@@ -23,6 +23,7 @@ import org.springframework.core.env.StandardEnvironment;
 import com.pilot.server.browser.BrowserHome;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.desktop.DesktopWindowLauncher.LaunchResult;
+import com.pilot.server.runtime.RuntimeMirrors;
 
 class DesktopWindowLauncherTest {
 
@@ -131,7 +132,8 @@ class DesktopWindowLauncherTest {
         ConfigurableEnvironment environment = new StandardEnvironment();
         environment.getPropertySources().addFirst(new MapPropertySource("test", Map.of("local.server.port", "10001")));
         DesktopWindowLauncher launcher = new DesktopWindowLauncher(environment,
-            new DesktopShellInstaller(false, (dir, cmd, env, log, timeout) -> 1), browserHome(null));
+            new DesktopShellInstaller(false, (dir, cmd, env, log, timeout) -> 1, RuntimeMirrors.defaults()),
+            browserHome(null));
         LaunchResult result = launcher.launch(() -> false);
         assertEquals("unavailable", result.status());
         assertTrue(result.message().contains("http://127.0.0.1:10001"));

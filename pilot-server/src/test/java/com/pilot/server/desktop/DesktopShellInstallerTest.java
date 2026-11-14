@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -19,6 +20,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+
+import com.pilot.server.runtime.NpmInstall;
+import com.pilot.server.runtime.RuntimeMirrors;
 
 class DesktopShellInstallerTest {
     @Test
@@ -30,7 +34,7 @@ class DesktopShellInstallerTest {
         Files.createDirectories(cli.getParent());
         Files.createFile(cli);
         assertEquals(List.of(node.toString(), cli.toString(), "install", "--no-audit", "--no-fund"),
-            DesktopShellInstaller.installCommand(npm, List.of()));
+            NpmInstall.command(npm, List.of()));
         assertEquals("system-bin", DesktopShellInstaller.inheritedPath(Map.of("Path", "system-bin")));
     }
 
@@ -72,17 +76,14 @@ class DesktopShellInstallerTest {
     @Test
     void failedAttemptsFallBackToTheMirrorAndThenGiveUp(@TempDir Path root) throws Exception {
         desktopPackage(root);
-        AtomicInteger attempts = new AtomicInteger();
+        var environments = new ArrayList<Map<String, String>>();
+        var commands = new ArrayList<List<String>>();
         CountDownLatch opened = new CountDownLatch(1);
-        DesktopShellInstaller installer = installer(true, fakeNpm(root), (dir, command, env, log, timeout) -> {
-            int attempt = attempts.incrementAndGet();
-            if (attempt == 1) {
-                assertFalse(command.toString().contains("npmmirror"));
-                assertFalse(env.containsKey("ELECTRON_MIRROR"));
-            } else {
-                assertTrue(command.toString().contains("npmmirror"));
-                assertEquals(DesktopShellInstaller.ELECTRON_MIRROR, env.get("ELECTRON_MIRROR"));
-            }
+        var mirrors = new RuntimeMirrors("https://mirror.test/npm", "https://mirror.test/chromium",
+            "https://mirror.test/electron");
+        DesktopShellInstaller installer = installer(true, fakeNpm(root), mirrors, (dir, command, env, log, timeout) -> {
+            commands.add(List.copyOf(command));
+            environments.add(Map.copyOf(env));
             return 1;
         });
 
@@ -91,8 +92,13 @@ class DesktopShellInstallerTest {
         while (installer.installing() && System.nanoTime() < deadline) {
             Thread.sleep(20);
         }
-        assertEquals(2, attempts.get());
         assertFalse(installer.installing(), "结束后要复位，允许下次重试");
+        assertEquals(2, environments.size());
+        assertFalse(environments.getFirst().containsKey("npm_config_registry"));
+        assertFalse(environments.getFirst().containsKey("ELECTRON_MIRROR"));
+        assertEquals("https://mirror.test/npm", environments.getLast().get("npm_config_registry"));
+        assertEquals("https://mirror.test/electron/", environments.getLast().get("ELECTRON_MIRROR"));
+        assertEquals(commands.getFirst(), commands.getLast());
         assertEquals(1, opened.getCount(), "两次都失败就不该开窗");
     }
 
@@ -160,7 +166,7 @@ class DesktopShellInstallerTest {
         DesktopShellInstaller installer = installer(true, npm, (dir, command, env, log, timeout) -> {
             if (command.size() == 2 && command.get(1).endsWith("install.js")) {
                 downloads.incrementAndGet();
-                assertEquals(DesktopShellInstaller.ELECTRON_MIRROR, env.get("ELECTRON_MIRROR"));
+                assertEquals("https://npmmirror.com/mirrors/electron/", env.get("ELECTRON_MIRROR"));
                 assertEquals(npm.getParent().resolve(nodeName()).toString(), command.get(0));
                 electron(root);
                 return 0;
@@ -176,7 +182,7 @@ class DesktopShellInstallerTest {
     @Test
     void installCommandUsesCmdOnWindowsAndNpmElsewhere() {
         Path npm = Path.of("tools", "npm");
-        List<String> command = DesktopShellInstaller.installCommand(npm, List.of());
+        List<String> command = NpmInstall.command(npm, List.of());
         String os = System.getProperty("os.name", "").toLowerCase();
         if (os.contains("win")) {
             assertEquals(List.of("cmd.exe", "/d", "/c", "\"" + npm + "\" install --no-audit --no-fund"), command);
@@ -195,7 +201,12 @@ class DesktopShellInstallerTest {
 
     /** 固定住 npm 的位置：不依赖测试机器上装没装 Node。 */
     private static DesktopShellInstaller installer(boolean provision, Path npm, DesktopShellInstaller.Runner runner) {
-        return new DesktopShellInstaller(provision, runner) {
+        return installer(provision, npm, RuntimeMirrors.defaults(), runner);
+    }
+
+    private static DesktopShellInstaller installer(boolean provision, Path npm, RuntimeMirrors mirrors,
+        DesktopShellInstaller.Runner runner) {
+        return new DesktopShellInstaller(provision, runner, mirrors) {
             @Override
             Path npm(Path root) {
                 return npm;

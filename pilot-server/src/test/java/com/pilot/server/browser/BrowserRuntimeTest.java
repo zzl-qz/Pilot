@@ -8,7 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -27,6 +29,7 @@ import com.pilot.core.tool.ToolRegistry;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.config.WebSearchProperties;
+import com.pilot.server.runtime.RuntimeMirrors;
 import com.pilot.server.workspace.WorkspaceToolFactory;
 
 import tools.jackson.databind.ObjectMapper;
@@ -36,9 +39,52 @@ class BrowserRuntimeTest {
     Path data;
 
     @Test
+    void installsBrowserDependenciesUsingTheConfiguredFallbackAfterFailure() throws Exception {
+        Path home = Files.createDirectory(data.resolve("浏览器 runtime"));
+        Path bin = Files.createDirectory(data.resolve("node bin"));
+        boolean windows = System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win");
+        Path node = Files.createFile(bin.resolve(windows ? "node.exe" : "node"));
+        Path npm = Files.createFile(bin.resolve(windows ? "npm.cmd" : "npm"));
+        if (!windows) {
+            assertTrue(npm.toFile().setExecutable(true));
+        }
+        Path dependency = home.resolve("node_modules/playwright-core");
+        var environments = new ArrayList<Map<String, String>>();
+        var commands = new ArrayList<List<String>>();
+        var mirrors = new RuntimeMirrors("https://mirror.test/npm", "https://mirror.test/chromium/",
+            "https://mirror.test/electron");
+        BrowserRuntime runtime = new BrowserRuntime(browserHome(home.toString()), new ObjectMapper(), mirrors, true,
+            true, true, true, true, "", -1) {
+            @Override
+            int run(Path directory, Path executable, Duration timeout, List<String> command,
+                Map<String, String> environment) {
+                environments.add(Map.copyOf(environment));
+                commands.add(command);
+                if (environments.size() == 2) {
+                    assertTrue(dependency.toFile().mkdirs());
+                } else if (environments.size() == 4) {
+                    assertTrue(home.resolve("browsers/chromium-test").toFile().mkdirs());
+                }
+                return environments.size() % 2;
+            }
+        };
+
+        assertTrue(runtime.install(home, node));
+        Files.createFile(dependency.resolve("cli.js"));
+        assertTrue(runtime.installChromium(home, node));
+        assertEquals(commands.get(0), commands.get(1));
+        assertEquals(commands.get(2), commands.get(3));
+        assertEquals(Map.of(), environments.get(0));
+        assertEquals(Map.of("npm_config_registry", "https://mirror.test/npm"), environments.get(1));
+        assertEquals(Set.of("PLAYWRIGHT_BROWSERS_PATH"), environments.get(2).keySet());
+        assertEquals("https://mirror.test/chromium", environments.get(3).get("PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST"));
+        assertEquals("https://mirror.test/chromium", environments.get(3).get("PLAYWRIGHT_DOWNLOAD_HOST"));
+    }
+
+    @Test
     void disabledRuntimeDeclaresNoCapabilityAndExplainsWhy() {
-        BrowserRuntime runtime =
-            new BrowserRuntime(browserHome(""), new ObjectMapper(), false, false, false, true, true, "", -1);
+        BrowserRuntime runtime = new BrowserRuntime(browserHome(""), new ObjectMapper(), RuntimeMirrors.defaults(),
+            false, false, false, true, true, "", -1);
         runtime.start();
 
         Availability availability = runtime.availability();
@@ -53,8 +99,8 @@ class BrowserRuntimeTest {
 
     @Test
     void toolFactoryRegistersSessionExtrasButTheyStayHiddenUntilTheirCapabilityIsReady(@TempDir Path workspace) {
-        BrowserRuntime runtime =
-            new BrowserRuntime(browserHome(""), new ObjectMapper(), false, false, false, true, true, "", -1);
+        BrowserRuntime runtime = new BrowserRuntime(browserHome(""), new ObjectMapper(), RuntimeMirrors.defaults(),
+            false, false, false, true, true, "", -1);
         WorkspaceToolFactory factory = new WorkspaceToolFactory(
             new AgentProperties(workspace.toString(), PermissionMode.AUTO, 8, 3, 5, 300, 2, 1, 60_000, true),
             new WebSearchProperties(false, "http://127.0.0.1:9", "", ""), SnapshotSink.none(), new ObjectMapper());
@@ -99,7 +145,8 @@ class BrowserRuntimeTest {
         BrowserHome home = browserHome("");
         Assumptions.assumeTrue(Files.isDirectory(home.directory().resolve("node_modules").resolve("playwright-core")),
             "没有安装 playwright-core");
-        BrowserRuntime runtime = new BrowserRuntime(home, new ObjectMapper(), true, false, false, true, true, "", -1);
+        BrowserRuntime runtime = new BrowserRuntime(home, new ObjectMapper(), RuntimeMirrors.defaults(), true, false,
+            false, true, true, "", -1);
         try {
             assertFalse(runtime.availability().available(), "启动之前不能声明能力");
             runtime.start();

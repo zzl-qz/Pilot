@@ -28,6 +28,8 @@ import com.pilot.core.browser.BrowserEventListener;
 import com.pilot.core.browser.PlaywrightBackend;
 import com.pilot.core.tool.Availability;
 import com.pilot.core.tool.ProcessSupport;
+import com.pilot.server.runtime.NpmInstall;
+import com.pilot.server.runtime.RuntimeMirrors;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -58,11 +60,10 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     static final String PLAYWRIGHT_VERSION = "1.64.1";
     private static final String SCRIPT_RESOURCE = "browser/browser-sidecar.mjs";
     private static final String SCRIPT_NAME = "browser-sidecar.mjs";
-    /** npmmirror 的 Playwright 浏览器镜像，与 npm 换源策略一致。 */
-    private static final String CHROMIUM_MIRROR = "https://npmmirror.com/mirrors/playwright";
 
     private final BrowserHome browserHome;
     private final ObjectMapper mapper;
+    private final RuntimeMirrors mirrors;
     private final boolean enabled;
     private final boolean provision;
     private final boolean downloadChromium;
@@ -84,7 +85,7 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     /** 用户接管开关（会话级内存态，不落库）：BrowserTool 据此拦截交互类动作。 */
     private final ConcurrentMap<String, Boolean> interactionsPaused = new ConcurrentHashMap<>();
 
-    public BrowserRuntime(BrowserHome browserHome, ObjectMapper mapper,
+    public BrowserRuntime(BrowserHome browserHome, ObjectMapper mapper, RuntimeMirrors mirrors,
         @Value("${pilot.browser.enabled:true}") boolean enabled,
         @Value("${pilot.browser.provision:true}") boolean provision,
         @Value("${pilot.browser.download-chromium:true}") boolean downloadChromium,
@@ -94,6 +95,7 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         @Value("${pilot.browser.idle-shutdown-seconds:-1}") long idleShutdownSeconds) {
         this.browserHome = browserHome;
         this.mapper = mapper;
+        this.mirrors = mirrors;
         this.enabled = enabled;
         this.provision = provision;
         this.downloadChromium = downloadChromium;
@@ -262,27 +264,27 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         }
     }
 
-    private boolean install(Path home, Path node) {
+    boolean install(Path home, Path node) {
         Path npm = sibling(node, "npm");
         if (npm == null) {
             log.warn("没有找到 npm，无法安装 playwright-core");
             return false;
         }
         log.info("第一次使用浏览器验证，正在安装 playwright-core@{}", PLAYWRIGHT_VERSION);
-        List<List<String>> attempts =
-            List.of(List.of(npm.toString(), "install", "--no-audit", "--no-fund", "--omit=dev"), List.of(npm.toString(),
-                "install", "--no-audit", "--no-fund", "--omit=dev", "--registry=https://registry.npmmirror.com"));
-        for (List<String> command : attempts) {
-            if (run(home, node, Duration.ofMinutes(5), command, Map.of()) == 0
+        List<String> command = NpmInstall.command(npm, List.of("--omit=dev"));
+        for (Map<String, String> environment : mirrors.npmAttempts(Map.of())) {
+            if (run(home, node, Duration.ofMinutes(5), command, environment) == 0
                 && Files.isDirectory(home.resolve("node_modules").resolve("playwright-core"))) {
                 return true;
             }
-            log.info("安装未成功，换下一个 npm 源重试");
+            if (environment.isEmpty()) {
+                log.info("首次安装未成功，使用备用 npm 源重试");
+            }
         }
         return false;
     }
 
-    private boolean installChromium(Path home, Path node) {
+    boolean installChromium(Path home, Path node) {
         Path cli = home.resolve("node_modules").resolve("playwright-core").resolve("cli.js");
         if (!Files.isRegularFile(cli)) {
             return false;
@@ -291,15 +293,15 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         log.info("本机没有可用的浏览器，正在下载内置 Chromium（完整版约 400MB，仅此一次，落盘 {}）", browsers);
         // 只装完整版：sidecar 一律显式传 executablePath（无头降级也是完整版跑无头模式），
         // playwright 1.49+ 附带的 headless-shell 用不上，--no-shell 省掉这份下载。
-        // 官方 CDN 失败换 npmmirror 镜像，与 npm 双源策略一致。
+        // 首次下载失败后使用配置的备用镜像。
         List<String> command = List.of(node.toString(), cli.toString(), "install", "chromium", "--no-shell");
         Map<String, String> base = chromiumDownloadEnvironment(browsers);
         if (run(home, node, Duration.ofMinutes(15), command, base) == 0 && hasChromium(browsers)) {
             return true;
         }
-        log.info("官方源下载未成功，换 npmmirror 镜像重试");
+        log.info("首次下载未成功，使用备用 Chromium 镜像重试");
         Map<String, String> mirror = new LinkedHashMap<>(base);
-        mirror.put("PLAYWRIGHT_DOWNLOAD_HOST", CHROMIUM_MIRROR);
+        mirror.putAll(mirrors.chromiumEnvironment());
         return run(home, node, Duration.ofMinutes(15), command, mirror) == 0 && hasChromium(browsers);
     }
 
@@ -390,12 +392,12 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         return configured.isAbsolute() ? configured : Path.of(".").toAbsolutePath().resolve(configured);
     }
 
-    private int run(Path home, Path node, Duration timeout, List<String> command, Map<String, String> environment) {
+    int run(Path home, Path node, Duration timeout, List<String> command, Map<String, String> environment) {
         ProcessBuilder builder = new ProcessBuilder(command);
         builder.directory(home.toFile());
         String path = builder.environment().getOrDefault("PATH", "");
         builder.environment().put("PATH", node.getParent() + File.pathSeparator + path);
-        builder.environment().putAll(environment);
+        RuntimeMirrors.applyEnvironment(builder.environment(), environment);
         return ProcessSupport.runLogged(builder, home.resolve("install.log"), timeout, log);
     }
 

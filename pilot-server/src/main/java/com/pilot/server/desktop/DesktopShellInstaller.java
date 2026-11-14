@@ -20,6 +20,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.tool.ProcessSupport;
+import com.pilot.server.runtime.NpmInstall;
+import com.pilot.server.runtime.RuntimeMirrors;
 
 /**
  * 桌面壳（{@code pilot-desktop} 的 Electron）没装时自动安装，装好再打开窗口。
@@ -32,16 +34,13 @@ import com.pilot.core.tool.ProcessSupport;
  * <p>安装放在后台线程：Electron 下载要几分钟，不能把 Spring 启动卡住。
  * 装好之后回调打开窗口；装失败保留手动命令，服务照常可用（浏览器访问同一端口即可）。
  *
- * <p>国内网络：官方源失败后换 npmmirror（npm 换 registry + Electron 走
- * {@code ELECTRON_MIRROR}）。{@code pilot.desktop.provision=false} 可完全关掉自动安装。
+ * <p>首次安装失败后换备用 npm 与 Electron 镜像。{@code pilot.desktop.provision=false} 可关闭自动安装。
  */
 @Component
 public class DesktopShellInstaller {
     private static final Logger log = LoggerFactory.getLogger(DesktopShellInstaller.class);
     /** Electron 比 npm 包大得多，给足一次下载的时间。 */
     static final Duration INSTALL_TIMEOUT = Duration.ofMinutes(15);
-    static final String MIRROR_REGISTRY = "https://registry.npmmirror.com";
-    static final String ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/";
     /**
      * 手动安装提示。写「进目录再 npm install」而不是 {@code npm --prefix pilot-desktop install}：
      * npm 10 的 {@code --prefix} 仍会去读当前目录的 package.json，在仓库根执行会直接 ENOENT 失败。
@@ -50,17 +49,19 @@ public class DesktopShellInstaller {
 
     private final boolean provision;
     private final Runner runner;
+    private final RuntimeMirrors mirrors;
     /** 同一进程里只装一次；重复调用（定时器、手动重试）直接返回「正在安装」。 */
     private final AtomicBoolean installing = new AtomicBoolean();
 
     @Autowired
-    public DesktopShellInstaller(@Value("${pilot.desktop.provision:true}") boolean provision) {
-        this(provision, DesktopShellInstaller::run);
+    public DesktopShellInstaller(@Value("${pilot.desktop.provision:true}") boolean provision, RuntimeMirrors mirrors) {
+        this(provision, DesktopShellInstaller::run, mirrors);
     }
 
-    DesktopShellInstaller(boolean provision, Runner runner) {
+    DesktopShellInstaller(boolean provision, Runner runner, RuntimeMirrors mirrors) {
         this.provision = provision;
         this.runner = runner;
+        this.mirrors = mirrors;
     }
 
     /** 命令执行器：返回退出码。测试里换成不真装的实现。 */
@@ -106,15 +107,16 @@ public class DesktopShellInstaller {
 
     private void install(Path root, Path desktop, Path npm, Path logFile, Runnable onReady) {
         try {
-            for (int attempt = 0; attempt < ATTEMPTS.size(); attempt++) {
-                Attempt current = ATTEMPTS.get(attempt);
-                int code = runner.run(desktop, installCommand(npm, current.arguments()),
-                    environment(npm, current.environment()), logFile, INSTALL_TIMEOUT);
+            List<String> command = NpmInstall.command(npm, List.of());
+            int attempt = 0;
+            for (Map<String, String> overrides : mirrors.npmAttempts(mirrors.electronEnvironment())) {
+                attempt++;
+                int code = runner.run(desktop, command, environment(npm, overrides), logFile, INSTALL_TIMEOUT);
                 if (ready(root, onReady)) {
-                    log.info("桌面壳安装完成（第 {} 次尝试），正在打开窗口", attempt + 1);
+                    log.info("桌面壳安装完成（第 {} 次尝试），正在打开窗口", attempt);
                     return;
                 }
-                log.warn("桌面壳安装未成功（第 {} 次尝试，退出码 {}），日志 {}", attempt + 1, code, logFile);
+                log.warn("桌面壳安装未成功（第 {} 次尝试，退出码 {}），日志 {}", attempt, code, logFile);
             }
             if (downloadBinaryOnly(root, desktop, npm, logFile, onReady)) {
                 log.info("桌面壳安装完成（镜像补下载二进制），正在打开窗口");
@@ -140,7 +142,7 @@ public class DesktopShellInstaller {
         }
         log.info("Electron 包已装好但二进制缺失，直接用镜像补下载");
         runner.run(desktop, List.of(node.toString(), script.toString()),
-            environment(npm, Map.of("ELECTRON_MIRROR", ELECTRON_MIRROR)), logFile, INSTALL_TIMEOUT);
+            environment(npm, mirrors.electronEnvironment()), logFile, INSTALL_TIMEOUT);
         return ready(root, onReady);
     }
 
@@ -151,38 +153,6 @@ public class DesktopShellInstaller {
         }
         onReady.run();
         return true;
-    }
-
-    private record Attempt(List<String> arguments, Map<String, String> environment) {
-    }
-
-    /** 官方源优先，失败换 npmmirror（npm 包与 Electron 二进制都换）。 */
-    private static final List<Attempt> ATTEMPTS = List.of(new Attempt(List.of(), Map.of()),
-        new Attempt(List.of("--registry=" + MIRROR_REGISTRY), Map.of("ELECTRON_MIRROR", ELECTRON_MIRROR)));
-
-    /**
-     * 安装命令。Windows 上 npm 是 {@code npm.cmd}，{@code CreateProcess} 执行不了批处理，
-     * 必须交给 {@code cmd.exe}；其它平台直接跑 npm 可执行文件。
-     */
-    static List<String> installCommand(Path npm, List<String> extra) {
-        List<String> arguments = new ArrayList<>(List.of("install", "--no-audit", "--no-fund"));
-        arguments.addAll(extra);
-        Path node = sibling(npm, "node");
-        for (Path cli : List.of(npm.getParent().resolve("node_modules/npm/bin/npm-cli.js"),
-            npm.getParent().resolve("../lib/node_modules/npm/bin/npm-cli.js").normalize())) {
-            if (node != null && Files.isRegularFile(cli)) {
-                List<String> command = new ArrayList<>(List.of(node.toString(), cli.toString()));
-                command.addAll(arguments);
-                return command;
-            }
-        }
-        if (isWindows()) {
-            return List.of("cmd.exe", "/d", "/c", "\"" + npm + "\" " + String.join(" ", arguments));
-        }
-        List<String> command = new ArrayList<>();
-        command.add(npm.toString());
-        command.addAll(arguments);
-        return command;
     }
 
     /** npm 所在目录进 PATH（npm 要能找到同目录的 node），再叠加本次尝试的镜像变量。 */
@@ -271,7 +241,10 @@ public class DesktopShellInstaller {
     private static int run(Path directory, List<String> command, Map<String, String> environment, Path logFile,
         Duration timeout) {
         ProcessBuilder builder = new ProcessBuilder(command).directory(directory.toFile());
-        builder.environment().putAll(environment);
+        RuntimeMirrors.applyEnvironment(builder.environment(), environment);
+        // 直接补下载与 npm 安装共用锁定包内的校验值。
+        builder.environment().keySet().removeIf(name -> "electron_use_remote_checksums".equalsIgnoreCase(name)
+            || "npm_config_electron_use_remote_checksums".equalsIgnoreCase(name));
         return ProcessSupport.runLogged(builder, logFile, timeout, log);
     }
 

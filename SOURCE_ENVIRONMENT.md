@@ -32,6 +32,8 @@ Python、Chromium 仍沿用既有组件准备机制；源码启动已确认过�
 
 电脑端 Maven、npm 与 Electron 下载缓存默认分别保存到 `pilot/.pilot/cache/maven`、`npm`、`electron`；可用 `PILOT_DEPENDENCY_CACHE` 整体换位置。显式设置的 `PILOT_MAVEN_REPOSITORY`、`npm_config_cache` 和 `electron_config_cache` 优先，避免覆盖已有配置。IDE 从 `pilot-server` 目录启动时，默认手机组件缓存也会定位到 Pilot 根目录。工具仍可以读取用户原有的仓库镜像、代理与认证配置。
 
+后端自动安装浏览器与桌面依赖时，首次尝试沿用现有工具配置。失败后，两个安装器共用 `PILOT_RUNTIME_NPM_FALLBACK_REGISTRY` 指定的 npm 备用源，浏览器和桌面二进制分别读取 `PILOT_RUNTIME_CHROMIUM_FALLBACK_MIRROR` 与 `PILOT_RUNTIME_ELECTRON_FALLBACK_MIRROR`。未设置时沿用原有 npmmirror 地址。备用地址支持无凭据、查询参数和片段的 HTTP(S) URL。
+
 新增运行时下载来自随源码固定的官方版本，SHA-256 保存在 `pilot-core/src/main/resources/bootstrap/runtime.properties`。下载使用临时文件，校验和解压完成后才发布；同一缓存有跨进程锁，同一项目构建也串行执行。重复启动不会同时安装，下载 / 进程有时间与大小上限，损坏的私有副本留存后再替换。Windows 安装器额外校验微软签名，不从随机网站获取单独 DLL。
 
 Windows VC++ 安装采用微软支持的 `/install /passive /norestart`。系统可能显示 UAC；拒绝授权、签名不可信或管理策略阻止时停止该修复，不自动重启、不关闭防护、不反复弹安装。手机连接可以降级，后台其他功能继续提供服务。微软流程参考 [官方部署说明](https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files)。
