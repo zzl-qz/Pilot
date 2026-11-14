@@ -7,6 +7,7 @@ import { api, apiJson } from '../api.js';
 import { applyEvent, restoreLiveOutput } from '../thread-reducer.js';
 import { EVENT_TYPES } from '../event-types.js';
 import { errorInfo } from '../lib/errors.js';
+import { isEphemeral, isRunEnd } from '../lib/events.js';
 import { browserStateUpdate } from '../lib/browser-mirror.js';
 import { sortChangeFiles } from '../lib/changes.js';
 import { classifyModelError } from '../lib/model-settings.js';
@@ -40,7 +41,6 @@ export function createSessionStreams({ get, set }: StoreContext, resetHistory: (
    *
    * assistant.preview / assistant.reasoning 是纯界面增量，不推进游标（否则正式事件会被当成重复丢掉）。
    */
-  const EPHEMERAL_EVENTS = new Set(['assistant.preview', 'assistant.reasoning']);
   let eventQueue: Array<{ event: EventEnvelope; sessionId: string; sessionEpoch: number }> = [];
   let flushHandle: number | undefined;
   let flushTimer: ReturnType<typeof setTimeout> | undefined;
@@ -79,15 +79,19 @@ export function createSessionStreams({ get, set }: StoreContext, resetHistory: (
     cancelFlush();
   }
 
+  function disconnectSse() {
+    eventSource?.close();
+    eventSource = null;
+    clearTimeout(stableConnectionTimer);
+    stableConnectionTimer = undefined;
+  }
+
   /** 确认游标不动，丢弃未确认缓存并重新获取；永久坏事件最多自动重试三次。 */
   function recoverEventStream(sessionId: string, reason: string) {
     if (get().sessionId !== sessionId || streamPaused) return;
     streamPaused = true;
     streamGeneration++;
-    eventSource?.close();
-    eventSource = null;
-    clearTimeout(stableConnectionTimer);
-    stableConnectionTimer = undefined;
+    disconnectSse();
     discardQueuedEvents();
     clearTimeout(reconnectTimer);
     reconnectTimer = undefined;
@@ -104,9 +108,8 @@ export function createSessionStreams({ get, set }: StoreContext, resetHistory: (
     streamGeneration++;
     const epoch = get().sessionEpoch;
     streamPaused = true;
-    eventSource?.close(); eventSource = null;
+    disconnectSse();
     clearTimeout(reconnectTimer); reconnectTimer = undefined;
-    clearTimeout(stableConnectionTimer); stableConnectionTimer = undefined;
     discardQueuedEvents();
     const loaded = await get().loadHistory();
     const state = get();
@@ -123,15 +126,10 @@ export function createSessionStreams({ get, set }: StoreContext, resetHistory: (
   function closeStreams() {
     streamGeneration++;
     resetHistory();
-    clearTimeout(stableConnectionTimer);
-    stableConnectionTimer = undefined;
+    disconnectSse();
     streamPaused = false;
     streamFailures = 0;
     discardQueuedEvents();
-    if (eventSource) {
-      eventSource.close();
-      eventSource = null;
-    }
     if (mirrorSource) {
       mirrorSource.close();
       mirrorSource = null;
@@ -210,20 +208,16 @@ export function createSessionStreams({ get, set }: StoreContext, resetHistory: (
     connectSse(sessionId, cursor) {
       if (get().sessionId !== sessionId) return;
       const generation = ++streamGeneration;
-      clearTimeout(stableConnectionTimer);
-      stableConnectionTimer = undefined;
-      if (eventSource) {
-        eventSource.close();
-        eventSource = null;
-      }
+      disconnectSse();
       clearTimeout(reconnectTimer);
       reconnectTimer = undefined;
       streamPaused = false;
       const revision = get().historyRevision;
       const source = new EventSource(`/api/sessions/${encodeURIComponent(sessionId)}/events?after=${cursor}${revision == null ? '' : `&revision=${revision}`}&protocol=2`);
       eventSource = source;
+      const current = () => eventSource === source && get().sessionId === sessionId;
       const handle = (message: MessageEvent<string>) => {
-        if (eventSource !== source || get().sessionId !== sessionId) return;
+        if (!current()) return;
         try {
           const event = JSON.parse(message.data) as EventEnvelope;
           if (!event || typeof event !== 'object' || event.sessionId !== sessionId) throw new Error('事件会话无效');
@@ -238,16 +232,17 @@ export function createSessionStreams({ get, set }: StoreContext, resetHistory: (
       }
       source.addEventListener('user.message', handle);
       source.addEventListener('stream.error', (message: MessageEvent<string>) => {
-        if (eventSource !== source || get().sessionId !== sessionId) return;
-        source.close(); eventSource = null; streamPaused = true;
-        discardQueuedEvents(); clearTimeout(stableConnectionTimer); stableConnectionTimer = undefined;
+        if (!current()) return;
+        disconnectSse();
+        streamPaused = true;
+        discardQueuedEvents();
         let reason = '事件恢复失败，请刷新后重试';
         try { reason = JSON.parse(message.data).payload?.message || reason; } catch { /* 使用明确的默认提示 */ }
         set(draft => { draft.ui.connection = { status: 'error', text: reason }; });
         get().showNotice(reason);
       });
       source.addEventListener('stream.preview', (message: MessageEvent<string>) => {
-        if (eventSource !== source || get().sessionId !== sessionId) return;
+        if (!current()) return;
         try {
           const control = JSON.parse(message.data), snapshot = control.payload;
           if (control.sessionId !== sessionId || !snapshot || snapshot.historyRevision !== get().historyRevision
@@ -263,7 +258,7 @@ export function createSessionStreams({ get, set }: StoreContext, resetHistory: (
         } catch { recoverEventStream(sessionId, '临时输出恢复失败'); }
       });
       source.addEventListener('stream.event', async (message: MessageEvent<string>) => {
-        if (eventSource !== source || get().sessionId !== sessionId) return;
+        if (!current()) return;
         const epoch = get().sessionEpoch;
         try {
           const control = JSON.parse(message.data);
@@ -271,8 +266,8 @@ export function createSessionStreams({ get, set }: StoreContext, resetHistory: (
           if (control.sessionId !== sessionId || !Number.isSafeInteger(sequence) || sequence < 1 || !Number.isSafeInteger(revision)) throw new Error('事件引用无效');
           get().flushEvents();
           if (streamPaused) return;
-          source.close(); eventSource = null; streamPaused = true;
-          clearTimeout(stableConnectionTimer); stableConnectionTimer = undefined;
+          disconnectSse();
+          streamPaused = true;
           const result = requireData(await apiJson<{ event: EventEnvelope; historyRevision: number }>(
             `/api/sessions/${encodeURIComponent(sessionId)}/events/${sequence}?revision=${revision}`));
           if (get().sessionId !== sessionId || get().sessionEpoch !== epoch || generation !== streamGeneration) return;
@@ -288,7 +283,7 @@ export function createSessionStreams({ get, set }: StoreContext, resetHistory: (
       });
       for (const kind of ['stream.ready', 'stream.reset']) {
         source.addEventListener(kind, (message: MessageEvent<string>) => {
-          if (eventSource !== source || get().sessionId !== sessionId) return;
+          if (!current()) return;
           try {
             const control = JSON.parse(message.data);
             const revision = control.payload?.historyRevision;
@@ -300,26 +295,21 @@ export function createSessionStreams({ get, set }: StoreContext, resetHistory: (
         });
       }
       source.onopen = () => {
-        if (eventSource !== source || get().sessionId !== sessionId) return;
+        if (!current()) return;
         set((draft) => {
           draft.ui.connection = { status: 'ok', text: '已连接' };
         });
         clearTimeout(stableConnectionTimer);
         stableConnectionTimer = setTimeout(() => {
           stableConnectionTimer = undefined;
-          if (eventSource === source && get().sessionId === sessionId) {
+          if (current()) {
             set(draft => { draft._reconnectAttempt = 0; });
           }
         }, CONNECTION_STABLE_MS);
       };
       source.onerror = () => {
-        if (eventSource !== source || get().sessionId !== sessionId) return;
-        clearTimeout(stableConnectionTimer);
-        stableConnectionTimer = undefined;
-        source.close();
-        if (eventSource === source) {
-          eventSource = null;
-        }
+        if (!current()) return;
+        disconnectSse();
         set((draft) => { draft.ui.connection = { status: 'error', text: '重连中' }; });
         get().scheduleReconnect(sessionId);
       };
@@ -356,8 +346,7 @@ export function createSessionStreams({ get, set }: StoreContext, resetHistory: (
         return;
       }
       const thread = get().thread;
-      if (!EPHEMERAL_EVENTS.has(event.type)
-          && typeof event.sequence === 'number' && event.sequence <= thread.cursor) {
+      if (!isEphemeral(event.type) && event.sequence <= thread.cursor) {
         // 重连/重放重复推送：同一序号不再应用一次
         return;
       }
@@ -392,7 +381,7 @@ export function createSessionStreams({ get, set }: StoreContext, resetHistory: (
         for (const queued of batch) {
           if (draft.sessionId !== queued.sessionId || draft.sessionEpoch !== queued.sessionEpoch) continue;
           const item = queued.event;
-          if (!EPHEMERAL_EVENTS.has(item.type) && typeof item.sequence === 'number' && item.sequence <= draft.thread.cursor) continue;
+          if (!isEphemeral(item.type) && item.sequence <= draft.thread.cursor) continue;
           applyEvent(draft, item, { live: true });
           applied.push(item);
         }
@@ -416,24 +405,26 @@ export function createSessionStreams({ get, set }: StoreContext, resetHistory: (
 
     /** 单条事件落地后的联动（标题转正、任务契约、上下文、变更报告）。 */
     settleEvent(event, after) {
+      const runEnded = isRunEnd(event.type);
+      const runChanged = event.type === 'run.started' || runEnded;
+      const sessionChanged = runChanged || event.type === 'run.steered';
       if (event.type === 'tool.completed' && after.thread.rows.some(row => row.type === 'turn'
           && row.toolIndex[event.payload.callId]?.name === 'install_skill')) {
         void get().loadSkills();
       }
-      if (['run.started', 'run.steered', 'run.completed', 'run.failed', 'run.cancelled'].includes(event.type)) {
+      if (sessionChanged) {
         set(draft => { draft.promoteBlank = null; });
         get().loadSessions();
       }
       // 任务契约面板刷新
-      if (['run.started', 'run.steered', 'run.continued', 'run.completed', 'run.failed', 'run.cancelled', 'tool.completed', 'execution.updated'].includes(event.type)) {
+      if (sessionChanged || event.type === 'run.continued' || event.type === 'tool.completed' || event.type === 'execution.updated') {
         get().loadTask();
       }
-      if (['run.started', 'run.completed', 'run.failed', 'run.cancelled'].includes(event.type)) {
+      if (runChanged) {
         get().loadQueue();
       }
       // 一轮结束后拉取本次 run 的变更
-      if (after.runChangesFetch && get().runChangesFetch === after.runChangesFetch && event.runId === after.runChangesFetch
-          && ['run.completed', 'run.failed', 'run.cancelled'].includes(event.type)) {
+      if (runEnded && after.runChangesFetch && get().runChangesFetch === after.runChangesFetch && event.runId === after.runChangesFetch) {
         const runId = after.runChangesFetch;
         const sessionEpoch = after.sessionEpoch;
         set((draft) => { draft.runChangesFetch = null; });
@@ -462,7 +453,7 @@ export function createSessionStreams({ get, set }: StoreContext, resetHistory: (
         }
       }
       // 上下文状态跟手刷新
-      if (['run.started', 'run.completed', 'run.failed', 'run.cancelled', 'context.compacted'].includes(event.type)) {
+      if (runChanged || event.type === 'context.compacted') {
         get().refreshContext();
       }
     },

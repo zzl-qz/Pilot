@@ -1,4 +1,4 @@
-import type { ReducerState, ThreadState, ThreadRow, TurnRow, PlanRow, UserRow, ToolRow, TimelineInput, TimelineItem, ArbitrationRow } from './types/thread.js';
+import type { ReducerState, ThreadState, ThreadRow, TurnRow, PlanRow, UserRow, ToolRow, TimelineInput, TimelineItem, ArbitrationRow, ResultRow } from './types/thread.js';
 import type { EventEnvelope, EventMetadata, LiveOutput } from './types/events.js';
 import type { MessageAttachment } from './types/runtime.js';
 /**
@@ -18,7 +18,7 @@ import {
   mergeHistoryEvents,
   trimHistoryWindowAtRows
 } from './lib/history.js';
-import { classifyRunFailure, isEphemeral, planProgressLabel } from './lib/events.js';
+import { classifyRunFailure, isEphemeral, isRunEnd, planProgressLabel, type RUN_END_EVENTS } from './lib/events.js';
 import { eventTimestamp, parseTimestamp, toolLabel } from './lib/tool-meta.js';
 import { preview, estimateTokens } from './thread-utils.js';
 import { splitAttachmentMarkers } from './lib/attachments.js';
@@ -37,11 +37,6 @@ export const initialThread = (): ThreadState => ({
   activityCount: 0
 });
 
-/** 该事件是否来自历史回放窗口的 user.message（不在 EVENT_TYPES 里）。 */
-export function isUserMessageType(event: { type: string }) {
-  return event.type === 'user.message';
-}
-
 /** 计划跟着当前这段用户消息走。上一问的计划卡片留在原处，不再被后来的更新改掉。 */
 function planInOpenSegment(draft: ReducerState): PlanRow | null {
   const rows = draft.thread.rows;
@@ -59,17 +54,7 @@ function planInOpenSegment(draft: ReducerState): PlanRow | null {
 
 /** 子智能体可能挂在更早的回合上，完成事件不能只看最后一轮。 */
 function turnWithAgent(draft: ReducerState, id: string | null | undefined): TurnRow | null {
-  if (!id) {
-    return null;
-  }
-  const rows = draft.thread.rows;
-  for (let i = rows.length - 1; i >= 0; i -= 1) {
-    const row = rows[i];
-    if (row.type === 'turn' && row.agents?.[id]) {
-      return row;
-    }
-  }
-  return null;
+  return draft.thread.rows.findLast((row): row is TurnRow => row.type === 'turn' && !!id && !!row.agents?.[id]) ?? null;
 }
 
 function openTurn(draft: ReducerState): TurnRow | null {
@@ -88,59 +73,19 @@ function openTurn(draft: ReducerState): TurnRow | null {
 
 /** 按 runId 找回那一次运行的回合。对不上就留空，不拿「最后一轮」凑。 */
 function turnForRun(draft: ReducerState, runId: string | null | undefined): TurnRow | null {
-  if (!runId) {
-    return null;
-  }
-  const rows = draft.thread.rows;
-  for (let i = rows.length - 1; i >= 0; i -= 1) {
-    const row = rows[i];
-    if (row.type === 'turn' && row.runIds?.includes(runId)) {
-      return row;
-    }
-  }
-  return null;
-}
-
-/** 结束、失败、取消只收自己那一轮。runId 对不上时，才落到当前这段还开着的回合。 */
-function turnToClose(draft: ReducerState, runId: string | null | undefined) {
-  return turnForRun(draft, runId) || openTurn(draft);
+  return draft.thread.rows.findLast((row): row is TurnRow => row.type === 'turn' && !!runId && row.runIds?.includes(runId)) ?? null;
 }
 
 /** 工具结果要回到发起它的那一轮。新一轮已经开了之后，不能写到更靠后的空回合上。 */
 function turnOwning(draft: ReducerState, callId: string | null | undefined): TurnRow | null {
   const rows = draft.thread.rows;
-  if (callId) {
-    for (let i = rows.length - 1; i >= 0; i -= 1) {
-      const row = rows[i];
-      if (row.type === 'turn' && row.toolIndex?.[callId]) {
-        return row;
-      }
-    }
-  }
-  for (let i = rows.length - 1; i >= 0; i -= 1) {
-    const row = rows[i];
-    if (row.type === 'turn') {
-      return row;
-    }
-  }
-  return null;
+  return rows.findLast((row): row is TurnRow => row.type === 'turn' && !!callId && !!row.toolIndex?.[callId])
+    ?? rows.findLast(row => row.type === 'turn') ?? null;
 }
 
 function ensureTurn(draft: ReducerState): TurnRow {
   const thread = draft.thread;
-  const rows = thread.rows;
-  // 从末尾往前找。中间夹了用户消息，说明上一轮已经结束，不能把新工具接回去。
-  let turn: TurnRow | null = null;
-  for (let i = rows.length - 1; i >= 0; i -= 1) {
-    const row = rows[i];
-    if (row.type === 'user') {
-      break;
-    }
-    if (row.type === 'turn') {
-      turn = row;
-      break;
-    }
-  }
+  let turn = openTurn(draft);
   if (!turn) {
     turn = {
       key: `turn:${draft.runId || 'live'}:${thread.cursor}`,
@@ -221,7 +166,8 @@ function finishTurnClock(draft: ReducerState, turn: TurnRow | null, event: Event
 }
 
 function settleRun(draft: ReducerState, event: EventMetadata) {
-  const turn = turnToClose(draft, event.runId);
+  // runId 对不上时，才落到当前这段还开着的回合。
+  const turn = turnForRun(draft, event.runId) || openTurn(draft);
   draft.lastRunId = event.runId || draft.lastRunId;
   draft.running = false;
   draft.cancelling = false;
@@ -235,15 +181,67 @@ function settleRun(draft: ReducerState, event: EventMetadata) {
   return turn;
 }
 
-function runResult(event: EventMetadata) {
-  return {
+const OUTCOME_LABELS: Record<string, string> = {
+  WAITING: '等待外部事件', NEED_INPUT: '需要输入', UNVERIFIED: '结果未验证',
+  NO_PROGRESS: '暂无有效进展', REVIEW_UNAVAILABLE: '核验暂不可用'
+};
+
+function appendRunResult(draft: ReducerState, event: Extract<EventEnvelope, { type: typeof RUN_END_EVENTS[number] }>, live: boolean) {
+  const turn = settleRun(draft, event);
+  const result: ResultRow = {
     key: `result:${event.runId || event.sequence}`,
-    type: 'result' as const,
+    type: 'result',
+    tone: 'text',
+    title: '执行结束',
+    detail: null,
     changedFiles: [],
     runIds: event.runId ? [event.runId] : [],
     start: event.sequence,
     end: event.sequence
   };
+  let attention = 'idle';
+  let status: string;
+  if (event.type === 'run.completed') {
+    draft.queueHeld = false;
+    draft.lastOutcome = 'completed';
+    result.detail = event.payload?.summary || null;
+    if (turn?.runIds?.length) result.runIds = turn.runIds;
+    status = '结束';
+  } else if (event.type === 'run.cancelled') {
+    draft.queueHeld = true;
+    Object.assign(result, { tone: 'warn', title: '运行已取消', detail: event.payload?.reason || null, resumable: true });
+    status = '取消';
+  } else {
+    const code = String(event.payload?.code || '');
+    const failure = classifyRunFailure(code);
+    const label = OUTCOME_LABELS[failure.outcome] || '';
+    result.title = label ? `本轮结束 · ${label}`
+      : failure.blocked ? '任务遇到阻塞'
+      : failure.budgetLimited ? '本轮已达预算'
+      : failure.paused ? `本轮已暂停 · ${code}`
+      : failure.interrupted ? `运行已中断 · ${code}`
+      : failure.cancelled ? '本轮已取消'
+      : `运行失败 · ${code || 'ERROR'}`;
+    status = label || (failure.blocked ? '遇到阻塞' : failure.budgetLimited ? '已达预算'
+      : failure.paused ? '可继续' : failure.interrupted ? '已中断' : failure.cancelled ? '已取消' : '失败');
+    result.tone = failure.resumable || failure.cancelled ? 'warn' : 'error';
+    result.detail = event.payload?.message || event.payload?.error || null;
+    // NEED_INPUT 需要补充信息，隐藏原样继续的按钮。
+    result.resumable = failure.resumable && code !== 'NEED_INPUT';
+    result.errorCode = code || null;
+    draft.lastOutcome = failure.outcome || code;
+    if (failure.resumable) attention = 'attention';
+  }
+  pushRow(draft, result);
+  if (live) {
+    draft.ui.attentionKind = attention;
+    draft.runChangesFetch = event.runId;
+  }
+  record(draft, event, {
+    kind: 'run', tone: result.tone, status,
+    title: event.type === 'run.completed' ? '运行结束' : result.title,
+    detail: result.detail
+  });
 }
 
 /** 正文或工具出来了，思考块就该收起（旧版 settleReasoning），秒数保留。 */
@@ -375,12 +373,13 @@ export function restoreLiveOutput(draft: ReducerState, snapshot: LiveOutput) {
 
 export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: { live: boolean }) {
   const thread = draft.thread;
-  if (isEphemeral(event.type) && event.previewId && event.previewOffset != null) {
+  const ephemeral = isEphemeral(event.type);
+  if (ephemeral && event.previewId && event.previewOffset != null) {
     if (thread.previewId === event.previewId && event.previewOffset <= (thread.previewOffset || 0)) return;
     thread.previewId = event.previewId; thread.previewOffset = event.previewOffset;
   }
   // 流式增量只用于界面，不推进游标（否则重连后正式事件会被判成重复而丢掉）
-  if (!isEphemeral(event.type)) {
+  if (!ephemeral) {
     thread.cursor = Math.max(thread.cursor, Number(event.sequence) || thread.cursor);
   }
 
@@ -399,12 +398,12 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
       draft.lastOutcome = '';
       draft.queueHeld = false;
       draft.running = true;
-      draft.runStartedAt = eventTimestamp(event);
+      const startedAt = eventTimestamp(event);
+      draft.runStartedAt = startedAt;
       draft.requestReports = [];
       draft.cancelling = false;
       draft.runId = event.runId || draft.runId;
       draft.turnRuns = event.runId ? [event.runId] : [];
-      const startedAt = eventTimestamp(event);
       draft.runUsage = {
         runId: draft.runId,
         startedAt,
@@ -436,14 +435,10 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
       if (draft.pendingInputs.length && (same(draft.pendingInputs[0], inputForMatch) || sameAttachments)) {
         draft.pendingInputs.shift();
         stampLastUserRow(draft, event.sequence, input, payload.attachments || [], payload.imagePositions || []);
-      } else if (draft.queue.length && same(draft.queue[0], input)) {
-        draft.queue.shift();
-        appendUserRow(draft, input, event.sequence, {
-          attachments: payload.attachments || [],
-          imagePositions: payload.imagePositions || []
-        });
-      } else if (input) {
-        appendUserRow(draft, input, event.sequence, {
+      } else {
+        const queued = draft.queue.length > 0 && same(draft.queue[0], input);
+        if (queued) draft.queue.shift();
+        if (queued || input) appendUserRow(draft, input, event.sequence, {
           attachments: payload.attachments || [],
           imagePositions: payload.imagePositions || []
         });
@@ -460,13 +455,14 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
       const report = event.payload?.report;
       if (!report?.id) break;
       const current = !draft.runId || !event.runId || event.runId === draft.runId;
-      if (current || String(event.runId || '').startsWith('compact_')) {
+      const compaction = String(event.runId || '').startsWith('compact_');
+      if (current || compaction) {
         const reports = draft.requestReports || [];
         if (!reports.some(item => item.id === report.id)) draft.requestReports = [...reports, report].slice(-200);
         if (report.purpose === 'main' && (!draft.latestContextReport || report.startedAt >= draft.latestContextReport.startedAt!))
           draft.latestContextReport = report;
       }
-      if (!String(event.runId || '').startsWith('compact_')) {
+      if (!compaction) {
         const turn = draft.thread.rows.findLast((row): row is TurnRow => row.type === 'turn' && row.runIds.includes(event.runId!)) || (current ? ensureTurn(draft) : null);
         if (turn && !(turn.requests || []).some(item => item.id === report.id)) turn.requests = [...(turn.requests || []), report].slice(-200);
       }
@@ -496,7 +492,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
       });
       draft.liveOutputTokens = 0;
       const turn = ensureTurn(draft);
-      if (!String(event.runId || '').startsWith('compact_')) turn.stats = { ...draft.runUsage };
+      turn.stats = { ...draft.runUsage };
       draft.contextStatus = {
         ...(draft.contextStatus || {}),
         usedTokens: draft.runUsage.contextTokens,
@@ -674,81 +670,11 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
       break;
     }
 
-    case 'run.completed': {
-      const turn = settleRun(draft, event);
-      draft.queueHeld = false;
-      draft.lastOutcome = 'completed';
-      const result = runResult(event);
-      pushRow(draft, {
-        ...result,
-        tone: 'text', title: '执行结束',
-        detail: event.payload?.summary || null,
-        runIds: turn?.runIds?.length ? turn.runIds : result.runIds,
-      });
-      if (live) {
-        draft.ui.attentionKind = 'idle';
-        draft.runChangesFetch = event.runId;
-      }
-      record(draft, event, { kind: 'run', tone: 'text', status: '结束', title: '运行结束', detail: event.payload?.summary || null });
+    case 'run.completed':
+    case 'run.failed':
+    case 'run.cancelled':
+      appendRunResult(draft, event, live);
       break;
-    }
-
-    case 'run.failed': {
-      settleRun(draft, event);
-      // 传的是失败码：暂停/中断/阻塞都不是「失败」，界面上要区分开并且可继续
-      const code = String(event.payload?.code || '');
-      const failure = classifyRunFailure(code);
-      const outcomeLabels: Record<string, string> = {
-        WAITING: '等待外部事件', NEED_INPUT: '需要输入', UNVERIFIED: '结果未验证',
-        NO_PROGRESS: '暂无有效进展', REVIEW_UNAVAILABLE: '核验暂不可用'
-      };
-      const outcomeLabel = outcomeLabels[failure.outcome] || '';
-      const title = outcomeLabel ? `本轮结束 · ${outcomeLabel}`
-        : failure.blocked ? '任务遇到阻塞'
-        : failure.budgetLimited ? '本轮已达预算'
-        : failure.paused ? `本轮已暂停 · ${code}`
-        : failure.interrupted ? `运行已中断 · ${code}`
-        : failure.cancelled ? '本轮已取消'
-        : `运行失败 · ${code || 'ERROR'}`;
-      const status = outcomeLabel || (failure.blocked ? '遇到阻塞' : failure.budgetLimited ? '已达预算'
-        : failure.paused ? '可继续' : failure.interrupted ? '已中断' : failure.cancelled ? '已取消' : '失败');
-      const tone = failure.resumable || failure.cancelled ? 'warn' : 'error';
-      draft.lastOutcome = failure.outcome || code;
-      pushRow(draft, {
-        ...runResult(event),
-        tone, title,
-        detail: event.payload?.message || event.payload?.error || null,
-        // NEED_INPUT 要的是新信息而不是原样重跑，不给常驻的「继续执行」
-        resumable: failure.resumable && code !== 'NEED_INPUT',
-        errorCode: code || null,
-      });
-      if (live) {
-        draft.ui.attentionKind = failure.resumable ? 'attention' : 'idle';
-        draft.runChangesFetch = event.runId;
-      }
-      record(draft, event, {
-        kind: 'run', tone, status, title,
-        detail: event.payload?.message || event.payload?.error || null
-      });
-      break;
-    }
-
-    case 'run.cancelled': {
-      settleRun(draft, event);
-      pushRow(draft, {
-        ...runResult(event),
-        tone: 'warn', title: '运行已取消',
-        detail: event.payload?.reason || null,
-        resumable: true,
-      });
-      draft.queueHeld = true;
-      if (live) {
-        draft.ui.attentionKind = 'idle';
-        draft.runChangesFetch = event.runId;
-      }
-      record(draft, event, { kind: 'run', tone: 'warn', status: '取消', title: '运行已取消', detail: event.payload?.reason || null });
-      break;
-    }
 
     case 'run.steered': {
       const previous = openTurn(draft);
@@ -935,9 +861,9 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
   }
 
   // 历史窗口只保留持久事件，临时增量已折入当前输出，避免长时间生成时重复保存。
-  if (!isEphemeral(event.type)) thread.windowEvents.push(event);
+  if (!ephemeral) thread.windowEvents.push(event);
   if (!thread.replaying && thread.windowEvents.length > HISTORY_WINDOW_LIMIT + thread.history.pageSize
-    && !draft.running && ['run.completed', 'run.failed', 'run.cancelled', 'user.message'].includes(event.type)) {
+    && !draft.running && (isRunEnd(event.type) || event.type === 'user.message')) {
     trimThreadWindow(draft);
   }
 }

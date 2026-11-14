@@ -12,10 +12,16 @@
  * <p>它们没有落库序号，推进游标会让之后的正式事件因「序号更小」被当成重复丢掉；
  * 但它们又必须参与渲染（流式输出就靠它们），所以「应用」与「推进游标」要分开判断。
  */
-export const EPHEMERAL_EVENTS = new Set(['assistant.preview', 'assistant.reasoning']);
+const EPHEMERAL_EVENTS = new Set(['assistant.preview', 'assistant.reasoning']);
 
 export function isEphemeral(type: string) {
   return EPHEMERAL_EVENTS.has(type);
+}
+
+export const RUN_END_EVENTS = ['run.completed', 'run.failed', 'run.cancelled'] as const;
+
+export function isRunEnd(type: string | undefined): type is typeof RUN_END_EVENTS[number] {
+  return RUN_END_EVENTS.some(event => event === type);
 }
 
 /**
@@ -33,7 +39,7 @@ export function isEphemeral(type: string) {
  */
 export function applyRule(event: { type: string; sequence?: number } | null | undefined, cursor: number | undefined) {
   const current = Number.isFinite(cursor) ? cursor! : 0;
-  if (!event || event.type === 'assistant.preview' || event.type === 'assistant.reasoning') {
+  if (!event || isEphemeral(event.type)) {
     return { apply: false, cursor: current };
   }
   if (typeof event.sequence !== 'number') {

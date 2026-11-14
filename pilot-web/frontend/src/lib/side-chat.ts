@@ -7,6 +7,7 @@ import type { SimpleEvent, SideChatTab, SideChatsState, SideTranscript } from '.
  * 切换主任务时只看到属于它的侧边对话，关掉即丢弃。
  */
 
+import { isRunEnd } from './events.js';
 import { samePath } from './projects.js';
 
 const STORAGE_KEY = 'pilot.side-chats';
@@ -180,7 +181,7 @@ export function reduceSideChat(state: Partial<SideTranscript> | null | undefined
     const live = payload.reset ? '' : current.live + (payload.text || '');
     return { messages: current.messages, live };
   }
-  if (type === 'run.completed' || type === 'run.failed' || type === 'run.cancelled') {
+  if (isRunEnd(type)) {
     return { messages: current.messages, live: '' };
   }
   return current;

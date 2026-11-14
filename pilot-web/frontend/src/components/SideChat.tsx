@@ -1,6 +1,7 @@
 import type { SideTranscript } from '../types/content.js';
 import type { EventEnvelope } from '../types/events.js';
 import { errorInfo } from '../lib/errors.js';
+import { isRunEnd, RUN_END_EVENTS } from '../lib/events.js';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
@@ -173,12 +174,12 @@ function SimpleSideChat({ sessionId }: { sessionId: string }) {
           runRef.current = event.runId || '';
           if (stopRequested.current) stop();
         }
-        if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') {
+        if (isRunEnd(event.type)) {
           setBusy(false); runRef.current = '';
           if (event.type === 'run.failed') setError(event.payload?.message || event.payload?.reason || '侧边任务失败，请重试。');
         }
       };
-      for (const type of ['user.message', 'run.started', 'assistant.delta', 'assistant.preview', 'run.completed', 'run.failed', 'run.cancelled']) {
+      for (const type of ['user.message', 'run.started', 'assistant.delta', 'assistant.preview', ...RUN_END_EVENTS]) {
         source.addEventListener(type, onEvent);
       }
       source.onerror = () => { if (!cancelled) setError('侧边对话连接中断，正在重连…'); };
