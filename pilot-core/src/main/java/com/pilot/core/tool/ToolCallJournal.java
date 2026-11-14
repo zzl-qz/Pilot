@@ -1,10 +1,7 @@
 package com.pilot.core.tool;
 
-import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 import com.pilot.core.util.Sha256;
 
@@ -83,18 +80,8 @@ public interface ToolCallJournal {
 
     /** 工具名 + 规范化参数（键排序、去空白）的 SHA-256，忽略 callId。 */
     static String fingerprint(ToolCall call) {
-        return Sha256.hex(call.name() + "\0" + canonical(call.args()));
+        return Sha256.hex(
+            call.name() + "\0" + ToolSupport.argumentSignature(call.args(), value -> String.valueOf(value).strip()));
     }
 
-    private static String canonical(Object value) {
-        if (value instanceof Map<?, ?> map) {
-            return map.entrySet().stream().sorted(Comparator.comparing(entry -> String.valueOf(entry.getKey())))
-                .map(entry -> entry.getKey() + "=" + canonical(entry.getValue()))
-                .collect(Collectors.joining(",", "{", "}"));
-        }
-        if (value instanceof List<?> list) {
-            return list.stream().map(ToolCallJournal::canonical).collect(Collectors.joining(",", "[", "]"));
-        }
-        return String.valueOf(value).strip();
-    }
 }

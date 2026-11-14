@@ -4,6 +4,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import com.pilot.core.workspace.PathValidator;
@@ -51,16 +52,20 @@ public final class ToolSupport {
 
     /** 保留现有参数签名格式，只统一对象键的顺序。 */
     public static String argumentSignature(Object value, String nullValue) {
+        return argumentSignature(value, item -> Objects.toString(item, nullValue));
+    }
+
+    static String argumentSignature(Object value, Function<Object, String> scalar) {
         if (value instanceof Map<?, ?> map) {
             return map.entrySet().stream().sorted(Comparator.comparing(entry -> String.valueOf(entry.getKey())))
-                .map(entry -> entry.getKey() + "=" + argumentSignature(entry.getValue(), nullValue))
+                .map(entry -> entry.getKey() + "=" + argumentSignature(entry.getValue(), scalar))
                 .collect(Collectors.joining(",", "{", "}"));
         }
         if (value instanceof List<?> list) {
-            return list.stream().map(item -> argumentSignature(item, nullValue))
+            return list.stream().map(item -> argumentSignature(item, scalar))
                 .collect(Collectors.joining(",", "[", "]"));
         }
-        return Objects.toString(value, nullValue);
+        return scalar.apply(value);
     }
 
     public static String oneLine(String text, int maxChars) {
