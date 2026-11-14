@@ -3,7 +3,7 @@ package com.pilot.server.search;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
-import java.net.Socket;
+import java.nio.channels.SocketChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -52,12 +52,13 @@ public class LocalSearchRuntime implements SmartLifecycle {
 
     @Override
     public void start() {
-        if (!properties.local() || !properties.loopback()) {
+        String host = properties.managedHost();
+        if (host == null) {
             return;
         }
-        int port = properties.port();
-        if (portOpen(port)) {
-            log.info("本机 {} 已有搜索服务，不再重复启动", port);
+        var address = new InetSocketAddress(host, properties.endpointUri().getPort());
+        if (portOpen(address)) {
+            log.info("{} 已有搜索服务，不再重复启动", properties.endpoint());
             running = true;
             return;
         }
@@ -88,19 +89,19 @@ public class LocalSearchRuntime implements SmartLifecycle {
             ProcessBuilder builder = new ProcessBuilder(launchCommand(venv));
             builder.directory(source.toFile());
             builder.environment().put("SEARXNG_SETTINGS_PATH", settings.toAbsolutePath().toString());
-            builder.environment().put("SEARXNG_BIND_ADDRESS", "127.0.0.1");
-            builder.environment().put("SEARXNG_PORT", Integer.toString(port));
+            builder.environment().put("SEARXNG_BIND_ADDRESS", address.getHostString());
+            builder.environment().put("SEARXNG_PORT", Integer.toString(address.getPort()));
             Path logFile = root.resolve("searxng.log");
             builder.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile.toFile()));
             builder.redirectErrorStream(true);
             process = builder.start();
-            if (!waitUntilUp(port, Duration.ofSeconds(60)) || !process.isAlive()) {
-                log.warn("SearXNG 没有在 {} 起来，日志：{}", port, logFile);
+            if (!waitUntilUp(address, Duration.ofSeconds(60)) || !process.isAlive()) {
+                log.warn("SearXNG 没有在 {} 起来，日志：{}", properties.endpoint(), logFile);
                 stopProcess();
                 return;
             }
             running = true;
-            log.info("本机搜索已启动：http://127.0.0.1:{}/search", port);
+            log.info("本机搜索已启动：{}/search", properties.endpoint());
         } catch (IOException e) {
             log.warn("启动本机搜索失败：{}", e.toString());
         }
@@ -580,10 +581,10 @@ public class LocalSearchRuntime implements SmartLifecycle {
         children.stream().filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly);
     }
 
-    private static boolean waitUntilUp(int port, Duration timeout) {
+    private static boolean waitUntilUp(InetSocketAddress address, Duration timeout) {
         long deadline = System.nanoTime() + timeout.toNanos();
         while (System.nanoTime() < deadline) {
-            if (portOpen(port)) {
+            if (portOpen(address)) {
                 return true;
             }
             try {
@@ -593,12 +594,12 @@ public class LocalSearchRuntime implements SmartLifecycle {
                 return false;
             }
         }
-        return portOpen(port);
+        return portOpen(address);
     }
 
-    private static boolean portOpen(int port) {
-        try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress("127.0.0.1", port), 400);
+    static boolean portOpen(InetSocketAddress address) {
+        try (SocketChannel channel = SocketChannel.open()) {
+            channel.socket().connect(address, 400);
             return true;
         } catch (IOException e) {
             return false;

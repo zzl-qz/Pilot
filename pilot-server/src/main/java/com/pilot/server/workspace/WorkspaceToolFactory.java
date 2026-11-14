@@ -201,7 +201,8 @@ public class WorkspaceToolFactory {
     }
 
     private WebSearchTool searchTool() {
-        return new WebSearchTool(webClient, mapper, webSearchProperties.endpointUri());
+        return new WebSearchTool(webClient, mapper, webSearchProperties.endpointUri(),
+            webSearchProperties.requestTimeout());
     }
 
     private ToolRegistry create(Path root, PlanSink planSink) {

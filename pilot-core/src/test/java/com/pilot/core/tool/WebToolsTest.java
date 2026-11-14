@@ -9,6 +9,8 @@ import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
 
@@ -52,6 +54,31 @@ class WebToolsTest {
         WebSearchTool tool = new WebSearchTool(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build(),
             mapper, URI.create("http://127.0.0.1:1"));
         assertTrue(tool.execute(Map.of("query", "pilot")).contains("本地搜索未启动"));
+    }
+
+    @Test
+    void searchTimesOutWhileWaitingForResponseBody() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        var release = new CountDownLatch(1);
+        server.createContext("/search", exchange -> {
+            try (exchange) {
+                exchange.sendResponseHeaders(200, 0);
+                exchange.getResponseBody().write('{');
+                exchange.getResponseBody().flush();
+                release.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        server.start();
+        try (HttpClient client = HttpClient.newHttpClient()) {
+            WebSearchTool tool = new WebSearchTool(client, mapper,
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort()), Duration.ofMillis(500));
+            assertTrue(tool.execute(Map.of("query", "pilot")).contains("搜索请求超时"));
+        } finally {
+            release.countDown();
+            server.stop(0);
+        }
     }
 
     @Test

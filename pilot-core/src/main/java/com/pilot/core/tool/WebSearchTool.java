@@ -4,11 +4,13 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import com.pilot.core.http.BoundedHttp;
 
@@ -17,20 +19,31 @@ import tools.jackson.databind.ObjectMapper;
 
 /** 只读网页搜索。请求本机 SearXNG 的 JSON 接口，不需要搜索密钥。 */
 public final class WebSearchTool implements Tool {
-    private static final URI DEFAULT_ENDPOINT = URI.create("http://127.0.0.1:8888");
+    public static final URI DEFAULT_ENDPOINT = URI.create("http://127.0.0.1:8888");
+    public static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(20);
+    private static final int MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 
     private final HttpClient client;
     private final ObjectMapper mapper;
     private final URI endpoint;
+    private final Duration timeout;
 
     public WebSearchTool(HttpClient client, ObjectMapper mapper) {
         this(client, mapper, DEFAULT_ENDPOINT);
     }
 
     public WebSearchTool(HttpClient client, ObjectMapper mapper, URI endpoint) {
+        this(client, mapper, endpoint, DEFAULT_TIMEOUT);
+    }
+
+    public WebSearchTool(HttpClient client, ObjectMapper mapper, URI endpoint, Duration timeout) {
         this.client = client;
         this.mapper = mapper;
         this.endpoint = endpoint;
+        this.timeout = Objects.requireNonNull(timeout);
+        if (timeout.isZero() || timeout.isNegative()) {
+            throw new IllegalArgumentException("搜索请求超时必须为正数");
+        }
     }
 
     @Override
@@ -67,9 +80,9 @@ public final class WebSearchTool implements Tool {
                 ? endpoint.toString().substring(0, endpoint.toString().length() - 1) : endpoint.toString();
             URI uri = URI.create(
                 base + "/search?q=" + URLEncoder.encode(query.strip(), StandardCharsets.UTF_8) + "&format=json");
-            HttpRequest request = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(20))
-                .header("Accept", "application/json").GET().build();
-            var response = BoundedHttp.text(client, request, Duration.ofSeconds(20), 4 * 1024 * 1024);
+            HttpRequest request =
+                HttpRequest.newBuilder(uri).timeout(timeout).header("Accept", "application/json").GET().build();
+            var response = BoundedHttp.text(client, request, timeout, MAX_RESPONSE_BYTES);
             if (response.statusCode() != 200) {
                 return "ERROR: 搜索服务返回 HTTP " + response.statusCode();
             }
@@ -92,6 +105,8 @@ public final class WebSearchTool implements Tool {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return "ERROR: 搜索请求被中断";
+        } catch (HttpTimeoutException e) {
+            return "ERROR: 搜索请求超时";
         } catch (Exception e) {
             if (down(e)) {
                 return "ERROR: 本地搜索未启动。把 pilot.web-search.local 设为 true 后重启。";

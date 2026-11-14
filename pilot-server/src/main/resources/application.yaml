@@ -137,7 +137,10 @@ pilot:
   web-search:
     # true：启动时在本机拉起 SearXNG。false：不拉起。不需要搜索密钥。
     local: ${PILOT_WEB_SEARCH_LOCAL:true}
-    endpoint: ${PILOT_WEB_SEARCH_ENDPOINT:http://127.0.0.1:8888}
+    # 留空使用内置搜索地址。回环 HTTP 根地址未写端口时，本机模式沿用内置端口。
+    endpoint: ${PILOT_WEB_SEARCH_ENDPOINT:}
+    # 请求总时限包含响应体，默认 20 秒。可用 PILOT_WEB_SEARCH_REQUEST_TIMEOUT_SECONDS 覆盖。
+    request-timeout-seconds: ${PILOT_WEB_SEARCH_REQUEST_TIMEOUT_SECONDS:}
     # 留空则自动找 Python 3.11+。打包时可以指到安装目录里的 python
     python: ${PILOT_WEB_SEARCH_PYTHON:}
     # 留空则用数据目录里的副本；已有源码目录时填这里，避免每次下载
