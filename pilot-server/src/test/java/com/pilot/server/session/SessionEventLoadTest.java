@@ -39,7 +39,7 @@ import tools.jackson.databind.ObjectMapper;
 /** 真实 TCP 与 HTTP 的可选负载测量；内存仓储隔离传输成本，SQLite 另有独立测量。 */
 @EnabledIfSystemProperty(named = "pilot.events.benchmark", matches = "true")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {"pilot.store=memory",
-    "pilot.events.session-connections=64", "logging.level.com.pilot.server.stream=DEBUG"})
+    "pilot.events.session-connections=64", "logging.level.com.pilot.server.common.web.AsyncEventStream=DEBUG"})
 class SessionEventLoadTest {
     @org.springframework.beans.factory.annotation.Value("${local.server.port}")
     int port;
