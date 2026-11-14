@@ -41,26 +41,7 @@ public final class AnthropicMessagesModelClient implements ModelClient {
     }
 
     static URI resolveEndpoint(URI endpoint) {
-        if (endpoint == null) {
-            throw new IllegalArgumentException("model endpoint must not be null");
-        }
-        String raw = endpoint.toString();
-        int queryIndex = raw.indexOf('?');
-        String base = queryIndex >= 0 ? raw.substring(0, queryIndex) : raw;
-        String query = queryIndex >= 0 ? raw.substring(queryIndex) : "";
-        if (base.endsWith("/messages")) {
-            return endpoint;
-        }
-        if (base.endsWith("/v1/chat/completions")) {
-            base = base.substring(0, base.length() - "/chat/completions".length());
-        } else if (base.endsWith("/chat/completions")) {
-            base = base.substring(0, base.length() - "/chat/completions".length());
-        } else if (base.endsWith("/v1/")) {
-            base = base.substring(0, base.length() - 1);
-        } else if (base.endsWith("/")) {
-            base = base.substring(0, base.length() - 1);
-        }
-        return URI.create((base.endsWith("/v1") ? base : base + "/v1") + "/messages" + query);
+        return ModelHttp.nativeEndpoint(endpoint, "/messages", true);
     }
 
     public AnthropicMessagesModelClient withIdleTimeout(Duration value) {

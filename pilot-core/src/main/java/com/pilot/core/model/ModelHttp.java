@@ -19,6 +19,29 @@ final class ModelHttp {
     private ModelHttp() {
     }
 
+    static URI nativeEndpoint(URI endpoint, String suffix, boolean preserveExplicitPath) {
+        if (endpoint == null) {
+            throw new IllegalArgumentException("model endpoint must not be null");
+        }
+        String raw = endpoint.toString();
+        int queryIndex = raw.indexOf('?');
+        String base = queryIndex >= 0 ? raw.substring(0, queryIndex) : raw;
+        String query = queryIndex >= 0 ? raw.substring(queryIndex) : "";
+        if (preserveExplicitPath && base.endsWith(suffix)) {
+            return endpoint;
+        }
+        String chatPath = "/chat/completions";
+        if (base.endsWith(chatPath)) {
+            base = base.substring(0, base.length() - chatPath.length());
+        } else if (base.endsWith("/")) {
+            base = base.substring(0, base.length() - 1);
+        }
+        if (!preserveExplicitPath && base.endsWith(suffix)) {
+            return URI.create(base + query);
+        }
+        return URI.create(base + (base.endsWith("/v1") ? "" : "/v1") + suffix + query);
+    }
+
     static HttpRequest.Builder jsonPost(URI endpoint, Duration timeout, ObjectMapper mapper, Map<String, Object> body) {
         return HttpRequest.newBuilder(endpoint).header("Content-Type", "application/json").timeout(timeout)
             .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(CanonicalJson.ordered(body)),
