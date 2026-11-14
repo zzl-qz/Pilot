@@ -85,6 +85,7 @@ import com.pilot.server.config.MultiAgentProperties;
 import com.pilot.server.model.ModelSettings;
 import com.pilot.server.multi.DispatchAgentsTool;
 import com.pilot.server.multi.MultiAgentService;
+import com.pilot.server.multi.SpawnAgentTool;
 import com.pilot.server.validation.ValidationEvidence;
 import com.pilot.server.workspace.RunSnapshotService;
 import com.pilot.server.workspace.WorkspaceToolFactory;

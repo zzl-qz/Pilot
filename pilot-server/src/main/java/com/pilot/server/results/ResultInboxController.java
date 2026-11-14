@@ -1,4 +1,4 @@
-package com.pilot.server.controller;
+package com.pilot.server.results;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -10,7 +10,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.pilot.server.common.web.ApiErrors;
-import com.pilot.server.results.ResultInboxService;
 
 @RestController
 @RequestMapping("/api/results")

@@ -1,4 +1,4 @@
-package com.pilot.server.store;
+package com.pilot.server.multi;
 
 import java.time.Instant;
 import java.util.List;
@@ -10,6 +10,8 @@ import org.springframework.stereotype.Component;
 
 import com.pilot.core.multi.TaskSpec;
 import com.pilot.core.multi.TaskStatus;
+import com.pilot.server.store.JdbcSupport;
+import com.pilot.server.store.SqliteStore;
 
 /**
  * 派发图与执行记录的持久化：{@code dispatches} / {@code task_nodes} / {@code task_attempts}。

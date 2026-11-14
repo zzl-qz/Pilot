@@ -13,7 +13,6 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import com.pilot.server.common.data.PilotDataDir;
-import com.pilot.server.controller.MobileReceiptController;
 
 import tools.jackson.databind.ObjectMapper;
 

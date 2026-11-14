@@ -1,4 +1,4 @@
-package com.pilot.server.controller;
+package com.pilot.server.mobile;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -11,8 +11,6 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.server.ResponseStatusException;
-
-import com.pilot.server.mobile.MobileConnectionService;
 
 import tools.jackson.databind.ObjectMapper;
 

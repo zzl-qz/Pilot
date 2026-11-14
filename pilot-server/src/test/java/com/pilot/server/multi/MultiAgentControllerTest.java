@@ -1,4 +1,4 @@
-package com.pilot.server.controller;
+package com.pilot.server.multi;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -24,8 +24,6 @@ import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
-import com.pilot.server.multi.SandboxStore;
-import com.pilot.server.multi.VerificationGate;
 
 import tools.jackson.databind.json.JsonMapper;
 

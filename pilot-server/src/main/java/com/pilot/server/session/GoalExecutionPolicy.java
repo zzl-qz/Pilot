@@ -35,6 +35,7 @@ import com.pilot.core.tool.VerificationCheck;
 import com.pilot.core.util.Sha256;
 import com.pilot.core.util.Texts;
 import com.pilot.core.util.WireEnum;
+import com.pilot.server.multi.SpawnAgentTool;
 
 import tools.jackson.databind.ObjectMapper;
 

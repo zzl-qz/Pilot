@@ -1,11 +1,10 @@
-package com.pilot.server.controller;
+package com.pilot.server.observability;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.pilot.server.maintenance.RetentionService;
-import com.pilot.server.observability.RunMetrics;
 
 /** 进程内运行指标：运行成功率、失败码分布、压缩与工具调用次数。 */
 @RestController

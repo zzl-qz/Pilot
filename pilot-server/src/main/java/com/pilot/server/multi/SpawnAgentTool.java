@@ -1,4 +1,4 @@
-package com.pilot.server.session;
+package com.pilot.server.multi;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -104,9 +104,9 @@ public final class SpawnAgentTool implements Tool {
             AgentProfileCatalog.EMPTY);
     }
 
-    SpawnAgentTool(ModelClient client, ToolRegistry tools, PermissionGate permissionGate, ApprovalBroker approvals,
-        AgentLoop.Config config, Supplier<List<Message>> history, Consumer<SessionEvent> events,
-        BooleanSupplier cancelled, UsageSink usageSink, AgentProfileCatalog profiles) {
+    public SpawnAgentTool(ModelClient client, ToolRegistry tools, PermissionGate permissionGate,
+        ApprovalBroker approvals, AgentLoop.Config config, Supplier<List<Message>> history,
+        Consumer<SessionEvent> events, BooleanSupplier cancelled, UsageSink usageSink, AgentProfileCatalog profiles) {
         this.client = Objects.requireNonNull(client, "client must not be null");
         this.tools = isolatedTools(Objects.requireNonNull(tools, "tools must not be null"));
         this.permissionGate = Objects.requireNonNull(permissionGate, "permissionGate must not be null");

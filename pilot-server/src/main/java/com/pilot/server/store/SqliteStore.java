@@ -377,7 +377,7 @@ public final class SqliteStore {
         return "(substr(" + column + ",1,19) || '.' || substr((" + fraction + ") || '000000000',1,9) || 'Z')";
     }
 
-    static String canonicalInstant(Instant instant) {
+    public static String canonicalInstant(Instant instant) {
         return INSTANT_FORMAT.format(instant);
     }
 

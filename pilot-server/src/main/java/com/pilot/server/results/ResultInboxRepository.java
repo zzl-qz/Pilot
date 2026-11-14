@@ -1,4 +1,4 @@
-package com.pilot.server.store;
+package com.pilot.server.results;
 
 import java.time.Instant;
 import java.util.Collections;
@@ -20,6 +20,9 @@ import com.pilot.core.event.SessionEvent;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.util.WireEnum;
+import com.pilot.server.store.EventCodec;
+import com.pilot.server.store.JdbcSupport;
+import com.pilot.server.store.SqliteStore;
 
 /** 结束事件是事实来源；这里只持久化用户的阅读/处理标记。 */
 @Component

@@ -1,4 +1,4 @@
-package com.pilot.server.controller;
+package com.pilot.server.work;
 
 import java.nio.file.Files;
 import java.util.function.Supplier;
@@ -16,7 +16,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.pilot.server.common.web.ApiErrors;
-import com.pilot.server.work.DocumentService;
 
 import tools.jackson.databind.JsonNode;
 

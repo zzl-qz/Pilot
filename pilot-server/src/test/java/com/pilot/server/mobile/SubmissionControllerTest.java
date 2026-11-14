@@ -19,7 +19,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import com.pilot.server.common.data.PilotDataDir;
-import com.pilot.server.controller.SubmissionController;
 
 import tools.jackson.databind.ObjectMapper;
 

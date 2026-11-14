@@ -1,4 +1,4 @@
-package com.pilot.server.controller;
+package com.pilot.server.work;
 
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
@@ -20,8 +20,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.pilot.server.common.web.ApiErrors;
-import com.pilot.server.work.SkillDraftService;
-import com.pilot.server.work.WorkProductService;
 
 /** 成果读取与人工技能审核；沿用服务统一的远程访问认证。 */
 @RestController

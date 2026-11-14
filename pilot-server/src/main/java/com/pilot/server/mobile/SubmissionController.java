@@ -1,4 +1,4 @@
-package com.pilot.server.controller;
+package com.pilot.server.mobile;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -14,8 +14,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
-
-import com.pilot.server.mobile.MobileReceiptStore;
 
 import tools.jackson.databind.ObjectMapper;
 

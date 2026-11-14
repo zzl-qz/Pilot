@@ -35,6 +35,7 @@ import com.pilot.core.tool.CommandTaskManager.Task;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolExecutor;
 import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.multi.SpawnAgentTool;
 
 import tools.jackson.databind.json.JsonMapper;
 

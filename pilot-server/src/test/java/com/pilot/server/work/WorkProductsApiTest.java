@@ -1,4 +1,4 @@
-package com.pilot.server.controller;
+package com.pilot.server.work;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -29,8 +29,6 @@ import com.pilot.core.plan.PlanSink;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.server.session.AgentRunService;
-import com.pilot.server.work.SkillDraftService;
-import com.pilot.server.work.WorkProductService;
 
 @SpringBootTest(properties = {"pilot.store=memory", "pilot.runtime.provision=false", "pilot.web-search.local=false"})
 @AutoConfigureMockMvc

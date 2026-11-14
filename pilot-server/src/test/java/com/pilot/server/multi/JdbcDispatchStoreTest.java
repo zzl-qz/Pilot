@@ -1,4 +1,4 @@
-package com.pilot.server.store;
+package com.pilot.server.multi;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -13,6 +13,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.ObjectProvider;
 
 import com.pilot.core.multi.TaskSpec;
+import com.pilot.server.store.SqliteStore;
 
 /** 派发图与尝试记录的持久化：重启后能找回待办，过期执行者的回执被丢弃。 */
 class JdbcDispatchStoreTest {

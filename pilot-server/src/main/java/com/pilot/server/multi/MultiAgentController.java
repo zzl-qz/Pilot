@@ -1,4 +1,4 @@
-package com.pilot.server.controller;
+package com.pilot.server.multi;
 
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
@@ -29,10 +29,7 @@ import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.common.web.SessionLookup;
 import com.pilot.server.config.AgentProperties;
-import com.pilot.server.multi.SandboxStore;
-import com.pilot.server.multi.VerificationGate;
 import com.pilot.server.multi.WorkspaceApplyJournal.State;
-import com.pilot.server.store.JdbcDispatchStore;
 
 /**
  * 多智能体面板接口：任务看板、沙箱改动、人工仲裁与变更接受/拒绝。
