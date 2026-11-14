@@ -10,7 +10,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,10 +18,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.pilot.core.session.SessionService;
+import com.pilot.server.common.web.SessionLookup;
 
 /**
  * 浏览器镜像面板的 HTTP 入口：瞬态 SSE 帧流 + 置前等上行动作。
@@ -310,7 +309,7 @@ public class BrowserControlController {
 
     private void requireSession(String id) {
         if (sessions.find(id).isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "会话不存在: " + id);
+            throw SessionLookup.missing(id);
         }
     }
 }

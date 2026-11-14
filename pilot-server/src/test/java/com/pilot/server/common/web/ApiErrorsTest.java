@@ -1,7 +1,6 @@
 package com.pilot.server.common.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.Map;
 
@@ -38,9 +37,20 @@ class ApiErrorsTest {
         assertEquals("session not found: s1", missing.getReason());
     }
 
-    /** 抽取前各控制器就是这样：没有提示语时抛空指针，最终表现为 500。行为保持不变。 */
+    /** 没有提示语时仍返回调用方声明的状态码，用兜底文案把响应体补上。 */
     @Test
-    void missingMessageStillFailsLikeBefore() {
-        assertThrows(NullPointerException.class, () -> ApiErrors.badRequest(new IllegalArgumentException()));
+    void missingMessageKeepsDeclaredStatus() {
+        var invalid = ApiErrors.badRequest(new IllegalArgumentException());
+        assertEquals(HttpStatus.BAD_REQUEST, invalid.getStatusCode());
+        assertEquals(Map.of("message", ApiErrors.FALLBACK), invalid.getBody());
+
+        var file = ApiErrors.error(HttpStatus.BAD_REQUEST, null);
+        assertEquals(Map.of("error", ApiErrors.FALLBACK), file.getBody());
+    }
+
+    @Test
+    void chineseSessionTextsStayAsPublished() {
+        assertEquals("会话不存在: s1", SessionLookup.missing("s1").getReason());
+        assertEquals("会话不存在", SessionLookup.missing().getReason());
     }
 }

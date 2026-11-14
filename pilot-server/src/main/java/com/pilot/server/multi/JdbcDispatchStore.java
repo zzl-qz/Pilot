@@ -3,6 +3,7 @@ package com.pilot.server.multi;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -339,6 +340,9 @@ public final class JdbcDispatchStore {
             return 0;
         }
         String now = Instant.now().toString();
+        // 与沙箱恢复用同一份清单，ready、verifying 这些旧值不会只在一边被漏掉。
+        String abandoned = TaskStatus.ABANDONED_AFTER_RESTART.stream().map(status -> "'" + status + "'")
+            .collect(Collectors.joining(", "));
         int[] count = {0};
         JdbcSupport.inTransaction(store, connection -> {
             count[0] = JdbcSupport.exec(connection, """
@@ -352,9 +356,9 @@ public final class JdbcDispatchStore {
             });
             JdbcSupport.exec(connection, """
                 UPDATE task_nodes SET status = 'cancelled', detail = '进程重启，需重新派发', updated_at = ?
-                WHERE status IN ('pending', 'running', 'ready', 'verifying') AND dispatch_id IN (
+                WHERE status IN (%s) AND dispatch_id IN (
                     SELECT dispatch_id FROM dispatches WHERE session_id = ? AND status = 'running')
-                """, statement -> {
+                """.formatted(abandoned), statement -> {
                 statement.setString(1, now);
                 statement.setString(2, sessionId);
             });

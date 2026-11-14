@@ -33,6 +33,7 @@ import com.pilot.core.util.Texts;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.core.workspace.WorkspaceViolationException;
 import com.pilot.server.common.web.ApiErrors;
+import com.pilot.server.common.web.SessionLookup;
 
 /**
  * 工作区文件浏览：给左侧文件树和右侧只读预览用。
@@ -185,8 +186,7 @@ public class SessionFilesController {
     }
 
     private PathValidator paths(String sessionId) {
-        Session session = sessions.find(sessionId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "会话不存在: " + sessionId));
+        Session session = sessions.find(sessionId).orElseThrow(() -> SessionLookup.missing(sessionId));
         if (session.workspace() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "该会话没有绑定工作区");
         }

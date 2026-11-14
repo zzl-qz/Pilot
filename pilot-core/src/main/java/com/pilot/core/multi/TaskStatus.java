@@ -1,5 +1,7 @@
 package com.pilot.core.multi;
 
+import java.util.List;
+
 /**
  * 子任务状态机。父 Agent 独占状态推进权，子 Agent 只能上报「完成 / 失败 / 待仲裁」。
  *
@@ -15,6 +17,13 @@ public enum TaskStatus {
     PENDING("pending", "⏳等待"), RUNNING("running", "🔄运行中"), DONE("done", "✅完成"), DISSENT("dissent", "⚠️分歧待仲裁"),
     CONFLICT("conflict", "🔴变更冲突"), FAILED("failed", "❌失败"), BLOCKED("blocked", "⛔已阻断"),
     CANCELLED("cancelled", "🚫已取消");
+
+    /**
+     * 重启后执行者已经不在的状态。
+     * ready、verifying 是旧版本写过、现在不再产生的值，留着才能把旧数据收敛掉。
+     */
+    public static final List<String> ABANDONED_AFTER_RESTART =
+        List.of(PENDING.wireName(), RUNNING.wireName(), "ready", "verifying");
 
     private final String wireName;
     private final String label;

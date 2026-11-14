@@ -34,6 +34,7 @@ import com.pilot.core.util.Sha256;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.browser.BrowserRuntime;
 import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.common.web.SessionLookup;
 import com.pilot.server.store.AutomationStore;
 import com.pilot.server.tool.WorkspaceToolFactory;
 
@@ -347,7 +348,7 @@ public class FileWorkbenchService {
 
     private Path root(String sessionId) throws IOException {
         String workspace =
-            sessions.find(sessionId).orElseThrow(() -> new IllegalArgumentException("会话不存在")).workspace();
+            sessions.find(sessionId).orElseThrow(() -> new IllegalArgumentException(SessionLookup.MISSING)).workspace();
         Path root = workspaces.resolve(workspace);
         return Files.isDirectory(root) ? root.toRealPath() : root.toAbsolutePath().normalize();
     }

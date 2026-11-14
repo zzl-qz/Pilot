@@ -21,6 +21,7 @@ import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.ToolNames;
 import com.pilot.core.util.WireEnum;
+import com.pilot.server.common.web.SessionLookup;
 import com.pilot.server.run.EvidenceStatus;
 import com.pilot.server.run.ExecutionPhase;
 import com.pilot.server.run.TaskControlService;
@@ -219,7 +220,7 @@ public class ResultInboxService {
 
     public List<Research> sessionResearch(String sessionId) {
         if (sessions.find(sessionId).isEmpty()) {
-            throw new IllegalArgumentException("会话不存在");
+            throw new IllegalArgumentException(SessionLookup.MISSING);
         }
         return research(tasks.load(sessionId));
     }

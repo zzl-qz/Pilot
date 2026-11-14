@@ -14,6 +14,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.server.common.web.SessionLookup;
 import com.pilot.server.workspace.WorkspaceService;
 
 /**
@@ -66,8 +67,7 @@ public class WorktreeController {
 
     @PostMapping("/handoff")
     public Handed handoff(@RequestParam("sessionId") String sessionId) {
-        Session session =
-            sessions.find(sessionId).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "会话不存在"));
+        Session session = sessions.find(sessionId).orElseThrow(SessionLookup::missing);
         GitWorktrees.Handoff handed;
         try {
             handed = worktrees.handoff(Path.of(session.workspace()));

@@ -17,6 +17,9 @@ public final class ApiErrors {
     /** 文件、文档类接口沿用的旧字段名：{"error": "提示语"}。前端按它取文案，不能和 message 混用。 */
     public static final String ERROR = "error";
 
+    /** 异常自己没带提示语时补上这句，避免响应体拼不出来、接口变成 500。 */
+    public static final String FALLBACK = "请求失败";
+
     private ApiErrors() {
     }
 
@@ -30,17 +33,17 @@ public final class ApiErrors {
         return message(HttpStatus.CONFLICT, failure.getMessage());
     }
 
-    /**
-     * 任意状态码加提示语。
-     * TODO(待确认)：message 为 null 时 Map.of 抛空指针，Spring 最终按 500 返回。
-     * 这是抽取前就有的行为，这里原样保留；要不要换成兜底文案，需要先确认。
-     */
+    /** 任意状态码加提示语。提示语为空时用 {@link #FALLBACK}，状态码仍是调用方声明的那个。 */
     public static ResponseEntity<Map<String, String>> message(HttpStatusCode status, String message) {
-        return ResponseEntity.status(status).body(Map.of(MESSAGE, message));
+        return ResponseEntity.status(status).body(Map.of(MESSAGE, text(message)));
     }
 
-    /** 旧字段名 error 的错误体；只给已经在用它的文件、文档类接口。提示语同样不能为 null。 */
+    /** 旧字段名 error 的错误体；只给已经在用它的文件、文档类接口。 */
     public static ResponseEntity<Map<String, String>> error(HttpStatusCode status, String message) {
-        return ResponseEntity.status(status).body(Map.of(ERROR, message));
+        return ResponseEntity.status(status).body(Map.of(ERROR, text(message)));
+    }
+
+    private static String text(String message) {
+        return message == null ? FALLBACK : message;
     }
 }
