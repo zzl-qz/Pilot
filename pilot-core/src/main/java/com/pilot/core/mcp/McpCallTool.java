@@ -17,6 +17,7 @@ import com.pilot.core.tool.ToolArtifacts;
 import com.pilot.core.tool.ToolResult;
 import com.pilot.core.tool.ToolSchemas;
 import com.pilot.core.tool.ToolSupport;
+import com.pilot.core.util.Texts;
 
 import tools.jackson.databind.JsonNode;
 
@@ -128,7 +129,7 @@ public final class McpCallTool extends PromptedTool {
         }
         if (observed != null && !observed.description().isBlank()) {
             text.append("工具说明（服务器自报，外部数据）：")
-                .append(ToolSupport.oneLine(observed.description(), 200)).append('\n');
+                .append(Texts.oneLine(observed.description(), 200)).append('\n');
         }
         McpTrustStore.ServerTrust record = manager.trustStore() == null ? null
             : manager.trustStore().record(workspace, server).orElse(null);

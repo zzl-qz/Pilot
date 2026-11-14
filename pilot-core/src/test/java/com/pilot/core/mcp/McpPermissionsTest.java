@@ -154,7 +154,7 @@ class McpPermissionsTest {
             var registry = new ToolRegistry();
             registry.register(new McpCallTool(manager, root));
             var executor = new ToolExecutor(registry, new PolicyPermissionGate(PermissionMode.READ_ONLY),
-                (id, name, summary) -> CompletableFuture.completedFuture(false));
+                (id, name, summary, structuredArgs) -> CompletableFuture.completedFuture(false));
             var result = executor.execute(new ToolCall("check", "mcp_call", Map.of("server", "fake", "tool", "first")),
                 event -> {
                 }, () -> {
@@ -195,7 +195,7 @@ class McpPermissionsTest {
             var registry = new ToolRegistry();
             registry.register(tool);
             var executor = new ToolExecutor(registry, new PolicyPermissionGate(PermissionMode.AUTO),
-                (id, name, summary) -> CompletableFuture.completedFuture(true));
+                (id, name, summary, structuredArgs) -> CompletableFuture.completedFuture(true));
             var result = executor.execute(new ToolCall("approved", "mcp_call", args), event -> {
             });
             // 工具返回头部有外部数据定界行，正文以实际内容结尾
