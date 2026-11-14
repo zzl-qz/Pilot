@@ -77,15 +77,15 @@ class DeliveryServiceTest {
         service.collect();
         service.collect();
         assertEquals(2, service.list().size());
-        var first = service.claim("WEBHOOK");
-        assertNull(service.claim("WEBHOOK"));
+        var first = service.claim(DeliveryChannel.WEBHOOK);
+        assertNull(service.claim(DeliveryChannel.WEBHOOK));
         service.send(first);
         assertEquals("RETRY", service.get(first.id()).state());
         var persisted = new AutomationStore(new SqliteStore(root.resolve("outbox.db")));
         service.close();
         service = make(persisted);
         clock.at = service.get(first.id()).nextAt();
-        var second = service.claim("WEBHOOK");
+        var second = service.claim(DeliveryChannel.WEBHOOK);
         assertNotEquals(first.lease(), second.lease());
         assertThrows(IllegalStateException.class,
             () -> service.receipt(first.id(), new DeliveryService.Receipt(first.lease(), true, "")));
@@ -94,7 +94,7 @@ class DeliveryServiceTest {
         assertEquals("DELIVERED", service.get(first.id()).state());
         assertEquals(List.of(first.id(), first.id()), keys);
         service.collect();
-        assertNull(service.claim("WEBHOOK"));
+        assertNull(service.claim(DeliveryChannel.WEBHOOK));
     }
 
     @Test
@@ -104,16 +104,16 @@ class DeliveryServiceTest {
         service.collect();
         String id = null;
         for (int i = 0; i < 6; i++) {
-            var d = service.claim("DESKTOP");
+            var d = service.claim(DeliveryChannel.DESKTOP);
             assertNotNull(d);
             id = d.id();
             clock.at = d.nextAt().plusSeconds(1);
         }
-        assertNull(service.claim("DESKTOP"));
+        assertNull(service.claim(DeliveryChannel.DESKTOP));
         var failed = service.get(id);
         assertEquals("FAILED", failed.state());
         service.retry(id, failed.version());
-        assertNotNull(service.claim("DESKTOP"));
+        assertNotNull(service.claim(DeliveryChannel.DESKTOP));
         assertThrows(IllegalStateException.class, () -> service.retry(failed.id(), failed.version()));
     }
 
@@ -122,11 +122,11 @@ class DeliveryServiceTest {
         service.configure(0, true, "");
         when(results.deliveryItems(any(Instant.class))).thenReturn(List.of(item(clock.instant())));
         service.collect();
-        var first = service.claim("DESKTOP");
+        var first = service.claim(DeliveryChannel.DESKTOP);
         clock.at = first.nextAt();
         assertThrows(IllegalStateException.class,
             () -> service.receipt(first.id(), new DeliveryService.Receipt(first.lease(), true, "")));
-        var second = service.claim("DESKTOP");
+        var second = service.claim(DeliveryChannel.DESKTOP);
         assertNotEquals(first.lease(), second.lease());
         service.receipt(second.id(), new DeliveryService.Receipt(second.lease(), true, ""));
         assertEquals("DELIVERED", service.get(second.id()).state());
@@ -137,11 +137,11 @@ class DeliveryServiceTest {
         service.configure(0, false, "https://example.test/hook");
         when(results.deliveryItems(any(Instant.class))).thenReturn(List.of(item(clock.instant())));
         service.collect();
-        var first = service.claim("WEBHOOK");
+        var first = service.claim(DeliveryChannel.WEBHOOK);
         clock.at = first.nextAt();
         service.send(first);
         assertTrue(keys.isEmpty(), "在备份或停顿后恢复的 worker 必须先核对租约");
-        var second = service.claim("WEBHOOK");
+        var second = service.claim(DeliveryChannel.WEBHOOK);
         service.send(first);
         assertTrue(keys.isEmpty(), "旧 worker 不能使用已被接管的租约发送");
         status.set(204);
@@ -156,7 +156,7 @@ class DeliveryServiceTest {
         var settings = service.configure(0, false, "https://example.test/hook");
         when(results.deliveryItems(any(Instant.class))).thenReturn(List.of(item(clock.instant())));
         service.collect();
-        var claimed = service.claim("WEBHOOK");
+        var claimed = service.claim(DeliveryChannel.WEBHOOK);
         service.configure(settings.version(), false, "https://example.test/new");
         service.send(claimed);
         assertTrue(keys.isEmpty());
@@ -172,7 +172,7 @@ class DeliveryServiceTest {
         when(results.deliveryItems(any(Instant.class))).thenReturn(List.of(item(clock.instant())));
         service.collect();
         service.configure(settings.version(), false, "https://example.test/new");
-        assertNull(service.claim("WEBHOOK"));
+        assertNull(service.claim(DeliveryChannel.WEBHOOK));
         assertEquals("CANCELLED", service.list().getFirst().state());
         assertTrue(keys.isEmpty());
         assertThrows(IllegalArgumentException.class, () -> service.configure(2, false, "file:///etc/passwd"));
@@ -204,7 +204,7 @@ class DeliveryServiceTest {
             service.configure(0, false, "http://127.0.0.1:" + receiver.getAddress().getPort() + "/hook");
             when(results.deliveryItems(any(Instant.class))).thenReturn(List.of(item(Instant.now())));
             service.collect();
-            var first = service.claim("WEBHOOK");
+            var first = service.claim(DeliveryChannel.WEBHOOK);
             assertNotNull(first);
             service.send(first);
             var retry = service.get(first.id());
@@ -212,7 +212,7 @@ class DeliveryServiceTest {
             assertEquals(0, redirected.get());
             service.retry(retry.id(), retry.version());
             response.set(204);
-            service.send(service.claim("WEBHOOK"));
+            service.send(service.claim(DeliveryChannel.WEBHOOK));
             assertEquals("DELIVERED", service.get(first.id()).state());
             assertEquals(List.of(first.id(), first.id()), headers);
             var body = JsonMapper.builder().build().readTree(bodies.getFirst());

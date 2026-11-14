@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.pilot.server.common.web.ApiErrors;
+import com.pilot.server.notifications.DeliveryChannel;
 import com.pilot.server.notifications.DeliveryService;
 
 @RestController
@@ -42,13 +43,13 @@ public class DeliveryController {
 
     @PostMapping("/claim")
     public ResponseEntity<?> claim() {
-        var d = service.claim("DESKTOP");
+        var d = service.claim(DeliveryChannel.DESKTOP);
         return d == null ? ResponseEntity.noContent().build() : ResponseEntity.ok(d);
     }
 
     @PostMapping("/{id}/receipt")
     public void receipt(@PathVariable String id, @RequestBody DeliveryService.Receipt input) {
-        if (!"DESKTOP".equals(service.get(id).channel())) {
+        if (!DeliveryChannel.DESKTOP.is(service.get(id).channel())) {
             throw new IllegalArgumentException("该投递由服务端处理");
         }
         service.receipt(id, input);

@@ -18,6 +18,7 @@ import com.pilot.core.event.RunCompleted;
 import com.pilot.core.loop.Attachment;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.config.PilotDataDir;
+import com.pilot.server.notifications.DeliveryChannel;
 import com.pilot.server.notifications.DeliveryService;
 import com.pilot.server.results.ResultInboxService;
 import com.pilot.server.session.RunStarter;
@@ -86,7 +87,7 @@ public class ScheduleCrashMain {
                     schedules.tick();
                 }
                 delivery.collect();
-                var pending = delivery.claim("WEBHOOK");
+                var pending = delivery.claim(DeliveryChannel.WEBHOOK);
                 if (pending != null) {
                     crash(phase, "claim");
                     delivery.send(pending);

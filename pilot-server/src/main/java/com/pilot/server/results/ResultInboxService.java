@@ -65,6 +65,11 @@ public class ResultInboxService {
         List<String> changedFiles, List<String> checks, List<String> openSteps, ScheduledTask.Workspace workspace) {
     }
 
+    /** 条目是否需要人工处理；计划条目和对话条目用的是同一个状态名。 */
+    public static boolean needsAttention(Item item) {
+        return ChatState.NEEDS_ATTENTION.name().equals(item.state());
+    }
+
     public record Page(List<Item> items, boolean truncated) {
     }
 

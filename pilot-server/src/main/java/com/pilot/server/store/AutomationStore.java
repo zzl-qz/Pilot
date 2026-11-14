@@ -57,6 +57,7 @@ public class AutomationStore {
             }, r -> new Document(r.getString("id"), r.getLong("version"), r.getString("payload")), "读取自动化记录失败");
     }
 
+    /** SQL 里的状态条件只是预筛；哪些状态算待投递以 DeliveryState.open 为准，服务层会再过滤一次。 */
     public synchronized List<Document> deliveryCandidates() {
         if (store == null) {
             return list("delivery");
