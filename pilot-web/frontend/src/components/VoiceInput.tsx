@@ -6,7 +6,7 @@ import { IconButton } from '@astryxdesign/core/IconButton';
 import { Spinner } from '@astryxdesign/core/Spinner';
 import { StatusDot } from '@astryxdesign/core/StatusDot';
 import { api } from '../api.js';
-import { createVoiceInput, VOICE_MAX_MS } from '../lib/voice-input.js';
+import { createVoiceInput } from '../lib/voice-input.js';
 import { Icon } from './Icon.jsx';
 
 const clock = (ms: number) => Math.floor(ms / 60000) + ':' + String(Math.floor(ms / 1000) % 60).padStart(2, '0');
@@ -29,6 +29,7 @@ export function VoiceInput({ ownerKey, disabled, feedbackRef, onBusy, onText }: 
   // 在会话切换的提交阶段取消录音，旧权限请求或转写结果就不会进入新草稿。
   useLayoutEffect(() => {
     const input = createVoiceInput({
+      loadLimits: async signal => (await api.settings(signal))?.voiceLimits,
       transcribe: (...args) => api.transcribeVoice(...args),
       onState: next => {
         setState(next);
@@ -69,6 +70,7 @@ export function VoiceInput({ ownerKey, disabled, feedbackRef, onBusy, onText }: 
   const elapsed = state.elapsed || 0;
   const status = {
     idle: '',
+    loading: '正在读取录音限额…',
     requesting: '正在请求麦克风权限…',
     recording: '正在录音',
     finishing: '正在收尾…',
@@ -97,7 +99,7 @@ export function VoiceInput({ ownerKey, disabled, feedbackRef, onBusy, onText }: 
             <span className="voice-status" role={failed ? 'alert' : 'status'}>{status}</span>
             {recording && <span className="voice-timer" aria-hidden="true">{clock(elapsed)}</span>}
           </div>
-          {recording && <p className="voice-hint">最长 {VOICE_MAX_MS / 60000} 分钟 · 转写后可编辑再发送</p>}
+          {recording && <p className="voice-hint">最长 {clock((state.maxSeconds ?? 0) * 1000)} · 转写后可编辑再发送</p>}
         </div>
         <div className="voice-panel-actions">
           {recording && <Button size="sm" label="完成并转写" onClick={() => {

@@ -27,21 +27,26 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 public class VoiceService {
     private static final Logger log = LoggerFactory.getLogger(VoiceService.class);
-    public static final int MAX_BYTES = 10 * 1024 * 1024;
     private final ModelSettings models;
     private final SettingsStore store;
     private final ObjectMapper mapper;
     private final HttpClient client;
     private final String defaultModel;
+    private final VoiceLimits limits;
 
-    public VoiceService(ModelSettings models, SettingsStore store, ObjectMapper mapper,
+    public VoiceService(ModelSettings models, SettingsStore store, ObjectMapper mapper, VoiceLimits limits,
         @Value("${pilot.voice.model:gpt-4o-mini-transcribe}") String defaultModel) {
         this.models = models;
         this.store = store;
         this.mapper = mapper;
         this.defaultModel = defaultModel;
+        this.limits = limits;
         client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10))
             .followRedirects(HttpClient.Redirect.NEVER).build();
+    }
+
+    VoiceLimits limits() {
+        return limits;
     }
 
     /** effectiveEndpoint：实际会请求的转写地址，界面直接显示，避免「配了却不知道打到哪」。 */
@@ -120,8 +125,8 @@ public class VoiceService {
         if (audio == null || audio.length == 0) {
             throw new IllegalArgumentException("录音为空，请重新录音");
         }
-        if (audio.length > MAX_BYTES) {
-            throw new IllegalArgumentException("录音不能超过 10 MB");
+        if (limits.exceedsUploadLimit(audio.length)) {
+            throw new IllegalArgumentException(limits.uploadLimitMessage());
         }
         String mime = contentType == null ? "" : contentType.split(";", 2)[0].strip().toLowerCase(Locale.ROOT);
         String extension = switch (mime) {

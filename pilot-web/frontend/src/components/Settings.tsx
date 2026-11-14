@@ -201,7 +201,7 @@ function VoiceSettings() {
       {!value && !loadError && <p className="settings-status" role="status">正在读取语音设置…</p>}
       {value && <>
         <div className="settings-field-grid">
-          <TextInput label="语音模型" size="lg" width="100%" placeholder="gpt-4o-mini-transcribe" value={value.model || ''}
+          <TextInput label="语音模型" size="lg" width="100%" placeholder="填写服务支持的转写模型" value={value.model || ''}
             isDisabled={busy} onChange={model => setValue({ ...value, model })} />
           <TextInput label="独立语音端点（可选）" size="lg" width="100%" inputMode="url" placeholder="留空沿用聊天服务" value={value.endpoint || ''}
             isDisabled={busy} onChange={endpoint => setValue({ ...value, endpoint })} />

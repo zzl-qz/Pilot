@@ -5,6 +5,7 @@ import java.util.Map;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -39,12 +40,13 @@ public class VoiceController {
     }
 
     @PostMapping(value = "/transcriptions", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public Map<String, String> transcribe(@RequestParam("file") MultipartFile file) throws IOException {
-        if (file.getSize() > VoiceService.MAX_BYTES) {
-            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "录音不能超过 10 MB");
+    public ResponseEntity<Map<String, String>> transcribe(@RequestParam("file") MultipartFile file) throws IOException {
+        if (voice.limits().exceedsUploadLimit(file.getSize())) {
+            return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+                .body(Map.of("message", voice.limits().uploadLimitMessage()));
         }
         try {
-            return Map.of("text", voice.transcribe(file.getBytes(), file.getContentType()));
+            return ResponseEntity.ok(Map.of("text", voice.transcribe(file.getBytes(), file.getContentType())));
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         } catch (VoiceService.VoiceException e) {

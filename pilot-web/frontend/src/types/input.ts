@@ -1,4 +1,5 @@
 import type { MessageAttachment } from './runtime.js';
+import type { VoiceLimitsBudget } from './server.js';
 
 export interface DraftAttachment extends MessageAttachment {
   id: string;
@@ -24,8 +25,8 @@ interface CommandFields {
 export interface BuiltinCommand extends CommandFields { kind?: 'builtin'; prompt: (args: string) => string; skill?: never }
 export interface SkillCommand extends CommandFields { kind: 'skill'; prompt: null; skill: string }
 export type QuickCommand = BuiltinCommand | SkillCommand;
-export type VoicePhase = 'idle' | 'requesting' | 'recording' | 'finishing' | 'transcribing' | 'error';
-export interface VoiceState { phase: VoicePhase; elapsed?: number; error?: string; retry?: boolean }
+export type VoicePhase = 'idle' | 'loading' | 'requesting' | 'recording' | 'finishing' | 'transcribing' | 'error';
+export interface VoiceState { phase: VoicePhase; elapsed?: number; maxSeconds?: number; error?: string; retry?: boolean }
 export interface VoiceEnvironment {
   AudioContext?: typeof AudioContext;
   webkitAudioContext?: typeof AudioContext;
@@ -37,6 +38,7 @@ export interface VoiceEnvironment {
 }
 export interface VoiceOptions {
   environment?: VoiceEnvironment;
+  loadLimits: (signal: AbortSignal) => Promise<VoiceLimitsBudget | null | undefined>;
   transcribe: (audio: Blob, signal: AbortSignal) => Promise<{ text?: string | null } | null>;
   onState: (state: VoiceState) => void;
   onText: (text: string) => void;

@@ -7,6 +7,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { browserOptions } from './browser-options.mjs';
 import { checkQueue } from './queue-cases.mjs';
 import { checkVoice } from './voice-cases.mjs';
 import { checkWorkbench } from './workbench-cases.mjs';
@@ -40,7 +41,7 @@ import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-a
 document.documentElement.dataset.theme='dark'; window.store=useStore; window.api=api; window.realTranscribe=api.transcribeVoice; window.calls=[];
 for(const name of Object.keys(api)) if(typeof api[name]==='function') api[name]=async (...args)=>{calls.push({name,args});return {};};
 api.workProducts=api.skillDrafts=async()=>[];
-api.settings=async()=>({attachmentLimits:{maxFiles:64,maxFileBytes:2097152,maxTotalBytes:26214400,maxRequestBytes:37000000}});
+api.settings=async()=>({attachmentLimits:{maxFiles:64,maxFileBytes:2097152,maxTotalBytes:26214400,maxRequestBytes:37000000},voiceLimits:{maxBytes:10485760,maxSeconds:73}});
 api.worktreeInfo=async()=>({branch:'feature/ui',worktree:false});
 api.filesFlat=api.workspaceFiles=async()=>({files:['src/组件.jsx','src/App.jsx','src/space file.js']});
 api.context=async()=>({usedTokens:10,limitTokens:100}); api.queue=async()=>({items:[]});
@@ -423,7 +424,7 @@ try {
   await listening;
   const url=`http://127.0.0.1:${server.httpServer.address().port}/__interaction`;
   if(process.argv.includes('--serve')) { console.log('Fixture:',url); await new Promise(()=>{}); }
-  browser=await chromium.launch({channel:'chrome',headless:true,args:['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});await run(await browser.newPage(), 'chromium',url);await browser.close();browser=null;
+  browser=await chromium.launch({...browserOptions(),args:['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});await run(await browser.newPage(), 'chromium',url);await browser.close();browser=null;
   if (!process.argv.includes('--chromium-only')) {
     const main=join(temp,'main.cjs');await writeFile(main,`const {app,BrowserWindow}=require('electron');app.commandLine.appendSwitch('use-fake-device-for-media-stream');app.commandLine.appendSwitch('use-fake-ui-for-media-stream');app.whenReady().then(()=>{let w=new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}});w.loadURL(${JSON.stringify(url)});});`);
     const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;

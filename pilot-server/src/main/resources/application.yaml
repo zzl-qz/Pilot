@@ -13,6 +13,7 @@ server:
 spring:
   servlet:
     multipart:
+      # 语音上传和前端预检从实际 multipart 限额派生，修改文件上限时也要给请求封装留空间。
       max-file-size: 10MB
       max-request-size: 11MB
   application:
@@ -84,10 +85,7 @@ pilot:
       max-width: ${PILOT_BROWSER_MIRROR_MAX_WIDTH:1280}
       # JPEG 质量（20-90）
       quality: ${PILOT_BROWSER_MIRROR_QUALITY:55}
-  voice:
-    # 转写（STT）是独立于聊天的能力，模型名各家不同：OpenAI 用 gpt-4o-mini-transcribe /
-    # gpt-4o-transcribe / whisper-1，其它兼容服务按它自己的名字填（设置 → 模型 → 语音输入可覆盖）。
-    model: ${PILOT_VOICE_MODEL:gpt-4o-mini-transcribe}
+  # PILOT_VOICE_MAX_RECORDING_SECONDS 可覆盖 120 秒的录音时长，PILOT_VOICE_MODEL 可设置默认转写模型。
   model:
     # endpoint 可以写服务根地址，也可以写完整的 /v1/chat/completions
     endpoint: ${PILOT_MODEL_ENDPOINT:https://api.openai.com/v1/chat/completions}

@@ -224,7 +224,7 @@ export const api = {
   worktreeHandoff: (sessionId: string) => apiJson<ApiResults['worktreeHandoff']>(`/api/worktrees/handoff?sessionId=${encodeURIComponent(sessionId)}`, { method: 'POST' }),
   workspaceRoots: () => apiJson<ApiResults['workspaceRoots']>('/api/workspaces/roots'),
   workspaceBrowse: (path?: string) => apiJson<ApiResults['workspaceBrowse']>(`/api/workspaces/browse?path=${encodeURIComponent(path || '')}`),
-  settings: () => apiJson<ApiResults['settings']>('/api/settings'),
+  settings: (signal?: AbortSignal) => apiJson<ApiResults['settings']>('/api/settings', { signal }),
   // 后端是 PUT：之前发 POST 会 405，权限与模型保存点了没反应
   savePermissionMode: (mode: string) => apiJson<ApiResults['savePermissionMode']>('/api/settings/permission-mode', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) }),
   saveModel: (body: Update<S.SettingsControllerModelRequest>) => apiJson<ApiResults['saveModel']>('/api/settings/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),

@@ -14,6 +14,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
+import jakarta.servlet.MultipartConfigElement;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -80,14 +82,15 @@ class VoiceServiceTest {
     @Test
     void validatesEmptyOversizeAndUnsupportedAudioBeforeCallingProvider() throws Exception {
         try (Fixture f = new Fixture()) {
+            int maxBytes = f.service.limits().budget().maxBytes();
             assertThrows(IllegalArgumentException.class, () -> f.service.transcribe(new byte[0], "audio/webm"));
             assertThrows(IllegalArgumentException.class,
-                () -> f.service.transcribe(new byte[VoiceService.MAX_BYTES + 1], "audio/webm"));
+                () -> f.service.transcribe(new byte[maxBytes + 1], "audio/webm"));
             assertThrows(IllegalArgumentException.class, () -> f.service.transcribe(new byte[] {1}, "text/plain"));
             assertNull(f.body.get());
             var mvc = MockMvcBuilders.standaloneSetup(new VoiceController(f.service)).build();
-            mvc.perform(multipart("/api/voice/transcriptions")
-                .file(new MockMultipartFile("file", new byte[VoiceService.MAX_BYTES + 1])))
+            mvc.perform(
+                multipart("/api/voice/transcriptions").file(new MockMultipartFile("file", new byte[maxBytes + 1])))
                 .andExpect(status().isPayloadTooLarge());
             mvc.perform(multipart("/api/voice/transcriptions")
                 .file(new MockMultipartFile("file", "empty.webm", "audio/webm", new byte[0])))
@@ -177,7 +180,8 @@ class VoiceServiceTest {
             var store = new InMemorySettingsStore();
             service = new VoiceService(
                 new ModelSettings(new ModelProperties("chat-test-key", endpoint, "test-chat", List.of()), store), store,
-                JsonMapper.builder().build(), "gpt-4o-mini-transcribe");
+                JsonMapper.builder().build(), new VoiceLimits(new MultipartConfigElement("", 2048, 4096, 0), 73),
+                "gpt-4o-mini-transcribe");
         }
 
         @Override

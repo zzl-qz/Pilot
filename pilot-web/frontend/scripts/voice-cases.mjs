@@ -32,6 +32,7 @@ export async function checkVoice(page, name, temp) {
   const sent = await page.evaluate(() => calls.filter(c => c.name === 'sendMessage').length);
   await page.getByRole('button', { name: '语音输入', exact: true }).click();
   await page.getByRole('button', { name: '完成录音', exact: true }).waitFor();
+  assert.match(await page.locator('.voice-hint').innerText(), /最长 1:13/);
   assert.equal(await page.locator('#send').isDisabled(), true);
   await page.screenshot({ path: join(temp, `${name}-recording.png`) });
   await page.waitForTimeout(350); await page.getByRole('button', { name: '完成录音', exact: true }).click();

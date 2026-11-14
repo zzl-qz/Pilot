@@ -1003,6 +1003,7 @@ export interface AttachmentLimitsBudget {
 
 export interface SettingsControllerSettingsResponse {
   attachmentLimits?: AttachmentLimitsBudget;
+  voiceLimits?: VoiceLimitsBudget;
   permissionMode: string;
   permissionModes: (string)[];
   model: string;
@@ -1356,6 +1357,12 @@ export interface ValidationLedgerReport {
   currentCandidateHash: string;
   latest: ValidationEvidence;
   recent: (ValidationEvidence)[];
+}
+
+/** VoiceLimits.java / Budget */
+export interface VoiceLimitsBudget {
+  maxBytes: number;
+  maxSeconds: number;
 }
 
 /** VoiceService.java / Settings */

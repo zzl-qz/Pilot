@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createVoiceInput, voiceFormat, voiceFilename, VOICE_MAX_BYTES, VOICE_MAX_MS } from '../../../frontend/src/lib/voice-input.js';
+import { createVoiceInput, voiceFormat, voiceFilename, toWav } from '../../../frontend/src/lib/voice-input.js';
 const tick = () => new Promise(resolve => setImmediate(resolve));
-function fixture({ getMedia, transcribe, format = 'audio/webm' } = {}) {
+const limits = { maxBytes: 100, maxSeconds: 3 };
+function fixture({ getMedia, transcribe, loadLimits = async () => limits, format = 'audio/webm' } = {}) {
   const states = [], texts = [], uploads = [];
   const track = { stopped: false, stop() { this.stopped = true; } };
   const stream = { getTracks: () => [track] };
@@ -13,7 +14,7 @@ function fixture({ getMedia, transcribe, format = 'audio/webm' } = {}) {
     start() { this.state = 'recording'; }
     stop() { this.state = 'inactive'; queueMicrotask(() => { this.ondataavailable?.({ data: new Blob(['sound'], { type: format }) }); this.onstop?.(); }); }
   }
-  const voice = createVoiceInput({ environment: { isSecureContext: true, MediaRecorder: Recorder,
+  const voice = createVoiceInput({ loadLimits, environment: { isSecureContext: true, MediaRecorder: Recorder,
     navigator: { mediaDevices: { getUserMedia: getMedia || (async () => stream) } } },
     transcribe: async (blob, signal) => { uploads.push(blob); return transcribe ? transcribe(blob, signal) : { text: '检查按钮和附件' }; },
     onState: state => states.push(state), onText: text => texts.push(text) });
@@ -33,7 +34,7 @@ test('完成录音后只回填文字，释放所有音轨；连续点击不会�
 });
 test('取消权限请求后，迟到的 stream 立即释放且不录音', async () => {
   let grant; const f = fixture({ getMedia: () => new Promise(resolve => { grant = resolve; }) });
-  const pending = f.voice.start(); f.voice.cancel(); grant(f.stream); await pending;
+  const pending = f.voice.start(); await tick(); f.voice.cancel(); grant(f.stream); await pending;
   assert.ok(f.track.stopped); assert.equal(f.recorder, undefined); assert.equal(f.uploads.length, 0);
 });
 test('取消录音、转写时切换会话，不回填迟到结果', async () => {
@@ -59,20 +60,46 @@ test('空转写不能把草稿清空', async () => {
   assert.equal(f.state.phase, 'error'); assert.deepEqual(f.texts, []); f.voice.cancel();
 });
 test('录音过大或设备断开，停止音轨，不上传残缺音频', async () => {
-  const f = fixture(); await f.voice.start(); f.recorder.ondataavailable({ data: new Blob([new Uint8Array(VOICE_MAX_BYTES + 1)]) }); await tick();
+  const f = fixture(); await f.voice.start(); f.recorder.ondataavailable({ data: new Blob([new Uint8Array(limits.maxBytes + 1)]) }); await tick();
   assert.equal(f.state.phase, 'error'); assert.equal(f.uploads.length, 0); assert.ok(f.track.stopped);
+  assert.match(f.state.error, /100 B/);
   const g = fixture(); await g.voice.start(); g.track.onended(); await tick(); assert.equal(g.state.phase, 'error'); assert.ok(g.track.stopped);
 });
 test('非安全页面和不支持录音的环境明确降级', async () => {
   let state;
-  const v = createVoiceInput({ environment: { isSecureContext: false }, transcribe() {}, onText() {}, onState: s => { state = s; } });
+  const v = createVoiceInput({ environment: { isSecureContext: false }, loadLimits: async () => limits, transcribe() {}, onText() {}, onState: s => { state = s; } });
   await v.start(); assert.match(state.error, /HTTPS/);
   const f = fixture({ format: 'unsupported' }); await f.voice.start(); assert.match(f.state.error, /不支持录音/);
 });
-test('最长两分钟自动结束；权限等待超时后可重试', async t => {
+test('按服务端录音时长自动结束；权限等待超时后可重试', async t => {
   t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'] });
-  const f = fixture(); await f.voice.start(); t.mock.timers.tick(VOICE_MAX_MS); await tick();
+  const f = fixture(); await f.voice.start(); assert.equal(f.state.maxSeconds, 3); t.mock.timers.tick(3000); await tick();
   assert.equal(f.uploads.length, 1); assert.ok(f.track.stopped);
-  const g = fixture({ getMedia: () => new Promise(() => {}) }); g.voice.start(); t.mock.timers.tick(30000);
+  const g = fixture({ getMedia: () => new Promise(() => {}) }); g.voice.start(); await tick(); t.mock.timers.tick(30000);
   assert.equal(g.state.phase, 'error'); assert.match(g.state.error, /超时/); g.voice.cancel();
+});
+
+test('限额不可用时不申请麦克风，取消会中止迟到的限额请求', async () => {
+  let microphoneRequests = 0;
+  const getMedia = () => { microphoneRequests++; };
+  const f = fixture({ loadLimits: async () => ({ ...limits, maxBytes: 0 }), getMedia });
+  await f.voice.start();
+  assert.match(f.state.error, /未提供录音限额/);
+  let resolve, signal;
+  const g = fixture({ loadLimits: value => { signal = value; return new Promise(r => { resolve = r; }); }, getMedia });
+  const pending = g.voice.start(); g.voice.cancel(); resolve(limits); await pending;
+  assert.ok(signal.aborted);
+  assert.equal(g.state.phase, 'idle');
+  assert.equal(microphoneRequests, 0);
+});
+
+test('WAV 预计超限时保留合规的原始音频', async () => {
+  const original = new Blob(['audio'], { type: 'audio/webm' });
+  class AudioContext {
+    async decodeAudioData() { return { duration: 1, length: 16000 }; }
+  }
+  class OfflineAudioContext {
+    constructor() { assert.fail('超限前无需分配 WAV 缓冲区'); }
+  }
+  assert.equal(await toWav(original, { AudioContext, OfflineAudioContext }, limits.maxBytes), original);
 });
