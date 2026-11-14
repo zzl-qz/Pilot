@@ -233,7 +233,7 @@ public class MultiAgentService {
         dispatch = dispatch.withDispatchId(dispatchId);
         if (dispatchStore != null) {
             dispatchStore.saveDispatch(dispatchId, dispatch.sessionId(), dispatch.runId(), dispatch.workspace(),
-                "running");
+                JdbcDispatchStore.DispatchStatus.RUNNING);
             dispatchStore.saveNodes(dispatchId, graph.specs());
         }
         final Dispatch scoped = dispatch;
@@ -354,13 +354,14 @@ public class MultiAgentService {
         if (!dissents.isEmpty()) {
             arbitrationId = "arb_" + randomSuffix();
             DissentReport first = dissents.get(0);
-            raiseArbitration(dispatch, new ArbitrationRequired(arbitrationId, "dissent", first.taskId(),
-                DissentReport.options(first.sides().size()), first.toText()));
+            raiseArbitration(dispatch, new ArbitrationRequired(arbitrationId, ArbitrationRequired.KIND_DISSENT,
+                first.taskId(), DissentReport.options(first.sides().size()), first.toText()));
         } else if (merge.hasConflict()) {
             markConflicts(merge, states, dispatch);
             arbitrationId = "arb_" + randomSuffix();
             raiseArbitration(dispatch,
-                new ArbitrationRequired(arbitrationId, "conflict", "", List.of("调整任务顺序重新生成", "放弃其中一份变更", "人工修改后重跑"),
+                new ArbitrationRequired(arbitrationId, ArbitrationRequired.KIND_CONFLICT, "",
+                    List.of("调整任务顺序重新生成", "放弃其中一份变更", "人工修改后重跑"),
                     "## 🔴 变更冲突\n\n" + merge.describe() + "\n\n> 父 Agent 不会自动合并冲突文件，请决定调整顺序、重新生成或放弃某份变更。"));
         }
 
@@ -400,7 +401,8 @@ public class MultiAgentService {
         String report = buildReport(outcomes, merge, verificationReport, dissents, completed, budget.snapshot());
         if (dispatchStore != null) {
             dispatchStore.saveDispatch(dispatchId, dispatch.sessionId(), dispatch.runId(), dispatch.workspace(),
-                completed ? "awaiting_acceptance" : arbitrationId.isEmpty() ? "failed" : "awaiting_decision");
+                completed ? JdbcDispatchStore.DispatchStatus.AWAITING_ACCEPTANCE : arbitrationId.isEmpty()
+                    ? JdbcDispatchStore.DispatchStatus.FAILED : JdbcDispatchStore.DispatchStatus.AWAITING_DECISION);
         }
         return new Result(completed, outcomes, merge, verificationReport, dissents, arbitrationId, report, dispatchId);
     }
@@ -658,12 +660,12 @@ public class MultiAgentService {
                     return budgetStopped(dispatch, lease, agentId, sandboxId, sandbox, meter.snapshot(), budgetReason);
                 }
                 String reason = "子 Agent 未完成：" + result.failureCode();
-                finish(lease, "failed", reason, meter.snapshot());
+                finish(lease, JdbcDispatchStore.AttemptStatus.FAILED, reason, meter.snapshot());
                 publish(dispatch.events(), new SubagentFinished(agentId, reason, false));
                 return new Attempt(agentId, List.of(sandboxId), sandbox, null, false, reason, meter.snapshot());
             }
             AgentReport report = AgentReport.parse(agentId, spec.id(), result.finalText());
-            if (!finish(lease, "succeeded", "", meter.snapshot())) {
+            if (!finish(lease, JdbcDispatchStore.AttemptStatus.SUCCEEDED, "", meter.snapshot())) {
                 sandboxes.discardCheckpoint(dispatch.sessionId(), sandboxId);
                 String reason = "执行租约已失效，已丢弃晚到产物";
                 publish(dispatch.events(), new SubagentFinished(agentId, reason, false));
@@ -677,7 +679,7 @@ public class MultiAgentService {
                 return budgetStopped(dispatch, lease, agentId, sandboxId, sandbox, meter.snapshot(), budgetReason);
             }
             String reason = "子 Agent 异常：" + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
-            finish(lease, "failed", reason, meter.snapshot());
+            finish(lease, JdbcDispatchStore.AttemptStatus.FAILED, reason, meter.snapshot());
             publish(dispatch.events(), new SubagentFinished(agentId, reason, false));
             return new Attempt(agentId, List.of(sandboxId), sandbox, null, false, reason, meter.snapshot());
         }
@@ -686,13 +688,13 @@ public class MultiAgentService {
     private Attempt budgetStopped(Dispatch dispatch, JdbcDispatchStore.Lease lease, String agentId, String sandboxId,
         DiffSandbox sandbox, JdbcDispatchStore.Usage usage, String reason) {
         String detail = "派发预算软停止：" + (reason == null || reason.isBlank() ? "预算已用尽" : reason);
-        finish(lease, "budget_stopped", detail, usage);
+        finish(lease, JdbcDispatchStore.AttemptStatus.BUDGET_STOPPED, detail, usage);
         publish(dispatch.events(), new SubagentFinished(agentId, detail, false));
         return Attempt.budgetStopped(agentId, List.of(sandboxId), sandbox, detail, usage);
     }
 
     /** 结算尝试；代次过期（被新尝试取代）时记一条日志，绝不让旧执行者改写状态。 */
-    private boolean finish(JdbcDispatchStore.Lease lease, String status, String failure,
+    private boolean finish(JdbcDispatchStore.Lease lease, JdbcDispatchStore.AttemptStatus status, String failure,
         JdbcDispatchStore.Usage usage) {
         if (dispatchStore == null || lease == null || lease.attemptId().isEmpty()) {
             return true;

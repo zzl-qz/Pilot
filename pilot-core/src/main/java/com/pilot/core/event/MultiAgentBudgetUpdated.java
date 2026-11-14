@@ -4,7 +4,7 @@ package com.pilot.core.event;
  * 单次多智能体派发的预算快照。每次请求完成或预算停止时更新；前端按 dispatchId 合并成一条状态卡片。
  *
  * @param dispatchId 派发编号
- * @param status 当前状态：running、stopped 或 completed
+ * @param status 当前状态：running、stopped、completed 或 failed，取值见 STATUS_ 常量
  * @param maxDispatchSeconds 墙钟上限（秒）
  * @param maxTotalTokens token 上限；0 表示不限
  * @param usedTokens 已结算的输入与输出 token（含估算）
@@ -17,10 +17,14 @@ package com.pilot.core.event;
 public record MultiAgentBudgetUpdated(String dispatchId, String status, int maxDispatchSeconds, long maxTotalTokens,
     long usedTokens, long estimatedTokens, long reservedTokens, int inFlightRequests, String stopReason,
     boolean cancellationRequested) implements SessionEvent {
+    public static final String STATUS_RUNNING = "running";
+    public static final String STATUS_STOPPED = "stopped";
+    public static final String STATUS_COMPLETED = "completed";
+    public static final String STATUS_FAILED = "failed";
 
     public MultiAgentBudgetUpdated {
         dispatchId = dispatchId == null ? "" : dispatchId;
-        status = status == null ? "running" : status;
+        status = status == null ? STATUS_RUNNING : status;
         maxDispatchSeconds = Math.max(0, maxDispatchSeconds);
         maxTotalTokens = Math.max(0L, maxTotalTokens);
         usedTokens = Math.max(0L, usedTokens);

@@ -60,7 +60,8 @@ final class DiscoveredModelClient implements ModelClient {
     @Override
     public synchronized Set<NativeCapability> nativeCapabilities() {
         ModelCapabilityDiscovery.Report current = runtime.capabilityReport(target);
-        if (rejected && current != null && current != rejectedReport && "verified".equals(current.state())) {
+        if (rejected && current != null && current != rejectedReport
+            && ModelCapabilityDiscovery.Report.VERIFIED.equals(current.state())) {
             rejected = false;
             rejectedProtocols.clear();
         }

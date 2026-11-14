@@ -39,6 +39,7 @@ import com.pilot.core.multi.ArtifactManifest;
 import com.pilot.core.multi.ChangeStatus;
 import com.pilot.core.multi.DiffSandbox;
 import com.pilot.core.multi.SandboxChange;
+import com.pilot.core.multi.TaskStatus;
 import com.pilot.core.util.FileTrees;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.config.PilotDataDir;
@@ -55,6 +56,12 @@ import tools.jackson.databind.ObjectMapper;
 @Component
 public class SandboxStore {
     private static final Logger log = LoggerFactory.getLogger(SandboxStore.class);
+    /**
+     * 重启后读到这些状态的任务已经没有执行者，一律改记为取消。
+     * TODO(待确认)：ready、verifying 不在 TaskStatus 里，看起来是旧版本写入的值，暂时原样保留。
+     */
+    private static final Set<String> ABANDONED_AFTER_RESTART =
+        Set.of(TaskStatus.PENDING.wireName(), TaskStatus.RUNNING.wireName(), "ready", "verifying");
 
     /** 界面展示用的改动视图：不含完整文件内容，避免大文件把 SSE / JSON 拖垮。 */
     public record DiffView(String sandboxId, String agentId, String taskId, String path, String diff, int added,
@@ -580,7 +587,7 @@ public class SandboxStore {
                     throw new IllegalStateException("工作区有其他任务未完成的应用，请先处理：" + journal.sandboxId());
                 }
                 try {
-                    if (journal.phase().equals("applied")) {
+                    if (journal.phase().equals(WorkspaceApplyJournal.PHASE_APPLIED)) {
                         finishApply(sessionId, sandboxId, workspace, journal);
                     } else {
                         applyJournal.rollback(workspace, journal);
@@ -941,10 +948,10 @@ public class SandboxStore {
             List<TaskView> views = new ArrayList<>();
             if (payloads != null) {
                 for (TaskPayload payload : payloads) {
-                    boolean abandoned = payload.status() != null && Set.of("pending", "ready", "running", "verifying")
-                        .contains(payload.status().toLowerCase(Locale.ROOT));
+                    boolean abandoned = payload.status() != null
+                        && ABANDONED_AFTER_RESTART.contains(payload.status().toLowerCase(Locale.ROOT));
                     views.add(new TaskView(payload.taskId(), payload.title(), payload.agentId(),
-                        abandoned ? "cancelled" : payload.status(),
+                        abandoned ? TaskStatus.CANCELLED.wireName() : payload.status(),
                         abandoned ? "服务已重启，原执行者失效；保留产物，请重新派发任务" : payload.detail(), payload.files()));
                 }
             }

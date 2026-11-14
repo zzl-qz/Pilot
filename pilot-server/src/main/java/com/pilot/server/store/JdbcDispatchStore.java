@@ -9,6 +9,7 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.multi.TaskSpec;
+import com.pilot.core.multi.TaskStatus;
 
 /**
  * 派发图与执行记录的持久化：{@code dispatches} / {@code task_nodes} / {@code task_attempts}。
@@ -21,6 +22,38 @@ import com.pilot.core.multi.TaskSpec;
  */
 @Component
 public final class JdbcDispatchStore {
+
+    /** 一次派发的状态；wireName 是 dispatches.status 列里的值，SQL 里的同名字面量与之对应。 */
+    public enum DispatchStatus {
+        RUNNING("running"), AWAITING_ACCEPTANCE("awaiting_acceptance"), AWAITING_DECISION("awaiting_decision"),
+        FAILED("failed"), INTERRUPTED("interrupted");
+
+        private final String wireName;
+
+        DispatchStatus(String wireName) {
+            this.wireName = wireName;
+        }
+
+        public String wireName() {
+            return wireName;
+        }
+    }
+
+    /** 单次尝试的状态；wireName 是 task_attempts.status 列里的值。 */
+    public enum AttemptStatus {
+        RUNNING("running"), SUCCEEDED("succeeded"), FAILED("failed"), BUDGET_STOPPED("budget_stopped"),
+        INTERRUPTED("interrupted");
+
+        private final String wireName;
+
+        AttemptStatus(String wireName) {
+            this.wireName = wireName;
+        }
+
+        public String wireName() {
+            return wireName;
+        }
+    }
 
     /** 一次派发。 */
     public record DispatchRow(String dispatchId, String sessionId, String runId, String workspace, String status,
@@ -147,7 +180,8 @@ public final class JdbcDispatchStore {
         return store != null;
     }
 
-    public void saveDispatch(String dispatchId, String sessionId, String runId, String workspace, String status) {
+    public void saveDispatch(String dispatchId, String sessionId, String runId, String workspace,
+        DispatchStatus status) {
         if (!available()) {
             return;
         }
@@ -161,7 +195,7 @@ public final class JdbcDispatchStore {
             statement.setString(2, sessionId);
             statement.setString(3, runId);
             statement.setString(4, workspace);
-            statement.setString(5, status);
+            statement.setString(5, status.wireName());
             statement.setString(6, now);
             statement.setString(7, now);
         }, "保存派发记录失败");
@@ -190,7 +224,7 @@ public final class JdbcDispatchStore {
                     statement.setInt(6, spec.scope() != null && spec.scope().writable() ? 1 : 0);
                     statement.setString(7, spec.risk() == null ? "" : spec.risk().wireName());
                     statement.setInt(8, spec.reviewers());
-                    statement.setString(9, "pending");
+                    statement.setString(9, TaskStatus.PENDING.wireName());
                     statement.setString(10, "");
                     statement.setString(11, "");
                     statement.setString(12, now);
@@ -274,7 +308,7 @@ public final class JdbcDispatchStore {
      *
      * @return {@code false} 表示这次回执来得太晚（旧执行者、被取消或已被新尝试取代），调用方应丢弃结果
      */
-    public boolean finishAttempt(String attemptId, int generation, String status, String failure, Usage usage) {
+    public boolean finishAttempt(String attemptId, int generation, AttemptStatus status, String failure, Usage usage) {
         if (!available() || attemptId == null || attemptId.isBlank()) {
             return true;
         }
@@ -284,7 +318,7 @@ public final class JdbcDispatchStore {
                     input_tokens = ?, output_tokens = ?, requests = ?, exact = ?
             WHERE attempt_id = ? AND generation = ? AND status = 'running'
             """, statement -> {
-            statement.setString(1, status);
+            statement.setString(1, status.wireName());
             statement.setString(2, failure == null ? "" : failure);
             statement.setString(3, Instant.now().toString());
             statement.setLong(4, counted.inputTokens());

@@ -57,6 +57,15 @@ public final class ModelCapabilityDiscovery implements AutoCloseable {
 
     public record Report(String state, String protocol, Set<NativeCapability> capabilities, long checkedAt,
         long expiresAt, String message, int probeRequests, long inputTokens, long outputTokens) {
+        /** 正在后台验证，结果还没回来。 */
+        public static final String CHECKING = "checking";
+        /** 已用真实工具调用验证通过。 */
+        public static final String VERIFIED = "verified";
+        /** 服务端明确拒绝，短期内不再重试。 */
+        public static final String UNSUPPORTED = "unsupported";
+        /** 没法下结论，稍后自动重试。 */
+        public static final String UNKNOWN = "unknown";
+
         public Report {
             capabilities = capabilities == null ? Set.of() : Set.copyOf(capabilities);
         }
@@ -82,7 +91,7 @@ public final class ModelCapabilityDiscovery implements AutoCloseable {
                     break;
                 }
                 Report value = mapper.treeToValue(property.getValue(), Report.class);
-                if (value.expiresAt() > clock.millis() && !"checking".equals(value.state())) {
+                if (value.expiresAt() > clock.millis() && !Report.CHECKING.equals(value.state())) {
                     cache.put(property.getKey(), value);
                 }
             }
@@ -101,16 +110,17 @@ public final class ModelCapabilityDiscovery implements AutoCloseable {
             return previous;
         }
         if (closed || !slots.tryAcquire()) {
-            return report("unknown", "", Set.of(), "后台验证繁忙，当前使用 Pilot 工具", 0, 0, 0);
+            return report(Report.UNKNOWN, "", Set.of(), "后台验证繁忙，当前使用 Pilot 工具", 0, 0, 0);
         }
-        Report pending = new Report("checking", "", Set.of(), clock.millis(), Long.MAX_VALUE,
+        Report pending = new Report(Report.CHECKING, "", Set.of(), clock.millis(), Long.MAX_VALUE,
             "正在后台自动验证服务端能力，当前任务可继续使用 Pilot 工具", 0, 0, 0);
         if (cache.size() >= MAX_ENTRIES) {
-            String removable = cache.entrySet().stream().filter(item -> !"checking".equals(item.getValue().state()))
-                .map(Map.Entry::getKey).findFirst().orElse(null);
+            String removable =
+                cache.entrySet().stream().filter(item -> !Report.CHECKING.equals(item.getValue().state()))
+                    .map(Map.Entry::getKey).findFirst().orElse(null);
             if (removable == null) {
                 slots.release();
-                return report("unknown", "", Set.of(), "后台验证繁忙", 0, 0, 0);
+                return report(Report.UNKNOWN, "", Set.of(), "后台验证繁忙", 0, 0, 0);
             }
             cache.remove(removable);
         }
@@ -121,9 +131,9 @@ public final class ModelCapabilityDiscovery implements AutoCloseable {
                 result = discover(target, hint);
             } catch (InterruptedException failure) {
                 Thread.currentThread().interrupt();
-                result = report("unknown", "", Set.of(), "后台验证已中断，当前使用 Pilot 工具", 0, 0, 0);
+                result = report(Report.UNKNOWN, "", Set.of(), "后台验证已中断，当前使用 Pilot 工具", 0, 0, 0);
             } catch (Exception failure) {
-                result = report("unknown", "", Set.of(), "暂时无法确认服务端能力，稍后自动重试；当前使用 Pilot 工具", 0, 0, 0);
+                result = report(Report.UNKNOWN, "", Set.of(), "暂时无法确认服务端能力，稍后自动重试；当前使用 Pilot 工具", 0, 0, 0);
             }
             synchronized (this) {
                 // 运行时拒绝、关闭或新一轮探测不能被迟到的后台结果覆盖。
@@ -143,10 +153,10 @@ public final class ModelCapabilityDiscovery implements AutoCloseable {
 
     public synchronized void reject(ModelSettings.Snapshot target, String hint, String protocol,
         boolean protocolRejected) {
-        cache.put(key(target, hint), report(protocolRejected ? "unknown" : "unsupported", protocol, Set.of(),
+        cache.put(key(target, hint), report(protocolRejected ? Report.UNKNOWN : Report.UNSUPPORTED, protocol, Set.of(),
             protocolRejected ? "当前协议路由不可用，正在自动选择兼容协议并使用 Pilot 工具" : "实际请求拒绝了原生工具，已自动切回 Pilot 工具，稍后重新验证", 0, 0, 0));
         while (cache.size() > MAX_ENTRIES) {
-            String oldest = cache.entrySet().stream().filter(entry -> !"checking".equals(entry.getValue().state()))
+            String oldest = cache.entrySet().stream().filter(entry -> !Report.CHECKING.equals(entry.getValue().state()))
                 .map(Map.Entry::getKey).findFirst().orElseThrow();
             cache.remove(oldest);
         }
@@ -157,7 +167,7 @@ public final class ModelCapabilityDiscovery implements AutoCloseable {
         URI base = URI.create(target.endpoint());
         if (base.getHost() == null || base.getUserInfo() != null
             || !Set.of("http", "https").contains(base.getScheme())) {
-            return report("unknown", "", Set.of(), "端点不适合自动验证，当前使用 Pilot 工具", 0, 0, 0);
+            return report(Report.UNKNOWN, "", Set.of(), "端点不适合自动验证，当前使用 Pilot 工具", 0, 0, 0);
         }
         JsonNode metadata = metadata(target);
         boolean messagesFirst = "anthropic-messages".equals(hint) || base.getPath().endsWith("/messages")
@@ -188,7 +198,8 @@ public final class ModelCapabilityDiscovery implements AutoCloseable {
                 JsonNode body = read(response);
                 int code = response.statusCode();
                 if (code == 401 || code == 402 || code == 403 || code == 429 || code >= 500 || code == 408) {
-                    return report("unknown", "", Set.of(), "服务端验证暂不可用或受账号限制，当前使用 Pilot 工具", requests, input, output);
+                    return report(Report.UNKNOWN, "", Set.of(), "服务端验证暂不可用或受账号限制，当前使用 Pilot 工具", requests, input,
+                        output);
                 }
                 input += body.path("usage").path("input_tokens").asLong(0);
                 output += body.path("usage").path("output_tokens").asLong(0);
@@ -206,10 +217,11 @@ public final class ModelCapabilityDiscovery implements AutoCloseable {
                 }
             }
             if (!verified.isEmpty()) {
-                return report("verified", protocol, verified, "已通过结构化工具执行结果自动验证，优先使用服务端能力", requests, input, output);
+                return report(Report.VERIFIED, protocol, verified, "已通过结构化工具执行结果自动验证，优先使用服务端能力", requests, input,
+                    output);
             }
         }
-        return report(allRejected ? "unsupported" : "unknown", "", Set.of(),
+        return report(allRejected ? Report.UNSUPPORTED : Report.UNKNOWN, "", Set.of(),
             allRejected ? "当前接口未接受已适配的原生工具，自动使用 Pilot 工具" : "接口未返回可验证的工具执行结果，自动使用 Pilot 工具", requests, input, output);
     }
 
@@ -375,8 +387,8 @@ public final class ModelCapabilityDiscovery implements AutoCloseable {
 
     private Report report(String state, String protocol, Set<NativeCapability> capabilities, String message,
         int requests, long input, long output) {
-        long ttl = "verified".equals(state) ? VERIFIED_TTL_MS
-            : "unsupported".equals(state) ? UNSUPPORTED_TTL_MS : UNKNOWN_TTL_MS;
+        long ttl = Report.VERIFIED.equals(state) ? VERIFIED_TTL_MS
+            : Report.UNSUPPORTED.equals(state) ? UNSUPPORTED_TTL_MS : UNKNOWN_TTL_MS;
         return new Report(state, protocol, capabilities, clock.millis(), clock.millis() + ttl, message, requests, input,
             output);
     }
@@ -390,7 +402,7 @@ public final class ModelCapabilityDiscovery implements AutoCloseable {
         try {
             Map<String, Report> saved = new LinkedHashMap<>();
             cache.forEach((key, value) -> {
-                if (!"checking".equals(value.state()) && value.expiresAt() > clock.millis()) {
+                if (!Report.CHECKING.equals(value.state()) && value.expiresAt() > clock.millis()) {
                     saved.put(key, value);
                 }
             });

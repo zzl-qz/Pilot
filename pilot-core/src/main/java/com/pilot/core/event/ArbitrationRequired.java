@@ -13,6 +13,11 @@ import java.util.List;
  */
 public record ArbitrationRequired(String arbitrationId, String kind, String taskId, List<String> options,
     String report) implements SessionEvent {
+    /** 同一任务的多个方案僵持。 */
+    public static final String KIND_DISSENT = "dissent";
+    /** 沙箱改动合并冲突。 */
+    public static final String KIND_CONFLICT = "conflict";
+
     public ArbitrationRequired {
         arbitrationId = arbitrationId == null ? "" : arbitrationId;
         kind = kind == null ? "" : kind;

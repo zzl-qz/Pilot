@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -42,13 +43,13 @@ class JdbcDispatchStoreTest {
     @Test
     void persistsGraphNodesAndAttempts() {
         JdbcDispatchStore store = store();
-        store.saveDispatch("dsp_1", "ses_1", "run_1", "/tmp/ws", "running");
+        store.saveDispatch("dsp_1", "ses_1", "run_1", "/tmp/ws", JdbcDispatchStore.DispatchStatus.RUNNING);
         store.saveNodes("dsp_1", List.of(node("T1")));
         store.updateNode("dsp_1", "T1", "done", "agent_1", "完成", 1);
 
         JdbcDispatchStore.Lease lease = store.startAttempt("dsp_1", "T1", "agent_1", "sbx_1");
-        assertTrue(store.finishAttempt(lease.attemptId(), lease.generation(), "succeeded", "",
-            new JdbcDispatchStore.Usage(1200, 300, 2, true)));
+        assertTrue(store.finishAttempt(lease.attemptId(), lease.generation(), JdbcDispatchStore.AttemptStatus.SUCCEEDED,
+            "", new JdbcDispatchStore.Usage(1200, 300, 2, true)));
 
         List<JdbcDispatchStore.DispatchRow> dispatches = store.dispatches("ses_1");
         assertEquals(1, dispatches.size());
@@ -73,28 +74,26 @@ class JdbcDispatchStoreTest {
     @Test
     void lateAttemptResultIsRejected() {
         JdbcDispatchStore store = store();
-        store.saveDispatch("dsp_1", "ses_1", "run_1", "/tmp/ws", "running");
+        store.saveDispatch("dsp_1", "ses_1", "run_1", "/tmp/ws", JdbcDispatchStore.DispatchStatus.RUNNING);
         JdbcDispatchStore.Lease first = store.startAttempt("dsp_1", "T1", "agent_1", "sbx_1");
 
-        assertTrue(
-            store.finishAttempt(first.attemptId(), first.generation(), "succeeded", "", JdbcDispatchStore.Usage.EMPTY));
-        assertFalse(
-            store.finishAttempt(first.attemptId(), first.generation(), "succeeded", "", JdbcDispatchStore.Usage.EMPTY),
-            "同一代次的回执只能结算一次");
+        assertTrue(store.finishAttempt(first.attemptId(), first.generation(), JdbcDispatchStore.AttemptStatus.SUCCEEDED,
+            "", JdbcDispatchStore.Usage.EMPTY));
+        assertFalse(store.finishAttempt(first.attemptId(), first.generation(),
+            JdbcDispatchStore.AttemptStatus.SUCCEEDED, "", JdbcDispatchStore.Usage.EMPTY), "同一代次的回执只能结算一次");
 
         JdbcDispatchStore.Lease second = store.startAttempt("dsp_1", "T1", "agent_2", "sbx_2");
         assertTrue(second.generation() > first.generation(), "重试必须拿到更大的代次");
-        assertFalse(
-            store.finishAttempt(first.attemptId(), first.generation(), "failed", "旧执行者", JdbcDispatchStore.Usage.EMPTY),
-            "旧执行者的晚到结果不能改写状态");
-        assertTrue(store.finishAttempt(second.attemptId(), second.generation(), "succeeded", "",
-            JdbcDispatchStore.Usage.EMPTY));
+        assertFalse(store.finishAttempt(first.attemptId(), first.generation(), JdbcDispatchStore.AttemptStatus.FAILED,
+            "旧执行者", JdbcDispatchStore.Usage.EMPTY), "旧执行者的晚到结果不能改写状态");
+        assertTrue(store.finishAttempt(second.attemptId(), second.generation(),
+            JdbcDispatchStore.AttemptStatus.SUCCEEDED, "", JdbcDispatchStore.Usage.EMPTY));
     }
 
     @Test
     void restartMarksRunningAttemptsInterrupted() {
         JdbcDispatchStore store = store();
-        store.saveDispatch("dsp_1", "ses_1", "run_1", "/tmp/ws", "running");
+        store.saveDispatch("dsp_1", "ses_1", "run_1", "/tmp/ws", JdbcDispatchStore.DispatchStatus.RUNNING);
         store.startAttempt("dsp_1", "T1", "agent_1", "sbx_1");
 
         JdbcDispatchStore restarted = store();
@@ -106,20 +105,19 @@ class JdbcDispatchStoreTest {
     @Test
     void startingRetryFencesStillRunningAttemptAndScopesGenerationToDispatch() {
         JdbcDispatchStore store = store();
-        store.saveDispatch("d1", "s", "r", "", "running");
-        store.saveDispatch("d2", "s", "r", "", "running");
+        store.saveDispatch("d1", "s", "r", "", JdbcDispatchStore.DispatchStatus.RUNNING);
+        store.saveDispatch("d2", "s", "r", "", JdbcDispatchStore.DispatchStatus.RUNNING);
         var first = store.startAttempt("d1", "T1", "a1", "");
         var retry = store.startAttempt("d1", "T1", "a2", "");
         var independent = store.startAttempt("d2", "T1", "a3", "");
         assertEquals(1, independent.generation());
         assertEquals(2, retry.generation());
-        assertFalse(
-            store.finishAttempt(first.attemptId(), first.generation(), "succeeded", "", JdbcDispatchStore.Usage.EMPTY),
-            "旧执行者尚未完成就被重试取代，其结果也必须拒绝");
-        assertTrue(
-            store.finishAttempt(retry.attemptId(), retry.generation(), "succeeded", "", JdbcDispatchStore.Usage.EMPTY));
-        assertTrue(store.finishAttempt(independent.attemptId(), independent.generation(), "succeeded", "",
-            JdbcDispatchStore.Usage.EMPTY));
+        assertFalse(store.finishAttempt(first.attemptId(), first.generation(),
+            JdbcDispatchStore.AttemptStatus.SUCCEEDED, "", JdbcDispatchStore.Usage.EMPTY), "旧执行者尚未完成就被重试取代，其结果也必须拒绝");
+        assertTrue(store.finishAttempt(retry.attemptId(), retry.generation(), JdbcDispatchStore.AttemptStatus.SUCCEEDED,
+            "", JdbcDispatchStore.Usage.EMPTY));
+        assertTrue(store.finishAttempt(independent.attemptId(), independent.generation(),
+            JdbcDispatchStore.AttemptStatus.SUCCEEDED, "", JdbcDispatchStore.Usage.EMPTY));
     }
 
     @Test
@@ -130,18 +128,18 @@ class JdbcDispatchStoreTest {
         var retried = store.startAttempt("d", "T1", "c", "s3", "left");
         assertEquals(1, right.generation());
         assertEquals(2, retried.generation());
-        assertFalse(
-            store.finishAttempt(left.attemptId(), left.generation(), "succeeded", "", JdbcDispatchStore.Usage.EMPTY));
-        assertTrue(
-            store.finishAttempt(right.attemptId(), right.generation(), "succeeded", "", JdbcDispatchStore.Usage.EMPTY));
-        assertTrue(store.finishAttempt(retried.attemptId(), retried.generation(), "succeeded", "",
-            JdbcDispatchStore.Usage.EMPTY));
+        assertFalse(store.finishAttempt(left.attemptId(), left.generation(), JdbcDispatchStore.AttemptStatus.SUCCEEDED,
+            "", JdbcDispatchStore.Usage.EMPTY));
+        assertTrue(store.finishAttempt(right.attemptId(), right.generation(), JdbcDispatchStore.AttemptStatus.SUCCEEDED,
+            "", JdbcDispatchStore.Usage.EMPTY));
+        assertTrue(store.finishAttempt(retried.attemptId(), retried.generation(),
+            JdbcDispatchStore.AttemptStatus.SUCCEEDED, "", JdbcDispatchStore.Usage.EMPTY));
     }
 
     @Test
     void startupRecoveryClosesDispatchAndUnfinishedNodesWithoutNewDispatch() {
         JdbcDispatchStore store = store();
-        store.saveDispatch("d1", "s", "r", "", "running");
+        store.saveDispatch("d1", "s", "r", "", JdbcDispatchStore.DispatchStatus.RUNNING);
         store.saveNodes("d1", List.of(node("T1"), node("T2"), node("T3")));
         store.updateNode("d1", "T1", "done", "a", "", 1);
         store.updateNode("d1", "T2", "running", "b", "", 1);
@@ -157,7 +155,7 @@ class JdbcDispatchStoreTest {
     void oldAttemptTableIsMigratedWithoutLosingUsage() throws Exception {
         var original = store();
         var first = original.startAttempt("d", "T1", "a", "s");
-        original.finishAttempt(first.attemptId(), first.generation(), "succeeded", "",
+        original.finishAttempt(first.attemptId(), first.generation(), JdbcDispatchStore.AttemptStatus.SUCCEEDED, "",
             new JdbcDispatchStore.Usage(100, 20, 1, false));
         try (var connection = new SqliteStore(dir.resolve("pilot.db")).open();
             var statement = connection.createStatement()) {
@@ -173,7 +171,7 @@ class JdbcDispatchStoreTest {
     void worksWithoutPersistedStore() {
         JdbcDispatchStore absent = new JdbcDispatchStore(null);
 
-        absent.saveDispatch("dsp_1", "ses_1", "run_1", "/tmp/ws", "running");
+        absent.saveDispatch("dsp_1", "ses_1", "run_1", "/tmp/ws", JdbcDispatchStore.DispatchStatus.RUNNING);
         absent.saveNodes("dsp_1", List.of(node("T1")));
         absent.updateNode("dsp_1", "T1", "done", "agent_1", "完成", 1);
         assertEquals(JdbcDispatchStore.Lease.NONE, absent.startAttempt("dsp_1", "T1", "agent_1", "sbx_1"));
@@ -182,5 +180,15 @@ class JdbcDispatchStoreTest {
         assertTrue(absent.dispatches("ses_1").isEmpty());
         assertTrue(absent.attempts("dsp_1").isEmpty());
         assertEquals(0, absent.interruptStale("ses_1"));
+    }
+
+    /** 库里的状态值不能随枚举改名而变：SQL 里写死的字面量和前端都认这些值。 */
+    @Test
+    void statusWireNamesStayStable() {
+        assertEquals(List.of("running", "awaiting_acceptance", "awaiting_decision", "failed", "interrupted"),
+            Arrays.stream(JdbcDispatchStore.DispatchStatus.values()).map(JdbcDispatchStore.DispatchStatus::wireName)
+                .toList());
+        assertEquals(List.of("running", "succeeded", "failed", "budget_stopped", "interrupted"), Arrays
+            .stream(JdbcDispatchStore.AttemptStatus.values()).map(JdbcDispatchStore.AttemptStatus::wireName).toList());
     }
 }

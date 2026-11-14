@@ -10,6 +10,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
+import com.pilot.core.event.MultiAgentBudgetUpdated;
 import com.pilot.server.config.MultiAgentBudget;
 
 /** Thread-safe, dispatch-wide admission and settlement ledger. */
@@ -148,11 +149,11 @@ final class MultiAgentBudgetLedger implements AutoCloseable {
     }
 
     void complete() {
-        finish("completed");
+        finish(MultiAgentBudgetUpdated.STATUS_COMPLETED);
     }
 
     void fail() {
-        finish("failed");
+        finish(MultiAgentBudgetUpdated.STATUS_FAILED);
     }
 
     /** 父运行取消：停止准入并中断在途线程，终态记为停止而不是完成。 */
@@ -161,7 +162,7 @@ final class MultiAgentBudgetLedger implements AutoCloseable {
         Snapshot snapshot;
         synchronized (lock) {
             interrupt = stopReason.isEmpty() ? stopLocked("父运行已取消", null) : List.of();
-            terminalStatus = "stopped";
+            terminalStatus = MultiAgentBudgetUpdated.STATUS_STOPPED;
             snapshot = snapshotLocked();
         }
         interrupt(interrupt);
@@ -215,7 +216,8 @@ final class MultiAgentBudgetLedger implements AutoCloseable {
     }
 
     private Snapshot snapshotLocked() {
-        String status = !stopReason.isEmpty() ? "stopped" : terminalStatus.isEmpty() ? "running" : terminalStatus;
+        String status = !stopReason.isEmpty() ? MultiAgentBudgetUpdated.STATUS_STOPPED
+            : terminalStatus.isEmpty() ? MultiAgentBudgetUpdated.STATUS_RUNNING : terminalStatus;
         return new Snapshot(status, maxDispatchSeconds, maxTotalTokens, usedTokens, estimatedTokens, reservedTokens,
             inFlightRequests, stopReason, cancellationRequested);
     }

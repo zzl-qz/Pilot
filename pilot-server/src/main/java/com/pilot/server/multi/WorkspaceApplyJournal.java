@@ -36,6 +36,10 @@ import tools.jackson.databind.ObjectMapper;
 /** 可恢复的文件应用日志。单文件原子替换；整批失败补偿，不承诺外部进程看到跨文件原子切换。 */
 public final class WorkspaceApplyJournal {
     private static final Map<Path, ReentrantLock> LOCKS = new ConcurrentHashMap<>();
+    /** 应用日志的阶段，按顺序推进：已备好 → 正在写文件 → 已写完。值就是日志文件里的 phase。 */
+    static final String PHASE_PREPARED = "prepared";
+    static final String PHASE_APPLYING = "applying";
+    static final String PHASE_APPLIED = "applied";
     private final Path directory;
     private final ObjectMapper mapper;
     private final FaultPoint faults;
@@ -134,9 +138,9 @@ public final class WorkspaceApplyJournal {
         try {
             Journal journal = mapper.readValue(Files.readString(file), Journal.class);
             if (journal == null || journal.version() != 1 || !root.toString().equals(journal.workspace())
-                || !Set.of("prepared", "applying", "applied").contains(journal.phase()) || journal.entries() == null
-                || journal.entries().isEmpty() || journal.targetRevision() < 1 || journal.sessionId() == null
-                || journal.sandboxId() == null || journal.operationId() == null) {
+                || !Set.of(PHASE_PREPARED, PHASE_APPLYING, PHASE_APPLIED).contains(journal.phase())
+                || journal.entries() == null || journal.entries().isEmpty() || journal.targetRevision() < 1
+                || journal.sessionId() == null || journal.sandboxId() == null || journal.operationId() == null) {
                 throw new IOException("应用日志内容无效");
             }
             Set<Path> paths = new HashSet<>();
@@ -184,11 +188,11 @@ public final class WorkspaceApplyJournal {
             entries.add(new Entry(change.path(), before, change.newContent(), permissions(file)));
         }
         Journal journal = new Journal(1, UUID.randomUUID().toString(), root.toString(), sessionId, sandboxId,
-            "prepared", targetRevision, List.copyOf(entries));
+            PHASE_PREPARED, targetRevision, List.copyOf(entries));
         save(root, journal);
         try {
             faults.reached("prepared", -1);
-            journal = phase(journal, "applying");
+            journal = phase(journal, PHASE_APPLYING);
             save(root, journal);
             int index = 0;
             for (Entry entry : entries) {
@@ -207,7 +211,7 @@ public final class WorkspaceApplyJournal {
                 }
             }
             faults.reached("before-commit", -1);
-            journal = phase(journal, "applied");
+            journal = phase(journal, PHASE_APPLIED);
             save(root, journal);
             faults.reached("after-commit", -1);
             return journal;
