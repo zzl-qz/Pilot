@@ -1,10 +1,13 @@
 package com.pilot.core.tool;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -53,6 +56,39 @@ class EditFileToolTest {
         String updated = Files.readString(file);
         assertTrue(updated.endsWith("\nDONE\n"), updated.substring(updated.length() - 20));
         assertEquals(-1, updated.indexOf("UNIQUE_TAIL"));
+    }
+
+    @Test
+    void editingToolsShareTheSizeAndBinaryChecks() throws IOException {
+        Path file = workspace.resolve("共享 样本.txt");
+        var paths = new PathValidator(workspace);
+        var sandbox = new SandboxEditFileTool(paths, SandboxSink.rejectAll());
+        var patch = new ApplyPatchTool(paths, SnapshotSink.none(), ReadGuard.allowAll());
+        var replacement = Map.<String, Object>of("path", file.getFileName().toString(), "old_string", "before",
+            "new_string", "after");
+        var patchArgs = Map.<String, Object>of("patch", """
+            *** Begin Patch
+            *** Update File: 共享 样本.txt
+            @@
+            -before
+            +after
+            *** End Patch
+            """);
+
+        try (var channel = FileChannel.open(file, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)) {
+            channel.write(ByteBuffer.wrap(new byte[] {1}), EditableText.MAX_BYTES);
+        }
+        assertEquals("ERROR: 文件过大（上限 32MB），无法整份替换。", tool.execute(replacement));
+        assertEquals(tool.execute(replacement), sandbox.execute(replacement));
+        assertTrue(patch.execute(patchArgs).contains("文件过大（上限 32MB）"));
+        assertEquals(EditableText.MAX_BYTES + 1L, Files.size(file));
+
+        byte[] binary = {1, 0, 2};
+        Files.write(file, binary);
+        assertTrue(tool.execute(replacement).startsWith("ERROR: 二进制文件，无法编辑"));
+        assertEquals(tool.execute(replacement), sandbox.execute(replacement));
+        assertTrue(patch.execute(patchArgs).startsWith("ERROR: 二进制文件，无法修改"));
+        assertArrayEquals(binary, Files.readAllBytes(file));
     }
 
     /** 先读后改是机制约束：本次运行没读过的文件拒绝编辑，错误信息要能指导下一步。 */

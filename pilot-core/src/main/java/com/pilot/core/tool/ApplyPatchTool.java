@@ -41,8 +41,6 @@ import com.pilot.core.workspace.PathValidator;
  * 不自动选择第一处；整份补丁先在内存中全部校验通过，再统一落盘，校验失败不产生任何改动。
  */
 public final class ApplyPatchTool extends PromptedTool implements WritesFiles {
-    private static final long MAX_BYTES = 32L * 1024 * 1024;
-
     private final PathValidator paths;
     private final SnapshotSink snapshots;
     private final ReadGuard reads;
@@ -160,14 +158,8 @@ public final class ApplyPatchTool extends PromptedTool implements WritesFiles {
     private Planned planUpdate(Operation op, Path file, String shown) throws IOException {
         requireExistingFile(file, shown);
         requireObserved(file, shown);
-        if (Files.size(file) > MAX_BYTES) {
-            throw new PatchException("文件过大（上限 32MB）: " + shown);
-        }
-        byte[] bytes = Files.readAllBytes(file);
-        if (ToolSupport.isBinary(bytes)) {
-            throw new PatchException("二进制文件，无法修改: " + shown);
-        }
-        PatchedText updated = applyHunks(new String(bytes, StandardCharsets.UTF_8), op.hunks(), shown);
+        String content = EditableText.readForPatch(file, shown);
+        PatchedText updated = applyHunks(content, op.hunks(), shown);
 
         Path target = file;
         String targetShown = shown;

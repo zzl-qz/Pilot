@@ -37,6 +37,7 @@
 
 - 跨模块共享的配置名、默认值和上限放在对应职责的类里。运行时环境变量与 JVM 属性集中在 `RuntimeEnvironment`，调用方通过其方法读取和发布运行时目录。
 - `ExecutablePath` 负责拆分 PATH 和按优先级生成候选程序。浏览器、桌面和搜索各自提供所需的程序名、回退位置和可用性条件。
+- `EditableText` 统一文本编辑工具的整文件读取上限与二进制检查。具体工具负责权限、匹配和写入。
 - 文件树清理使用 `FileTrees`，短命令执行使用 `ProcessSupport`。下载、长驻进程与交互式命令各自维护生命周期。
 - `UnifiedDiff` 使用已有 java-diff-utils 处理大型差异，重复行匹配及合并预检的旧行区间由项目测试约束。
 - 前端 SVG 预览使用 DOMPurify 的 SVG profile，保留 XML 格式检查与源码回退。更新依赖时验证普通 SVG、HTML 沙箱和流式 Markdown。 [DOMPurify 项目说明](https://github.com/cure53/DOMPurify)

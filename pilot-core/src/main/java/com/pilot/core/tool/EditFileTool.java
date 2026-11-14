@@ -14,8 +14,6 @@ import com.pilot.core.workspace.PathValidator;
  * 这是 Coding Agent 与普通文本替换的关键区别：绝不自动选择第一处匹配。
  */
 public final class EditFileTool extends PromptedTool implements WritesFiles {
-    private static final long MAX_BYTES = 32L * 1024 * 1024;
-
     private final PathValidator paths;
     private final SnapshotSink snapshots;
     private final ReadGuard reads;
@@ -82,16 +80,10 @@ public final class EditFileTool extends PromptedTool implements WritesFiles {
         }
 
         try {
-            if (Files.size(file) > MAX_BYTES) {
-                return "ERROR: 文件过大（上限 32MB），无法整份替换。";
-            }
-            byte[] bytes = Files.readAllBytes(file);
-            if (ToolSupport.isBinary(bytes)) {
-                return "ERROR: 二进制文件，无法编辑: " + rawPath;
-            }
             ExactEditBatch.Applied applied;
             try {
-                applied = ExactEditBatch.apply(new String(bytes, StandardCharsets.UTF_8), edits);
+                String content = EditableText.readForReplacement(file, rawPath);
+                applied = ExactEditBatch.apply(content, edits);
             } catch (IllegalArgumentException e) {
                 return "ERROR: " + e.getMessage();
             }

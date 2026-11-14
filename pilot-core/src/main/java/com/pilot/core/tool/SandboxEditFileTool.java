@@ -1,7 +1,6 @@
 package com.pilot.core.tool;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -16,8 +15,6 @@ import com.pilot.core.workspace.PathValidator;
  * <p>工具名保持不变，子 Agent 的行为与主 Agent 对齐；隔离靠「写不进去」而不是「提示词要求别写」。
  */
 public final class SandboxEditFileTool extends PromptedTool {
-    private static final long MAX_BYTES = 32L * 1024 * 1024;
-
     private final PathValidator paths;
     private final SandboxSink sandbox;
     private final ReadGuard reads;
@@ -63,14 +60,9 @@ public final class SandboxEditFileTool extends PromptedTool {
         String diskText = null;
         if (Files.isRegularFile(file)) {
             try {
-                if (Files.size(file) > MAX_BYTES) {
-                    return "ERROR: 文件过大（上限 32MB），无法整份替换。";
-                }
-                byte[] bytes = Files.readAllBytes(file);
-                if (ToolSupport.isBinary(bytes)) {
-                    return "ERROR: 二进制文件，无法编辑: " + rawPath;
-                }
-                diskText = new String(bytes, StandardCharsets.UTF_8);
+                diskText = EditableText.readForReplacement(file, rawPath);
+            } catch (IllegalArgumentException e) {
+                return "ERROR: " + e.getMessage();
             } catch (IOException e) {
                 return "ERROR: 读取失败: " + e.getMessage();
             }
