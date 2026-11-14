@@ -86,10 +86,10 @@ public final class OpenAiResponsesModelClient implements ModelClient {
 
     @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
-        var request = NativeModelHttp.jsonPost(endpoint, timeout, mapper, requestBody(messages, tools))
+        var request = ModelHttp.jsonPost(endpoint, timeout, mapper, requestBody(messages, tools))
             .header("Authorization", "Bearer " + apiKey).build();
-        var response = NativeModelHttp.send(httpClient, request, idleTimeout);
-        JsonNode root = NativeModelHttp.parseJson(mapper, response.body());
+        var response = ModelHttp.sendNative(httpClient, request, idleTimeout);
+        JsonNode root = ModelHttp.parseJson(mapper, response.body());
         if (!root.path("output").isArray() && root.path("choices").isArray()) {
             throw new NativeToolRejectedException("端点忽略了 Responses 协议，已返回聊天协议响应", true);
         }
@@ -101,7 +101,7 @@ public final class OpenAiResponsesModelClient implements ModelClient {
         }
         if (!root.path("output").isArray()) {
             throw new ModelClientException(ModelFailureKind.PERMANENT,
-                "模型响应缺少 output：" + NativeModelHttp.snippet(response.body()));
+                "模型响应缺少 output：" + ModelHttp.snippet(response.body()));
         }
         ModelResponse.FinishReason reason = switch (string(root.get("status"))) {
             case "completed" -> ModelResponse.FinishReason.STOP;

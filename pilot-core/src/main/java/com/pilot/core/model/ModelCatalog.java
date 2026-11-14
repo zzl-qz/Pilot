@@ -26,7 +26,6 @@ import tools.jackson.databind.ObjectMapper;
  * 允许匿名访问，强制带空密钥反而会被部分网关判 401。
  */
 public final class ModelCatalog {
-    private static final int ERROR_SNIPPET_CHARS = 300;
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
 
     private ModelCatalog() {
@@ -86,14 +85,14 @@ public final class ModelCatalog {
         String body = response.body();
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw new ModelClientException(
-                "模型列表接口返回 HTTP " + response.statusCode() + "（" + modelsUri + "）：" + snippet(body));
+                "模型列表接口返回 HTTP " + response.statusCode() + "（" + modelsUri + "）：" + ModelHttp.snippet(body));
         }
 
         JsonNode root;
         try {
             root = objectMapper.readTree(body);
         } catch (RuntimeException e) {
-            throw new ModelClientException("模型列表响应不是合法 JSON（" + modelsUri + "）：" + snippet(body), e);
+            throw new ModelClientException("模型列表响应不是合法 JSON（" + modelsUri + "）：" + ModelHttp.snippet(body), e);
         }
 
         // OpenAI 标准是 data[].id；个别网关返回 models[].id，兜一下
@@ -102,7 +101,7 @@ public final class ModelCatalog {
             items = root.path("models");
         }
         if (!items.isArray()) {
-            throw new ModelClientException("模型列表响应缺少 data 数组（" + modelsUri + "）：" + snippet(body));
+            throw new ModelClientException("模型列表响应缺少 data 数组（" + modelsUri + "）：" + ModelHttp.snippet(body));
         }
 
         SortedSet<String> ids = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
@@ -115,7 +114,7 @@ public final class ModelCatalog {
         return List.copyOf(ids);
     }
 
-    private static URI appendPath(URI endpoint, String suffix) {
+    static URI appendPath(URI endpoint, String suffix) {
         String raw = endpoint.toString();
         int queryIndex = raw.indexOf('?');
         String base = queryIndex >= 0 ? raw.substring(0, queryIndex) : raw;
@@ -135,13 +134,5 @@ public final class ModelCatalog {
             return appendPath(endpoint, replacement);
         }
         return URI.create(base.substring(0, base.length() - suffix.length()) + replacement + query);
-    }
-
-    private static String snippet(String text) {
-        if (text == null) {
-            return "";
-        }
-        String single = text.replaceAll("\\s+", " ").strip();
-        return single.length() <= ERROR_SNIPPET_CHARS ? single : single.substring(0, ERROR_SNIPPET_CHARS) + "…";
     }
 }

@@ -35,7 +35,6 @@ import tools.jackson.databind.ObjectMapper;
  * 并把增量文本实时回调给调用方。AgentLoop 走的是流式路径。
  */
 public final class OpenAiCompatibleModelClient implements ModelClient {
-    private static final int ERROR_SNIPPET_CHARS = 300;
 
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
@@ -224,33 +223,19 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         }
         String path = endpoint.getPath();
         if (path == null || path.isEmpty() || "/".equals(path)) {
-            return appendPath(endpoint, "/v1/chat/completions");
+            return ModelCatalog.appendPath(endpoint, "/v1/chat/completions");
         }
         if (path.endsWith("/v1") || path.endsWith("/v1/")) {
-            return appendPath(endpoint, "/chat/completions");
+            return ModelCatalog.appendPath(endpoint, "/chat/completions");
         }
         return endpoint;
     }
 
-    private static URI appendPath(URI endpoint, String suffix) {
-        String raw = endpoint.toString();
-        int queryIndex = raw.indexOf('?');
-        String base = queryIndex >= 0 ? raw.substring(0, queryIndex) : raw;
-        String query = queryIndex >= 0 ? raw.substring(queryIndex) : "";
-        while (base.endsWith("/")) {
-            base = base.substring(0, base.length() - 1);
-        }
-        return URI.create(base + suffix + query);
-    }
-
     @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
-        Map<String, Object> body = requestBody(messages, tools, false);
-
-        HttpRequest request = HttpRequest.newBuilder(endpoint).header("Authorization", "Bearer " + apiKey)
-            .header("Content-Type", "application/json").timeout(requestTimeout).POST(HttpRequest.BodyPublishers
-                .ofString(objectMapper.writeValueAsString(CanonicalJson.ordered(body)), StandardCharsets.UTF_8))
-            .build();
+        HttpRequest request =
+            ModelHttp.jsonPost(endpoint, requestTimeout, objectMapper, requestBody(messages, tools, false))
+                .header("Authorization", "Bearer " + apiKey).build();
 
         long startedAt = System.nanoTime();
         BoundedHttp.TextResponse response;
@@ -265,7 +250,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         }
 
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            String errorBody = snippet(response.body());
+            String errorBody = ModelHttp.snippet(response.body());
             if ((response.statusCode() == 404 || response.statusCode() == 405)
                 && NativeToolRejectedException.rejected(response.statusCode(), errorBody)) {
                 throw new NativeToolRejectedException("端点未提供当前聊天协议路由", true);
@@ -275,20 +260,17 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                     + errorBody);
         }
 
-        JsonNode root;
-        try {
-            root = objectMapper.readTree(response.body());
-        } catch (RuntimeException e) {
-            throw new ModelClientException(ModelFailureKind.PERMANENT, "模型响应不是合法 JSON：" + snippet(response.body()), e);
-        }
+        JsonNode root = ModelHttp.parseJson(objectMapper, response.body());
 
         JsonNode choices = root.path("choices");
         if (!choices.isArray() || choices.isEmpty()) {
-            throw new ModelClientException(ModelFailureKind.PERMANENT, "模型响应缺少 choices：" + snippet(response.body()));
+            throw new ModelClientException(ModelFailureKind.PERMANENT,
+                "模型响应缺少 choices：" + ModelHttp.snippet(response.body()));
         }
         JsonNode message = choices.get(0).path("message");
         if (message.isMissingNode()) {
-            throw new ModelClientException(ModelFailureKind.PERMANENT, "模型响应缺少 message：" + snippet(response.body()));
+            throw new ModelClientException(ModelFailureKind.PERMANENT,
+                "模型响应缺少 message：" + ModelHttp.snippet(response.body()));
         }
         String content = text(message.get("content"));
         ModelResponse.FinishReason finishReason =
@@ -301,25 +283,18 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     }
 
     @Override
-    public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> textDelta) {
-        return chat(messages, tools, textDelta, null);
-    }
-
-    @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> textDelta,
         Consumer<String> reasoningDelta) {
-        Map<String, Object> body = requestBody(messages, tools, true);
-        HttpRequest request = HttpRequest
-            .newBuilder(endpoint).header("Authorization", "Bearer " + apiKey).header("Content-Type", "application/json")
-            .header("Accept", "text/event-stream").timeout(requestTimeout).POST(HttpRequest.BodyPublishers
-                .ofString(objectMapper.writeValueAsString(CanonicalJson.ordered(body)), StandardCharsets.UTF_8))
-            .build();
+        HttpRequest request =
+            ModelHttp.jsonPost(endpoint, requestTimeout, objectMapper, requestBody(messages, tools, true))
+                .header("Authorization", "Bearer " + apiKey).header("Accept", "text/event-stream").build();
+
         long startedAt = System.nanoTime();
         try (var response = BoundedHttp.open(httpClient, request, idleTimeout, BoundedHttp.STREAM_BYTES)) {
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 try (InputStream stream = response.body()) {
-                    String errorBody =
-                        snippet(new String(stream.readNBytes(BoundedHttp.ERROR_BYTES), StandardCharsets.UTF_8));
+                    String errorBody = ModelHttp
+                        .snippet(new String(stream.readNBytes(BoundedHttp.ERROR_BYTES), StandardCharsets.UTF_8));
                     if ((response.statusCode() == 404 || response.statusCode() == 405)
                         && NativeToolRejectedException.rejected(response.statusCode(), errorBody)) {
                         throw new NativeToolRejectedException("端点未提供当前聊天协议路由", true);
@@ -566,7 +541,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             return objectMapper.readValue(raw,
                 objectMapper.getTypeFactory().constructMapType(LinkedHashMap.class, String.class, Object.class));
         } catch (RuntimeException e) {
-            throw new ModelClientException(ModelFailureKind.PERMANENT, "工具调用参数不是合法 JSON：" + snippet(raw), e);
+            throw new ModelClientException(ModelFailureKind.PERMANENT, "工具调用参数不是合法 JSON：" + ModelHttp.snippet(raw), e);
         }
     }
 
@@ -654,13 +629,5 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
 
     private static String text(JsonNode node) {
         return node == null || node.isNull() ? "" : node.asString();
-    }
-
-    private static String snippet(String text) {
-        if (text == null) {
-            return "";
-        }
-        String single = text.replaceAll("\\s+", " ").strip();
-        return single.length() <= ERROR_SNIPPET_CHARS ? single : single.substring(0, ERROR_SNIPPET_CHARS) + "…";
     }
 }

@@ -9,13 +9,14 @@ import java.time.Duration;
 import java.util.Map;
 
 import com.pilot.core.http.BoundedHttp;
+import com.pilot.core.tool.ToolSupport;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
-/** 原生协议共用的 HTTP 发送与错误分类；请求和响应结构由各协议客户端处理。 */
-final class NativeModelHttp {
-    private NativeModelHttp() {
+/** 模型 HTTP 请求构造、错误摘要和原生协议的发送规则。 */
+final class ModelHttp {
+    private ModelHttp() {
     }
 
     static HttpRequest.Builder jsonPost(URI endpoint, Duration timeout, ObjectMapper mapper, Map<String, Object> body) {
@@ -32,7 +33,7 @@ final class NativeModelHttp {
         }
     }
 
-    static BoundedHttp.TextResponse send(HttpClient httpClient, HttpRequest request, Duration idleTimeout) {
+    static BoundedHttp.TextResponse sendNative(HttpClient httpClient, HttpRequest request, Duration idleTimeout) {
         BoundedHttp.TextResponse response;
         try {
             response = BoundedHttp.text(httpClient, request, idleTimeout, BoundedHttp.JSON_BYTES);
@@ -58,7 +59,6 @@ final class NativeModelHttp {
     }
 
     static String snippet(String body) {
-        String value = body == null ? "" : body.replaceAll("\\s+", " ").strip();
-        return value.length() <= 300 ? value : value.substring(0, 300) + "…";
+        return ToolSupport.oneLine(body, 300);
     }
 }

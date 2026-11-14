@@ -80,13 +80,13 @@ public final class AnthropicMessagesModelClient implements ModelClient {
 
     @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
-        var request = NativeModelHttp.jsonPost(endpoint, timeout, mapper, requestBody(messages, tools))
+        var request = ModelHttp.jsonPost(endpoint, timeout, mapper, requestBody(messages, tools))
             .header("x-api-key", apiKey).header("anthropic-version", "2023-06-01").build();
-        var response = NativeModelHttp.send(httpClient, request, idleTimeout);
-        JsonNode root = NativeModelHttp.parseJson(mapper, response.body());
+        var response = ModelHttp.sendNative(httpClient, request, idleTimeout);
+        JsonNode root = ModelHttp.parseJson(mapper, response.body());
         if (!root.path("content").isArray()) {
             throw new ModelClientException(ModelFailureKind.PERMANENT,
-                "模型响应缺少 content：" + NativeModelHttp.snippet(response.body()));
+                "模型响应缺少 content：" + ModelHttp.snippet(response.body()));
         }
         if ("pause_turn".equals(root.path("stop_reason").asString())) {
             throw new NativeToolRejectedException("原生工具需要分段续传，当前自动切回 Pilot 工具");
