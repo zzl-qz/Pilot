@@ -1,4 +1,4 @@
-package com.pilot.server.config;
+package com.pilot.server.permission;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

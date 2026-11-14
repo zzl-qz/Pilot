@@ -18,7 +18,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import com.pilot.server.config.ModelSettings;
+import com.pilot.server.model.ModelSettings;
 import com.pilot.server.store.SettingsStore;
 
 import tools.jackson.databind.ObjectMapper;

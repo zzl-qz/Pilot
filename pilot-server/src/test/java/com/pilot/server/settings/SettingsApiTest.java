@@ -1,4 +1,4 @@
-package com.pilot.server.controller;
+package com.pilot.server.settings;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;

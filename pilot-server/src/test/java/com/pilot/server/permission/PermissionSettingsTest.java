@@ -1,10 +1,11 @@
-package com.pilot.server.config;
+package com.pilot.server.permission;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import org.junit.jupiter.api.Test;
 
 import com.pilot.core.permission.PermissionMode;
+import com.pilot.server.config.AgentProperties;
 import com.pilot.server.store.InMemorySettingsStore;
 
 class PermissionSettingsTest {

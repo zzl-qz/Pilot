@@ -20,8 +20,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import com.pilot.server.config.ModelProperties;
-import com.pilot.server.config.ModelSettings;
+import com.pilot.server.model.ModelProperties;
+import com.pilot.server.model.ModelSettings;
 import com.pilot.server.store.InMemorySettingsStore;
 import com.sun.net.httpserver.HttpServer;
 

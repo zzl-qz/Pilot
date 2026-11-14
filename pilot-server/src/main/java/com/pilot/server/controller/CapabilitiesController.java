@@ -24,8 +24,8 @@ import com.pilot.core.tool.ToolRegistry;
 import com.pilot.server.capability.LocalCapabilityService;
 import com.pilot.server.common.web.SessionLookup;
 import com.pilot.server.config.AgentProperties;
-import com.pilot.server.config.ModelSettings;
-import com.pilot.server.config.PermissionSettings;
+import com.pilot.server.model.ModelSettings;
+import com.pilot.server.permission.PermissionSettings;
 import com.pilot.server.workspace.WorkspaceToolFactory;
 
 /**

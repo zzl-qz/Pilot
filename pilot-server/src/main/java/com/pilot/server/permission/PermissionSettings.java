@@ -1,4 +1,4 @@
-package com.pilot.server.config;
+package com.pilot.server.permission;
 
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.permission.PermissionMode;
+import com.pilot.server.config.AgentProperties;
 import com.pilot.server.store.SettingsStore;
 
 /**

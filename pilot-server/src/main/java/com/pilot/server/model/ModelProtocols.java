@@ -1,4 +1,4 @@
-package com.pilot.server.config;
+package com.pilot.server.model;
 
 /**
  * 模型接口协议的名字。

@@ -1,4 +1,4 @@
-package com.pilot.server.controller;
+package com.pilot.server.permission;
 
 import java.util.List;
 

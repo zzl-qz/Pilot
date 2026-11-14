@@ -1,4 +1,4 @@
-package com.pilot.server.controller;
+package com.pilot.server.model;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -7,8 +7,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
-
-import com.pilot.server.config.ModelRuntimeSettings;
 
 @RestController
 @RequestMapping("/api/settings/model/runtime")

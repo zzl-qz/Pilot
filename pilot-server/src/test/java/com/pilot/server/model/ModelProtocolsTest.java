@@ -1,4 +1,4 @@
-package com.pilot.server.config;
+package com.pilot.server.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 

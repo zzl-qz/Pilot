@@ -1,4 +1,4 @@
-package com.pilot.server.controller;
+package com.pilot.server.settings;
 
 import java.util.List;
 
@@ -10,8 +10,8 @@ import org.springframework.web.bind.annotation.RestController;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.server.config.AgentProperties;
-import com.pilot.server.config.ModelSettings;
-import com.pilot.server.config.PermissionSettings;
+import com.pilot.server.model.ModelSettings;
+import com.pilot.server.permission.PermissionSettings;
 
 /** 运行状态：当前模型、权限档位和可用工具。 */
 @RestController

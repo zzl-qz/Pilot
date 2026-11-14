@@ -1,4 +1,4 @@
-package com.pilot.server.config;
+package com.pilot.server.store;
 
 import java.nio.file.Path;
 
@@ -19,18 +19,6 @@ import com.pilot.core.session.RunCheckpointRepository;
 import com.pilot.core.session.RunRepository;
 import com.pilot.core.session.SessionRepository;
 import com.pilot.server.common.data.PilotDataDir;
-import com.pilot.server.store.EventCodec;
-import com.pilot.server.store.InMemorySettingsStore;
-import com.pilot.server.store.JdbcConversationRepository;
-import com.pilot.server.store.JdbcPlanRepository;
-import com.pilot.server.store.JdbcProjectRepository;
-import com.pilot.server.store.JdbcRunCheckpointRepository;
-import com.pilot.server.store.JdbcRunRepository;
-import com.pilot.server.store.JdbcSessionRepository;
-import com.pilot.server.store.JdbcSettingsStore;
-import com.pilot.server.store.QueuedMessageRepository;
-import com.pilot.server.store.SettingsStore;
-import com.pilot.server.store.SqliteStore;
 
 import tools.jackson.databind.ObjectMapper;
 

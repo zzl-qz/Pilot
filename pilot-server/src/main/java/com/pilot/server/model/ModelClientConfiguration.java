@@ -1,4 +1,4 @@
-package com.pilot.server.config;
+package com.pilot.server.model;
 
 import java.net.http.HttpClient;
 import java.time.Duration;

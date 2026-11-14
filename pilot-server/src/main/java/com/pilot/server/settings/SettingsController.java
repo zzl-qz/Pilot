@@ -1,4 +1,4 @@
-package com.pilot.server.controller;
+package com.pilot.server.settings;
 
 import java.util.Arrays;
 import java.util.List;
@@ -16,9 +16,9 @@ import org.springframework.web.server.ResponseStatusException;
 import com.pilot.core.model.ModelClientException;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.server.config.AttachmentLimits;
-import com.pilot.server.config.ModelCatalogService;
-import com.pilot.server.config.ModelSettings;
-import com.pilot.server.config.PermissionSettings;
+import com.pilot.server.model.ModelCatalogService;
+import com.pilot.server.model.ModelSettings;
+import com.pilot.server.permission.PermissionSettings;
 import com.pilot.server.voice.VoiceLimits;
 
 /**

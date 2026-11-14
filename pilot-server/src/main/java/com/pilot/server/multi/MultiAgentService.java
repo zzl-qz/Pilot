@@ -80,7 +80,7 @@ import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.MultiAgentBudget;
 import com.pilot.server.config.MultiAgentProperties;
-import com.pilot.server.config.PermissionSettings;
+import com.pilot.server.permission.PermissionSettings;
 import com.pilot.server.session.SpawnAgentTool;
 import com.pilot.server.session.SpawnAgentTool.UsageSink;
 import com.pilot.server.store.JdbcDispatchStore;
