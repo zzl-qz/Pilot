@@ -159,6 +159,82 @@ class McpConfigControllerTest {
     }
 
     @Test
+    void importWritesBothFormatsAndPreservesArgsEnv() throws IOException {
+        McpConfigController.ImportResponse wrapped = controller.importServers(sessionId,
+            new McpConfigController.ImportRequest(
+                "{\"mcpServers\": {\"one\": {\"command\": \"npx\", \"args\": [\"-y\", \"@scope/server\"], "
+                    + "\"env\": {\"K\": \"v\"}}}}"));
+        assertEquals(List.of("one"), wrapped.imported());
+        assertEquals(List.of(), wrapped.overwritten());
+
+        controller.importServers(sessionId, new McpConfigController.ImportRequest(
+            "{\"two\": {\"command\": \"node\"}}"));
+
+        var root = mapper.readTree(Files.readString(dataRoot.resolve("mcp.json")));
+        assertEquals(2, root.path("mcpServers").size());
+        assertEquals("-y", root.path("mcpServers").path("one").path("args").get(0).asString());
+        assertEquals("v", root.path("mcpServers").path("one").path("env").path("K").asString());
+        assertEquals("node", root.path("mcpServers").path("two").path("command").asString());
+    }
+
+    @Test
+    void importOverwritesUserLevelEntriesAndReportsThem() throws IOException {
+        controller.add(sessionId, new McpConfigController.AddRequest("mine", "node", "-old", null));
+        McpConfigController.ImportResponse response = controller.importServers(sessionId,
+            new McpConfigController.ImportRequest("{\"mine\": {\"command\": \"node\", \"args\": [\"-new\"]}}"));
+        assertEquals(List.of("mine"), response.imported());
+        assertEquals(List.of("mine"), response.overwritten());
+
+        var root = mapper.readTree(Files.readString(dataRoot.resolve("mcp.json")));
+        assertEquals("-new", root.path("mcpServers").path("mine").path("args").get(0).asString());
+    }
+
+    @Test
+    void importIsAtomicWorkspaceConflictsRejectTheWholeBatch() throws IOException {
+        controller.add(sessionId, new McpConfigController.AddRequest("before", "node", null, null));
+        ResponseStatusException conflict = assertThrows(ResponseStatusException.class,
+            () -> controller.importServers(sessionId, new McpConfigController.ImportRequest(
+                "{\"fresh\": {\"command\": \"node\"}, \"from-workspace\": {\"command\": \"node\"}}")));
+        assertEquals(HttpStatus.CONFLICT, conflict.getStatusCode());
+        assertTrue(conflict.getReason().contains("from-workspace"), conflict.getReason());
+        assertTrue(conflict.getReason().contains("未写入任何内容"), conflict.getReason());
+
+        // 批次整体未写入：fresh 不应存在，before 保持原样
+        var root = mapper.readTree(Files.readString(dataRoot.resolve("mcp.json")));
+        assertTrue(root.path("mcpServers").path("fresh").isMissingNode());
+        assertTrue(root.path("mcpServers").has("before"));
+    }
+
+    @Test
+    void importRejectsBadEntriesWithSpecificReasons() {
+        assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
+            () -> controller.importServers(sessionId, new McpConfigController.ImportRequest("   ")))
+            .getStatusCode());
+        assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
+            () -> controller.importServers(sessionId, new McpConfigController.ImportRequest("{ not json")))
+            .getStatusCode());
+        assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
+            () -> controller.importServers(sessionId, new McpConfigController.ImportRequest(
+                "{\"不合法 名字\": {\"command\": \"npx\"}}")))
+            .getStatusCode());
+        ResponseStatusException urlOnly = assertThrows(ResponseStatusException.class,
+            () -> controller.importServers(sessionId, new McpConfigController.ImportRequest(
+                "{\"remote\": {\"type\": \"http\", \"url\": \"https://example.com\"}}")));
+        assertEquals(HttpStatus.BAD_REQUEST, urlOnly.getStatusCode());
+        assertTrue(urlOnly.getReason().contains("仅支持 stdio"), urlOnly.getReason());
+        ResponseStatusException disabled = assertThrows(ResponseStatusException.class,
+            () -> controller.importServers(sessionId, new McpConfigController.ImportRequest(
+                "{\"off\": {\"command\": \"node\", \"disabled\": true}}")));
+        assertEquals(HttpStatus.BAD_REQUEST, disabled.getStatusCode());
+        assertTrue(disabled.getReason().contains("已禁用"), disabled.getReason());
+        ResponseStatusException noCommand = assertThrows(ResponseStatusException.class,
+            () -> controller.importServers(sessionId, new McpConfigController.ImportRequest(
+                "{\"bare\": {\"args\": [\"-y\"]}}")));
+        assertEquals(HttpStatus.BAD_REQUEST, noCommand.getStatusCode());
+        assertTrue(noCommand.getReason().contains("缺少 command"), noCommand.getReason());
+    }
+
+    @Test
     void viewReflectsTrustStateAfterRevocation() throws IOException {
         controller.add(sessionId, new McpConfigController.AddRequest("mine", "node", null, null));
         new McpTrustController(sessions,

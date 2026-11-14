@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.pilot.core.mcp.McpArgsParser;
+import com.pilot.core.mcp.McpConfigImports;
 import com.pilot.core.mcp.McpException;
 import com.pilot.core.mcp.McpManager;
 import com.pilot.core.mcp.McpServerConfig;
@@ -147,6 +148,65 @@ public class McpConfigController {
         }
     }
 
+    /**
+     * 批量导入（粘贴 JSON）：支持 {"服务器名": {…}} 与 {"mcpServers": {…}} 两种格式。
+     *
+     * <p>整批原子：任一条目非法、或与工作区同名即全部拒绝，避免半成功让用户搞不清写入了哪些；
+     * 与用户级同名则覆盖（主动粘贴即意图覆盖）。条目的 args/env/type 等字段原样保留。
+     */
+    @PostMapping("/import")
+    public ImportResponse importServers(@PathVariable String id, @RequestBody ImportRequest request) {
+        McpManager manager = required();
+        Path workspace = workspace(id);
+        Map<String, JsonNode> entries;
+        try {
+            entries = McpConfigImports.parse(request.config());
+        } catch (McpException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
+        List<String> overwritten = new ArrayList<>();
+        for (Map.Entry<String, JsonNode> item : entries.entrySet()) {
+            String name = item.getKey();
+            JsonNode entry = item.getValue();
+            if (!NAME.matcher(name).matches()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "服务器名 " + name + " 不合法：只能包含字母、数字、点、下划线和连字符，长度 1–64");
+            }
+            if (entry.path("disabled").asBoolean(false)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "服务器 " + name + " 标记为已禁用；请去掉 disabled 字段或不要导入它");
+            }
+            if (entry.path("command").asString("").strip().isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, entry.has("url")
+                    ? "服务器 " + name + " 只配置了 url（HTTP 传输）——目前仅支持 stdio（command + args）"
+                    : "服务器 " + name + " 缺少 command；示例：{\"" + name + "\": {\"command\": \"npx\", \"args\": []}}");
+            }
+            if (manager.servers(workspace).get(name) != null && !manager.definedInUserConfig(name)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "工作区 .mcp.json 里已有同名服务器 " + name + "（会覆盖用户级配置）；请改名或先从工作区配置中移除；"
+                        + "本次导入未写入任何内容");
+            }
+            if (manager.definedInUserConfig(name)) {
+                overwritten.add(name);
+            }
+        }
+        try {
+            ObjectNode root = (ObjectNode)manager.readUserConfig();
+            ObjectNode servers = root.path("mcpServers").isObject() ? (ObjectNode)root.path("mcpServers")
+                : mapper.createObjectNode();
+            if (!servers.equals(root.path("mcpServers"))) {
+                root.set("mcpServers", servers);
+            }
+            for (Map.Entry<String, JsonNode> item : entries.entrySet()) {
+                servers.set(item.getKey(), item.getValue().deepCopy());
+            }
+            manager.saveUserConfig(root);
+        } catch (IOException | RuntimeException e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "写入用户级配置失败：" + e.getMessage());
+        }
+        return new ImportResponse(List.copyOf(entries.keySet()), List.copyOf(overwritten));
+    }
+
     // ————— 内部 —————
 
     private Path workspace(String sessionId) {
@@ -204,6 +264,15 @@ public class McpConfigController {
     }
 
     public record AddRequest(String name, String command, String args, Map<String, String> env) {
+    }
+
+    /** 粘贴导入：config 是原始 JSON 文本（两种格式见 McpConfigImports）。 */
+    public record ImportRequest(String config) {
+    }
+
+    /** @param imported    本次写入的服务器名（含覆盖）
+     *  @param overwritten 其中覆盖了既有用户级条目的名字 */
+    public record ImportResponse(List<String> imported, List<String> overwritten) {
     }
 
     public record ServerPayload(String name, String source, String command, String commandOnly, boolean usable,
