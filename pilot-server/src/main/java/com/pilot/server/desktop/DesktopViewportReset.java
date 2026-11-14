@@ -13,6 +13,8 @@ import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Component;
 
+import com.pilot.server.browser.BrowserHome;
+
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -25,23 +27,17 @@ public final class DesktopViewportReset {
     private static final Pattern TOKEN = Pattern.compile("\"token\"\\s*:\\s*\"([^\"]+)\"");
 
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofMillis(300)).build();
+    private final BrowserHome browserHome;
+
+    public DesktopViewportReset(BrowserHome browserHome) {
+        this.browserHome = browserHome;
+    }
 
     public void clear(String sessionId) {
         if (sessionId == null || sessionId.isBlank()) {
             return;
         }
-        var root = DesktopWindowLauncher.repositoryRoot();
-        if (root == null) {
-            return;
-        }
-        var file = root.resolve(".pilot").resolve("browser").resolve("desktop-browser.json");
-        clear(sessionId, file);
-    }
-
-    void clear(String sessionId, Path file) {
-        if (sessionId == null || sessionId.isBlank()) {
-            return;
-        }
+        Path file = browserHome.desktopEndpoint();
         if (!Files.isRegularFile(file)) {
             return;
         }

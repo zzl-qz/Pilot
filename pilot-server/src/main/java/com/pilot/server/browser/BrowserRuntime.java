@@ -28,7 +28,6 @@ import com.pilot.core.browser.BrowserEventListener;
 import com.pilot.core.browser.PlaywrightBackend;
 import com.pilot.core.tool.Availability;
 import com.pilot.core.tool.ProcessSupport;
-import com.pilot.server.config.PilotDataDir;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -62,7 +61,7 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     /** npmmirror 的 Playwright 浏览器镜像，与 npm 换源策略一致。 */
     private static final String CHROMIUM_MIRROR = "https://npmmirror.com/mirrors/playwright";
 
-    private final PilotDataDir dataDir;
+    private final BrowserHome browserHome;
     private final ObjectMapper mapper;
     private final boolean enabled;
     private final boolean provision;
@@ -85,7 +84,7 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     /** 用户接管开关（会话级内存态，不落库）：BrowserTool 据此拦截交互类动作。 */
     private final ConcurrentMap<String, Boolean> interactionsPaused = new ConcurrentHashMap<>();
 
-    public BrowserRuntime(PilotDataDir dataDir, ObjectMapper mapper,
+    public BrowserRuntime(BrowserHome browserHome, ObjectMapper mapper,
         @Value("${pilot.browser.enabled:true}") boolean enabled,
         @Value("${pilot.browser.provision:true}") boolean provision,
         @Value("${pilot.browser.download-chromium:true}") boolean downloadChromium,
@@ -93,7 +92,7 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         @Value("${pilot.browser.prefer-bundled:true}") boolean preferBundled,
         @Value("${pilot.browser.browsers-dir:}") String browsersDir,
         @Value("${pilot.browser.idle-shutdown-seconds:-1}") long idleShutdownSeconds) {
-        this.dataDir = dataDir;
+        this.browserHome = browserHome;
         this.mapper = mapper;
         this.enabled = enabled;
         this.provision = provision;
@@ -219,7 +218,7 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
 
     private void prepare() {
         try {
-            Path home = home();
+            Path home = browserHome.directory();
             Files.createDirectories(home);
             Path script = home.resolve(SCRIPT_NAME);
             writeIfChanged(script);
@@ -434,18 +433,6 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
             return;
         }
         Files.writeString(file, json, StandardCharsets.UTF_8);
-    }
-
-    private Path home() {
-        Path dir = Path.of(System.getProperty("user.dir", ".")).toAbsolutePath();
-        for (int i = 0; i < 6 && dir != null; i++) {
-            if (Files.isRegularFile(dir.resolve("pom.xml"))
-                && Files.isRegularFile(dir.resolve("pilot-server").resolve("pom.xml"))) {
-                return dir.resolve(".pilot").resolve("browser");
-            }
-            dir = dir.getParent();
-        }
-        return dataDir.file("browser");
     }
 
     /** 内置运行时优先，其次 PATH，最后常见安装位置。 */

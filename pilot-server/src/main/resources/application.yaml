@@ -74,7 +74,9 @@ pilot:
     headless: ${PILOT_BROWSER_HEADLESS:true}
     # 内置 Chromium 优先于系统 Chrome / Edge（版本配套、行为跨机器一致）；false = 系统浏览器优先
     prefer-bundled: ${PILOT_BROWSER_PREFER_BUNDLED:true}
-    # 内置 Chromium 落盘目录；留空 = <仓库根>/.pilot/browser/browsers
+    # 浏览器运行目录（含桌面控制端点和日志）；留空沿用仓库 .pilot/browser 或数据目录。
+    home: ${PILOT_BROWSER_HOME:}
+    # 内置 Chromium 落盘目录；留空使用浏览器运行目录下的 browsers
     browsers-dir: ${PILOT_BROWSER_BROWSERS_DIR:}
     # 空闲多少秒后关掉浏览器进程释放内存。-1 = 自动：无头 600 秒（面板正在显示这一页时不回收）
     idle-shutdown-seconds: ${PILOT_BROWSER_IDLE_SHUTDOWN_SECONDS:-1}

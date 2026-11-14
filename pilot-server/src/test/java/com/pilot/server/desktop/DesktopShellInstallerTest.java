@@ -43,7 +43,7 @@ class DesktopShellInstallerTest {
             return 0;
         });
 
-        assertNull(installer.ensureInstalled(root, () -> {
+        assertNull(installer.ensureInstalled(root, root.resolve("browser runtime"), () -> {
         }));
         assertFalse(ran.get());
     }
@@ -56,13 +56,14 @@ class DesktopShellInstallerTest {
         DesktopShellInstaller installer = installer(true, fakeNpm(root), (dir, command, env, log, timeout) -> {
             attempts.incrementAndGet();
             assertEquals(root.resolve("pilot-desktop"), dir);
+            assertEquals(root.resolve("browser runtime/desktop-install.log"), log);
             assertTrue(String.join(" ", command).contains("install --no-audit --no-fund"),
                 "安装命令应执行 npm install：" + command);
             electron(root);
             return 0;
         });
 
-        String pending = installer.ensureInstalled(root, opened::countDown);
+        String pending = installer.ensureInstalled(root, root.resolve("browser runtime"), opened::countDown);
         assertTrue(pending.contains("正在后台安装"), pending);
         assertTrue(opened.await(10, TimeUnit.SECONDS), "安装成功后应回调打开窗口");
         assertEquals(1, attempts.get());
@@ -85,7 +86,7 @@ class DesktopShellInstallerTest {
             return 1;
         });
 
-        assertNotNull(installer.ensureInstalled(root, opened::countDown));
+        assertNotNull(installer.ensureInstalled(root, root.resolve("browser runtime"), opened::countDown));
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (installer.installing() && System.nanoTime() < deadline) {
             Thread.sleep(20);
@@ -104,7 +105,7 @@ class DesktopShellInstallerTest {
             return 0;
         });
 
-        String pending = installer.ensureInstalled(root, () -> {
+        String pending = installer.ensureInstalled(root, root.resolve("browser runtime"), () -> {
         });
         assertTrue(pending.contains(DesktopShellInstaller.MANUAL), pending);
         assertTrue(pending.contains("provision=false"), pending);
@@ -117,7 +118,7 @@ class DesktopShellInstallerTest {
         DesktopShellInstaller installer = installer(true, null, (dir, command, env, log, timeout) -> 0);
 
         assertNull(DesktopShellInstaller.npm(root, "", ""));
-        String pending = installer.ensureInstalled(root, () -> {
+        String pending = installer.ensureInstalled(root, root.resolve("browser runtime"), () -> {
         });
         assertTrue(pending.contains(DesktopShellInstaller.MANUAL), pending);
         assertFalse(installer.installing());
@@ -138,9 +139,10 @@ class DesktopShellInstallerTest {
             return 0;
         });
 
-        String first = installer.ensureInstalled(root, opened::countDown);
+        String first = installer.ensureInstalled(root, root.resolve("browser runtime"), opened::countDown);
         assertTrue(first.contains("正在后台安装"), first);
-        assertTrue(installer.ensureInstalled(root, opened::countDown).contains("正在安装"));
+        assertTrue(
+            installer.ensureInstalled(root, root.resolve("browser runtime"), opened::countDown).contains("正在安装"));
         release.countDown();
         assertTrue(opened.await(10, TimeUnit.SECONDS));
     }
@@ -166,7 +168,7 @@ class DesktopShellInstallerTest {
             return 1; // npm 两次都失败（例如二进制下载被墙），但包已经落地
         });
 
-        assertNotNull(installer.ensureInstalled(root, opened::countDown));
+        assertNotNull(installer.ensureInstalled(root, root.resolve("browser runtime"), opened::countDown));
         assertTrue(opened.await(10, TimeUnit.SECONDS), "补下载成功后应回调打开窗口");
         assertEquals(1, downloads.get());
     }

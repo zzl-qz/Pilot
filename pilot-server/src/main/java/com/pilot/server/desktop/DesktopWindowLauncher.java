@@ -21,6 +21,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
+import com.pilot.server.browser.BrowserHome;
 import com.pilot.server.browser.BrowserRuntime;
 
 /**
@@ -43,10 +44,12 @@ public class DesktopWindowLauncher {
 
     private final Environment environment;
     private final DesktopShellInstaller installer;
+    private final BrowserHome browserHome;
 
-    public DesktopWindowLauncher(Environment environment, DesktopShellInstaller installer) {
+    public DesktopWindowLauncher(Environment environment, DesktopShellInstaller installer, BrowserHome browserHome) {
         this.environment = environment;
         this.installer = installer;
+        this.browserHome = browserHome;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -80,6 +83,7 @@ public class DesktopWindowLauncher {
 
     /** 桌面会话能力可注入，便于在没有图形会话的平台上做单元测试。 */
     LaunchResult launch(BooleanSupplier desktopAvailable) {
+        Path logFile = browserHome.directory().resolve("desktop-launch.log");
         try {
             Path root = repositoryRoot();
             if (root == null) {
@@ -88,17 +92,16 @@ public class DesktopWindowLauncher {
             if (!desktopAvailable.getAsBoolean()) {
                 return LaunchResult.unavailable("当前没有可用的图形桌面，桌面窗口无法打开；请访问 " + webUrl() + " 使用 Web 工作台。");
             }
-            if (alreadyOpen(root)) {
+            if (alreadyOpen(browserHome.desktopEndpoint())) {
                 return LaunchResult.already("桌面窗口已经在运行，请切换到那个窗口使用内置浏览器。");
             }
-            Path logFile = root.resolve(".pilot").resolve("browser").resolve("desktop-launch.log");
             Files.createDirectories(logFile.getParent());
             if (!Files.exists(logFile)) {
                 Files.createFile(logFile);
             }
             Path electron = electronBinary(root);
             if (!Files.isExecutable(electron)) {
-                String pending = installer.ensureInstalled(root, this::launchAfterInstall);
+                String pending = installer.ensureInstalled(root, browserHome.directory(), this::launchAfterInstall);
                 if (pending != null) {
                     return LaunchResult.installing(pending);
                 }
@@ -110,14 +113,15 @@ public class DesktopWindowLauncher {
             builder.directory(root.resolve("pilot-desktop").toFile());
             builder.environment().remove("ELECTRON_RUN_AS_NODE");
             builder.environment().put("PILOT_URL", url);
+            builder.environment().put("PILOT_BROWSER_HOME", browserHome.directory().toString());
             builder.redirectErrorStream(true);
             builder.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile.toFile()));
             Process process = builder.start();
-            watchWindow(root, process, logFile, url);
+            watchWindow(process, logFile, url);
             return LaunchResult.started("正在打开桌面窗口；Web 工作台同样可用：" + url + "。");
         } catch (IOException e) {
-            return LaunchResult.failed("桌面窗口没有打开：" + e.getMessage() + "；请访问 " + webUrl()
-                + " 使用 Web 工作台，或查看 .pilot/browser/desktop-launch.log。");
+            return LaunchResult
+                .failed("桌面窗口没有打开：" + e.getMessage() + "；请访问 " + webUrl() + " 使用 Web 工作台，或查看 " + logFile + "。");
         }
     }
 
@@ -126,12 +130,12 @@ public class DesktopWindowLauncher {
     }
 
     /** 不阻塞服务启动：后台确认窗口真的就绪，失败时给出明确原因和可用的替代操作。 */
-    private void watchWindow(Path root, Process process, Path logFile, String url) {
+    private void watchWindow(Process process, Path logFile, String url) {
         Thread thread = new Thread(() -> {
             long deadline = System.nanoTime() + WINDOW_TIMEOUT.toNanos();
             try {
                 while (System.nanoTime() < deadline) {
-                    if (alreadyOpen(root)) {
+                    if (alreadyOpen(browserHome.desktopEndpoint())) {
                         return;
                     }
                     if (!process.isAlive()) {
@@ -237,12 +241,8 @@ public class DesktopWindowLauncher {
         }
     }
 
-    static Path endpointFile(Path root) {
-        return root.resolve(".pilot").resolve("browser").resolve("desktop-browser.json");
-    }
-
-    static boolean alreadyOpen(Path root) {
-        return alreadyOpen(root, pid -> ProcessHandle.of(pid).filter(ProcessHandle::isAlive)
+    static boolean alreadyOpen(Path file) {
+        return alreadyOpen(file, pid -> ProcessHandle.of(pid).filter(ProcessHandle::isAlive)
             .flatMap(handle -> handle.info().command()).orElse(null));
     }
 
@@ -250,8 +250,7 @@ public class DesktopWindowLauncher {
      * 残留端点不能再只凭「PID 还活着」判定：Windows 上 PID 可能被系统复用给 conhost 等无关进程。
      * 端点必须完整、进程必须是桌面壳，且新格式记录的启动时间要与进程一致。
      */
-    static boolean alreadyOpen(Path root, LongFunction<String> commandOf) {
-        Path file = endpointFile(root);
+    static boolean alreadyOpen(Path file, LongFunction<String> commandOf) {
         if (!Files.isRegularFile(file)) {
             return false;
         }

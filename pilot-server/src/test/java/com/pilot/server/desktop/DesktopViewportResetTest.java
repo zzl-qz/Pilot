@@ -13,6 +13,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.pilot.server.browser.BrowserHome;
+import com.pilot.server.config.PilotDataDir;
 import com.sun.net.httpserver.HttpServer;
 
 import tools.jackson.databind.JsonNode;
@@ -34,13 +36,15 @@ class DesktopViewportResetTest {
         server.start();
         try {
             ObjectMapper mapper = new ObjectMapper();
-            Path endpoint = temp.resolve("desktop-browser.json");
+            Path custom = Files.createDirectory(temp.resolve("运行 目录"));
+            BrowserHome home = new BrowserHome(new PilotDataDir(temp.toString()), custom.toString());
+            Path endpoint = home.desktopEndpoint();
             Files.writeString(endpoint,
                 mapper.writeValueAsString(Map.of("controlPort", server.getAddress().getPort(), "token", "test")));
-            DesktopViewportReset reset = new DesktopViewportReset();
-            reset.clear("", endpoint);
+            DesktopViewportReset reset = new DesktopViewportReset(home);
+            reset.clear("");
             assertNull(body.get());
-            reset.clear("session-a", endpoint);
+            reset.clear("session-a");
             JsonNode sent = mapper.readTree(body.get());
             assertEquals("session-a", sent.path("sessionId").asText());
             assertEquals(0, sent.path("width").asInt(-1));

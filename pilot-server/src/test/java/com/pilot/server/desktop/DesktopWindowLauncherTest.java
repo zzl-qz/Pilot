@@ -20,6 +20,8 @@ import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.StandardEnvironment;
 
+import com.pilot.server.browser.BrowserHome;
+import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.desktop.DesktopWindowLauncher.LaunchResult;
 
 class DesktopWindowLauncherTest {
@@ -77,7 +79,7 @@ class DesktopWindowLauncherTest {
     @Test
     void deadPidDoesNotCountAsAnOpenWindow(@TempDir Path root) throws Exception {
         Path file = endpoint(root, endpointJson(99999999L, currentStartMillis()));
-        assertFalse(DesktopWindowLauncher.alreadyOpen(root, pid -> WINDOWS_SHELL));
+        assertFalse(DesktopWindowLauncher.alreadyOpen(endpointFile(root), pid -> WINDOWS_SHELL));
         assertFalse(Files.exists(file), "失效端点要被清理，避免每次启动都误判");
     }
 
@@ -85,14 +87,15 @@ class DesktopWindowLauncherTest {
     void liveDesktopShellEndpointCountsAsAnOpenWindow(@TempDir Path root) throws Exception {
         long pid = ProcessHandle.current().pid();
         endpoint(root, endpointJson(pid, currentStartMillis()));
-        assertTrue(DesktopWindowLauncher.alreadyOpen(root, ignored -> WINDOWS_SHELL));
+        assertTrue(DesktopWindowLauncher.alreadyOpen(endpointFile(root), ignored -> WINDOWS_SHELL));
     }
 
     @Test
     void reusedPidDoesNotCountAsAnOpenWindow(@TempDir Path root) throws Exception {
         long pid = ProcessHandle.current().pid();
         Path file = endpoint(root, endpointJson(pid, currentStartMillis()));
-        assertFalse(DesktopWindowLauncher.alreadyOpen(root, ignored -> "C:\\Windows\\System32\\conhost.exe"));
+        assertFalse(
+            DesktopWindowLauncher.alreadyOpen(endpointFile(root), ignored -> "C:\\Windows\\System32\\conhost.exe"));
         assertFalse(Files.exists(file), "PID 被系统复用时残留端点必须失效");
     }
 
@@ -101,7 +104,7 @@ class DesktopWindowLauncherTest {
         assumeTrue(ProcessHandle.current().info().startInstant().isPresent());
         long pid = ProcessHandle.current().pid();
         Path file = endpoint(root, endpointJson(pid, 1L));
-        assertFalse(DesktopWindowLauncher.alreadyOpen(root, ignored -> LINUX_SHELL));
+        assertFalse(DesktopWindowLauncher.alreadyOpen(endpointFile(root), ignored -> LINUX_SHELL));
         assertFalse(Files.exists(file));
     }
 
@@ -109,7 +112,7 @@ class DesktopWindowLauncherTest {
     void incompleteEndpointIsDiscarded(@TempDir Path root) throws Exception {
         long pid = ProcessHandle.current().pid();
         Path file = endpoint(root, "{\"pid\": " + pid + "}");
-        assertFalse(DesktopWindowLauncher.alreadyOpen(root, ignored -> MAC_SHELL));
+        assertFalse(DesktopWindowLauncher.alreadyOpen(endpointFile(root), ignored -> MAC_SHELL));
         assertFalse(Files.exists(file));
     }
 
@@ -128,7 +131,7 @@ class DesktopWindowLauncherTest {
         ConfigurableEnvironment environment = new StandardEnvironment();
         environment.getPropertySources().addFirst(new MapPropertySource("test", Map.of("local.server.port", "10001")));
         DesktopWindowLauncher launcher = new DesktopWindowLauncher(environment,
-            new DesktopShellInstaller(false, (dir, cmd, env, log, timeout) -> 1));
+            new DesktopShellInstaller(false, (dir, cmd, env, log, timeout) -> 1), browserHome(null));
         LaunchResult result = launcher.launch(() -> false);
         assertEquals("unavailable", result.status());
         assertTrue(result.message().contains("http://127.0.0.1:10001"));
@@ -146,9 +149,17 @@ class DesktopWindowLauncherTest {
     }
 
     private static Path endpoint(Path root, String json) throws IOException {
-        Path file = DesktopWindowLauncher.endpointFile(root);
+        Path file = endpointFile(root);
         Files.createDirectories(file.getParent());
         Files.writeString(file, json);
         return file;
+    }
+
+    private static Path endpointFile(Path root) {
+        return browserHome(root.resolve("browser runtime").toString()).desktopEndpoint();
+    }
+
+    private static BrowserHome browserHome(String configured) {
+        return new BrowserHome(new PilotDataDir(null), configured);
     }
 }

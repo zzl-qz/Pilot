@@ -73,7 +73,7 @@ public class DesktopShellInstaller {
      * 桌面壳已经装好返回 {@code null}；否则返回一句话说明（正在后台安装，或为什么装不了）。
      * 后台安装完成后回调 {@code onReady}（用于打开窗口）。
      */
-    public String ensureInstalled(Path root, Runnable onReady) {
+    public String ensureInstalled(Path root, Path browserHome, Runnable onReady) {
         if (Files.isExecutable(DesktopWindowLauncher.electronBinary(root))) {
             return null;
         }
@@ -92,7 +92,7 @@ public class DesktopShellInstaller {
             installing.set(false);
             return "桌面壳尚未安装，也没有找到 npm，无法自动安装。" + MANUAL;
         }
-        Path logFile = logFile(root);
+        Path logFile = logFile(browserHome);
         Thread thread = new Thread(() -> install(root, desktop, npm, logFile, onReady), "pilot-desktop-install");
         thread.setDaemon(true);
         thread.start();
@@ -258,8 +258,8 @@ public class DesktopShellInstaller {
         return isWindows() || Files.isExecutable(candidate);
     }
 
-    private static Path logFile(Path root) {
-        Path file = root.resolve(".pilot").resolve("browser").resolve("desktop-install.log");
+    private static Path logFile(Path browserHome) {
+        Path file = browserHome.resolve("desktop-install.log");
         try {
             Files.createDirectories(file.getParent());
         } catch (IOException e) {
