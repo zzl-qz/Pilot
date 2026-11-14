@@ -1,13 +1,12 @@
 package com.pilot.core.tool;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
+
+import com.pilot.core.util.Sha256;
 
 /**
  * 工具调用幂等账本。
@@ -84,17 +83,7 @@ public interface ToolCallJournal {
 
     /** 工具名 + 规范化参数（键排序、去空白）的 SHA-256，忽略 callId。 */
     static String fingerprint(ToolCall call) {
-        String canonical = call.name() + "\0" + canonical(call.args());
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(canonical.getBytes(StandardCharsets.UTF_8));
-            StringBuilder hex = new StringBuilder(digest.length * 2);
-            for (byte value : digest) {
-                hex.append(String.format("%02x", value));
-            }
-            return hex.toString();
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 不可用", e);
-        }
+        return Sha256.hex(call.name() + "\0" + canonical(call.args()));
     }
 
     private static String canonical(Object value) {

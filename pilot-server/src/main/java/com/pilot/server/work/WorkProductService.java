@@ -8,11 +8,8 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.Comparator;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -28,6 +25,7 @@ import com.pilot.core.loop.Message;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.core.util.Sha256;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.store.AutomationStore;
@@ -131,10 +129,10 @@ public class WorkProductService {
         try {
             byte[] bytes = readBounded(source);
             List<Source> sources = sources(sessionId, urls);
-            String hash = digest(bytes);
+            String hash = Sha256.hex(bytes);
             String identity = mapper.writeValueAsString(List.of(sessionId, Objects.toString(runId, ""),
                 paths.display(source), label, description, hash, sources.stream().map(Source::url).toList()));
-            String id = "art_" + digest(identity.getBytes(StandardCharsets.UTF_8)).substring(0, 32);
+            String id = "art_" + Sha256.hex(identity).substring(0, 32);
             if (store.get(KIND, id).isPresent()) {
                 Product existing = get(sessionId, id);
                 content(existing);
@@ -146,7 +144,7 @@ public class WorkProductService {
             Path target = snapshot(id);
             // 同一内容地址下的孤儿副本可来自上次落库前崩溃；只能复用内容相同的副本。
             if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
-                if (!hash.equals(digest(readBounded(target)))) {
+                if (!hash.equals(Sha256.hex(readBounded(target)))) {
                     throw new IllegalStateException("成果快照发生冲突，未覆盖已有文件");
                 }
             } else {
@@ -168,7 +166,7 @@ public class WorkProductService {
                 throw new IOException("快照不是可读的普通文件");
             }
             byte[] bytes = readBounded(file);
-            if (!product.sha256().equals(digest(bytes))) {
+            if (!product.sha256().equals(Sha256.hex(bytes))) {
                 throw new IllegalStateException("成果快照已变化，不能下载未经核对的内容");
             }
             return bytes;
@@ -260,14 +258,6 @@ public class WorkProductService {
             throw new IllegalArgumentException(label + "不能为空且不能超过 " + max + " 字符");
         }
         return value.strip();
-    }
-
-    static String digest(byte[] bytes) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 不可用", e);
-        }
     }
 
     private byte[] readBounded(Path file) throws IOException {

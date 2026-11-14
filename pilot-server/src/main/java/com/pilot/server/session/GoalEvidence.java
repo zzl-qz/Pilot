@@ -1,9 +1,6 @@
 package com.pilot.server.session;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -14,6 +11,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import com.pilot.core.tool.VerificationCheck;
+import com.pilot.core.util.Sha256;
 
 /** 归并目标执行记录中的命令与验证证据。 */
 final class GoalEvidence {
@@ -129,11 +127,6 @@ final class GoalEvidence {
     }
 
     static String hash(String text) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                .digest(Objects.toString(text, "").getBytes(StandardCharsets.UTF_8)));
-        } catch (Exception e) {
-            throw new IllegalStateException(e);
-        }
+        return Sha256.hex(Objects.toString(text, ""));
     }
 }

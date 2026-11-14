@@ -1,7 +1,6 @@
 package com.pilot.server.workspace;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.FileAlreadyExistsException;
@@ -12,8 +11,6 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -33,6 +30,7 @@ import com.pilot.core.loop.Message;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.tool.CommandChangeTracker;
 import com.pilot.core.tool.SnapshotSink;
+import com.pilot.core.util.Sha256;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.workspace.ChangeService.RunChangeReport;
 
@@ -706,34 +704,11 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
     }
 
     private static String hashIfRegularFile(Path file) throws IOException {
-        if (!Files.isRegularFile(file)) {
-            return null;
-        }
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            try (InputStream input = Files.newInputStream(file)) {
-                byte[] buffer = new byte[8192];
-                int count;
-                while ((count = input.read(buffer)) != -1) {
-                    digest.update(buffer, 0, count);
-                }
-            }
-            return java.util.HexFormat.of().formatHex(digest.digest());
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is unavailable", e);
-        }
+        return Files.isRegularFile(file) ? Sha256.hex(file) : null;
     }
 
     static String hash(byte[] content) {
-        if (content == null) {
-            return null;
-        }
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(content);
-            return java.util.HexFormat.of().formatHex(digest);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is unavailable", e);
-        }
+        return content == null ? null : Sha256.hex(content);
     }
 
     /** 删除最后修改时间早于 {@code cutoff} 的运行快照，返回删掉的运行数。 */

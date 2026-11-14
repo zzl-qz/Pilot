@@ -11,7 +11,6 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
@@ -28,6 +27,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import com.pilot.core.util.Sha256;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.maintenance.DataMaintenance;
 
@@ -326,11 +326,7 @@ public class MobileReceiptStore {
     }
 
     static String digest(byte[] bytes) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
+        return Sha256.hex(bytes);
     }
 
     private void write(Path file, Object value) throws IOException {

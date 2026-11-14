@@ -5,8 +5,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -20,6 +18,7 @@ import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 
 import com.pilot.core.tool.DocumentRenderer;
+import com.pilot.core.util.Sha256;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.store.AutomationStore;
@@ -84,7 +83,7 @@ public class DocumentService {
         String normalized = validateSpec(spec);
         String now = Instant.now().toString();
         Document document = new Document(newId("doc"), sessionId, title(title), normalizeKind(kind), normalized,
-            hash(normalized), 1, createdBy == null ? "human" : createdBy, now, now);
+            Sha256.hex(normalized), 1, createdBy == null ? "human" : createdBy, now, now);
         if (!store.put(KIND, document.id(), 0, json.writeValueAsString(document))) {
             throw new IllegalStateException("文档标识冲突，请重试");
         }
@@ -101,7 +100,7 @@ public class DocumentService {
         Version snapshot = new Version(current.version(), current.spec(), current.specHash(), current.updatedAt(),
             current.createdBy());
         store.put(VERSION_KIND, id + ":" + current.version(), 0, json.writeValueAsString(snapshot));
-        Document next = new Document(id, sessionId, title(title), current.kind(), normalized, hash(normalized),
+        Document next = new Document(id, sessionId, title(title), current.kind(), normalized, Sha256.hex(normalized),
             version + 1, createdBy == null ? "human" : createdBy, current.createdAt(), now);
         if (!store.put(KIND, id, version, json.writeValueAsString(next))) {
             throw new IllegalArgumentException("并发更新冲突，请刷新后再保存");
@@ -171,7 +170,7 @@ public class DocumentService {
                 Path target = directory.resolve(filename);
                 Files.move(temp, target);
                 Artifact artifact = new Artifact(artifactId, id, document.version(), format, filename, bytes.length,
-                    sha256(bytes), verification, Instant.now().toString());
+                    Sha256.hex(bytes), verification, Instant.now().toString());
                 if (!store.put(ARTIFACT_KIND, artifactId, 0, json.writeValueAsString(artifact))) {
                     throw new IllegalStateException("产物标识冲突，请重试");
                 }
@@ -332,19 +331,4 @@ public class DocumentService {
         return prefix + "_" + UUID.randomUUID().toString().replace("-", "");
     }
 
-    private static String hash(String value) {
-        return sha256(value.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static String sha256(byte[] bytes) {
-        try {
-            StringBuilder out = new StringBuilder();
-            for (byte value : MessageDigest.getInstance("SHA-256").digest(bytes)) {
-                out.append(String.format(Locale.ROOT, "%02x", value));
-            }
-            return out.toString();
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
-    }
 }

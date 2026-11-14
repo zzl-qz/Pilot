@@ -9,11 +9,8 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermissions;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -30,6 +27,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import com.pilot.core.util.Sha256;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.maintenance.DataMaintenance;
 import com.pilot.server.store.SqliteStore;
@@ -289,14 +287,7 @@ public class HistoryEditCoordinator {
     }
 
     private static String hash(byte[] bytes) {
-        if (bytes == null) {
-            return null;
-        }
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
-        } catch (NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException(impossible);
-        }
+        return bytes == null ? null : Sha256.hex(bytes);
     }
 
     private void write(Path file, byte[] bytes) {

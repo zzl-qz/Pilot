@@ -1,19 +1,16 @@
 package com.pilot.core.multi;
 
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
+import com.pilot.core.util.Sha256;
 import com.pilot.core.workspace.WorkspacePathIdentity;
 
 /**
@@ -164,15 +161,7 @@ public final class DiffSandbox {
 
     /** 内容指纹：接受变更前用它确认文件没被其他人改过，避免覆盖用户手上的修改。 */
     public static String fingerprint(String text) {
-        if (text == null) {
-            return "";
-        }
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 不可用", e);
-        }
+        return text == null ? "" : Sha256.hex(text);
     }
 
     private static String requireText(String value, String field) {

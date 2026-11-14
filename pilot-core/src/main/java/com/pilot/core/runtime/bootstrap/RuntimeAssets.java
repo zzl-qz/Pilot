@@ -10,10 +10,8 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.Comparator;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Properties;
 import java.util.UUID;
@@ -24,6 +22,8 @@ import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
+
+import com.pilot.core.util.Sha256;
 
 /** 所有下载写入项目私有目录，校验通过后原子发布；不覆盖系统工具链。 */
 public final class RuntimeAssets {
@@ -207,15 +207,7 @@ public final class RuntimeAssets {
     }
 
     public static String digest(Path file) throws Exception {
-        MessageDigest hash = MessageDigest.getInstance("SHA-256");
-        try (InputStream input = Files.newInputStream(file)) {
-            byte[] buffer = new byte[64 * 1024];
-            int size;
-            while ((size = input.read(buffer)) != -1) {
-                hash.update(buffer, 0, size);
-            }
-        }
-        return HexFormat.of().formatHex(hash.digest());
+        return Sha256.hex(file);
     }
 
     static Path safeEntry(Path destination, String name) throws IOException {

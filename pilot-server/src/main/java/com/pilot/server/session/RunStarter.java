@@ -1,15 +1,12 @@
 package com.pilot.server.session;
 
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import com.pilot.core.loop.Attachment;
+import com.pilot.core.util.Sha256;
 
 /**
  * 一次运行的启动器。控制器只依赖这个接口，真正跑模型的是 {@code AgentRunService}。
@@ -223,12 +220,7 @@ public interface RunStarter {
     }
 
     static String queueRevision(List<QueuedMessage> messages) {
-        try {
-            return HexFormat.of().formatHex(
-                MessageDigest.getInstance("SHA-256").digest(messages.toString().getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException(impossible);
-        }
+        return Sha256.hex(messages.toString());
     }
 
     /** 最后一项验收完成并释放编辑槽位后，尝试启动等待中的下一件事。 */

@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.core.util.Sha256;
 import com.pilot.server.session.SkillService;
 import com.pilot.server.store.AutomationStore;
 import com.pilot.server.workspace.WorkspaceToolFactory;
@@ -77,7 +78,7 @@ public class SkillDraftService {
         String installedHash = hash(content);
         String identity = mapper
             .writeValueAsString(List.of(sessionId, Objects.toString(runId, ""), name, baseHash, installedHash, proof));
-        String id = "skill_" + WorkProductService.digest(identity.getBytes(StandardCharsets.UTF_8)).substring(0, 32);
+        String id = "skill_" + Sha256.hex(identity).substring(0, 32);
         if (store.get(KIND, id).isPresent()) {
             return get(sessionId, id);
         }
@@ -277,6 +278,6 @@ public class SkillDraftService {
     }
 
     private static String hash(String content) {
-        return content == null ? "absent" : WorkProductService.digest(content.getBytes(StandardCharsets.UTF_8));
+        return content == null ? "absent" : Sha256.hex(content);
     }
 }

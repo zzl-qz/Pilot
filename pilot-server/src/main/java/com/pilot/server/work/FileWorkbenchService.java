@@ -3,7 +3,6 @@ package com.pilot.server.work;
 import java.awt.Desktop;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -12,13 +11,10 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -34,6 +30,7 @@ import org.springframework.stereotype.Service;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.DocumentRenderer;
 import com.pilot.core.tool.FilePreviews;
+import com.pilot.core.util.Sha256;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.browser.BrowserRuntime;
 import com.pilot.server.config.PilotDataDir;
@@ -141,7 +138,7 @@ public class FileWorkbenchService {
 
     public PreviewInfo preview(String sessionId, String id) throws IOException {
         Path file = resolve(sessionId, id);
-        String sha = sha256(file);
+        String sha = Sha256.hex(file, LinkOption.NOFOLLOW_LINKS);
         Path directory = dataDir.file("file-workbench", sessionId, id, sha, "pages");
         FilePreviews.Result result = FilePreviews.generate(file, directory);
         return new PreviewInfo(id, result.pages(), result.notice());
@@ -149,7 +146,8 @@ public class FileWorkbenchService {
 
     public Download previewPage(String sessionId, String id, int page) throws IOException {
         Path file = resolve(sessionId, id);
-        Path directory = dataDir.file("file-workbench", sessionId, id, sha256(file), "pages");
+        Path directory =
+            dataDir.file("file-workbench", sessionId, id, Sha256.hex(file, LinkOption.NOFOLLOW_LINKS), "pages");
         FilePreviews.Result result = FilePreviews.generate(file, directory);
         if (page < 1 || page > result.pages()) {
             throw new IllegalArgumentException("页码超出范围：1.." + result.pages());
@@ -216,7 +214,7 @@ public class FileWorkbenchService {
             try (output; InputStream input = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
                 input.transferTo(output);
             }
-            Version version = new Version(next, sha256(saved), Instant.now().toString(),
+            Version version = new Version(next, Sha256.hex(saved, LinkOption.NOFOLLOW_LINKS), Instant.now().toString(),
                 label == null || label.isBlank() ? "快照 " + next : label.trim());
             if (!store.put(VERSION_KIND, key(sessionId, id, String.valueOf(next)), 0, write(version))) {
                 throw new IOException("快照版本冲突，请刷新后重试：v" + next);
@@ -336,7 +334,7 @@ public class FileWorkbenchService {
     }
 
     private static FileAsset describe(String sessionId, Path file, String relative, Version latest) throws IOException {
-        String sha = sha256(file);
+        String sha = Sha256.hex(file, LinkOption.NOFOLLOW_LINKS);
         BasicFileAttributes attributes =
             Files.readAttributes(file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
         return new FileAsset(assetId(relative), sessionId, relative, file.getFileName().toString(),
@@ -356,7 +354,7 @@ public class FileWorkbenchService {
     }
 
     private static String assetId(String relative) {
-        return "fil_" + sha256Text(relative).substring(0, 32);
+        return "fil_" + Sha256.hex(relative).substring(0, 32);
     }
 
     private static Optional<String> format(String relative) {
@@ -437,31 +435,6 @@ public class FileWorkbenchService {
             }
         }
         return result;
-    }
-
-    private static String sha256(Path file) throws IOException {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            try (InputStream in = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
-                byte[] buffer = new byte[8192];
-                int read;
-                while ((read = in.read(buffer)) > 0) {
-                    digest.update(buffer, 0, read);
-                }
-            }
-            return HexFormat.of().formatHex(digest.digest());
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
-    }
-
-    private static String sha256Text(String value) {
-        try {
-            return HexFormat.of()
-                .formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
     }
 
     private String write(Object value) throws IOException {
