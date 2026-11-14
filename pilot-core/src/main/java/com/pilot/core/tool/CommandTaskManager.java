@@ -25,7 +25,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -36,6 +35,8 @@ import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.pilot.core.util.WireEnum;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -117,8 +118,9 @@ public final class CommandTaskManager implements AutoCloseable {
                 .sorted(Comparator.comparingInt(String::length).reversed()).toList();
         Path workdir = canonical(builder.directory() == null ? Path.of("") : builder.directory().toPath());
         String id = "cmd_" + UUID.randomUUID();
-        Task task = new Task(id, sessionId, redact(displayCommand, secrets), workdir.toString(), "RUNNING", null, null,
-            Instant.now(), null, background, timeoutMillis / 1000 + (timeoutMillis % 1000 == 0 ? 0 : 1), "");
+        Task task = new Task(id, sessionId, redact(displayCommand, secrets), workdir.toString(),
+            CommandTaskStatus.RUNNING.name(), null, null, Instant.now(), null, background,
+            timeoutMillis / 1000 + (timeoutMillis % 1000 == 0 ? 0 : 1), "");
         task = new Task(task.taskId(), task.sessionId(), task.command(), task.workdir(), task.status(), task.pid(),
             task.exitCode(), task.startedAt(), task.finishedAt(), task.background(), task.timeoutSeconds(),
             task.reason(), changeTracking);
@@ -131,7 +133,7 @@ public final class CommandTaskManager implements AutoCloseable {
             entry.process = builder.start();
             // pid 必须立刻可见：状态查询、进程树停止和所有权判定都依赖它，
             // 不能等子进程发现做完，否则会读到 pid 为空的运行中任务。
-            entry.task = state(entry.task, "RUNNING", pid(entry.process), null, null, "");
+            entry.task = state(entry.task, CommandTaskStatus.RUNNING, pid(entry.process), null, null, "");
             persist(entry);
             // Sample before metadata I/O and again before scheduling, reducing the window for short-lived wrappers.
             // Already detached children cannot be recovered portably; callers should run servers in foreground mode.
@@ -150,7 +152,7 @@ public final class CommandTaskManager implements AutoCloseable {
                 entry.process.descendants().forEach(ProcessHandle::destroyForcibly);
                 entry.process.destroyForcibly();
             }
-            Task failed = state(entry.task, "FAILED", pid(entry.process), null, Instant.now(),
+            Task failed = state(entry.task, CommandTaskStatus.FAILED, pid(entry.process), null, Instant.now(),
                 redact("命令启动失败：" + failure.getMessage(), secrets));
             persist(entry, failed);
             entry.task = failed;
@@ -204,7 +206,7 @@ public final class CommandTaskManager implements AutoCloseable {
             }
             long next = actual + text.codePointCount(0, text.length());
             return new LogChunk(taskId, actual, next, text.toString(), !running(entry.task) && next >= entry.logPoints,
-                "OUTPUT_LIMIT".equals(entry.task.status()));
+                CommandTaskStatus.OUTPUT_LIMIT.is(entry.task.status()));
         }
     }
 
@@ -213,7 +215,7 @@ public final class CommandTaskManager implements AutoCloseable {
         if (entry == null) {
             return null;
         }
-        requestStop(entry, "CANCELLED", "用户停止了命令");
+        requestStop(entry, CommandTaskStatus.CANCELLED, "用户停止了命令");
         return entry.task;
     }
 
@@ -228,7 +230,7 @@ public final class CommandTaskManager implements AutoCloseable {
             throw new UncheckedIOException(e);
         }
         entries.values().stream().filter(entry -> entry.task.sessionId().equals(sessionId))
-            .forEach(entry -> requestStop(entry, "CANCELLED", "会话已关闭"));
+            .forEach(entry -> requestStop(entry, CommandTaskStatus.CANCELLED, "会话已关闭"));
     }
 
     public boolean hasRunningInWorkspace(Path workspace) {
@@ -251,7 +253,7 @@ public final class CommandTaskManager implements AutoCloseable {
                 }
                 if (timeoutMillis > 0 && entry.stopStatus == null
                     && System.nanoTime() - started >= TimeUnit.MILLISECONDS.toNanos(timeoutMillis)) {
-                    requestStop(entry, "TIMED_OUT", "命令超过运行时限，已终止进程树");
+                    requestStop(entry, CommandTaskStatus.TIMED_OUT, "命令超过运行时限，已终止进程树");
                 }
                 if (entry.stopStatus != null) {
                     terminate(entry);
@@ -262,12 +264,13 @@ public final class CommandTaskManager implements AutoCloseable {
             awaitReader(entry);
             int exit = entry.process.exitValue();
             synchronized (entry) {
-                String status = entry.stopStatus != null ? entry.stopStatus : exit == 0 ? "COMPLETED" : "FAILED";
+                CommandTaskStatus status = entry.stopStatus != null ? entry.stopStatus
+                    : exit == 0 ? CommandTaskStatus.COMPLETED : CommandTaskStatus.FAILED;
                 String reason = entry.stopReason != null ? entry.stopReason : exit == 0 ? "" : "命令退出码 " + exit;
                 publish(entry, state(entry.task, status, entry.task.pid(), exit, Instant.now(), reason));
             }
         } catch (InterruptedException e) {
-            requestStop(entry, "INTERRUPTED", "服务停止，命令已终止");
+            requestStop(entry, CommandTaskStatus.INTERRUPTED, "服务停止，命令已终止");
             forceTree(entry);
             awaitReader(entry);
             synchronized (entry) {
@@ -278,7 +281,7 @@ public final class CommandTaskManager implements AutoCloseable {
         } catch (RuntimeException e) {
             forceTree(entry);
             synchronized (entry) {
-                publish(entry, state(entry.task, "FAILED", entry.task.pid(), null, Instant.now(),
+                publish(entry, state(entry.task, CommandTaskStatus.FAILED, entry.task.pid(), null, Instant.now(),
                     redact("命令监控失败：" + e.getMessage(), entry.secrets)));
             }
         }
@@ -302,23 +305,23 @@ public final class CommandTaskManager implements AutoCloseable {
                 inputChars += accepted;
                 append(entry, redactor.accept(decoded.substring(0, Math.max(0, accepted)), false));
                 if (accepted < decoded.length()) {
-                    requestStop(entry, "OUTPUT_LIMIT", "命令输出达到上限 " + outputLimit + " 字节，已终止进程树");
+                    requestStop(entry, CommandTaskStatus.OUTPUT_LIMIT, "命令输出达到上限 " + outputLimit + " 字节，已终止进程树");
                     break;
                 }
             }
-            if (!"OUTPUT_LIMIT".equals(entry.stopStatus)) {
+            if (entry.stopStatus != CommandTaskStatus.OUTPUT_LIMIT) {
                 append(entry, redactor.accept(decoder.decode(new byte[0], 0, true), false));
                 // A cap may cut a secret halfway; discard that withheld suffix instead of exposing a partial credential.
                 append(entry, redactor.accept("", true));
             }
         } catch (IOException e) {
             if (entry.stopStatus == null) {
-                requestStop(entry, "FAILED", "读取命令输出失败");
+                requestStop(entry, CommandTaskStatus.FAILED, "读取命令输出失败");
             }
         } catch (RuntimeException e) {
             log.warn("读取命令输出异常：{}", e.toString());
             if (entry.stopStatus == null) {
-                requestStop(entry, "FAILED", "读取命令输出异常：" + e);
+                requestStop(entry, CommandTaskStatus.FAILED, "读取命令输出异常：" + e);
             }
         }
     }
@@ -348,12 +351,12 @@ public final class CommandTaskManager implements AutoCloseable {
                 entry.logPoints += kept.codePointCount(0, kept.length());
             }
             if (end < output.length()) {
-                requestStop(entry, "OUTPUT_LIMIT", "命令输出达到上限 " + outputLimit + " 字节，已终止进程树");
+                requestStop(entry, CommandTaskStatus.OUTPUT_LIMIT, "命令输出达到上限 " + outputLimit + " 字节，已终止进程树");
             }
         }
     }
 
-    private void requestStop(Entry entry, String status, String reason) {
+    private void requestStop(Entry entry, CommandTaskStatus status, String reason) {
         synchronized (entry) {
             if (!running(entry.task) || entry.stopStatus != null) {
                 return;
@@ -361,7 +364,7 @@ public final class CommandTaskManager implements AutoCloseable {
             entry.stopReason = reason;
             entry.stoppingAt = System.nanoTime();
             entry.stopStatus = status;
-            publish(entry, state(entry.task, "STOPPING", entry.task.pid(), null, null, reason));
+            publish(entry, state(entry.task, CommandTaskStatus.STOPPING, entry.task.pid(), null, null, reason));
         }
     }
 
@@ -420,7 +423,7 @@ public final class CommandTaskManager implements AutoCloseable {
                 return;
             }
             closed = true;
-            entries.values().forEach(entry -> requestStop(entry, "INTERRUPTED", "服务停止，命令已终止"));
+            entries.values().forEach(entry -> requestStop(entry, CommandTaskStatus.INTERRUPTED, "服务停止，命令已终止"));
             workers.shutdown();
         }
         try {
@@ -468,14 +471,13 @@ public final class CommandTaskManager implements AutoCloseable {
         }
         Task task = mapper.readValue(Files.readString(file), Task.class);
         if (task == null || task.startedAt() == null || task.command() == null || task.workdir() == null
-            || task.status() == null || !Set.of("RUNNING", "STOPPING", "COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT",
-                "INTERRUPTED", "OUTPUT_LIMIT").contains(task.status())
-            || !file.equals(metadata(task))) {
+            || WireEnum.parse(CommandTaskStatus.class, task.status()).isEmpty() || !file.equals(metadata(task))) {
             throw new IOException("Invalid task metadata");
         }
         Path.of(task.workdir());
         if (running(task)) {
-            task = state(task, "INTERRUPTED", task.pid(), null, Instant.now(), "服务重启，原进程所有权已失效；未按旧 PID 操作进程");
+            task = state(task, CommandTaskStatus.INTERRUPTED, task.pid(), null, Instant.now(),
+                "服务重启，原进程所有权已失效；未按旧 PID 操作进程");
         }
         Entry entry = new Entry(task, List.of());
         Path logPath = logFile(task);
@@ -569,7 +571,7 @@ public final class CommandTaskManager implements AutoCloseable {
     }
 
     private static boolean running(Task task) {
-        return "RUNNING".equals(task.status()) || "STOPPING".equals(task.status());
+        return CommandTaskStatus.active(task.status());
     }
 
     private static Path canonical(Path path) {
@@ -592,9 +594,10 @@ public final class CommandTaskManager implements AutoCloseable {
         }
     }
 
-    private static Task state(Task previous, String status, Long pid, Integer exit, Instant finished, String reason) {
-        return new Task(previous.taskId(), previous.sessionId(), previous.command(), previous.workdir(), status, pid,
-            exit, previous.startedAt(), finished, previous.background(), previous.timeoutSeconds(), reason,
+    private static Task state(Task previous, CommandTaskStatus status, Long pid, Integer exit, Instant finished,
+        String reason) {
+        return new Task(previous.taskId(), previous.sessionId(), previous.command(), previous.workdir(), status.name(),
+            pid, exit, previous.startedAt(), finished, previous.background(), previous.timeoutSeconds(), reason,
             previous.changeTracking());
     }
 
@@ -617,7 +620,7 @@ public final class CommandTaskManager implements AutoCloseable {
         private final List<String> secrets;
         private final Object logLock = new Object();
         private final Map<Long, OwnedProcess> descendants = new ConcurrentHashMap<>();
-        private volatile String stopStatus;
+        private volatile CommandTaskStatus stopStatus;
         private volatile String stopReason;
         private long stoppingAt;
         private long logBytes;

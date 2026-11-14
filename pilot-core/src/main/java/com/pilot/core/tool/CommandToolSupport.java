@@ -4,6 +4,8 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import com.pilot.core.util.WireEnum;
+
 /** 命令工具共用的状态表示；日志内容不参与判断验证是否通过。 */
 final class CommandToolSupport {
     private static final Pattern TASK_ID = Pattern.compile("(?m)^任务ID: ([A-Za-z0-9_-]+)$");
@@ -13,7 +15,7 @@ final class CommandToolSupport {
     }
 
     static boolean running(CommandTaskManager.Task task) {
-        return task != null && ("RUNNING".equals(task.status()) || "STOPPING".equals(task.status()));
+        return task != null && CommandTaskStatus.active(task.status());
     }
 
     static String render(CommandTaskManager.Task task) {
@@ -25,7 +27,7 @@ final class CommandToolSupport {
             return "ERROR: 当前会话没有该命令任务";
         }
         StringBuilder result = new StringBuilder();
-        if (reportFailure && !running(task) && !"COMPLETED".equals(task.status())) {
+        if (reportFailure && !running(task) && !CommandTaskStatus.COMPLETED.is(task.status())) {
             result.append("ERROR: 命令未成功完成（").append(task.status()).append("）\n");
         }
         result.append("任务ID: ").append(task.taskId()).append('\n').append("状态: ").append(task.status()).append('\n')
@@ -55,7 +57,7 @@ final class CommandToolSupport {
             return null;
         }
         // 查询与渲染之间即使进程刚好结束，返回的 RUNNING 也不算验证已完成。
-        if ("RUNNING".equals(status.group(1)) || "STOPPING".equals(status.group(1))) {
+        if (CommandTaskStatus.active(status.group(1))) {
             return null;
         }
         CommandTaskManager.Task task = manager.get(sessionId, id.group(1));
@@ -66,7 +68,7 @@ final class CommandToolSupport {
         if (result.startsWith("ERROR: 命令已结束，但无法完整确认其工作区变更")) {
             return command + " → CHANGE_TRACKING_INCOMPLETE";
         }
-        if ("COMPLETED".equals(task.status()) || "FAILED".equals(task.status())) {
+        if (WireEnum.in(task.status(), CommandTaskStatus.COMPLETED, CommandTaskStatus.FAILED)) {
             return command + " → exit " + task.exitCode();
         }
         // 超时或取消不是成功验证，即使恰好捕获到退出码 0，也不能满足收尾门。
