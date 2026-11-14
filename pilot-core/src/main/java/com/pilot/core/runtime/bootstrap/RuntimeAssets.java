@@ -286,8 +286,6 @@ public final class RuntimeAssets {
     }
 
     static void deleteTree(Path directory) throws IOException {
-        if (!Files.notExists(directory)) {
-            FileTrees.delete(directory);
-        }
+        FileTrees.deleteIfExists(directory);
     }
 }

@@ -13,7 +13,6 @@ import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -40,6 +39,7 @@ import com.pilot.core.multi.ArtifactManifest;
 import com.pilot.core.multi.ChangeStatus;
 import com.pilot.core.multi.DiffSandbox;
 import com.pilot.core.multi.SandboxChange;
+import com.pilot.core.util.FileTrees;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.config.PilotDataDir;
 
@@ -144,10 +144,8 @@ public class SandboxStore {
         restoredSessions.remove(sessionId);
         Path dir = sessionDir(sessionId);
         if (Files.isDirectory(dir)) {
-            try (var paths = Files.walk(dir)) {
-                for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
-                    Files.deleteIfExists(path);
-                }
+            try {
+                FileTrees.deleteIfExists(dir);
             } catch (IOException e) {
                 throw new UncheckedIOException("清理多 Agent 会话状态失败", e);
             }

@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.pilot.core.util.FileTrees;
 import com.pilot.core.workspace.PathValidator;
 
 /** 物化可见文件与提案；不挂载真实工作区、Git 管理目录或 Pilot 数据目录。 */
@@ -185,21 +186,6 @@ public final class IsolatedWorkspace implements AutoCloseable {
 
     @Override
     public void close() throws IOException {
-        Files.walkFileTree(root, new SimpleFileVisitor<>() {
-            @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                Files.delete(file);
-                return FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult postVisitDirectory(Path dir, IOException error) throws IOException {
-                if (error != null) {
-                    throw error;
-                }
-                Files.delete(dir);
-                return FileVisitResult.CONTINUE;
-            }
-        });
+        FileTrees.delete(root);
     }
 }

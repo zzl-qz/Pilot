@@ -11,7 +11,6 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -425,15 +424,4 @@ public class GitWorktrees {
     private record Exec(int exit, String output) {
     }
 
-    /** 测试清理用，避免临时仓库留下 worktree 登记。 */
-    static void deleteTree(Path path) throws IOException {
-        if (path == null || !Files.exists(path)) {
-            return;
-        }
-        try (Stream<Path> walk = Files.walk(path)) {
-            for (Path file : walk.sorted(Comparator.reverseOrder()).toList()) {
-                Files.deleteIfExists(file);
-            }
-        }
-    }
 }

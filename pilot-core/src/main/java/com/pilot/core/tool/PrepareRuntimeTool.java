@@ -4,13 +4,13 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
+import com.pilot.core.util.FileTrees;
 import com.pilot.core.workspace.PathValidator;
 
 import tools.jackson.databind.ObjectMapper;
@@ -114,7 +114,7 @@ public final class PrepareRuntimeTool implements Tool {
                 if (!Files.isRegularFile(manifest)) {
                     throw new IllegalArgumentException("找不到该环境的准备记录");
                 }
-                deleteTree(bucket.resolve("venv"));
+                FileTrees.deleteIfExists(bucket.resolve("venv"));
                 Files.writeString(bucket.resolve("status.txt"), "CLEANED");
                 return "已清理 " + id + "，保留准备记录与日志";
             }
@@ -156,7 +156,7 @@ public final class PrepareRuntimeTool implements Tool {
         } catch (Exception e) {
             if (bucket != null && !"cleanup".equals(args.get("action"))) {
                 try {
-                    deleteTree(bucket.resolve("venv"));
+                    FileTrees.deleteIfExists(bucket.resolve("venv"));
                     Files.writeString(bucket.resolve("status.txt"), "FAILED: " + e.getMessage());
                 } catch (Exception cleanup) {
                     return "ERROR: " + e.getMessage() + "；清理未成功：" + cleanup.getMessage() + "；检查 " + bucket;
@@ -219,15 +219,4 @@ public final class PrepareRuntimeTool implements Tool {
         }
     }
 
-    private static void deleteTree(Path root) throws IOException {
-        if (!Files.exists(root, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-            return;
-        }
-        // walk 不跟随链接；删除链接本身，不触碰链接目标。
-        try (var files = Files.walk(root)) {
-            for (Path file : files.sorted(Comparator.reverseOrder()).toList()) {
-                Files.delete(file);
-            }
-        }
-    }
 }
