@@ -6,8 +6,13 @@ import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.TimeUnit;
+
+import org.slf4j.Logger;
 
 /**
  * 子进程执行的公共细节：跨平台 shell 包装与输出解码。
@@ -27,6 +32,29 @@ public final class ProcessSupport {
     /** 用平台 shell 执行一条命令行：Windows 走 {@code cmd.exe /c}，其余走 {@code /bin/sh -c}。 */
     public static List<String> shell(String command) {
         return WINDOWS ? List.of("cmd.exe", "/c", command) : List.of("/bin/sh", "-c", command);
+    }
+
+    /** 执行安装命令，将合并后的输出写入日志。 */
+    public static int runLogged(ProcessBuilder builder, Path logFile, Duration timeout, Logger log) {
+        builder.redirectErrorStream(true);
+        builder.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile.toFile()));
+        try {
+            Process process = builder.start();
+            process.getOutputStream().close();
+            if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                process.descendants().forEach(ProcessHandle::destroyForcibly);
+                process.destroyForcibly();
+                log.warn("命令超时：{}", String.join(" ", builder.command()));
+                return -1;
+            }
+            return process.exitValue();
+        } catch (IOException e) {
+            log.warn("命令无法执行：{}（{}）", String.join(" ", builder.command()), e.getMessage());
+            return -1;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return -1;
+        }
     }
 
     /** 优先按 UTF-8 严格解码；出现非法字节时回退 GBK。 */

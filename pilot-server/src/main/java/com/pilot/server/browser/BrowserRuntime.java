@@ -15,7 +15,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,6 +27,7 @@ import com.pilot.core.browser.BrowserBackend;
 import com.pilot.core.browser.BrowserEventListener;
 import com.pilot.core.browser.PlaywrightBackend;
 import com.pilot.core.tool.Availability;
+import com.pilot.core.tool.ProcessSupport;
 import com.pilot.server.config.PilotDataDir;
 
 import tools.jackson.databind.ObjectMapper;
@@ -397,25 +397,7 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         String path = builder.environment().getOrDefault("PATH", "");
         builder.environment().put("PATH", node.getParent() + File.pathSeparator + path);
         builder.environment().putAll(environment);
-        builder.redirectErrorStream(true);
-        builder.redirectOutput(ProcessBuilder.Redirect.appendTo(home.resolve("install.log").toFile()));
-        try {
-            Process process = builder.start();
-            process.getOutputStream().close();
-            if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
-                process.descendants().forEach(ProcessHandle::destroyForcibly);
-                process.destroyForcibly();
-                log.warn("命令超时：{}", String.join(" ", command));
-                return -1;
-            }
-            return process.exitValue();
-        } catch (IOException e) {
-            log.warn("命令无法执行：{}（{}）", String.join(" ", command), e.getMessage());
-            return -1;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return -1;
-        }
+        return ProcessSupport.runLogged(builder, home.resolve("install.log"), timeout, log);
     }
 
     private void writeIfChanged(Path script) throws IOException {

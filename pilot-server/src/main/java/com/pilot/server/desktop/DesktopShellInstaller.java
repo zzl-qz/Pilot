@@ -11,7 +11,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.slf4j.Logger;
@@ -19,6 +18,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+
+import com.pilot.core.tool.ProcessSupport;
 
 /**
  * 桌面壳（{@code pilot-desktop} 的 Electron）没装时自动安装，装好再打开窗口。
@@ -269,28 +270,9 @@ public class DesktopShellInstaller {
 
     private static int run(Path directory, List<String> command, Map<String, String> environment, Path logFile,
         Duration timeout) {
-        try {
-            ProcessBuilder builder = new ProcessBuilder(command);
-            builder.directory(directory.toFile());
-            builder.environment().putAll(environment);
-            builder.redirectErrorStream(true);
-            builder.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile.toFile()));
-            Process process = builder.start();
-            process.getOutputStream().close();
-            if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
-                process.descendants().forEach(ProcessHandle::destroyForcibly);
-                process.destroyForcibly();
-                log.warn("命令超时：{}", String.join(" ", command));
-                return -1;
-            }
-            return process.exitValue();
-        } catch (IOException e) {
-            log.warn("命令无法执行：{}（{}）", String.join(" ", command), e.getMessage());
-            return -1;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return -1;
-        }
+        ProcessBuilder builder = new ProcessBuilder(command).directory(directory.toFile());
+        builder.environment().putAll(environment);
+        return ProcessSupport.runLogged(builder, logFile, timeout, log);
     }
 
     private static boolean isWindows() {
