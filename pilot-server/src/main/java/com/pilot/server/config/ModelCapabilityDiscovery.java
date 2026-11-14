@@ -170,11 +170,12 @@ public final class ModelCapabilityDiscovery implements AutoCloseable {
             return report(Report.UNKNOWN, "", Set.of(), "端点不适合自动验证，当前使用 Pilot 工具", 0, 0, 0);
         }
         JsonNode metadata = metadata(target);
-        boolean messagesFirst = "anthropic-messages".equals(hint) || base.getPath().endsWith("/messages")
+        boolean messagesFirst = ModelProtocols.ANTHROPIC_MESSAGES.equals(hint) || base.getPath().endsWith("/messages")
             || metadata.path("capabilities").has("server_tools");
-        List<String> protocols = messagesFirst ? List.of("anthropic-messages", "openai-responses")
-            : List.of("openai-responses", "anthropic-messages");
-        if (!"auto".equals(hint)) {
+        List<String> protocols =
+            messagesFirst ? List.of(ModelProtocols.ANTHROPIC_MESSAGES, ModelProtocols.OPENAI_RESPONSES)
+                : List.of(ModelProtocols.OPENAI_RESPONSES, ModelProtocols.ANTHROPIC_MESSAGES);
+        if (!ModelProtocols.AUTO.equals(hint)) {
             protocols = List.of(hint);
         }
         int requests = 0;
@@ -183,11 +184,11 @@ public final class ModelCapabilityDiscovery implements AutoCloseable {
         boolean allRejected = true;
         for (String protocol : protocols) {
             Set<NativeCapability> verified = EnumSet.noneOf(NativeCapability.class);
-            List<NativeCapability> candidates =
-                "anthropic-messages".equals(protocol) ? List.of(NativeCapability.WEB_SEARCH, NativeCapability.WEB_FETCH)
-                    : List.of(NativeCapability.WEB_SEARCH);
+            List<NativeCapability> candidates = ModelProtocols.ANTHROPIC_MESSAGES.equals(protocol)
+                ? List.of(NativeCapability.WEB_SEARCH, NativeCapability.WEB_FETCH)
+                : List.of(NativeCapability.WEB_SEARCH);
             for (NativeCapability capability : candidates) {
-                if (capability == NativeCapability.WEB_SEARCH && "anthropic-messages".equals(protocol)
+                if (capability == NativeCapability.WEB_SEARCH && ModelProtocols.ANTHROPIC_MESSAGES.equals(protocol)
                     && metadata.path("capabilities").path("server_tools").path("web_search").has("supported")
                     && !metadata.path("capabilities").path("server_tools").path("web_search").path("supported")
                         .asBoolean()) {
@@ -226,7 +227,7 @@ public final class ModelCapabilityDiscovery implements AutoCloseable {
     }
 
     private JsonNode metadata(ModelSettings.Snapshot target) throws Exception {
-        HttpResponse<byte[]> response = send(target, "models", null);
+        HttpResponse<byte[]> response = send(target, ModelProtocols.MODELS, null);
         JsonNode body = read(response);
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             return mapper.createObjectNode();
@@ -247,7 +248,7 @@ public final class ModelCapabilityDiscovery implements AutoCloseable {
         if (target.hasApiKey()) {
             builder.header("Authorization", "Bearer " + target.apiKey());
             // 仅发送到同一用户配置站点，不跟随重定向、不使用元数据给出的第三方 URL。
-            if ("anthropic-messages".equals(protocol) || "models".equals(protocol)) {
+            if (ModelProtocols.ANTHROPIC_MESSAGES.equals(protocol) || ModelProtocols.MODELS.equals(protocol)) {
                 builder.header("x-api-key", target.apiKey());
             }
         }
@@ -323,9 +324,9 @@ public final class ModelCapabilityDiscovery implements AutoCloseable {
             path = "/v1";
         }
         String tail = switch (protocol) {
-            case "models" -> "models";
-            case "anthropic-messages" -> "messages";
-            case "chat-completions" -> "chat/completions";
+            case ModelProtocols.MODELS -> "models";
+            case ModelProtocols.ANTHROPIC_MESSAGES -> "messages";
+            case ModelProtocols.CHAT_COMPLETIONS -> "chat/completions";
             default -> "responses";
         };
         return URI.create(original.getScheme() + "://" + original.getRawAuthority() + path + "/" + tail
@@ -336,7 +337,7 @@ public final class ModelCapabilityDiscovery implements AutoCloseable {
         String prompt = capability == NativeCapability.WEB_SEARCH
             ? "Use web search once to find the IANA example domains page. Give its title and URL briefly."
             : "Use web fetch once to read https://example.com and give the page title briefly.";
-        if (!"anthropic-messages".equals(protocol)) {
+        if (!ModelProtocols.ANTHROPIC_MESSAGES.equals(protocol)) {
             return Map.of("model", model, "input", prompt, "tools",
                 List.of(Map.of("type", "web_search", "search_context_size", "low")), "tool_choice", "required",
                 "max_output_tokens", 128, "max_tool_calls", 1, "store", false);
@@ -349,7 +350,7 @@ public final class ModelCapabilityDiscovery implements AutoCloseable {
     }
 
     static boolean executed(JsonNode body, String protocol, NativeCapability capability) {
-        if ("openai-responses".equals(protocol)) {
+        if (ModelProtocols.OPENAI_RESPONSES.equals(protocol)) {
             if ("failed".equals(body.path("status").asString()) || body.hasNonNull("error")) {
                 return false;
             }

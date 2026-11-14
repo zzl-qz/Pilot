@@ -40,11 +40,13 @@ public final class ModelRuntimeSettings {
 
         public Options(String provider, String cacheMode, String cacheTtl, Boolean instructionMessages,
             Boolean streamUsage, String compactionMode, ModelPricing pricing) {
-            this(provider, cacheMode, cacheTtl, instructionMessages, streamUsage, compactionMode, "auto", pricing);
+            this(provider, cacheMode, cacheTtl, instructionMessages, streamUsage, compactionMode, ModelProtocols.AUTO,
+                pricing);
         }
 
         public static Options defaults() {
-            return new Options("auto", "auto", "", null, null, "short", "auto", ModelPricing.unknown());
+            return new Options(ModelProfile.AUTO, ModelProfile.AUTO, "", null, null, ModelProfile.COMPACTION_SHORT,
+                ModelProtocols.AUTO, ModelPricing.unknown());
         }
     }
 
@@ -87,7 +89,7 @@ public final class ModelRuntimeSettings {
     }
 
     public ModelCapabilityDiscovery.Report capabilityReport(ModelSettings.Snapshot model) {
-        if (discovery == null || "local".equals(options(model).webSearchMode())) {
+        if (discovery == null || ModelProtocols.LOCAL.equals(options(model).webSearchMode())) {
             return null;
         }
         return discovery.inspect(model, discoveryHint(model));
@@ -95,18 +97,19 @@ public final class ModelRuntimeSettings {
 
     private String discoveryHint(ModelSettings.Snapshot model) {
         String mode = options(model).webSearchMode();
-        if (mode != null && !"auto".equals(mode)) {
+        if (mode != null && !ModelProtocols.AUTO.equals(mode)) {
             return mode;
         }
         String provider = profile(model).provider();
-        if ("anthropic".equals(provider) || URI.create(model.endpoint()).getPath().endsWith("/messages")) {
-            return "anthropic-messages";
+        if (ModelProfile.PROVIDER_ANTHROPIC.equals(provider)
+            || URI.create(model.endpoint()).getPath().endsWith("/messages")) {
+            return ModelProtocols.ANTHROPIC_MESSAGES;
         }
-        return "auto";
+        return ModelProtocols.AUTO;
     }
 
     public boolean rejectNative(ModelSettings.Snapshot model, String protocol, boolean protocolRejected) {
-        if (discovery == null || "local".equals(options(model).webSearchMode())) {
+        if (discovery == null || ModelProtocols.LOCAL.equals(options(model).webSearchMode())) {
             return false;
         }
         discovery.reject(model, discoveryHint(model), protocol, protocolRejected);
@@ -173,26 +176,28 @@ public final class ModelRuntimeSettings {
             return report.capabilities();
         }
         Options options = options(model);
-        String mode = options.webSearchMode() == null ? "auto" : options.webSearchMode();
-        if ("local".equals(mode)) {
+        String mode = options.webSearchMode() == null ? ModelProtocols.AUTO : options.webSearchMode();
+        if (ModelProtocols.LOCAL.equals(mode)) {
             return Set.of();
         }
-        if ("openai-responses".equals(mode)) {
+        if (ModelProtocols.OPENAI_RESPONSES.equals(mode)) {
             return Set.of(NativeCapability.WEB_SEARCH);
         }
-        if ("anthropic-messages".equals(mode)) {
+        if (ModelProtocols.ANTHROPIC_MESSAGES.equals(mode)) {
             return Set.of(NativeCapability.WEB_SEARCH);
         }
         URI endpoint = URI.create(model.endpoint());
         String host = endpoint.getHost() == null ? "" : endpoint.getHost().toLowerCase(Locale.ROOT);
-        if (!"auto".equals(mode)) {
+        if (!ModelProtocols.AUTO.equals(mode)) {
             return Set.of();
         }
-        if ("api.openai.com".equals(host) && profile(model).provider().equals("openai") && model.model() != null
+        if (ModelProfile.HOST_OPENAI.equals(host) && profile(model).provider().equals(ModelProfile.PROVIDER_OPENAI)
+            && model.model() != null
             && model.model().matches("(?:gpt-(?:4o(?:-.*)?|4\\.1(?:-.*)?|5(?:[.-].*)?)|o[134].*)")) {
             return Set.of(NativeCapability.WEB_SEARCH);
         }
-        if ("api.anthropic.com".equals(host) && profile(model).provider().equals("anthropic")
+        if (ModelProfile.HOST_ANTHROPIC.equals(host)
+            && profile(model).provider().equals(ModelProfile.PROVIDER_ANTHROPIC)
             && supportsAnthropicWebSearch(model.model())) {
             return Set.of(NativeCapability.WEB_SEARCH);
         }
@@ -202,18 +207,19 @@ public final class ModelRuntimeSettings {
     public boolean anthropicMessages(ModelSettings.Snapshot model) {
         ModelCapabilityDiscovery.Report report = capabilityReport(model);
         if (report != null && !report.protocol().isBlank()) {
-            return "anthropic-messages".equals(report.protocol());
+            return ModelProtocols.ANTHROPIC_MESSAGES.equals(report.protocol());
         }
         String mode = options(model).webSearchMode();
         // 手动选定的协议优先于端点探测，否则官方 Anthropic 主机名会覆盖用户选择的 Responses 协议
-        if ("openai-responses".equals(mode)) {
+        if (ModelProtocols.OPENAI_RESPONSES.equals(mode)) {
             return false;
         }
-        if ("anthropic-messages".equals(mode)) {
+        if (ModelProtocols.ANTHROPIC_MESSAGES.equals(mode)) {
             return true;
         }
         String host = URI.create(model.endpoint()).getHost();
-        return "anthropic".equals(profile(model).provider()) || "api.anthropic.com".equalsIgnoreCase(host);
+        return ModelProfile.PROVIDER_ANTHROPIC.equals(profile(model).provider())
+            || ModelProfile.HOST_ANTHROPIC.equalsIgnoreCase(host);
     }
 
     private static boolean supportsAnthropicWebSearch(String model) {
@@ -225,20 +231,23 @@ public final class ModelRuntimeSettings {
     }
 
     private ModelProfile profile(ModelSettings.Snapshot model, Options options) {
-        String searchMode = options.webSearchMode() == null ? "auto" : options.webSearchMode();
-        if (!Set.of("auto", "local", "openai-responses", "anthropic-messages").contains(searchMode)) {
+        String searchMode = options.webSearchMode() == null ? ModelProtocols.AUTO : options.webSearchMode();
+        if (!Set.of(ModelProtocols.AUTO, ModelProtocols.LOCAL, ModelProtocols.OPENAI_RESPONSES,
+            ModelProtocols.ANTHROPIC_MESSAGES).contains(searchMode)) {
             throw new IllegalArgumentException("不支持的原生网页搜索策略");
         }
         ModelProfile resolved = ModelProfile.resolve(URI.create(model.endpoint()), model.model(), options.provider(),
             options.cacheMode(), options.cacheTtl(), options.instructionMessages(), options.streamUsage(),
             options.compactionMode(), options.pricing());
         String host = URI.create(model.endpoint()).getHost();
-        boolean anthropicHost = "api.anthropic.com".equalsIgnoreCase(host);
-        boolean openaiHost = "api.openai.com".equalsIgnoreCase(host);
-        if ("openai-responses".equals(searchMode) && ("anthropic".equals(resolved.provider()) || anthropicHost)) {
+        boolean anthropicHost = ModelProfile.HOST_ANTHROPIC.equalsIgnoreCase(host);
+        boolean openaiHost = ModelProfile.HOST_OPENAI.equalsIgnoreCase(host);
+        if (ModelProtocols.OPENAI_RESPONSES.equals(searchMode)
+            && (ModelProfile.PROVIDER_ANTHROPIC.equals(resolved.provider()) || anthropicHost)) {
             throw new IllegalArgumentException("Anthropic 端点不能使用 OpenAI Responses 协议");
         }
-        if ("anthropic-messages".equals(searchMode) && ("openai".equals(resolved.provider()) || openaiHost)) {
+        if (ModelProtocols.ANTHROPIC_MESSAGES.equals(searchMode)
+            && (ModelProfile.PROVIDER_OPENAI.equals(resolved.provider()) || openaiHost)) {
             throw new IllegalArgumentException("OpenAI 端点不能使用 Anthropic Messages 协议");
         }
         return resolved;
@@ -250,11 +259,11 @@ public final class ModelRuntimeSettings {
         ModelCapabilityDiscovery.Report report = capabilityReport(model);
         Set<NativeCapability> capabilities = report == null ? nativeCapabilities(model) : report.capabilities();
         Set<String> names = capabilities.stream().map(Enum::name).collect(Collectors.toUnmodifiableSet());
-        String mode = options.webSearchMode() == null ? "auto" : options.webSearchMode();
+        String mode = options.webSearchMode() == null ? ModelProtocols.AUTO : options.webSearchMode();
         String source = switch (mode) {
-            case "local" -> "已手动指定 Pilot 本地搜索";
-            case "openai-responses" -> "已手动选择 OpenAI Responses 协议";
-            case "anthropic-messages" -> "已手动选择 Anthropic Messages 协议";
+            case ModelProtocols.LOCAL -> "已手动指定 Pilot 本地搜索";
+            case ModelProtocols.OPENAI_RESPONSES -> "已手动选择 OpenAI Responses 协议";
+            case ModelProtocols.ANTHROPIC_MESSAGES -> "已手动选择 Anthropic Messages 协议";
             default ->
                 capabilities.contains(NativeCapability.WEB_SEARCH) ? "按官方端点与模型能力目录自动识别" : "原生能力未知或未确认，回退 Pilot 本地搜索";
         };

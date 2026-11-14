@@ -14,6 +14,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import com.pilot.core.model.ModelClient;
+import com.pilot.core.model.ModelProfile;
 import com.pilot.core.model.ModelRequestScope;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.RequestBudget;
@@ -450,7 +451,7 @@ public final class ContextCompactor {
         int input = estimateTokens(history) + estimateTokens(String.valueOf(definitions));
         var price = profile.pricing();
         // 实验策略仅在有余量且已配置单价显示潜在节省时启用；默认仍走短输入。
-        boolean candidate = "prefix".equals(profile.compactionMode()) && !history.isEmpty()
+        boolean candidate = ModelProfile.COMPACTION_PREFIX.equals(profile.compactionMode()) && !history.isEmpty()
             && contextLimit.getAsInt() > 0 && input + estimateTokens(instruction) + 2_000 < contextLimit.getAsInt()
             && totalChars(history) + instruction.length() + 8_000 < contextLimit.getAsInt() && price.input() != null
             && price.cachedInput() != null && price.cacheWrite() != null

@@ -63,7 +63,8 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         this.model = model;
         this.requestTimeout = requestTimeout;
         this.idleTimeout = requestTimeout;
-        this.profile = ModelProfile.resolve(this.endpoint, model, "auto", "auto", "", null, null, "short", null);
+        this.profile = ModelProfile.resolve(this.endpoint, model, ModelProfile.AUTO, ModelProfile.AUTO, "", null, null,
+            ModelProfile.COMPACTION_SHORT, null);
     }
 
     /**
@@ -71,7 +72,8 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
      * 只应对支持该字段的端点开启；OpenAI 官方端点自动缓存，保持关闭即可。
      */
     public OpenAiCompatibleModelClient withPromptCaching(boolean enabled) {
-        this.promptCaching = enabled && !profile.provider().equals("openai") && !profile.provider().equals("deepseek");
+        this.promptCaching = enabled && !profile.provider().equals(ModelProfile.PROVIDER_OPENAI)
+            && !profile.provider().equals(ModelProfile.PROVIDER_DEEPSEEK);
         return this;
     }
 
@@ -88,9 +90,10 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     @Override
     public ModelProfile profile() {
         ModelProfile p = profile;
-        return new ModelProfile(p.provider(), p.model(), cacheParametersDisabled ? "none" : p.cacheMode(), p.cacheTtl(),
-            p.instructionMessages(), p.streamUsage() && !streamUsageDisabled, p.cacheKey() && !cacheParametersDisabled,
-            p.compactionMode(), p.pricing());
+        return new ModelProfile(p.provider(), p.model(),
+            cacheParametersDisabled ? ModelProfile.CACHE_NONE : p.cacheMode(), p.cacheTtl(), p.instructionMessages(),
+            p.streamUsage() && !streamUsageDisabled, p.cacheKey() && !cacheParametersDisabled, p.compactionMode(),
+            p.pricing());
     }
 
     @Override
@@ -130,7 +133,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             : new ArrayList<>(definitions.stream().map(this::toolPayload).map(LinkedHashMap::new).toList());
         body.put("model", model);
         String outputParameter = System.getProperty("pilot.model.chat-output-parameter",
-            "openai".equals(profile.provider()) ? "max_completion_tokens" : "max_tokens");
+            ModelProfile.PROVIDER_OPENAI.equals(profile.provider()) ? "max_completion_tokens" : "max_tokens");
         if (!java.util.Set.of("max_tokens", "max_completion_tokens").contains(outputParameter)) {
             throw new IllegalArgumentException("Invalid chat output parameter");
         }
@@ -157,8 +160,8 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             body.put("prompt_cache_key",
                 "pilot-" + MeteredModelClient.hash(ModelRequestScope.current().cacheGroup()).substring(0, 32));
         }
-        if (!cacheParametersDisabled
-            && ((promptCaching && !profile.cacheMode().equals("none")) || profile.cacheMode().equals("explicit"))) {
+        if (!cacheParametersDisabled && ((promptCaching && !profile.cacheMode().equals(ModelProfile.CACHE_NONE))
+            || profile.cacheMode().equals(ModelProfile.CACHE_EXPLICIT))) {
             Map<String, Object> marker = new LinkedHashMap<>();
             marker.put("type", "ephemeral");
             if (!profile.cacheTtl().isBlank()) {

@@ -73,14 +73,16 @@ final class DiscoveredModelClient implements ModelClient {
         if (!(failure instanceof NativeToolRejectedException refusal)) {
             return false;
         }
-        String currentProtocol = applied instanceof AnthropicMessagesModelClient ? "anthropic-messages"
-            : applied instanceof OpenAiResponsesModelClient ? "openai-responses" : "chat-completions";
+        String currentProtocol = applied instanceof AnthropicMessagesModelClient ? ModelProtocols.ANTHROPIC_MESSAGES
+            : applied instanceof OpenAiResponsesModelClient ? ModelProtocols.OPENAI_RESPONSES
+                : ModelProtocols.CHAT_COMPLETIONS;
         if (refusal.protocolRejected()) {
             if (!rejectedProtocols.add(currentProtocol)) {
                 return false;
             }
-            fallbackProtocol = List.of("chat-completions", "anthropic-messages", "openai-responses").stream()
-                .filter(protocol -> !rejectedProtocols.contains(protocol)).findFirst().orElse("");
+            fallbackProtocol = List
+                .of(ModelProtocols.CHAT_COMPLETIONS, ModelProtocols.ANTHROPIC_MESSAGES, ModelProtocols.OPENAI_RESPONSES)
+                .stream().filter(protocol -> !rejectedProtocols.contains(protocol)).findFirst().orElse("");
             if (fallbackProtocol.isEmpty()) {
                 return false;
             }
@@ -120,31 +122,32 @@ final class DiscoveredModelClient implements ModelClient {
         String protocol = rejected ? fallbackProtocol : report != null ? report.protocol() : "";
         if (protocol.isBlank()) {
             String mode = runtime.options(target).webSearchMode();
-            if ("openai-responses".equals(mode) || "anthropic-messages".equals(mode)) {
+            if (ModelProtocols.OPENAI_RESPONSES.equals(mode) || ModelProtocols.ANTHROPIC_MESSAGES.equals(mode)) {
                 protocol = mode;
             } else if (URI.create(target.endpoint()).getPath().endsWith("/responses")) {
-                protocol = "openai-responses";
+                protocol = ModelProtocols.OPENAI_RESPONSES;
             }
         }
-        boolean messages =
-            "anthropic-messages".equals(protocol) || (protocol.isBlank() && runtime.anthropicMessages(target));
+        boolean messages = ModelProtocols.ANTHROPIC_MESSAGES.equals(protocol)
+            || (protocol.isBlank() && runtime.anthropicMessages(target));
         String plan = protocol + ":" + messages + ":" + capabilities;
         if (applied != null && plan.equals(appliedPlan)) {
             return applied;
         }
         URI endpoint = URI.create(target.endpoint());
         if (messages) {
-            endpoint = ModelCapabilityDiscovery.endpoint(target.endpoint(), "anthropic-messages");
+            endpoint = ModelCapabilityDiscovery.endpoint(target.endpoint(), ModelProtocols.ANTHROPIC_MESSAGES);
             applied = new AnthropicMessagesModelClient(http, mapper, endpoint, target.apiKey(), target.model(), timeout,
                 profile, capabilities).withIdleTimeout(idleTimeout);
-        } else if (capabilities.contains(NativeCapability.WEB_SEARCH) || "openai-responses".equals(protocol)) {
-            endpoint = ModelCapabilityDiscovery.endpoint(target.endpoint(), "openai-responses");
+        } else if (capabilities.contains(NativeCapability.WEB_SEARCH)
+            || ModelProtocols.OPENAI_RESPONSES.equals(protocol)) {
+            endpoint = ModelCapabilityDiscovery.endpoint(target.endpoint(), ModelProtocols.OPENAI_RESPONSES);
             applied = new OpenAiResponsesModelClient(http, mapper, endpoint, target.apiKey(), target.model(), timeout,
                 profile, capabilities).withIdleTimeout(idleTimeout);
         } else {
             // 原有自定义聊天完整路径必须原样保留；只替换明确的其他协议后缀。
             if (endpoint.getPath().endsWith("/messages") || endpoint.getPath().endsWith("/responses")) {
-                endpoint = ModelCapabilityDiscovery.endpoint(target.endpoint(), "chat-completions");
+                endpoint = ModelCapabilityDiscovery.endpoint(target.endpoint(), ModelProtocols.CHAT_COMPLETIONS);
             }
             applied = new OpenAiCompatibleModelClient(http, mapper, endpoint, target.apiKey(), target.model(), timeout)
                 .withProfile(profile).withPromptCaching(promptCaching).withIdleTimeout(idleTimeout);
