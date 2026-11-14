@@ -23,81 +23,56 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 /**
- * 守住 pilot-server 的包依赖方向，防止包之间重新缠在一起。
+ * 守住包依赖方向，防止包之间重新缠在一起。
  * 做法很朴素：读主代码源文件，看每个包引用了哪些别的包，然后检查几条规则。
  * 不引入额外的架构测试库。
+ * pilot-server 直接编译 pilot-core 的源码（见 pom 的 build-helper），所以 core 的规则也放在这里，扫描逻辑只写一份。
  */
 class PackageDependencyTest {
-    private static final String BASE = "com.pilot.server";
-    /** 匹配 com.pilot.server.某包.某类，包名是小写段，遇到大写开头的类名（或 import 的 *）为止。 */
-    private static final Pattern REFERENCE =
-        Pattern.compile("com\\.pilot\\.server((?:\\.[a-z][a-z0-9_]*)+)\\.(?:[A-Z]\\w*|\\*)");
     private static final Pattern PACKAGE = Pattern.compile("(?m)^package ([\\w.]+);");
     /** 文本块、字符串、字符、注释。这些地方出现的类名不算依赖，统一先去掉。 */
     private static final Pattern NOISE = Pattern
         .compile("(?s)\"\"\".*?\"\"\"|\"(?:\\\\.|[^\"\\\\\\n])*\"|'(?:\\\\.|[^'\\\\\\n])'|/\\*.*?\\*/|//[^\\n]*");
+    /** core 内核里目前互相依赖的 8 个包，是已知的历史欠账，见 coreKernelCycleDoesNotGrow。 */
+    private static final Set<String> CORE_KERNEL =
+        Set.of("event", "hook", "loop", "model", "permission", "prompt", "tool", "trace");
 
-    /** 包 -> 它引用的其它包 -> 是哪些类引用的（报错时用）。包名去掉了 com.pilot.server 前缀。 */
-    private static Map<String, Map<String, Set<String>>> graph;
+    /** 包 -> 它引用的其它包 -> 是哪些类引用的（报错时用）。包名去掉了 com.pilot.server 或 com.pilot.core 前缀。 */
+    private static Map<String, Map<String, Set<String>>> server;
+    private static Map<String, Map<String, Set<String>>> core;
 
     @BeforeAll
     static void scanSources() throws IOException {
-        Path root = Path.of(System.getProperty("basedir", "."), "src", "main", "java", "com", "pilot", "server");
-        assertTrue(Files.isDirectory(root), "找不到主代码目录：" + root.toAbsolutePath());
-        graph = new TreeMap<>();
-        List<Path> files;
-        try (Stream<Path> walk = Files.walk(root)) {
-            files = walk.filter(path -> path.toString().endsWith(".java")).toList();
-        }
-        for (Path file : files) {
-            String source = NOISE.matcher(Files.readString(file, StandardCharsets.UTF_8)).replaceAll(" ");
-            Matcher declared = PACKAGE.matcher(source);
-            assertTrue(declared.find(), "没有 package 声明：" + file);
-            String from = shortName(declared.group(1));
-            graph.computeIfAbsent(from, key -> new TreeMap<>());
-            Matcher reference = REFERENCE.matcher(source);
-            while (reference.find()) {
-                String to = reference.group(1).substring(1);
-                if (!to.equals(from)) {
-                    graph.get(from).computeIfAbsent(to, key -> new TreeSet<>())
-                        .add(file.getFileName().toString().replace(".java", ""));
-                }
-            }
-        }
+        Path module = Path.of(System.getProperty("basedir", "."));
+        server = scan(module.resolve("src").resolve("main").resolve("java"), "com.pilot.server");
+        core = scan(module.resolve("..").resolve("pilot-core").resolve("src").resolve("main").resolve("java"),
+            "com.pilot.core");
     }
 
     @Test
     void packagesHaveNoCycles() {
-        List<String> problems = new ArrayList<>();
-        for (String from : graph.keySet()) {
-            for (String to : graph.get(from).keySet()) {
-                if (from.compareTo(to) < 0 && reaches(to, from)) {
-                    problems.add(
-                        from + " 与 " + to + " 在同一个依赖环里（" + from + " -> " + to + " 来自 " + graph.get(from).get(to) + "）");
-                }
-            }
-        }
-        assertTrue(problems.isEmpty(), "包之间出现循环依赖：\n" + String.join("\n", problems));
+        List<String> problems = cycleEdges(server, Set.of());
+        assertTrue(problems.isEmpty(), "pilot-server 的包之间出现循环依赖：\n" + String.join("\n", problems));
     }
 
     @Test
     void commonDependsOnNoBusinessPackage() {
-        assertOnlyDependsOn("common.data", Set.of());
-        assertOnlyDependsOn("common.web", Set.of());
+        assertOnlyDependsOn(server, "common.data", Set.of());
+        assertOnlyDependsOn(server, "common.web", Set.of());
     }
 
     @Test
     void configAndStoreStayAtTheBottom() {
         // config 只放跨业务的配置项和不依赖业务的基础装配；store 只放 SQLite 与 core 仓储接口的实现。
-        assertOnlyDependsOn("config", Set.of("common.data", "runtime"));
-        assertOnlyDependsOn("store", Set.of("common.data"));
+        assertOnlyDependsOn(server, "config", Set.of("common.data", "runtime"));
+        assertOnlyDependsOn(server, "store", Set.of("common.data"));
     }
 
     @Test
     void nothingDependsOnTheAgentAssembly() {
         // agent 是把模型、工具、任务控制装到一起的最上层，别的业务只通过 run.RunStarter 接口启动运行。
         List<String> problems = new ArrayList<>();
-        graph.forEach((from, targets) -> {
+        server.forEach((from, targets) -> {
             if (targets.containsKey("agent")) {
                 problems.add(from + " 依赖了 agent：" + targets.get("agent"));
             }
@@ -109,11 +84,71 @@ class PackageDependencyTest {
     void layeredPackagesAreGone() {
         // 控制器、仓储跟着业务走，不再按技术分层建包。
         for (String retired : List.of("controller", "http", "stream")) {
-            assertTrue(!graph.containsKey(retired), "不要再建 " + retired + " 包，类请放到所属业务包里");
+            assertTrue(!server.containsKey(retired), "不要再建 " + retired + " 包，类请放到所属业务包里");
         }
     }
 
-    private static void assertOnlyDependsOn(String pkg, Set<String> allowed) {
+    @Test
+    void coreKernelCycleDoesNotGrow() {
+        // 内核 8 个包的互相依赖要拆得动模型消息和工具执行的归属，这次没有动。
+        // 这里只守两件事：别的包不能再被卷进这个环；环外不能出现新的环。
+        List<String> problems = cycleEdges(core, CORE_KERNEL);
+        assertTrue(problems.isEmpty(), "pilot-core 出现了新的循环依赖：\n" + String.join("\n", problems));
+    }
+
+    @Test
+    void coreBottomPackagesDependOnNothing() {
+        // util 是纯工具，workspace 是路径与权限范围的基础判断，都不能反过来依赖上层。
+        assertOnlyDependsOn(core, "util", Set.of());
+        assertOnlyDependsOn(core, "workspace", Set.of());
+    }
+
+    private static Map<String, Map<String, Set<String>>> scan(Path sourceRoot, String base) throws IOException {
+        Path root = sourceRoot;
+        for (String segment : base.split("\\.")) {
+            root = root.resolve(segment);
+        }
+        assertTrue(Files.isDirectory(root), "找不到主代码目录：" + root.toAbsolutePath());
+        // 匹配 base.某包.某类，包名是小写段，遇到大写开头的类名（或 import 的 *）为止。
+        Pattern reference = Pattern.compile(Pattern.quote(base) + "((?:\\.[a-z][a-z0-9_]*)+)\\.(?:[A-Z]\\w*|\\*)");
+        Map<String, Map<String, Set<String>>> graph = new TreeMap<>();
+        List<Path> files;
+        try (Stream<Path> walk = Files.walk(root)) {
+            files = walk.filter(path -> path.toString().endsWith(".java")).toList();
+        }
+        for (Path file : files) {
+            String source = NOISE.matcher(Files.readString(file, StandardCharsets.UTF_8)).replaceAll(" ");
+            Matcher declared = PACKAGE.matcher(source);
+            assertTrue(declared.find(), "没有 package 声明：" + file);
+            String pkg = declared.group(1);
+            String from = pkg.equals(base) ? "" : pkg.substring(base.length() + 1);
+            graph.computeIfAbsent(from, key -> new TreeMap<>());
+            Matcher matcher = reference.matcher(source);
+            while (matcher.find()) {
+                String to = matcher.group(1).substring(1);
+                if (!to.equals(from)) {
+                    graph.get(from).computeIfAbsent(to, key -> new TreeSet<>())
+                        .add(file.getFileName().toString().replace(".java", ""));
+                }
+            }
+        }
+        return graph;
+    }
+
+    /** 找出所有落在环上的依赖。两头都在 tolerated 里的不报，其余每一条都报出是哪些类引起的。 */
+    private static List<String> cycleEdges(Map<String, Map<String, Set<String>>> graph, Set<String> tolerated) {
+        List<String> problems = new ArrayList<>();
+        graph.forEach((from, targets) -> targets.forEach((to, classes) -> {
+            boolean known = tolerated.contains(from) && tolerated.contains(to);
+            if (!known && reaches(graph, to, from)) {
+                problems.add(from + " -> " + to + " 在依赖环上，来自 " + classes);
+            }
+        }));
+        return problems;
+    }
+
+    private static void assertOnlyDependsOn(Map<String, Map<String, Set<String>>> graph, String pkg,
+        Set<String> allowed) {
         assertTrue(graph.containsKey(pkg), "包不存在：" + pkg);
         List<String> problems = new ArrayList<>();
         graph.get(pkg).forEach((to, classes) -> {
@@ -125,7 +160,7 @@ class PackageDependencyTest {
     }
 
     /** 从 start 出发顺着依赖能不能走到 target。 */
-    private static boolean reaches(String start, String target) {
+    private static boolean reaches(Map<String, Map<String, Set<String>>> graph, String start, String target) {
         Set<String> seen = new HashSet<>();
         Deque<String> queue = new ArrayDeque<>();
         queue.add(start);
@@ -139,9 +174,5 @@ class PackageDependencyTest {
             }
         }
         return false;
-    }
-
-    private static String shortName(String pkg) {
-        return pkg.equals(BASE) ? "" : pkg.substring(BASE.length() + 1);
     }
 }
