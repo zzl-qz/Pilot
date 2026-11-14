@@ -81,6 +81,7 @@ public final class MergePrecheck {
     private static String overlapping(Map<String, List<SandboxChange>> owners) {
         List<String> names = new ArrayList<>(owners.keySet());
         List<String> notes = new ArrayList<>();
+        Map<String, List<List<int[]>>> ranges = new LinkedHashMap<>();
         for (int i = 0; i < names.size(); i++) {
             for (int j = i + 1; j < names.size(); j++) {
                 String left = names.get(i);
@@ -92,7 +93,8 @@ public final class MergePrecheck {
                     notes.add(left + " 与 " + right + " 都新建同一文件");
                     continue;
                 }
-                String hit = rangesHit(leftChanges, rightChanges);
+                String hit = rangesHit(ranges.computeIfAbsent(left, key -> oldRanges(leftChanges)),
+                    ranges.computeIfAbsent(right, key -> oldRanges(rightChanges)));
                 if (hit != null) {
                     notes.add(left + " 与 " + right + "：" + hit);
                 }
@@ -105,11 +107,15 @@ public final class MergePrecheck {
         return changes.stream().noneMatch(SandboxChange::existed);
     }
 
-    private static String rangesHit(List<SandboxChange> left, List<SandboxChange> right) {
-        for (SandboxChange one : left) {
-            for (SandboxChange other : right) {
-                for (int[] a : UnifiedDiff.oldRanges(one.diff())) {
-                    for (int[] b : UnifiedDiff.oldRanges(other.diff())) {
+    private static List<List<int[]>> oldRanges(List<SandboxChange> changes) {
+        return changes.stream().map(SandboxChange::diff).map(UnifiedDiff::oldRanges).toList();
+    }
+
+    private static String rangesHit(List<List<int[]>> left, List<List<int[]>> right) {
+        for (List<int[]> one : left) {
+            for (List<int[]> other : right) {
+                for (int[] a : one) {
+                    for (int[] b : other) {
                         if (a[0] <= b[1] && b[0] <= a[1]) {
                             return "改动行区间重叠 " + a[0] + "-" + bounded(a[1]) + " 与 " + b[0] + "-" + bounded(b[1]);
                         }

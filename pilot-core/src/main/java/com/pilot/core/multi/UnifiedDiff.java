@@ -196,6 +196,9 @@ public final class UnifiedDiff {
             return "";
         }
         StringBuilder out = new StringBuilder();
+        int line = 0;
+        int oldStart = 1;
+        int newStart = 1;
         int index = 0;
         while (index < changes.size()) {
             int from = Math.max(0, changes.get(index) - CONTEXT);
@@ -206,30 +209,24 @@ public final class UnifiedDiff {
                 lastChange = changes.get(cursor);
             }
             int to = Math.min(ops.size(), lastChange + CONTEXT + 1);
-            out.append(hunk(ops, from, to));
+            while (line < from) {
+                char type = ops.get(line++).type();
+                oldStart += type == '+' ? 0 : 1;
+                newStart += type == '-' ? 0 : 1;
+            }
+            out.append(hunk(ops, from, to, oldStart, newStart));
             index = cursor + 1;
         }
         return out.toString();
     }
 
-    private static String hunk(List<Op> ops, int from, int to) {
-        int oldStart = 1;
-        int newStart = 1;
-        for (int i = 0; i < from; i++) {
-            char type = ops.get(i).type();
-            if (type != '+') {
-                oldStart++;
-            }
-            if (type != '-') {
-                newStart++;
-            }
-        }
+    private static String hunk(List<Op> ops, int from, int to, int oldStart, int newStart) {
         int oldCount = 0;
         int newCount = 0;
         StringBuilder body = new StringBuilder();
         for (int i = from; i < to; i++) {
             Op op = ops.get(i);
-            body.append(op.type() == ' ' ? ' ' : op.type()).append(op.line()).append('\n');
+            body.append(op.type()).append(op.line()).append('\n');
             if (op.type() != '+') {
                 oldCount++;
             }
@@ -262,7 +259,9 @@ public final class UnifiedDiff {
         }
         List<String> left = before.subList(prefix, before.size() - suffix);
         List<String> right = after.subList(prefix, after.size() - suffix);
-        if ((long)left.size() * right.size() > MAX_CELLS) {
+        if (left.isEmpty() || right.isEmpty()) {
+            appendReplacement(ops, left, right);
+        } else if ((long)left.size() * right.size() > MAX_CELLS) {
             appendLargeDiff(ops, left, right);
         } else {
             ops.addAll(lcsOps(left, right));
@@ -292,6 +291,10 @@ public final class UnifiedDiff {
                 // 大面积改写超过搜索上限，保留整段替换的展示方式。
             }
         }
+        appendReplacement(ops, left, right);
+    }
+
+    private static void appendReplacement(List<Op> ops, List<String> left, List<String> right) {
         left.forEach(line -> ops.add(new Op('-', line)));
         right.forEach(line -> ops.add(new Op('+', line)));
     }

@@ -33,6 +33,12 @@
 
 同一含义的默认值由实际执行校验的模块提供。配置绑定要验证缺省、显式覆盖、非法输入以及已有环境变量名。协议字段、持久化格式和回环访问边界属于兼容性约定。
 
+### 公共能力与依赖
+
+- 文件树清理使用 `FileTrees`，短命令执行使用 `ProcessSupport`。下载、长驻进程与交互式命令各自维护生命周期。
+- `UnifiedDiff` 使用已有 java-diff-utils 处理大型差异，重复行匹配及合并预检的旧行区间由项目测试约束。
+- 前端 SVG 预览使用 DOMPurify 的 SVG profile，保留 XML 格式检查与源码回退。更新依赖时验证普通 SVG、HTML 沙箱和流式 Markdown。 [DOMPurify 项目说明](https://github.com/cure53/DOMPurify)
+
 ## 本地验证
 
 ### 服务端与完整 Maven 验证

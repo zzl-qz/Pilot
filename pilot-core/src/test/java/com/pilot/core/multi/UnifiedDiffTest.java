@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -103,5 +104,20 @@ class UnifiedDiffTest {
         assertArrayEquals(new int[] {3000, 3000}, UnifiedDiff.countChanges(diff));
         assertTrue(diff.contains("-common\n"));
         assertTrue(diff.contains("+common\n"));
+    }
+
+    @Test
+    void separatedHunksKeepTheirLineNumbersAfterEarlierInsertions() {
+        List<String> before = IntStream.rangeClosed(1, 80).mapToObj(i -> "line " + i).toList();
+        var after = new ArrayList<>(before);
+        after.add(0, "added first");
+        after.set(40, "changed line 40");
+        after.remove(80);
+
+        String diff = UnifiedDiff.create("sample.txt", String.join("\n", before), String.join("\n", after));
+        assertTrue(diff.contains("@@ -1,3 +1,4 @@"));
+        assertTrue(diff.contains("@@ -37,7 +38,7 @@"));
+        assertTrue(diff.contains("@@ -77,4 +78,3 @@"));
+        assertArrayEquals(new int[] {2, 2}, UnifiedDiff.countChanges(diff));
     }
 }
