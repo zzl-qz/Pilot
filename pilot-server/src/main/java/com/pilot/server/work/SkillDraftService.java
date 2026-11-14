@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.util.Sha256;
+import com.pilot.core.util.WireEnum;
 import com.pilot.server.session.SkillService;
 import com.pilot.server.store.AutomationStore;
 import com.pilot.server.workspace.WorkspaceToolFactory;
@@ -31,14 +32,38 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 public class SkillDraftService {
     private static final String KIND = "skill-draft";
+    private static final String ID_PREFIX = "skill_";
     private static final int MAX_SKILL_BYTES = 128 * 1024;
+    private static final int MAX_DESCRIPTION_CHARS = 500;
+    private static final int MAX_BODY_CHARS = 32_000;
+    private static final int MAX_EVIDENCE_CHARS = 2_000;
+
+    /** 人工对草稿的操作；wire 是接口里 action 的取值。 */
+    private enum Action {
+        APPROVE("approve"), REVERT("revert"), REJECT("reject");
+
+        private final String wire;
+
+        Action(String wire) {
+            this.wire = wire;
+        }
+
+        static Action parse(String value) {
+            for (Action action : values()) {
+                if (action.wire.equals(value)) {
+                    return action;
+                }
+            }
+            throw new IllegalArgumentException("不支持的草稿操作");
+        }
+    }
 
     public record Draft(String id, String sessionId, String runId, String workspace, String name, String description,
         String body, String evidence, String previousContent, String baseHash, String installedHash, String status,
         long version, Instant createdAt, Instant updatedAt) {
-        Draft transition(String next) {
+        Draft transition(SkillDraftStatus next) {
             return new Draft(id, sessionId, runId, workspace, name, description, body, evidence, previousContent,
-                baseHash, installedHash, next, version + 1, createdAt, Instant.now());
+                baseHash, installedHash, next.name(), version + 1, createdAt, Instant.now());
         }
     }
 
@@ -65,12 +90,12 @@ public class SkillDraftService {
             || name.matches("con|prn|aux|nul|com[1-9]|lpt[1-9]")) {
             throw new IllegalArgumentException("技能名称须为 1–64 位小写字母、数字或连字符，并以字母开头");
         }
-        String detail = WorkProductService.required(description, "适用场景", 500);
+        String detail = WorkProductService.required(description, "适用场景", MAX_DESCRIPTION_CHARS);
         if (detail.contains("\n") || detail.contains("\r")) {
             throw new IllegalArgumentException("适用场景必须写在一行中");
         }
-        String steps = WorkProductService.required(body, "技能步骤", 32_000);
-        String proof = WorkProductService.required(evidence, "经验依据", 2_000);
+        String steps = WorkProductService.required(body, "技能步骤", MAX_BODY_CHARS);
+        String proof = WorkProductService.required(evidence, "经验依据", MAX_EVIDENCE_CHARS);
         String content = content(name, detail, steps);
         Path target = target(workspace, name);
         String previous = read(target);
@@ -78,13 +103,13 @@ public class SkillDraftService {
         String installedHash = hash(content);
         String identity = mapper
             .writeValueAsString(List.of(sessionId, Objects.toString(runId, ""), name, baseHash, installedHash, proof));
-        String id = "skill_" + Sha256.hex(identity).substring(0, 32);
+        String id = ID_PREFIX + Sha256.hex(identity).substring(0, 32);
         if (store.get(KIND, id).isPresent()) {
             return get(sessionId, id);
         }
         Instant now = Instant.now();
         Draft draft = new Draft(id, sessionId, Objects.toString(runId, ""), workspace.toString(), name, detail, steps,
-            proof, previous, baseHash, installedHash, "PENDING", 1, now, now);
+            proof, previous, baseHash, installedHash, SkillDraftStatus.PENDING.name(), 1, now, now);
         if (!store.put(KIND, id, 0, mapper.writeValueAsString(draft))) {
             return get(sessionId, id);
         }
@@ -124,17 +149,15 @@ public class SkillDraftService {
         if (draft.version() != version) {
             throw new IllegalStateException("草稿状态已变化，请刷新后核对");
         }
-        if ("reject".equals(action)) {
-            if (!List.of("PENDING", "CONFLICT").contains(draft.status())) {
+        Action decision = Action.parse(action);
+        if (decision == Action.REJECT) {
+            if (!WireEnum.in(draft.status(), SkillDraftStatus.PENDING, SkillDraftStatus.CONFLICT)) {
                 throw new IllegalStateException("当前草稿不能拒绝");
             }
-            return save(draft, "REJECTED");
+            return save(draft, SkillDraftStatus.REJECTED);
         }
-        if (!List.of("approve", "revert").contains(Objects.toString(action, ""))) {
-            throw new IllegalArgumentException("不支持的草稿操作");
-        }
-        boolean approve = "approve".equals(action);
-        if (!(approve ? "PENDING" : "APPROVED").equals(draft.status())) {
+        boolean approve = decision == Action.APPROVE;
+        if (!(approve ? SkillDraftStatus.PENDING : SkillDraftStatus.APPROVED).is(draft.status())) {
             throw new IllegalStateException(approve ? "只能接受待审核草稿" : "只能撤回已接受的版本");
         }
         Path target = checkedTarget(draft);
@@ -142,34 +165,34 @@ public class SkillDraftService {
         if (!hash(read(target)).equals(expected)) {
             throw new IllegalStateException("技能文件已被其他操作修改，未覆盖；请重新生成草稿或核对当前文件");
         }
-        Draft intent = save(draft, approve ? "APPROVING" : "REVERTING");
+        Draft intent = save(draft, approve ? SkillDraftStatus.APPROVING : SkillDraftStatus.REVERTING);
         replace(Path.of(draft.workspace()), target,
             approve ? content(draft.name(), draft.description(), draft.body()) : draft.previousContent(), expected);
-        return save(intent, approve ? "APPROVED" : "REVERTED");
+        return save(intent, approve ? SkillDraftStatus.APPROVED : SkillDraftStatus.REVERTED);
     }
 
     private Draft recover(Draft draft) {
-        if (!List.of("APPROVING", "REVERTING").contains(draft.status())) {
+        if (!WireEnum.in(draft.status(), SkillDraftStatus.APPROVING, SkillDraftStatus.REVERTING)) {
             return draft;
         }
         String current;
         try {
             current = hash(read(checkedTarget(draft)));
         } catch (IllegalStateException | UncheckedIOException e) {
-            return save(draft, "CONFLICT");
+            return save(draft, SkillDraftStatus.CONFLICT);
         }
-        boolean approving = "APPROVING".equals(draft.status());
+        boolean approving = SkillDraftStatus.APPROVING.is(draft.status());
         if (current.equals(approving ? draft.installedHash() : draft.baseHash())) {
-            return save(draft, approving ? "APPROVED" : "REVERTED");
+            return save(draft, approving ? SkillDraftStatus.APPROVED : SkillDraftStatus.REVERTED);
         }
         if (current.equals(approving ? draft.baseHash() : draft.installedHash())) {
             // 文件操作尚未发生，回到可由用户重试的状态；不会静默重放写操作。
-            return save(draft, approving ? "PENDING" : "APPROVED");
+            return save(draft, approving ? SkillDraftStatus.PENDING : SkillDraftStatus.APPROVED);
         }
-        return save(draft, "CONFLICT");
+        return save(draft, SkillDraftStatus.CONFLICT);
     }
 
-    private Draft save(Draft draft, String status) {
+    private Draft save(Draft draft, SkillDraftStatus status) {
         Draft next = draft.transition(status);
         if (!store.put(KIND, draft.id(), draft.version(), mapper.writeValueAsString(next))) {
             throw new IllegalStateException("草稿状态已变化，请刷新");

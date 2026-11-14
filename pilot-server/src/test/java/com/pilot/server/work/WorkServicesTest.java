@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -101,7 +102,7 @@ class WorkServicesTest {
     @Test
     void disabledSkillsAndConflictingInterruptedWriteDoNotActivateDrafts() throws Exception {
         var draft = propose();
-        var intent = draft.transition("APPROVING");
+        var intent = draft.transition(SkillDraftStatus.APPROVING);
         store.put("skill-draft", draft.id(), draft.version(), mapper.writeValueAsString(intent));
         Files.createDirectories(skillFile().getParent());
         Files.writeString(skillFile(), "外部修改");
@@ -221,6 +222,20 @@ class WorkServicesTest {
     }
 
     @Test
+    void unknownActionsAreRejectedAndStatusNamesStayStable() {
+        var draft = propose();
+        for (String action : new String[] {"APPROVE", "delete", "", null}) {
+            var failure = assertThrows(IllegalArgumentException.class,
+                () -> drafts.decide(session, draft.id(), draft.version(), action));
+            assertEquals("不支持的草稿操作", failure.getMessage());
+        }
+        assertEquals("PENDING", drafts.get(session, draft.id()).status());
+        // 草稿记录和接口里的状态字符串由枚举名决定
+        assertEquals(List.of("PENDING", "APPROVING", "APPROVED", "REVERTING", "REVERTED", "REJECTED", "CONFLICT"),
+            Arrays.stream(SkillDraftStatus.values()).map(Enum::name).toList());
+    }
+
+    @Test
     void staleVersionAndExternalEditsCannotBeOverwritten() throws Exception {
         var draft = propose();
         assertThrows(IllegalStateException.class, () -> drafts.decide(session, draft.id(), 0, "approve"));
@@ -239,7 +254,7 @@ class WorkServicesTest {
     @Test
     void restartReconcilesIntentBeforeAndAfterWriteWithoutReplaying() throws Exception {
         var draft = propose();
-        var intent = draft.transition("APPROVING");
+        var intent = draft.transition(SkillDraftStatus.APPROVING);
         assertTrue(store.put("skill-draft", draft.id(), draft.version(), mapper.writeValueAsString(intent)));
         restart();
         var restored = drafts.get(session, draft.id());
@@ -247,11 +262,11 @@ class WorkServicesTest {
         assertFalse(Files.exists(skillFile()));
         var accepted = drafts.decide(session, draft.id(), restored.version(), "approve");
         // 模拟文件写入成功但最终状态提交前退出：恢复只核对内容，不再次覆盖文件。
-        var unfinished = accepted.transition("APPROVING");
+        var unfinished = accepted.transition(SkillDraftStatus.APPROVING);
         assertTrue(store.put("skill-draft", draft.id(), accepted.version(), mapper.writeValueAsString(unfinished)));
         restart();
         assertEquals("APPROVED", drafts.get(session, draft.id()).status());
-        var reverting = drafts.get(session, draft.id()).transition("REVERTING");
+        var reverting = drafts.get(session, draft.id()).transition(SkillDraftStatus.REVERTING);
         assertTrue(store.put("skill-draft", draft.id(), reverting.version() - 1, mapper.writeValueAsString(reverting)));
         Files.delete(skillFile());
         restart();
