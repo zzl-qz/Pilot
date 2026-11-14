@@ -2,15 +2,13 @@ package com.pilot.core.model;
 
 import java.net.URI;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Consumer;
+import java.util.function.UnaryOperator;
 
 import com.pilot.core.loop.Message;
 import com.pilot.core.tool.ToolCall;
@@ -88,19 +86,10 @@ public final class OpenAiResponsesModelClient implements ModelClient {
 
     @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
-        Map<String, Object> body = requestBody(messages, tools);
-        HttpRequest request = HttpRequest.newBuilder(endpoint).header("Authorization", "Bearer " + apiKey)
-            .header("Content-Type", "application/json").timeout(timeout).POST(HttpRequest.BodyPublishers
-                .ofString(mapper.writeValueAsString(CanonicalJson.ordered(body)), StandardCharsets.UTF_8))
-            .build();
+        var request = NativeModelHttp.jsonPost(endpoint, timeout, mapper, requestBody(messages, tools))
+            .header("Authorization", "Bearer " + apiKey).build();
         var response = NativeModelHttp.send(httpClient, request, idleTimeout);
-        JsonNode root;
-        try {
-            root = mapper.readTree(response.body());
-        } catch (RuntimeException e) {
-            throw new ModelClientException(ModelFailureKind.PERMANENT,
-                "模型响应不是合法 JSON：" + NativeModelHttp.snippet(response.body()), e);
-        }
+        JsonNode root = NativeModelHttp.parseJson(mapper, response.body());
         if (!root.path("output").isArray() && root.path("choices").isArray()) {
             throw new NativeToolRejectedException("端点忽略了 Responses 协议，已返回聊天协议响应", true);
         }
@@ -145,21 +134,11 @@ public final class OpenAiResponsesModelClient implements ModelClient {
                 calls.add(new ToolCall(id, name, arguments(item.get("arguments"))));
             }
         }
-        appendCitations(text, citations);
+        NativeModelCitations.append(text, citations, UnaryOperator.identity());
         ModelUsage usage = ModelUsageParser.parse(root.get("usage"));
         return new ModelResponse(text.toString(), calls, usage,
             reason == ModelResponse.FinishReason.STOP && !calls.isEmpty() ? ModelResponse.FinishReason.TOOL_CALLS
                 : reason);
-    }
-
-    @Override
-    public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> textDelta,
-        Consumer<String> reasoningDelta) {
-        ModelResponse response = chat(messages, tools);
-        if (textDelta != null && response.content() != null && !response.content().isEmpty()) {
-            textDelta.accept(response.content());
-        }
-        return response;
     }
 
     Map<String, Object> requestBody(List<Message> messages, List<ToolDefinition> definitions) {
@@ -243,32 +222,8 @@ public final class OpenAiResponsesModelClient implements ModelClient {
             if (!"url_citation".equals(string(annotation.get("type")))) {
                 continue;
             }
-            String url = string(annotation.get("url"));
-            String title = string(annotation.get("title"));
-            try {
-                URI citation = URI.create(url);
-                String scheme = citation.getScheme();
-                if (citation.getHost() != null && citation.getUserInfo() == null
-                    && ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
-                    citations.putIfAbsent(citation.toASCIIString(), title.isBlank() ? citation.toASCIIString() : title);
-                }
-            } catch (IllegalArgumentException ignored) {
-                // Ignore malformed provider citation metadata.
-            }
+            NativeModelCitations.add(string(annotation.get("url")), string(annotation.get("title")), citations);
         }
-    }
-
-    private static void appendCitations(StringBuilder text, Map<String, String> citations) {
-        if (citations.isEmpty()) {
-            return;
-        }
-        text.append("\n\n来源：\n");
-        citations
-            .forEach((url, title) -> text.append("- [").append(markdown(title)).append("](").append(url).append(")\n"));
-    }
-
-    private static String markdown(String value) {
-        return value.replace("[", "\\[").replace("]", "\\]").replace("\n", " ");
     }
 
     private static String string(JsonNode node) {

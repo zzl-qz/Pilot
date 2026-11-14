@@ -2,15 +2,12 @@ package com.pilot.core.model;
 
 import java.net.URI;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Consumer;
 
 import com.pilot.core.loop.Message;
 import com.pilot.core.tool.ToolCall;
@@ -83,20 +80,10 @@ public final class AnthropicMessagesModelClient implements ModelClient {
 
     @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
-        Map<String, Object> body = requestBody(messages, tools);
-        HttpRequest request =
-            HttpRequest.newBuilder(endpoint).header("x-api-key", apiKey).header("anthropic-version", "2023-06-01")
-                .header("Content-Type", "application/json").timeout(timeout).POST(HttpRequest.BodyPublishers
-                    .ofString(mapper.writeValueAsString(CanonicalJson.ordered(body)), StandardCharsets.UTF_8))
-                .build();
+        var request = NativeModelHttp.jsonPost(endpoint, timeout, mapper, requestBody(messages, tools))
+            .header("x-api-key", apiKey).header("anthropic-version", "2023-06-01").build();
         var response = NativeModelHttp.send(httpClient, request, idleTimeout);
-        JsonNode root;
-        try {
-            root = mapper.readTree(response.body());
-        } catch (RuntimeException e) {
-            throw new ModelClientException(ModelFailureKind.PERMANENT,
-                "模型响应不是合法 JSON：" + NativeModelHttp.snippet(response.body()), e);
-        }
+        JsonNode root = NativeModelHttp.parseJson(mapper, response.body());
         if (!root.path("content").isArray()) {
             throw new ModelClientException(ModelFailureKind.PERMANENT,
                 "模型响应缺少 content：" + NativeModelHttp.snippet(response.body()));
@@ -139,18 +126,8 @@ public final class AnthropicMessagesModelClient implements ModelClient {
                 collectCitations(block, citations);
             }
         }
-        appendCitations(text, citations);
+        NativeModelCitations.append(text, citations, url -> url.replace("(", "%28").replace(")", "%29"));
         return new ModelResponse(text.toString(), calls, ModelUsageParser.parse(root.get("usage")), reason);
-    }
-
-    @Override
-    public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> textDelta,
-        Consumer<String> reasoningDelta) {
-        ModelResponse response = chat(messages, tools);
-        if (textDelta != null && response.content() != null && !response.content().isEmpty()) {
-            textDelta.accept(response.content());
-        }
-        return response;
     }
 
     Map<String, Object> requestBody(List<Message> messages, List<ToolDefinition> definitions) {
@@ -260,29 +237,8 @@ public final class AnthropicMessagesModelClient implements ModelClient {
         if (!value.isObject()) {
             return;
         }
-        String url = string(value.get("url"));
-        String title = string(value.get("title"));
-        try {
-            URI citation = URI.create(url);
-            String scheme = citation.getScheme();
-            if (citation.getHost() != null && citation.getUserInfo() == null
-                && ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
-                citations.putIfAbsent(citation.toASCIIString(), title.isBlank() ? citation.toASCIIString() : title);
-            }
-        } catch (IllegalArgumentException ignored) {
-            // Ignore malformed provider citation metadata.
-        }
+        NativeModelCitations.add(string(value.get("url")), string(value.get("title")), citations);
         value.properties().forEach(entry -> collectCitations(entry.getValue(), citations));
-    }
-
-    private static void appendCitations(StringBuilder text, Map<String, String> citations) {
-        if (citations.isEmpty()) {
-            return;
-        }
-        text.append("\n\n来源：\n");
-        citations.forEach(
-            (url, title) -> text.append("- [").append(title.replace("[", "\\[").replace("]", "\\]").replace("\n", " "))
-                .append("](").append(url.replace("(", "%28").replace(")", "%29")).append(")\n"));
     }
 
     private static String string(JsonNode node) {
