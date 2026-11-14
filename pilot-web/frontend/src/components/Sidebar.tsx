@@ -98,7 +98,7 @@ export function Sidebar() {
           </ul>
           {!groups.length && (
             <p id="session-empty" className="nav-empty">
-              {query ? `没有标题或路径包含「${query}」的对话。` : '还没有项目，点上面「新任务」新建一个。'}
+              {query ? `没有标题或路径包含「${query}」的对话。` : '还没有项目，点「项目」右侧的 + 新建一个。'}
             </p>
           )}
         </section>

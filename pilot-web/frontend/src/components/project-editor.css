@@ -17,8 +17,6 @@
 .project-browser-list > li { display: flex; align-items: center; min-width: 0; }
 .project-browser-list .picker-item { flex: 1; min-width: 0; }
 .project-browser-list .picker-item span { overflow-wrap: anywhere; min-width: 0; }
-.project-folder-manual > summary { cursor: pointer; color: var(--muted); font-size: 12px; padding: 6px 0; }
-.project-folder-manual[open] > summary { margin-bottom: 8px; }
 @media (max-width: 480px) {
   .project-folder-browser { padding: 8px; }
   .project-folder-list > li { gap: 6px; }

@@ -19,7 +19,7 @@ export async function checkWorkbench(page, name, output) {
   await page.evaluate(() => store.getState().setUi({ projectEditor: { id: 'existing-project' } }));
   await page.locator('#project-name').waitFor();
   assert.equal(await page.locator('#project-name').inputValue(), '现有项目');
-  assert.equal(await page.locator('#project-folders').inputValue(), 'D:\\项目 空格\n/workspace/demo');
+  assert.deepEqual(await page.locator('.project-folder-list .project-selected-path').evaluateAll(items => items.map(item => item.textContent)), ['D:\\项目 空格', '/workspace/demo']);
   await page.evaluate(() => { window.savedProjectRename = api.renameProject; api.renameProject = async () => { throw Error('保存项目失败'); }; });
   await page.locator('#project-name').fill('修改后的名称'); await page.locator('#project-save').click();
   assert.equal(await page.locator('#project-name').inputValue(), '修改后的名称');

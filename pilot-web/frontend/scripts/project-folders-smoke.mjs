@@ -84,14 +84,14 @@ async function run(page, name) {
   await page.locator('#project-choose-folders').click();
   await page.getByRole('status').filter({ hasText: '远程服务' }).waitFor();
   await page.getByRole('region', { name: '浏览服务端文件夹', exact: true }).waitFor();
-  await page.getByText('手动填写路径', { exact: true }).click();
-  await page.locator('#project-folders').fill('relative/path');
-  await page.locator('#project-save').click();
-  await page.getByRole('alert').filter({ hasText: '绝对目录路径' }).waitFor();
-  await page.locator('#project-folders').fill('/workspace/手工路径\n/workspace/第二个');
+  // 手动填写路径已移除：只能从系统选择器或服务端目录浏览添加
+  assert.equal(await page.locator('#project-folders').count(), 0, '手动填写路径应该已经移除');
+  assert.equal(await page.getByText('手动填写路径', { exact: true }).count(), 0);
+  await page.getByRole('button', { name: '添加 frontend', exact: true }).click();
+  assert.equal(await page.locator('.project-folder-list li').count(), 4);
   await page.locator('#project-save').click();
   await page.locator('#project-modal').waitFor({ state: 'hidden' });
-  assert.deepEqual(await page.evaluate(() => calls.at(-1).folders), ['/workspace/手工路径', '/workspace/第二个']);
+  assert.deepEqual(await page.evaluate(() => calls.at(-1).folders), ['C:\\项目 空间', '\\\\server\\share', '/workspace/资料', '/workspace/frontend']);
   assert.deepEqual(errors, []);
 }
 
@@ -104,7 +104,7 @@ try {
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
   electron = await _electron.launch({ executablePath: electronBinary(), args: [main], env });
   await run(await electron.firstWindow(), 'electron');
-  console.log('目录多选、去重、取消、失败重试、远程降级、手动路径与三种屏宽通过。Screenshots:', output);
+  console.log('目录多选、去重、取消、失败重试、远程降级与三种屏宽通过。Screenshots:', output);
 } finally {
   await browser?.close(); await electron?.close();
   await new Promise(resolve => server.httpServer.close(resolve));

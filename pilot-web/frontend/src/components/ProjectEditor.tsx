@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@astryxdesign/core/Button';
 import { IconButton } from '@astryxdesign/core/IconButton';
-import { TextArea } from '@astryxdesign/core/TextArea';
 import { TextInput } from '@astryxdesign/core/TextInput';
 import { Modal } from './Modal.jsx';
 import { Icon, FileIcon } from './Icon.jsx';
@@ -51,7 +50,7 @@ export function ProjectEditor() {
       const result = await desktop.selectDirectories();
       if (!mounted.current) return;
       if (!result.ok) {
-        setNotice(result.message || '系统目录选择暂不可用，请浏览服务端文件夹或手动填写路径。');
+        setNotice(result.message || '系统目录选择暂不可用，请改用下方的服务端目录浏览。');
         setBrowserOpen(true);
       } else if (!result.canceled) {
         if (!Array.isArray(result.paths)) throw new Error('目录选择器返回了无效结果，请重试。');
@@ -59,7 +58,7 @@ export function ProjectEditor() {
       }
     } catch (failure) {
       if (!mounted.current) return;
-      setNotice(`${errorInfo(failure).message || '无法打开系统目录选择器。'} 可改用服务端目录浏览或手动填写路径。`);
+      setNotice(`${errorInfo(failure).message || '无法打开系统目录选择器。'} 请改用下方的服务端目录浏览。`);
       setBrowserOpen(true);
     } finally {
       if (mounted.current) setBusy('');
@@ -112,7 +111,7 @@ export function ProjectEditor() {
       <section className="project-folders-section" aria-labelledby="project-folders-label">
         <div className="project-folders-heading">
           <span id="project-folders-label">绑定文件夹 <span className="project-folder-count">{paths.length} / {MAX_PROJECT_FOLDERS}</span></span>
-          <Button id="project-choose-folders" label={busy === 'pick' ? '正在选择…' : '选择文件夹'}
+          <Button id="project-choose-folders" label={busy === 'pick' ? '正在选择…' : '添加文件夹'}
             isDisabled={Boolean(busy)} onClick={chooseFolders} />
         </div>
         <p className="project-folder-help">可绑定多个目录，对话按工作区路径归组到项目。</p>
@@ -123,15 +122,10 @@ export function ProjectEditor() {
             <IconButton label={`移除 ${path}`} icon={<Icon name="close" />} variant="ghost" isDisabled={Boolean(busy)}
               onClick={() => setFolders(paths.filter(item => item !== path).join('\n'))} />
           </li>)}
-        </ul> : <p className="project-no-folders">尚未选择文件夹。点击「选择文件夹」开始添加。</p>}
+        </ul> : <p className="project-no-folders">尚未添加文件夹，点「添加文件夹」选一个或多个目录。</p>}
         {notice && <p className="pilot-inline-status" role="status">{notice}</p>}
         {browserOpen && <ProjectDirectoryBrowser disabled={Boolean(busy)} selected={paths} onAdd={addFolders}
           onClose={() => setBrowserOpen(false)} />}
-        <details className="project-folder-manual">
-          <summary>手动填写路径</summary>
-          <TextArea id="project-folders" label="文件夹绝对路径" description="每行一个路径，必须存在于 Pilot 服务所在的电脑。"
-            value={folders} onChange={setFolders} rows={3} width="100%" isDisabled={Boolean(busy)} hasSpellCheck={false} />
-        </details>
       </section>
       {error && <p className="pilot-inline-status" role="alert">{error}</p>}
 
