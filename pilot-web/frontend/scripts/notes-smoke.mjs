@@ -127,8 +127,42 @@ async function run(page) {
   await chip.click();
   await panel.waitFor();
   assert.deepEqual(await page.locator('#notes-menu .note-content').allInnerTexts(), ['另一个会话的想法']);
+
+  // 8. 还没开始任务也能先记想法：先存本机，切走再回来仍在，发出第一条消息前一直可用
+  await page.evaluate(() => store.getState().startNewSession());
+  await chip.click();
+  await panel.waitFor();
+  await page.getByText('还没开始任务', { exact: false }).waitFor();
+  assert.equal(await chip.isDisabled(), false, '没有会话时也要能记录想法');
+  await page.locator('#notes-input').fill('先规划再动手');
+  await page.locator('#notes-save').click();
+  await page.waitForFunction(() => document.querySelectorAll('#notes-menu .note-row').length === 1);
+  assert.equal(await page.locator('#notes-menu .note-content').innerText(), '先规划再动手');
+  assert.equal(await page.evaluate(() => Boolean(localStorage.getItem('pilot.notes.draft'))), true);
+
+  await page.evaluate(() => store.setState({ sessionId: 'test-a' }));
+  await page.evaluate(() => store.getState().loadNotes());
+  await page.waitForFunction(() => store.getState().notes.length === 2);
+  await page.evaluate(() => store.getState().startNewSession());
+  await page.waitForFunction(() => store.getState().notes.length === 1 && store.getState().notes[0].content === '先规划再动手');
+  await chip.click();
+  await panel.waitFor();
+  assert.equal(await page.locator('#notes-menu .note-content').innerText(), '先规划再动手');
+
+  const draftRow = page.locator('#notes-menu .note-row').first();
+  await draftRow.hover();
+  await draftRow.getByRole('button', { name: '编辑想法', exact: true }).click();
+  await page.locator('#notes-menu textarea[aria-label="编辑想法"]').fill('先规划再动手（改）');
+  await page.getByRole('button', { name: '保存修改', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('#notes-menu .note-content')?.textContent === '先规划再动手（改）');
+  assert.match(await page.evaluate(() => localStorage.getItem('pilot.notes.draft')), /先规划再动手（改）/);
+  await draftRow.hover();
+  await draftRow.getByRole('button', { name: '删除想法', exact: true }).click();
+  await page.waitForFunction(() => document.querySelectorAll('#notes-menu .note-row').length === 0);
+  assert.equal(await page.evaluate(() => localStorage.getItem('pilot.notes.draft')), null);
+
   assert.deepEqual(errors, []);
-  console.log('想法：新建/回填/追加/编辑/删除/失败提示/刷新恢复/会话隔离与三种屏宽通过。Screenshots:', output);
+  console.log('想法：新建/回填/追加/编辑/删除/失败提示/刷新恢复/会话隔离/规划期草稿与三种屏宽通过。Screenshots:', output);
 }
 
 try {

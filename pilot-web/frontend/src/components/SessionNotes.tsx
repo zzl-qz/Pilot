@@ -29,7 +29,7 @@ export function SessionNotes({ onClose }: { onClose: () => void }) {
 
   useEffect(() => { inputRef.current?.focus({ preventScroll: true }); }, []);
   useEffect(() => {
-    if (sessionId && notesState === 'idle') void useStore.getState().loadNotes();
+    if (notesState === 'idle') void useStore.getState().loadNotes();
   }, [sessionId, notesState]);
   useEffect(() => { if (editing) editRef.current?.focus({ preventScroll: true }); }, [editing]);
 
@@ -83,6 +83,7 @@ export function SessionNotes({ onClose }: { onClose: () => void }) {
       <span className="notes-count" aria-label={`${notes.length} 条想法`}>{notes.length}</span>
       <IconButton className="notes-close" label="关闭想法" icon={<Icon name="close" />} variant="ghost" onClick={onClose} />
     </header>
+    {!sessionId && <p className="notes-draft-hint">还没开始任务：想法先存在本机，发出第一条消息后自动并入当前会话。</p>}
     <div className="notes-form">
       <textarea id="notes-input" ref={inputRef} aria-label="新想法" rows={3} maxLength={NOTE_LIMIT}
         placeholder="记下这一刻的想法，稍后可带回输入框…" value={draft}

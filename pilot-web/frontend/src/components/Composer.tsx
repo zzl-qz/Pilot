@@ -583,11 +583,11 @@ export function Composer() {
                 icon={<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.2 7.4 8.1 12.5a3.1 3.1 0 0 1-4.4-4.4l5.3-5.3a2.1 2.1 0 0 1 3 3L6.9 11a1.1 1.1 0 0 1-1.6-1.6l4.8-4.8" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>} />
             </span>
             <div className="perm-picker composer-notes-picker">
-              <span title={sessionId ? '想法：记下暂时不发送的内容，需要时点一下带回输入框' : '发送第一条消息后就能记录想法'}>
+              <span title="想法：可以先记下计划或待办，需要时点一下带回输入框">
                 <Button id="notes-chip" className="composer-choice" size="sm" variant="ghost"
                   label={noteCount > 0 ? `想法 ${noteCount}` : '想法'} icon={<Icon name="note" />}
                   aria-haspopup="dialog" aria-expanded={notesOpen} aria-controls={notesOpen ? 'notes-menu' : undefined}
-                  isDisabled={!sessionId} onClick={() => toggleToolbarPanel('notes')} />
+                  onClick={() => toggleToolbarPanel('notes')} />
               </span>
               {notesOpen && <SessionNotes onClose={() => {
                 setToolbarPanel(null);
