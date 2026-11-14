@@ -1,8 +1,10 @@
 package com.pilot.core.mcp;
 
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -117,9 +119,73 @@ public final class McpManager implements AutoCloseable {
         return trustStore;
     }
 
+    /**
+     * 服务器是否定义在用户级配置（数据目录 mcp.json）中。同名时工作区会覆盖用户级，
+     * 但定义本身在哪儿是这个判断；设置页签的「来源」徽标与写保护都依赖它。
+     */
+    public boolean definedInUserConfig(String server) {
+        return readUserConfig().path("mcpServers").has(server);
+    }
+
+    /**
+     * 用户级配置的整体树（只读快照）：没有文件或解析失败时返回空对象——
+     * 让上层在损坏时仍能展示配置不可用，而不是抛错或被悄悄覆盖。
+     */
+    public JsonNode readUserConfig() {
+        if (userConfig == null || !Files.isRegularFile(userConfig)) {
+            return mapper.createObjectNode();
+        }
+        try {
+            return McpJson.readConfig(userConfig);
+        } catch (IOException | RuntimeException e) {
+            return mapper.createObjectNode();
+        }
+    }
+
+    /** 写回用户级配置：先落在临时文件再原子替换，避免读者看到半截 JSON。 */
+    public void saveUserConfig(JsonNode root) throws IOException {
+        Objects.requireNonNull(root, "root must not be null");
+        if (userConfig == null) {
+            throw new IOException("没有配置用户级 mcp.json 的路径");
+        }
+        Path absolute = userConfig.toAbsolutePath();
+        if (absolute.getParent() != null) {
+            Files.createDirectories(absolute.getParent());
+        }
+        Path tmp = absolute.resolveSibling(absolute.getFileName() + ".tmp");
+        Files.writeString(tmp, mapper.writeValueAsString(root));
+        try {
+            Files.move(tmp, absolute, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(tmp, absolute, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
     /** 上次启动时检测到的工具定义漂移说明；无漂移或未信任时为 {@code null}。 */
     public String trustNote(Path workspace, String server) {
         return notes.get(key(workspace, server));
+    }
+
+    /**
+     * 信任状态四态（供设置页签与能力面板展示，语义对应 McpTrustPolicy）：
+     * UNTRUSTED 无记录；TRUSTED_UNPINNED 已批准当前命令但工具未钉住（下次启动钉）；
+     * TRUSTED 已批准且已钉住工具定义；STALE 有记录但当前命令与批准时不一致。
+     */
+    public String trustState(Path workspace, String server) {
+        if (trustStore == null) {
+            return "UNTRUSTED";
+        }
+        McpTrustStore.ServerTrust record = trustStore.record(workspace, server).orElse(null);
+        if (record == null) {
+            return "UNTRUSTED";
+        }
+        McpServerConfig config = servers(workspace).get(server);
+        if (config == null || !config.usable()) {
+            return "UNTRUSTED";
+        }
+        return record.configHash().equals(McpTrustStore.hash(config))
+            ? (record.tools().isEmpty() ? "TRUSTED_UNPINNED" : "TRUSTED")
+            : "STALE";
     }
 
     /**

@@ -75,8 +75,7 @@ class McpTrustControllerTest {
 
         var record = manager.trustStore().record(workspace, "fake").orElseThrow();
         assertEquals(McpTrustStore.hash(manager.servers(workspace).get("fake")), record.configHash());
-        assertEquals("TRUSTED_UNPINNED", McpTrustController.trustState(manager, workspace,
-            manager.servers(workspace).get("fake")));
+        assertEquals("TRUSTED_UNPINNED", manager.trustState(workspace, "fake"));
     }
 
     @Test

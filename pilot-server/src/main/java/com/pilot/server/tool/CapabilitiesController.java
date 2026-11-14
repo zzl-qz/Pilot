@@ -102,7 +102,9 @@ public class CapabilitiesController {
             List<McpToolInfo> known = manager.knownTools(workspace, config.name());
             result.add(new McpServerPayload(config.name(), commandLine(config), config.usable(), running,
                 manager.failure(workspace, config.name()), config.unsupported(),
-                known.stream().map(McpToolInfo::name).toList()));
+                known.stream().map(McpToolInfo::name).toList(),
+                manager.definedInUserConfig(config.name()) ? "user" : "workspace",
+                manager.trustState(workspace, config.name())));
         }
         return List.copyOf(result);
     }
@@ -155,9 +157,13 @@ public class CapabilitiesController {
     public record ToolPayload(String name, String description, boolean readOnly, boolean available, String reason) {
     }
 
-    /** @param tools 已罗列的工具名；服务器没启动时为空（不会为了看清单而拉起进程） */
+    /**
+     * @param tools       已罗列的工具名；服务器没启动时为空（不会为了看清单而拉起进程）
+     * @param source      user（用户级 mcp.json）或 workspace（工作区 .mcp.json，同名时覆盖用户级）
+     * @param trustState  UNTRUSTED / TRUSTED_UNPINNED / TRUSTED / STALE，见 McpTrustController
+     */
     public record McpServerPayload(String name, String command, boolean usable, boolean running, String failure,
-        String unsupported, List<String> tools) {
+        String unsupported, List<String> tools, String source, String trustState) {
     }
 
     public record CapabilitiesResponse(String workspace, String model, String permissionMode, List<ToolPayload> tools,

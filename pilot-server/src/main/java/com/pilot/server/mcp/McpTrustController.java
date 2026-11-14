@@ -21,7 +21,6 @@ import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.common.web.SessionLookup;
 import com.pilot.server.config.AgentProperties;
-import com.pilot.server.tool.CapabilitiesController;
 
 import lombok.RequiredArgsConstructor;
 
@@ -132,23 +131,9 @@ public class McpTrustController {
         return config;
     }
 
-    public static String trustState(McpManager manager, Path workspace, McpServerConfig config) {
-        McpTrustStore store = manager.trustStore();
-        if (store == null) {
-            return "UNTRUSTED";
-        }
-        McpTrustStore.ServerTrust record = store.record(workspace, config.name()).orElse(null);
-        if (record == null) {
-            return "UNTRUSTED";
-        }
-        return record.configHash().equals(McpTrustStore.hash(config))
-            ? (record.tools().isEmpty() ? "TRUSTED_UNPINNED" : "TRUSTED")
-            : "STALE";
-    }
-
     private static TrustedServer trustedServer(McpManager manager, Path workspace, McpServerConfig config) {
-        return new TrustedServer(config.name(), trustState(manager, workspace, config), manager.trustNote(workspace,
-            config.name()));
+        return new TrustedServer(config.name(), manager.trustState(workspace, config.name()),
+            manager.trustNote(workspace, config.name()));
     }
 
     public record TrustRequest(String action, String server, String tool) {
