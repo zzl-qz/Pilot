@@ -3,6 +3,7 @@ package com.pilot.core.runtime.bootstrap;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -48,6 +49,41 @@ class RuntimeAssetsTest {
     private RuntimeAssets.Asset asset(URI uri, byte[] content) throws Exception {
         return new RuntimeAssets.Asset("fixture", uri,
             HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content)), "managed-fixture");
+    }
+
+    @Test
+    void nodeMirrorsUseTheSamePinnedArtifactAcrossSupportedPlatforms() throws Exception {
+        var assets = new RuntimeAssets(directory, RuntimeAssets.manifest(directory), false, ignored -> {
+        });
+        for (String platform : new String[] {"windows.x64", "windows.aarch64", "mac.x64", "mac.aarch64", "linux.x64",
+            "linux.aarch64"}) {
+            var asset = assets.asset("node." + platform);
+            assertEquals("https", asset.fallback().getScheme());
+            assertEquals("npmmirror.com", asset.fallback().getHost());
+            assertTrue(asset.fallback().getPath().endsWith(asset.uri().getPath().substring("/dist".length())));
+        }
+    }
+
+    @Test
+    void fallsBackOnDownloadFailureAndStillChecksThePinnedHash() throws Exception {
+        byte[] bytes = zip("tool/bin/node", "verified archive fixture");
+        var primaryRequests = new AtomicInteger();
+        var fallbackRequests = new AtomicInteger();
+        var primary = server("unverified bytes".getBytes(StandardCharsets.UTF_8), primaryRequests);
+        var fallback = server(bytes, fallbackRequests);
+        try {
+            var original = asset(uri(primary), bytes);
+            var withFallback = new RuntimeAssets.Asset(original.name(), original.uri(), original.sha256(),
+                original.home(), uri(fallback));
+            Path home = assets(true).install(withFallback);
+            assertEquals(1, primaryRequests.get());
+            assertEquals(1, fallbackRequests.get());
+            assertTrue(RuntimeAssets.verified(home, withFallback));
+            assertEquals(home, assets(false).install(withFallback));
+        } finally {
+            primary.stop(0);
+            fallback.stop(0);
+        }
     }
 
     @Test

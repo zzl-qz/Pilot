@@ -27,7 +27,11 @@ import com.pilot.core.util.Sha256;
 
 /** 所有下载写入项目私有目录，校验通过后原子发布；不覆盖系统工具链。 */
 public final class RuntimeAssets {
-    public record Asset(String name, URI uri, String sha256, String home) {
+    public record Asset(String name, URI uri, String sha256, String home, URI fallback) {
+        public Asset(String name, URI uri, String sha256, String home) {
+            this(name, uri, sha256, home, null);
+        }
+
         public Asset {
             if (!sha256.matches("[a-f0-9]{64}") || !home.matches("[A-Za-z0-9._-]+")) {
                 throw new IllegalArgumentException("运行环境清单无效");
@@ -37,6 +41,7 @@ public final class RuntimeAssets {
 
     private static final long MAX_DOWNLOAD = 512L * 1024 * 1024;
     private static final long MAX_UNPACKED = 2L * 1024 * 1024 * 1024;
+    private static final URI NODE_DISTRIBUTION = URI.create("https://nodejs.org/dist/");
     private final Path root;
     private final Properties manifest;
     private final boolean network;
@@ -80,8 +85,13 @@ public final class RuntimeAssets {
         if (url == null) {
             throw new IllegalStateException("此系统架构暂没有经过验证的 " + name + " 自动安装包");
         }
-        return new Asset(name, URI.create(url), manifest.getProperty(name + ".sha256", ""),
-            manifest.getProperty(name + ".home", ""));
+        URI uri = URI.create(url);
+        URI relative = NODE_DISTRIBUTION.relativize(uri);
+        String fallbackBase = manifest.getProperty("node.fallback.base");
+        URI fallback = name.startsWith("node.") && fallbackBase != null && !relative.isAbsolute()
+            ? URI.create(fallbackBase).resolve(relative) : null;
+        return new Asset(name, uri, manifest.getProperty(name + ".sha256", ""),
+            manifest.getProperty(name + ".home", ""), fallback);
     }
 
     public Path install(Asset asset) throws Exception {
@@ -97,8 +107,7 @@ public final class RuntimeAssets {
 
     private Path installUnlocked(Asset asset, boolean replaceInvalid) throws Exception {
         Path destination = root.resolve(asset.home());
-        Path marker = destination.resolve(".pilot-verified");
-        if (!replaceInvalid && Files.isRegularFile(marker) && Files.readString(marker).equals(asset.sha256())) {
+        if (!replaceInvalid && verified(destination, asset)) {
             return destination;
         }
         Files.createDirectories(root);
@@ -141,6 +150,11 @@ public final class RuntimeAssets {
         }
     }
 
+    public static boolean verified(Path directory, Asset asset) throws IOException {
+        Path marker = directory.resolve(".pilot-verified");
+        return Files.isRegularFile(marker) && Files.readString(marker).equals(asset.sha256());
+    }
+
     public Path download(Asset asset) throws Exception {
         Files.createDirectories(root);
         Path cached = root.resolve(asset.sha256() + ".archive");
@@ -150,17 +164,34 @@ public final class RuntimeAssets {
         if (!network) {
             throw new IOException("离线模式缺少 " + asset.name() + "，请联网补齐或预先放入已校验的离线缓存");
         }
-        if (!allowed(asset.uri())) {
-            throw new IOException("运行环境下载必须使用 HTTPS");
-        }
         if (Files.getFileStore(root).getUsableSpace() < 1024L * 1024 * 1024) {
             throw new IOException("运行环境缓存目录的剩余空间不足 1 GB");
+        }
+        try {
+            return downloadFrom(asset, asset.uri(), cached);
+        } catch (IOException first) {
+            if (asset.fallback() == null) {
+                throw first;
+            }
+            progress.accept("首选下载源未完成 " + asset.name() + "，正在使用备用源");
+            try {
+                return downloadFrom(asset, asset.fallback(), cached);
+            } catch (IOException fallbackFailure) {
+                fallbackFailure.addSuppressed(first);
+                throw fallbackFailure;
+            }
+        }
+    }
+
+    private Path downloadFrom(Asset asset, URI uri, Path cached) throws Exception {
+        if (!allowed(uri)) {
+            throw new IOException("运行环境下载必须使用 HTTPS");
         }
         Path partial = Files.createTempFile(root, ".download-", ".part");
         progress.accept("正在下载并校验 " + asset.name() + "，首次准备可能需要几分钟");
         try {
             HttpClient client = http == null ? BootstrapHttp.client(System.getenv()) : http;
-            var response = client.send(HttpRequest.newBuilder(asset.uri()).timeout(downloadTimeout).GET().build(),
+            var response = client.send(HttpRequest.newBuilder(uri).timeout(downloadTimeout).GET().build(),
                 HttpResponse.BodyHandlers.ofInputStream());
             try (InputStream input = response.body(); var output = Files.newOutputStream(partial)) {
                 if (response.statusCode() != 200 || !allowed(response.uri())) {

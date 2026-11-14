@@ -17,16 +17,19 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
 
+import com.pilot.core.runtime.bootstrap.BootstrapPlatform;
+import com.pilot.core.runtime.bootstrap.RuntimeAssets;
+import com.pilot.core.runtime.bootstrap.SourceEnvironment;
+
 /**
  * 给技能脚本准备 Python 3.12 和 Node 22。
- * 放在仓库的 .pilot/runtime 里，run_command 会优先用这里的 python3 / node / npm。
+ * Python 继续使用 .pilot/runtime，Node 新安装共用源码启动器的校验缓存。
  * 不进 git，打包 exe 时把这个目录一起拷走即可。
  */
 @Component
 public class BundledRuntime implements SmartLifecycle {
     private static final Logger log = LoggerFactory.getLogger(BundledRuntime.class);
     static final String BIN_PROPERTY = "pilot.runtime.bin";
-    private static final String NODE_VERSION = "22.23.4";
     private static final String PYTHON_RELEASE = "20261026";
     private static final String PYTHON_VERSION = "3.12.16";
 
@@ -42,9 +45,6 @@ public class BundledRuntime implements SmartLifecycle {
         Path root = runtimeRoot();
         if (provision) {
             ensure(root.resolve("python"), pythonArchive(), "python3", "python.exe");
-            if (bootstrapNode() == null) {
-                ensure(root.resolve("node"), nodeArchive(), "node", "node.exe");
-            }
         }
         publish(root);
         running = true;
@@ -131,7 +131,13 @@ public class BundledRuntime implements SmartLifecycle {
             bins.add(bootstrap.getParent().toString());
         }
         addBin(bins, root.resolve("python"), "python3", "python.exe");
-        addBin(bins, root.resolve("node"), "node", "node.exe");
+        Path node = findBin(root.resolve("node"), "node", "node.exe");
+        if (node == null && bootstrap == null) {
+            node = managedNode();
+        }
+        if (node != null) {
+            bins.add(node.getParent().toString());
+        }
         if (bins.isEmpty()) {
             return;
         }
@@ -143,6 +149,43 @@ public class BundledRuntime implements SmartLifecycle {
     private static Path bootstrapNode() {
         String value = System.getenv("PILOT_BOOTSTRAP_NODE");
         return value != null && !value.isBlank() && Files.isRegularFile(Path.of(value)) ? Path.of(value) : null;
+    }
+
+    private Path managedNode() {
+        Path current = SourceLayout.workingDirectory();
+        Path source = SourceLayout.serverRoot(current);
+        Path root = source == null ? current : source;
+        try {
+            Path cache = SourceEnvironment.cache(root);
+            var assets = new RuntimeAssets(cache, RuntimeAssets.manifest(root),
+                !"true".equalsIgnoreCase(System.getenv("PILOT_OFFLINE")), message -> log.info("{}", message));
+            var platform = BootstrapPlatform.current();
+            var asset = assets.asset("node." + platform.key());
+            Path installed = cache.resolve(asset.home());
+            if (provision) {
+                installed = assets.install(asset);
+            } else if (!RuntimeAssets.verified(installed, asset)) {
+                return null;
+            }
+            return nodeExecutable(installed, platform);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (Exception e) {
+            if (provision) {
+                log.warn("未能准备内置 Node.js，将使用系统环境：{}", e.getMessage());
+            }
+            return null;
+        }
+    }
+
+    private static Path nodeExecutable(Path installed, BootstrapPlatform platform) {
+        Path node = platform.windows() ? installed.resolve("node.exe") : installed.resolve("bin/node");
+        if (Files.isRegularFile(node)) {
+            return node;
+        }
+        log.warn("已校验的 Node.js 安装目录缺少可执行文件：{}", installed);
+        return null;
     }
 
     private static void addBin(List<String> bins, Path root, String unixName, String windowsName) {
@@ -217,14 +260,6 @@ public class BundledRuntime implements SmartLifecycle {
                 origin));
     }
 
-    private static Archive nodeArchive() {
-        String tag = nodeTag();
-        String file = "node-v" + NODE_VERSION + "-" + tag + (tag.startsWith("win-") ? ".zip" : ".tar.gz");
-        String origin = "https://nodejs.org/dist/v" + NODE_VERSION + "/" + file;
-        return new Archive("Node.js " + NODE_VERSION,
-            List.of(origin, "https://npmmirror.com/mirrors/node/v" + NODE_VERSION + "/" + file));
-    }
-
     private static String pythonTriple() {
         String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         String arch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
@@ -236,19 +271,6 @@ public class BundledRuntime implements SmartLifecycle {
             return arm ? "aarch64-apple-darwin" : "x86_64-apple-darwin";
         }
         return arm ? "aarch64-unknown-linux-gnu" : "x86_64-unknown-linux-gnu";
-    }
-
-    private static String nodeTag() {
-        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-        String arch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
-        boolean arm = arch.contains("aarch64") || arch.contains("arm64");
-        if (os.contains("win")) {
-            return arm ? "win-arm64" : "win-x64";
-        }
-        if (os.contains("mac")) {
-            return arm ? "darwin-arm64" : "darwin-x64";
-        }
-        return arm ? "linux-arm64" : "linux-x64";
     }
 
     private static int run(Path directory, Duration timeout, String... command) {

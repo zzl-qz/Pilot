@@ -15,7 +15,7 @@
 | 桌面 Electron | npm 安装后显式运行官方二进制安装器；验证锁定版本、平台、架构、路径及执行权限后再准备桌面壳；失效副本保留后修复 |
 | Windows VC++ | 原生加载失败时先尝试私有 Temurin，再按需使用微软安装器；下载哈希与 Authenticode 签名均验证后才运行 |
 
-Python、Chromium 仍沿用既有组件准备机制；源码启动已确认过的 Node 会复用，避免重复下载。PC 启动不检查或下载 Gradle、Android SDK、移动构建用 Java 21，也不强装 Docker、Xcode 或修改系统证书、企业安全策略。这些项目工具和系统能力不能等同于可复制的私有运行时。
+Python、Chromium 仍沿用既有组件准备机制。源码启动器和后台新增的 Node 安装共用制品清单和 SHA-256 缓存，已有 `.pilot/runtime/node` 继续可用。PC 启动不检查或下载 Gradle、Android SDK、移动构建用 Java 21，也不强装 Docker、Xcode 或修改系统证书、企业安全策略。这些项目工具和系统能力不能等同于可复制的私有运行时。
 
 ## 系统与架构
 
