@@ -29,6 +29,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.core.util.Texts;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.core.workspace.WorkspaceViolationException;
 import com.pilot.server.common.web.ApiErrors;
@@ -168,7 +169,7 @@ public class SessionFilesController {
                 return new FileResponse(path, size, false, true);
             }
             byte[] bytes = Files.readAllBytes(file);
-            if (isBinary(bytes)) {
+            if (Texts.isBinary(bytes)) {
                 return new FileResponse(path, size, true, false);
             }
             return new FileResponse(path, size, false, false, new String(bytes, StandardCharsets.UTF_8));
@@ -213,16 +214,6 @@ public class SessionFilesController {
         } catch (IOException e) {
             return null;
         }
-    }
-
-    private static boolean isBinary(byte[] bytes) {
-        int limit = Math.min(bytes.length, 8000);
-        for (int i = 0; i < limit; i++) {
-            if (bytes[i] == 0) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /** @param path 相对工作区的路径，根目录为空字符串 */

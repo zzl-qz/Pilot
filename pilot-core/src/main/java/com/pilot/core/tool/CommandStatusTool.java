@@ -30,11 +30,11 @@ public final class CommandStatusTool implements Tool, ProducesCheck {
     }
 
     public Map<String, Object> parameters() {
-        return Map.of("type", "object", "properties",
-            Map.of("taskId", Map.of("type", "string", "description", "run_command 返回的任务 ID"), "waitSeconds",
-                Map.of("type", "integer", "minimum", 0, "maximum", 5, "description",
-                    "最多等待多少秒再返回，默认 0，最大 5；运行中可用 5 避免频繁轮询")),
-            "required", List.of("taskId"), "additionalProperties", false);
+        return ToolSchemas
+            .object(
+                Map.of("taskId", ToolSchemas.string("run_command 返回的任务 ID"), "waitSeconds", Map.of("type", "integer",
+                    "minimum", 0, "maximum", 5, "description", "最多等待多少秒再返回，默认 0，最大 5；运行中可用 5 避免频繁轮询")),
+                List.of("taskId"));
     }
 
     public String execute(Map<String, Object> args) {

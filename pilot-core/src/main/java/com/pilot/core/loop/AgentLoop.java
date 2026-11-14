@@ -50,6 +50,7 @@ import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.ToolResults;
 import com.pilot.core.tool.ToolSupport;
 import com.pilot.core.trace.TraceRecorder;
+import com.pilot.core.util.Texts;
 import com.pilot.core.util.WireEnum;
 
 /**
@@ -684,7 +685,7 @@ public final class AgentLoop {
             }
             if (remaining != null) {
                 runtimeGuidance.add(remaining);
-                events.accept(new RunContinued(1, 1, "核对目标后继续：" + ToolSupport.oneLine(remaining, 120)));
+                events.accept(new RunContinued(1, 1, "核对目标后继续：" + Texts.oneLine(remaining, 120)));
                 safeCheckpoint(checkpoint, messages);
                 return null;
             }
@@ -803,9 +804,8 @@ public final class AgentLoop {
     /** 非模型故障可请求一次禁用工具的收尾；端点失败或预算耗尽时直接保留本地说明。 */
     private Result finalizeFailure(List<Message> messages, Consumer<SessionEvent> events, UsageTracker usage,
         String code, String reason, boolean emitFailure) {
-        String fallback =
-            "本轮未能完整结束（" + code + "）：" + ToolSupport.oneLine(reason, 500) + (RunFailureCode.NO_PROGRESS.is(code)
-                ? "\n\n已有进度已保存。可以先继续一次推进未完成步骤，或直接补充要执行的命令与资料后重新发送。" : "\n\n已有进度已保存。请根据上面的原因补充条件或选择继续执行。");
+        String fallback = "本轮未能完整结束（" + code + "）：" + Texts.oneLine(reason, 500) + (RunFailureCode.NO_PROGRESS.is(code)
+            ? "\n\n已有进度已保存。可以先继续一次推进未完成步骤，或直接补充要执行的命令与资料后重新发送。" : "\n\n已有进度已保存。请根据上面的原因补充条件或选择继续执行。");
         String finalText = fallback;
         if (!cancellation.cancelled() && !WireEnum.in(code, RunFailureCode.NO_PROGRESS, RunFailureCode.MODEL_ERROR,
             RunFailureCode.MODEL_INCOMPLETE)) {
@@ -1163,8 +1163,7 @@ public final class AgentLoop {
                 String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
                 // 永久错误（鉴权、余额、模型不支持、结构非法）重试不会变好，立刻失败
                 if (!kind.retryable()) {
-                    throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_ERROR,
-                        "模型调用失败：" + ToolSupport.oneLine(reason, 300));
+                    throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_ERROR, "模型调用失败：" + Texts.oneLine(reason, 300));
                 }
                 RetryBudget.Decision decision = retryBudget.afterFailure(reason);
                 if (!decision.retry()) {
@@ -1173,7 +1172,7 @@ public final class AgentLoop {
                         + "。已等待 " + Math.max(0, decision.elapsedMs() / 1000) + " 秒，" + "进度与对话已保存；确认模型服务恢复后可继续执行。");
                 }
                 attempt = decision.attempt();
-                events.accept(new RunRetrying(attempt, decision.delayMs(), ToolSupport.oneLine(reason, 300),
+                events.accept(new RunRetrying(attempt, decision.delayMs(), Texts.oneLine(reason, 300),
                     decision.elapsedMs(), decision.remainingMs(), retryBudget.maxAttempts()));
                 // 上一次尝试可能已经推过一段预览：重试会重新输出全文，旧片段必须先作废。
                 events.accept(AssistantPreview.discarded());

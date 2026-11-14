@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.pilot.core.tool.Tool;
+import com.pilot.core.tool.ToolSchemas;
 import com.pilot.core.tool.ToolSupport;
 
 import tools.jackson.databind.ObjectMapper;
@@ -23,10 +24,10 @@ public record ProposeSkillTool(SkillDraftService drafts, ObjectMapper mapper, St
 
     @Override
     public Map<String, Object> parameters() {
-        return Map.of("type", "object", "properties",
+        return ToolSchemas.object(
             Map.of("name", Map.of("type", "string"), "description", Map.of("type", "string"), "body",
                 Map.of("type", "string"), "evidence", Map.of("type", "string")),
-            "required", List.of("name", "description", "body", "evidence"), "additionalProperties", false);
+            List.of("name", "description", "body", "evidence"));
     }
 
     @Override

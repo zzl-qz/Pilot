@@ -7,7 +7,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 import javax.imageio.ImageIO;
@@ -19,6 +18,7 @@ import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
 
 import com.pilot.core.loop.Attachment;
+import com.pilot.core.util.FileNames;
 import com.pilot.core.util.Sha256;
 
 /**
@@ -181,8 +181,6 @@ final class MediaFileReader {
     }
 
     private static String extension(Path file) {
-        String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
-        int dot = name.lastIndexOf('.');
-        return dot < 0 ? "" : name.substring(dot + 1);
+        return FileNames.extension(file.getFileName().toString());
     }
 }

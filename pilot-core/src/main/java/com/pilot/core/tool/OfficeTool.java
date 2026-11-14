@@ -62,13 +62,12 @@ public final class OfficeTool implements Tool {
 
     @Override
     public Map<String, Object> parameters() {
-        return Map.of("type", "object", "properties",
-            Map.of("action", Map.of("type", "string", "enum", ACTIONS, "description", "生成、编辑、检查或渲染动作"), "path",
-                Map.of("type", "string", "description", "工作区内的 xlsx/pptx/docx/pdf 路径；创建与编辑都不得覆盖已有文件"), "spec_path",
-                Map.of("type", "string", "description", "写操作必需的 JSON 规格文件；格式见工具说明"), "source_path",
-                Map.of("type", "string", "description", "edit_* 必需的原始文件，编辑结果另存到 path"), "pages",
-                Map.of("type", "string", "description", "仅 render_pdf：页码或范围，例如 3 或 2-5，默认全部页")),
-            "required", List.of("action", "path"), "additionalProperties", false);
+        return ToolSchemas
+            .object(Map.of("action", Map.of("type", "string", "enum", ACTIONS, "description", "生成、编辑、检查或渲染动作"), "path",
+                ToolSchemas.string("工作区内的 xlsx/pptx/docx/pdf 路径；创建与编辑都不得覆盖已有文件"), "spec_path",
+                ToolSchemas.string("写操作必需的 JSON 规格文件；格式见工具说明"), "source_path",
+                ToolSchemas.string("edit_* 必需的原始文件，编辑结果另存到 path"), "pages",
+                ToolSchemas.string("仅 render_pdf：页码或范围，例如 3 或 2-5，默认全部页")), List.of("action", "path"));
     }
 
     @Override

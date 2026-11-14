@@ -18,6 +18,7 @@ import com.pilot.core.tool.PatchParser.Hunk;
 import com.pilot.core.tool.PatchParser.Kind;
 import com.pilot.core.tool.PatchParser.Line;
 import com.pilot.core.tool.PatchParser.Operation;
+import com.pilot.core.util.Texts;
 import com.pilot.core.workspace.PathValidator;
 
 /**
@@ -54,8 +55,7 @@ public final class ApplyPatchTool extends PromptedTool implements WritesFiles {
 
     @Override
     public Map<String, Object> parameters() {
-        return objectSchema(
-            Map.of("patch", Map.of("type", "string", "description", "完整补丁文本，以 *** Begin Patch 开头、*** End Patch 结尾")),
+        return ToolSchemas.object(Map.of("patch", ToolSchemas.string("完整补丁文本，以 *** Begin Patch 开头、*** End Patch 结尾")),
             List.of("patch"));
     }
 
@@ -261,7 +261,7 @@ public final class ApplyPatchTool extends PromptedTool implements WritesFiles {
         String firstLine = wanted.getFirst();
         throw new PatchException(shown + " 的 hunk " + number + " 没有找到对应原文。最接近的文件片段：\n"
             + ExactEditBatch.closestExcerpt(String.join("\n", lines), String.join("\n", wanted)) + "\n请基于该片段重写 hunk（首行："
-            + ToolSupport.oneLine(firstLine, 80) + "）");
+            + Texts.oneLine(firstLine, 80) + "）");
     }
 
     private static boolean matches(List<String> lines, List<String> wanted, int at, UnaryOperator<String> mode) {

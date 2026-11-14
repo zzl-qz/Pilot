@@ -9,7 +9,7 @@ import java.time.Duration;
 import java.util.Map;
 
 import com.pilot.core.http.BoundedHttp;
-import com.pilot.core.tool.ToolSupport;
+import com.pilot.core.util.Texts;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -82,6 +82,6 @@ final class ModelHttp {
     }
 
     static String snippet(String body) {
-        return ToolSupport.oneLine(body, 300);
+        return Texts.oneLine(body, 300);
     }
 }

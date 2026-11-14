@@ -10,7 +10,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -18,6 +17,7 @@ import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 
 import com.pilot.core.tool.DocumentRenderer;
+import com.pilot.core.util.FileNames;
 import com.pilot.core.util.Sha256;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.config.PilotDataDir;
@@ -221,7 +221,7 @@ public class DocumentService {
         var product = products.list(sessionId).stream().filter(item -> item.id().equals(productId)).findFirst()
             .orElseThrow(() -> new IllegalArgumentException("成果不存在：" + productId));
         byte[] bytes = products.content(product);
-        String suffix = extension(product.filename());
+        String suffix = FileNames.dotExtension(product.filename());
         if (!DocumentRenderer.isRenderable(product.filename())) {
             throw new IllegalArgumentException("该成果不是可导入的 Office 文件");
         }
@@ -306,11 +306,6 @@ public class DocumentService {
             return "未命名文档";
         }
         return title.length() > 120 ? title.substring(0, 120) : title.strip();
-    }
-
-    private static String extension(String filename) {
-        int dot = filename.lastIndexOf('.');
-        return dot < 0 ? "" : filename.substring(dot).toLowerCase(Locale.ROOT);
     }
 
     private static String mediaType(String format) {

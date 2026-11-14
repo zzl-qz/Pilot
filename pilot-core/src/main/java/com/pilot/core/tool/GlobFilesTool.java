@@ -40,12 +40,10 @@ public final class GlobFilesTool implements Tool.ParallelReadOnly {
 
     @Override
     public Map<String, Object> parameters() {
-        return Map.of("type", "object", "properties",
-            Map.of("pattern",
-                Map.of("type", "string", "description", "glob，相对 path；例如 **/*.java、src/**/*Test.java、docs/*.md"),
-                "path", Map.of("type", "string", "description", "起始目录，工作区内的相对路径，默认根目录"), "limit",
-                Map.of("type", "integer", "description", "最多返回条数，默认 " + DEFAULT_LIMIT + "，最大 " + MAX_LIMIT)),
-            "required", List.of("pattern"), "additionalProperties", false);
+        return ToolSchemas
+            .object(Map.of("pattern", ToolSchemas.string("glob，相对 path；例如 **/*.java、src/**/*Test.java、docs/*.md"),
+                "path", ToolSchemas.string("起始目录，工作区内的相对路径，默认根目录"), "limit",
+                ToolSchemas.integer("最多返回条数，默认 " + DEFAULT_LIMIT + "，最大 " + MAX_LIMIT)), List.of("pattern"));
     }
 
     @Override

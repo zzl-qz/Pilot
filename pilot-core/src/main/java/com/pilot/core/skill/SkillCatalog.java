@@ -15,6 +15,8 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
+import com.pilot.core.util.Texts;
+
 /**
  * 技能目录：扫描两级来源（项目级在前、用户级在后，roots 按优先级降序传入）并解析 SKILL.md。
  *
@@ -255,7 +257,7 @@ public final class SkillCatalog {
         } catch (IOException | OutOfMemoryError e) {
             throw new IllegalArgumentException("读取文件失败：" + cleaned);
         }
-        if (isBinary(raw)) {
+        if (Texts.isBinary(raw)) {
             throw new IllegalArgumentException("疑似二进制文件，不进入提示词：" + cleaned);
         }
         String text = new String(raw, StandardCharsets.UTF_8);
@@ -268,13 +270,4 @@ public final class SkillCatalog {
     }
 
     /** 采样前 8KB 是否含 NUL 字节，与 read_file 的二进制判断同款。 */
-    private static boolean isBinary(byte[] bytes) {
-        int limit = Math.min(bytes.length, 8000);
-        for (int i = 0; i < limit; i++) {
-            if (bytes[i] == 0) {
-                return true;
-            }
-        }
-        return false;
-    }
 }

@@ -15,6 +15,7 @@ import com.pilot.core.tool.Availability;
 import com.pilot.core.tool.PromptedTool;
 import com.pilot.core.tool.ToolArtifacts;
 import com.pilot.core.tool.ToolResult;
+import com.pilot.core.tool.ToolSchemas;
 import com.pilot.core.tool.ToolSupport;
 
 import tools.jackson.databind.JsonNode;
@@ -48,10 +49,9 @@ public final class McpCallTool extends PromptedTool {
 
     @Override
     public Map<String, Object> parameters() {
-        return objectSchema(
-            Map.of("server", Map.of("type", "string", "description", "MCP 服务器名"), "tool",
-                Map.of("type", "string", "description", "工具名（来自 mcp_tools）"), "arguments",
-                Map.of("type", "object", "description", "工具参数，结构以 mcp_tools 返回的 schema 为准")),
+        return ToolSchemas.object(
+            Map.of("server", ToolSchemas.string("MCP 服务器名"), "tool", ToolSchemas.string("工具名（来自 mcp_tools）"),
+                "arguments", Map.of("type", "object", "description", "工具参数，结构以 mcp_tools 返回的 schema 为准")),
             List.of("server", "tool"));
     }
 

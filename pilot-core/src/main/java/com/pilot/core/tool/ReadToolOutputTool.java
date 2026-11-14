@@ -23,11 +23,9 @@ public final class ReadToolOutputTool implements Tool.ParallelReadOnly {
 
     @Override
     public Map<String, Object> parameters() {
-        return Map.of("type", "object", "properties",
-            Map.of("run_id", Map.of("type", "string"), "call_id", Map.of("type", "string"), "offset",
-                Map.of("type", "integer", "minimum", 0), "limit",
-                Map.of("type", "integer", "minimum", 1, "maximum", 16000)),
-            "required", List.of("run_id", "call_id"), "additionalProperties", false);
+        return ToolSchemas.object(Map.of("run_id", Map.of("type", "string"), "call_id", Map.of("type", "string"),
+            "offset", Map.of("type", "integer", "minimum", 0), "limit",
+            Map.of("type", "integer", "minimum", 1, "maximum", 16000)), List.of("run_id", "call_id"));
     }
 
     @Override

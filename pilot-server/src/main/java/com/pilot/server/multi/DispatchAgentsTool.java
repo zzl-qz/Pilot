@@ -16,6 +16,7 @@ import com.pilot.core.multi.RiskLevel;
 import com.pilot.core.multi.TaskSpec;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolNames;
+import com.pilot.core.tool.ToolSchemas;
 import com.pilot.server.session.SpawnAgentTool;
 
 /**
@@ -84,10 +85,10 @@ public final class DispatchAgentsTool implements Tool {
     @Override
     public Map<String, Object> parameters() {
         Map<String,
-            Object> fields = Map.ofEntries(Map.entry("id", Map.of("type", "string", "description", "任务编号，会话内唯一，例如 T1")),
-                Map.entry("title", Map.of("type", "string", "description", "任务标题，界面展示用")),
-                Map.entry("goal", Map.of("type", "string", "description", "完整目标：做什么、做到什么算完成")),
-                Map.entry("agent", Map.of("type", "string", "description", agentFieldDescription())),
+            Object> fields = Map.ofEntries(Map.entry("id", ToolSchemas.string("任务编号，会话内唯一，例如 T1")),
+                Map.entry("title", ToolSchemas.string("任务标题，界面展示用")),
+                Map.entry("goal", ToolSchemas.string("完整目标：做什么、做到什么算完成")),
+                Map.entry("agent", ToolSchemas.string(agentFieldDescription())),
                 Map.entry("depends_on",
                     Map.of("type", "array", "items", Map.of("type", "string"), "description", "前置任务编号；为空表示可立即并行")),
                 Map.entry("files",
@@ -95,29 +96,24 @@ public final class DispatchAgentsTool implements Tool {
                         "文件白名单 glob，例如 pilot-core/src/**/*.java")),
                 Map.entry("deny_files",
                     Map.of("type", "array", "items", Map.of("type", "string"), "description", "禁止访问的 glob")),
-                Map.entry("writable", Map.of("type", "boolean", "description", "是否允许提交沙箱改动；只读调研填 false")),
+                Map.entry("writable", ToolSchemas.bool("是否允许提交沙箱改动；只读调研填 false")),
                 Map.entry("tools",
                     Map.of("type", "array", "items", Map.of("type", "string"), "description",
                         "可用工具白名单，支持 * 通配符，例如 read_*/search_text/run_command")),
                 Map.entry("commands",
                     Map.of("type", "array", "items", Map.of("type", "string"), "description",
                         "命令白名单，按参数前缀匹配，例如 mvn test / git status；留空沿用内置可执行白名单")),
-                Map.entry(
-                    "deny_commands",
+                Map.entry("deny_commands",
                     Map.of("type", "array", "items", Map.of("type", "string"), "description",
                         "禁止执行的命令前缀，优先级高于 commands")),
-                Map.entry(
-                    "risk",
+                Map.entry("risk",
                     Map.of("type", "string", "enum", List.of("low", "medium", "high"), "description",
                         "风险等级，高风险必须人工审批")),
-                Map.entry("reviewers",
-                    Map.of("type", "integer", "description", "同一任务并行出方案的子 Agent 数量（1-3），结论不一致会触发仲裁")));
-        Map<String, Object> task = Map.of("type", "object", "properties", fields, "required", List.of("id", "goal"),
-            "additionalProperties", false);
-        return Map.of("type", "object", "properties",
-            Map.of("tasks", Map.of("type", "array", "items", task, "description", "任务列表，按依赖关系组成 DAG；建议 2-6 个"),
-                "reason", Map.of("type", "string", "description", "一句话说明为什么这样拆分")),
-            "required", List.of("tasks"), "additionalProperties", false);
+                Map.entry("reviewers", ToolSchemas.integer("同一任务并行出方案的子 Agent 数量（1-3），结论不一致会触发仲裁")));
+        Map<String, Object> task = ToolSchemas.object(fields, List.of("id", "goal"));
+        return ToolSchemas
+            .object(Map.of("tasks", Map.of("type", "array", "items", task, "description", "任务列表，按依赖关系组成 DAG；建议 2-6 个"),
+                "reason", ToolSchemas.string("一句话说明为什么这样拆分")), List.of("tasks"));
     }
 
     /** agent 字段的动态说明：有可用代理时点名角色与职责，模型不必猜名字。 */

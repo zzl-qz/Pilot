@@ -9,10 +9,8 @@ import java.util.stream.Collectors;
 
 import com.pilot.core.workspace.PathValidator;
 
-/** 工具实现的公共小工具：参数取值、二进制判断、摘要截断。 */
+/** 工具实现的公共小工具：参数取值与参数签名。 */
 public final class ToolSupport {
-    private static final int BINARY_SAMPLE_BYTES = 8000;
-
     private ToolSupport() {
     }
 
@@ -39,17 +37,6 @@ public final class ToolSupport {
         }
     }
 
-    /** 采样前 8KB 是否含 NUL 字节，作为二进制文件的粗略判断。 */
-    public static boolean isBinary(byte[] bytes) {
-        int limit = Math.min(bytes.length, BINARY_SAMPLE_BYTES);
-        for (int i = 0; i < limit; i++) {
-            if (bytes[i] == 0) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     /** 保留现有参数签名格式，只统一对象键的顺序。 */
     public static String argumentSignature(Object value, String nullValue) {
         return argumentSignature(value, item -> Objects.toString(item, nullValue));
@@ -68,11 +55,4 @@ public final class ToolSupport {
         return scalar.apply(value);
     }
 
-    public static String oneLine(String text, int maxChars) {
-        if (text == null) {
-            return "";
-        }
-        String single = text.replaceAll("\\s+", " ").strip();
-        return single.length() <= maxChars ? single : single.substring(0, maxChars) + "…";
-    }
 }

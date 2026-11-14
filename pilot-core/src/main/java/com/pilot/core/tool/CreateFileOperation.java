@@ -21,10 +21,8 @@ abstract class CreateFileOperation extends PromptedTool {
 
     @Override
     public Map<String, Object> parameters() {
-        return objectSchema(
-            Map.of("path", Map.of("type", "string", "description", "工作区内的相对文件路径；文件不能已存在，改已有文件请用 edit_file"), "content",
-                Map.of("type", "string", "description", "文件的完整内容")),
-            List.of("path", "content"));
+        return ToolSchemas.object(Map.of("path", ToolSchemas.string("工作区内的相对文件路径；文件不能已存在，改已有文件请用 edit_file"), "content",
+            ToolSchemas.string("文件的完整内容")), List.of("path", "content"));
     }
 
     @Override

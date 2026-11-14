@@ -39,13 +39,15 @@ public final class EditFileTool extends PromptedTool implements WritesFiles {
     }
 
     static Map<String, Object> schema() {
-        return objectSchema(Map.of("path", Map.of("type", "string", "description", "工作区内的相对文件路径"), "old_string",
-            Map.of("type", "string", "description", "单处替换的原文，必须唯一匹配；与 edits 二选一"), "new_string",
-            Map.of("type", "string", "description", "单处替换的新内容，可为空；与 edits 二选一"), "edits",
-            Map.of("type", "array", "description", "同一文件内多处互不重叠的替换；均匹配原文件，整体成功或整体失败", "items",
-                objectSchema(Map.of("old_string", Map.of("type", "string", "description", "唯一匹配的原文"), "new_string",
-                    Map.of("type", "string", "description", "替换后的内容，可为空")), List.of("old_string", "new_string")))),
-            List.of("path"));
+        return ToolSchemas
+            .object(
+                Map.of("path", ToolSchemas.string("工作区内的相对文件路径"), "old_string",
+                    ToolSchemas.string("单处替换的原文，必须唯一匹配；与 edits 二选一"), "new_string",
+                    ToolSchemas.string("单处替换的新内容，可为空；与 edits 二选一"), "edits", Map
+                        .of("type", "array", "description", "同一文件内多处互不重叠的替换；均匹配原文件，整体成功或整体失败", "items",
+                            ToolSchemas.object(Map.of("old_string", ToolSchemas.string("唯一匹配的原文"), "new_string",
+                                ToolSchemas.string("替换后的内容，可为空")), List.of("old_string", "new_string")))),
+                List.of("path"));
     }
 
     @Override

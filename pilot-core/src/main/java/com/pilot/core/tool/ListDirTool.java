@@ -27,9 +27,7 @@ public final class ListDirTool implements Tool.ParallelReadOnly {
 
     @Override
     public Map<String, Object> parameters() {
-        return Map.of("type", "object", "properties",
-            Map.of("path", Map.of("type", "string", "description", "工作区内的相对目录路径，省略表示根目录")), "required", List.of(),
-            "additionalProperties", false);
+        return ToolSchemas.object(Map.of("path", ToolSchemas.string("工作区内的相对目录路径，省略表示根目录")), List.of());
     }
 
     @Override

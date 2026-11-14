@@ -75,6 +75,7 @@ import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.tool.SandboxSink;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.trace.JsonlTraceRecorder;
+import com.pilot.core.util.Texts;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.MultiAgentBudget;
 import com.pilot.server.config.MultiAgentProperties;
@@ -644,8 +645,8 @@ public class MultiAgentService {
         AgentLoop loop = new AgentLoop(budgeted, tools, new PolicyPermissionGate(mode), ApprovalBroker.denyAll(),
             config, cancellation, () -> null, trace);
 
-        publish(dispatch.events(), new SubagentStarted(agentId, oneLine(spec.title() + "：" + spec.goal(), 200),
-            oneLine(spec.id() + " " + spec.title(), 40)));
+        publish(dispatch.events(), new SubagentStarted(agentId, Texts.oneLine(spec.title() + "：" + spec.goal(), 200),
+            Texts.oneLine(spec.id() + " " + spec.title(), 40)));
         // 每次尝试都拿一份新租约：重试时代次递增，旧执行者的晚到结果写不进来
         JdbcDispatchStore.Lease lease =
             dispatchStore == null || dispatch.dispatchId().isBlank() ? JdbcDispatchStore.Lease.NONE
@@ -1011,7 +1012,7 @@ public class MultiAgentService {
             out.append("- ").append(outcome.taskId()).append(' ').append(outcome.status().label()).append("（")
                 .append(outcome.title()).append('）');
             if (!outcome.detail().isBlank()) {
-                out.append("：").append(oneLine(outcome.detail(), 160));
+                out.append("：").append(Texts.oneLine(outcome.detail(), 160));
             }
             if (!outcome.sandboxIds().isEmpty()) {
                 out.append(" ｜ 沙箱 ").append(String.join(", ", outcome.sandboxIds()));
@@ -1022,12 +1023,12 @@ public class MultiAgentService {
         for (TaskOutcome outcome : outcomes) {
             if (outcome.report() != null) {
                 out.append("- ").append(outcome.taskId()).append("：")
-                    .append(oneLine(outcome.report().conclusion(), MAX_CONCLUSION_CHARS)).append('\n');
+                    .append(Texts.oneLine(outcome.report().conclusion(), MAX_CONCLUSION_CHARS)).append('\n');
             }
             // 分歧任务没有「唯一结论」，把每个方案各列一行，避免父 Agent 只看到第一个
             for (AgentReport side : outcome.competing()) {
                 out.append("- ").append(outcome.taskId()).append("（").append(side.agentId()).append("）：")
-                    .append(oneLine(side.conclusion(), MAX_CONCLUSION_CHARS)).append('\n');
+                    .append(Texts.oneLine(side.conclusion(), MAX_CONCLUSION_CHARS)).append('\n');
             }
         }
         out.append("\n### 合并预检\n").append(merge.describe()).append('\n');
@@ -1037,7 +1038,7 @@ public class MultiAgentService {
                 out.append("  - ").append(check).append('\n');
             }
             if (!verification.detail().isBlank()) {
-                out.append("  - ").append(oneLine(verification.detail(), 600)).append('\n');
+                out.append("  - ").append(Texts.oneLine(verification.detail(), 600)).append('\n');
             }
         }
         if (!dissents.isEmpty()) {
@@ -1056,7 +1057,7 @@ public class MultiAgentService {
         out.append("- 在途预留：").append(budget.reservedTokens()).append(" token 输入估算，").append(budget.inFlightRequests())
             .append(" 个请求尚未结算\n");
         if (!budget.stopReason().isBlank()) {
-            out.append("- 停止原因：").append(oneLine(budget.stopReason(), 240)).append('\n');
+            out.append("- 停止原因：").append(Texts.oneLine(budget.stopReason(), 240)).append('\n');
         }
         if (budget.cancellationRequested()) {
             out.append("- 已向在途子任务请求中断；这不保证供应商撤销请求或停止计费。\n");
@@ -1104,14 +1105,6 @@ public class MultiAgentService {
 
     private static String summary(AgentReport report) {
         return report == null ? "" : report.headline();
-    }
-
-    private static String oneLine(String text, int max) {
-        if (text == null) {
-            return "";
-        }
-        String single = text.replaceAll("\\s+", " ").strip();
-        return single.length() <= max ? single : single.substring(0, max) + "…";
     }
 
     private static String randomSuffix() {

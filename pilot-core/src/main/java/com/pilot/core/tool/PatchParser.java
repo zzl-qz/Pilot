@@ -3,6 +3,8 @@ package com.pilot.core.tool;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.pilot.core.util.Texts;
+
 /** 逐行读取补丁，只处理文本语法。 */
 final class PatchParser {
     enum Kind {
@@ -64,7 +66,7 @@ final class PatchParser {
             } else if (line.startsWith(UPDATE_FILE)) {
                 operations.add(readUpdate(line.substring(UPDATE_FILE.length()).strip()));
             } else {
-                throw new IllegalArgumentException("无法识别的行（第 " + index + " 行）：" + ToolSupport.oneLine(line, 80));
+                throw new IllegalArgumentException("无法识别的行（第 " + index + " 行）：" + Texts.oneLine(line, 80));
             }
         }
         if (operations.isEmpty()) {

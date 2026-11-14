@@ -8,7 +8,9 @@ import java.util.Map;
 
 import com.pilot.core.tool.Availability;
 import com.pilot.core.tool.Tool;
+import com.pilot.core.tool.ToolSchemas;
 import com.pilot.core.tool.ToolSupport;
+import com.pilot.core.util.Texts;
 
 /**
  * 按需发现 MCP 工具：模型每次请求只携带 {@code mcp_tools} 与 {@code mcp_call} 两个定义，
@@ -43,9 +45,8 @@ public final class McpToolsTool implements Tool {
     @Override
     public Map<String, Object> parameters() {
         return Map.of("type", "object", "properties",
-            Map.of("server", Map.of("type", "string", "description", "MCP 服务器名；省略则列出所有已配置的服务器"), "query",
-                Map.of("type", "string", "description", "按名称或描述过滤工具（不区分大小写）"), "tool",
-                Map.of("type", "string", "description", "给出后返回该工具的完整说明与参数 schema")),
+            Map.of("server", ToolSchemas.string("MCP 服务器名；省略则列出所有已配置的服务器"), "query",
+                ToolSchemas.string("按名称或描述过滤工具（不区分大小写）"), "tool", ToolSchemas.string("给出后返回该工具的完整说明与参数 schema")),
             "additionalProperties", false);
     }
 
@@ -145,7 +146,7 @@ public final class McpToolsTool implements Tool {
         for (McpToolInfo info : matched.stream().limit(MAX_LISTED).toList()) {
             out.append("- ").append(info.name()).append(permissionLabel(info, policy));
             if (!info.description().isBlank()) {
-                out.append("：").append(ToolSupport.oneLine(info.description(), 140));
+                out.append("：").append(Texts.oneLine(info.description(), 140));
             }
             out.append('\n');
         }

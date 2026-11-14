@@ -25,7 +25,7 @@ public final class CommandLogsTool implements Tool {
     public Map<String, Object> parameters() {
         return Map
             .of("type", "object", "properties",
-                Map.of("taskId", Map.of("type", "string", "description", "run_command 返回的任务 ID"), "offset",
+                Map.of("taskId", ToolSchemas.string("run_command 返回的任务 ID"), "offset",
                     Map.of("type", "integer", "minimum", 0, "description", "首次传 0，之后原样传上次 nextOffset"), "limit", Map.of(
                         "type", "integer", "minimum", 1, "maximum", 32000, "description", "最多读取字符数，默认 12000，最大 32000")),
                 "required", List.of("taskId"), "additionalProperties", false);

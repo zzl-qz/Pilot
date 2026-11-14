@@ -13,8 +13,8 @@ import com.pilot.core.plan.PlanItem;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolResults;
-import com.pilot.core.tool.ToolSupport;
 import com.pilot.core.tool.VerificationCheck;
+import com.pilot.core.util.Texts;
 
 /**
  * 收尾门：模型说「做完了」时，先检查它是不是真的做完了。
@@ -168,7 +168,7 @@ final class CompletionGate {
         if (!readOnlyTask && !changed && !researching && actionPrompts < MAX_ACTION_PROMPTS && looksLikeAction(goal)
             && !looksLikeResearch(goal)) {
             actionPrompts++;
-            String prompt = prompts.render("completion/act", Map.of("goal", ToolSupport.oneLine(goal, 500))).strip();
+            String prompt = prompts.render("completion/act", Map.of("goal", Texts.oneLine(goal, 500))).strip();
             return new Nudge(prompt, "实现类目标尚无任何改动，已要求直接动手", actionPrompts, MAX_ACTION_PROMPTS);
         }
         if (!changed && !researching) {
@@ -182,7 +182,7 @@ final class CompletionGate {
         }
         if (!independentReview && reviewPrompts < MAX_REVIEW_PROMPTS) {
             reviewPrompts++;
-            String goalText = goal == null ? "（续跑，无原始输入）" : ToolSupport.oneLine(goal, 500);
+            String goalText = goal == null ? "（续跑，无原始输入）" : Texts.oneLine(goal, 500);
             String prompt;
             if (changed) {
                 int done = (int)plan.stream().filter(PlanItem::done).count();

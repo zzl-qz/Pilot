@@ -58,10 +58,9 @@ public final class WebSearchTool implements Tool {
 
     @Override
     public Map<String, Object> parameters() {
-        return Map.of("type", "object", "properties",
-            Map.of("query", Map.of("type", "string", "description", "搜索关键词"), "count",
-                Map.of("type", "integer", "description", "结果数量，1 到 10")),
-            "required", List.of("query"), "additionalProperties", false);
+        return ToolSchemas.object(
+            Map.of("query", ToolSchemas.string("搜索关键词"), "count", ToolSchemas.integer("结果数量，1 到 10")),
+            List.of("query"));
     }
 
     @Override

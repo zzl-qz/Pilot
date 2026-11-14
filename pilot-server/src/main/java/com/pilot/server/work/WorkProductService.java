@@ -26,6 +26,7 @@ import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.ToolNames;
+import com.pilot.core.util.FileNames;
 import com.pilot.core.util.Sha256;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.config.PilotDataDir;
@@ -123,7 +124,7 @@ public class WorkProductService {
         if (filename.chars().anyMatch(Character::isISOControl)) {
             throw new IllegalArgumentException("文件名包含控制字符");
         }
-        String mediaType = TYPES.get(extension(filename));
+        String mediaType = TYPES.get(FileNames.extension(filename));
         if (mediaType == null) {
             throw new IllegalArgumentException("支持 Markdown、TXT、CSV、JSON、PDF、DOCX、XLSX、PPTX 成果");
         }
@@ -178,7 +179,7 @@ public class WorkProductService {
 
     public Preview preview(Product product) {
         byte[] bytes = content(product);
-        String extension = extension(product.filename());
+        String extension = FileNames.extension(product.filename());
         if (List.of("docx", "xlsx", "pptx").contains(extension)) {
             return new Preview("download", "", false, "此格式请下载后查看；下载内容与保存时的快照一致。");
         }
@@ -286,8 +287,4 @@ public class WorkProductService {
         return sessions.find(id).orElseThrow(() -> new NoSuchElementException("对话不存在"));
     }
 
-    private static String extension(String filename) {
-        int dot = filename.lastIndexOf('.');
-        return dot < 0 ? "" : filename.substring(dot + 1).toLowerCase(Locale.ROOT);
-    }
 }

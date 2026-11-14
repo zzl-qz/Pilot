@@ -36,9 +36,7 @@ public final class WebFetchTool implements Tool {
 
     @Override
     public Map<String, Object> parameters() {
-        return Map.of("type", "object", "properties",
-            Map.of("url", Map.of("type", "string", "description", "要读取的网页 URL")), "required", List.of("url"),
-            "additionalProperties", false);
+        return ToolSchemas.object(Map.of("url", ToolSchemas.string("要读取的网页 URL")), List.of("url"));
     }
 
     @Override

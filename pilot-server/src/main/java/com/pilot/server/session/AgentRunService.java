@@ -76,6 +76,7 @@ import com.pilot.core.tool.ToolNames;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.UseSkillTool;
 import com.pilot.core.trace.JsonlTraceRecorder;
+import com.pilot.core.util.Texts;
 import com.pilot.core.util.WireEnum;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.config.AgentProperties;
@@ -1665,8 +1666,7 @@ public class AgentRunService implements RunStarter {
         }
         return "\n\n本会话最近的命令任务（后台命令独立运行，已启动不代表验证通过）：\n"
             + tasks.stream().limit(10)
-                .map(task -> "- " + task.taskId() + " [" + task.status() + "] "
-                    + com.pilot.core.tool.ToolSupport.oneLine(task.command(), 180)
+                .map(task -> "- " + task.taskId() + " [" + task.status() + "] " + Texts.oneLine(task.command(), 180)
                     + (task.exitCode() == null ? "" : "，退出码 " + task.exitCode()))
                 .collect(Collectors.joining("\n"))
             + "\n用 command_status 确认实际退出结果、command_logs 查看增量日志，必要时 stop_command 停止进程。";

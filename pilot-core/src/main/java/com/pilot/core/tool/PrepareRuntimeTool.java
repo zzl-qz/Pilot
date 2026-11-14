@@ -78,11 +78,10 @@ public final class PrepareRuntimeTool implements Tool {
 
     @Override
     public Map<String, Object> parameters() {
-        return Map.of("type", "object", "properties",
-            Map.of("action", Map.of("type", "string", "enum", List.of("plan", "prepare", "cleanup")), "recipe",
+        return ToolSchemas
+            .object(Map.of("action", Map.of("type", "string", "enum", List.of("plan", "prepare", "cleanup")), "recipe",
                 Map.of("type", "string", "enum", List.of("excel", "slides", "documents")), "env_id",
-                Map.of("type", "string")),
-            "required", List.of("action"), "additionalProperties", false);
+                Map.of("type", "string")), List.of("action"));
     }
 
     @Override

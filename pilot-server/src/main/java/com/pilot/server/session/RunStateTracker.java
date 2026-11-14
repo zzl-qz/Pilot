@@ -29,6 +29,7 @@ import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.event.ToolStarted;
 import com.pilot.core.session.RunCheckpoint;
 import com.pilot.core.session.RunCheckpointRepository;
+import com.pilot.core.util.Texts;
 import com.pilot.core.util.WireEnum;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.maintenance.DataMaintenance;
@@ -112,7 +113,8 @@ public class RunStateTracker {
                 case ToolStarted started -> current.advance(current.step(), started.callId(),
                     current.lastSuccessfulStep(), "等待工具 " + started.name() + " 返回", RunCheckpoint.PHASE_TOOL, now);
                 case ToolCompleted completed -> current.advance(current.step() + 1, completed.callId(),
-                    "工具调用成功：" + clip(completed.resultSummary(), 120), "根据工具结果决定下一步", RunCheckpoint.PHASE_MODEL, now);
+                    "工具调用成功：" + Texts.oneLine(completed.resultSummary(), 120), "根据工具结果决定下一步", RunCheckpoint.PHASE_MODEL,
+                    now);
                 case ApprovalRequired approval ->
                     current.advance(current.step(), current.lastToolCallId(), current.lastSuccessfulStep(),
                         "等待用户批准 " + approval.name(), RunCheckpoint.PHASE_WAITING_APPROVAL, now);
@@ -280,11 +282,4 @@ public class RunStateTracker {
         return RunCheckpoint.STATUS_FAILED;
     }
 
-    private static String clip(String value, int max) {
-        if (value == null) {
-            return "";
-        }
-        String trimmed = value.replaceAll("\\s+", " ").strip();
-        return trimmed.length() <= max ? trimmed : trimmed.substring(0, max) + "…";
-    }
 }

@@ -44,11 +44,10 @@ public final class SandboxCommandTool implements Tool, ProducesCheck {
     @Override
     public Map<String, Object> parameters() {
         var properties = new LinkedHashMap<String, Object>();
-        properties.put("command", Map.of("type", "string", "description", "项目校验命令，例如 npm test"));
-        properties.put("workdir", Map.of("type", "string", "description", "工作区内相对目录"));
+        properties.put("command", ToolSchemas.string("项目校验命令，例如 npm test"));
+        properties.put("workdir", ToolSchemas.string("工作区内相对目录"));
         properties.put("timeoutSeconds", Map.of("type", "integer", "minimum", 1, "maximum", 600, "default", 120));
-        return Map.of("type", "object", "properties", properties, "required", List.of("command"),
-            "additionalProperties", false);
+        return ToolSchemas.object(properties, List.of("command"));
     }
 
     @Override

@@ -4,6 +4,7 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import com.pilot.core.util.Texts;
 import com.pilot.core.util.WireEnum;
 
 /** 命令工具共用的状态表示；日志内容不参与判断验证是否通过。 */
@@ -64,7 +65,7 @@ final class CommandToolSupport {
         if (task == null || running(task) || task.exitCode() == null || !task.status().equals(status.group(1))) {
             return null;
         }
-        String command = ToolSupport.oneLine(task.command(), 90);
+        String command = Texts.oneLine(task.command(), 90);
         if (ToolResults.isChangeTrackingIncomplete(result)) {
             return command + " → CHANGE_TRACKING_INCOMPLETE";
         }

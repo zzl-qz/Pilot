@@ -29,9 +29,11 @@ import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolExecutor;
 import com.pilot.core.tool.ToolNames;
+import com.pilot.core.tool.ToolSchemas;
 import com.pilot.core.tool.ToolSupport;
 import com.pilot.core.tool.VerificationCheck;
 import com.pilot.core.util.Sha256;
+import com.pilot.core.util.Texts;
 import com.pilot.core.util.WireEnum;
 
 import tools.jackson.databind.ObjectMapper;
@@ -922,10 +924,9 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         contract.put("gap", state.gap().isBlank() ? "核验尚未通过" : state.gap());
         contract.put("next_action", state.nextAction());
         contract.put("expected_observation", state.expectedObservation());
-        contract.put("evidence_delta",
-            evidence.subList(start, evidence.size()).stream().map(
-                e -> Map.of("id", e.id(), "tool", e.tool(), "status", e.status(), "result", oneLine(e.result(), 160)))
-                .toList());
+        contract.put("evidence_delta", evidence.subList(start, evidence.size()).stream().map(
+            e -> Map.of("id", e.id(), "tool", e.tool(), "status", e.status(), "result", Texts.oneLine(e.result(), 160)))
+            .toList());
         return prompts.render("goal/continue", Map.of("contractJson", mapper.writeValueAsString(contract))).strip();
     }
 
@@ -1002,7 +1003,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         }
         String reason = lastFailure == null ? "核验器重试后仍未返回有效结构" : Objects.toString(lastFailure.getMessage(), "未知错误");
         updatePhase(state(), ExecutionPhase.VERIFICATION_FAILED, reason);
-        throw new Stop(RunFailureCode.VERIFICATION_FAILED, "收尾核验暂时不可用，现有结果保持为未核验状态：" + oneLine(reason, 180));
+        throw new Stop(RunFailureCode.VERIFICATION_FAILED, "收尾核验暂时不可用，现有结果保持为未核验状态：" + Texts.oneLine(reason, 180));
     }
 
     private static boolean validDecisionShape(Map<String, Object> args) {
@@ -1058,10 +1059,10 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("id", e.id());
             row.put("tool", e.tool());
-            row.put("target", oneLine(e.target(), 160));
+            row.put("target", Texts.oneLine(e.target(), 160));
             row.put("status", e.status());
-            row.put("result", oneLine(e.result(), 250));
-            row.put("check", oneLine(Objects.toString(e.check(), ""), 180));
+            row.put("result", Texts.oneLine(e.result(), 250));
+            row.put("check", Texts.oneLine(Objects.toString(e.check(), ""), 180));
             row.put("source_version", e.endVersion());
             row.put("evidence_scope", ToolNames.WAIT_UNTIL.equals(e.tool()) ? "historical_action"
                 : RESEARCH_TOOLS.contains(e.tool()) ? "external_source" : "current_workspace");
@@ -1109,7 +1110,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
             for (String ref : refs) {
                 String issue = evidenceIssue(evidenceById.get(ref), version);
                 if (issue != null) {
-                    return "条件 " + index + " 的证据 " + oneLine(ref, 80) + " 不可引用：" + issue;
+                    return "条件 " + index + " 的证据 " + Texts.oneLine(ref, 80) + " 不可引用：" + issue;
                 }
             }
         }
@@ -1272,8 +1273,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     }
 
     private static Map<String, Object> object(Map<String, Object> properties, String... required) {
-        return Map.of("type", "object", "properties", properties, "required", List.of(required), "additionalProperties",
-            false);
+        return ToolSchemas.object(properties, List.of(required));
     }
 
     private static Map<String, Object> str() {
@@ -1300,11 +1300,6 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private static String clip(String value, int max) {
         String text = value == null ? "" : value;
         return text.length() <= max ? text : text.substring(0, max) + "\n[展示已截断，可按目标定向补查]";
-    }
-
-    private static String oneLine(String value, int max) {
-        String text = value == null ? "" : value.replaceAll("\\s+", " ").strip();
-        return text.length() <= max ? text : text.substring(0, max) + "…";
     }
 
     private static String operationKey(ToolCall call) {

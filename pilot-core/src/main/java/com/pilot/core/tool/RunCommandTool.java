@@ -23,6 +23,7 @@ import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.runtime.ExecutablePath;
 import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
 import com.pilot.core.util.HostOs;
+import com.pilot.core.util.Texts;
 import com.pilot.core.workspace.PathValidator;
 
 /**
@@ -103,17 +104,15 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     @Override
     public Map<String, Object> parameters() {
         Map<String, Object> properties = new java.util.LinkedHashMap<>();
-        properties.put("command",
-            Map.of("type", "string", "description", "完整命令，例如 \"mvn -q test\" 或 \"git status --porcelain\""));
-        properties.put("workdir", Map.of("type", "string", "description", "可选，工作区内的工作目录，例如 pilot-web；默认工作区根目录"));
+        properties.put("command", ToolSchemas.string("完整命令，例如 \"mvn -q test\" 或 \"git status --porcelain\""));
+        properties.put("workdir", ToolSchemas.string("可选，工作区内的工作目录，例如 pilot-web；默认工作区根目录"));
         properties.put("timeoutSeconds",
             Map.of("type", "integer", "minimum", 0, "maximum", 600, "description", "前台默认 120 秒，后台默认 0（不设超时），最大 600 秒"));
         if (commandTasks != null) {
             properties.put("background",
                 Map.of("type", "boolean", "default", false, "description", "后台运行并立即返回任务 ID；默认 false，等待命令结束"));
         }
-        return Map.of("type", "object", "properties", properties, "required", List.of("command"),
-            "additionalProperties", false);
+        return ToolSchemas.object(properties, List.of("command"));
     }
 
     @Override
@@ -548,15 +547,15 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         String command =
             call == null || call.args() == null ? "" : String.valueOf(call.args().getOrDefault("command", ""));
         if (ToolResults.isChangeTrackingIncomplete(result)) {
-            return ToolSupport.oneLine(command, 90) + " → CHANGE_TRACKING_INCOMPLETE";
+            return Texts.oneLine(command, 90) + " → CHANGE_TRACKING_INCOMPLETE";
         }
         Matcher matcher = EXIT_CODE.matcher(result);
         if (matcher.find()) {
-            return ToolSupport.oneLine(command, 90) + " → exit " + matcher.group(1);
+            return Texts.oneLine(command, 90) + " → exit " + matcher.group(1);
         }
         // 超时、启动失败没有退出码，但同样是「验证没通过」，要留在记录里
         if (ToolResults.isError(result)) {
-            return ToolSupport.oneLine(command, 90) + " → " + ToolSupport.oneLine(result, 80);
+            return Texts.oneLine(command, 90) + " → " + Texts.oneLine(result, 80);
         }
         return null;
     }

@@ -30,14 +30,13 @@ public final class UpdatePlanTool implements Tool {
 
     @Override
     public Map<String, Object> parameters() {
-        return Map.of("type", "object", "properties", Map.of("explanation",
-            Map.of("type", "string", "description", "本次更新的原因（可选）"), "plan",
-            Map.of("type", "array", "description", "完整步骤列表，整体替换上一次的计划", "items", Map.of("type", "object", "properties",
-                Map.of("step", Map.of("type", "string", "description", "步骤描述"), "status",
+        return ToolSchemas.object(Map.of("explanation", ToolSchemas.string("本次更新的原因（可选）"), "plan",
+            Map.of("type", "array", "description", "完整步骤列表，整体替换上一次的计划", "items", ToolSchemas.object(
+                Map.of("step", ToolSchemas.string("步骤描述"), "status",
                     Map.of("type", "string", "enum",
                         List.of(PlanItem.PENDING, PlanItem.IN_PROGRESS, PlanItem.COMPLETED), "description", "步骤状态")),
-                "required", List.of("step", "status"), "additionalProperties", false))),
-            "required", List.of("plan"), "additionalProperties", false);
+                List.of("step", "status")))),
+            List.of("plan"));
     }
 
     @Override

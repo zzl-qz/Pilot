@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.pilot.core.tool.Tool;
+import com.pilot.core.tool.ToolSchemas;
 import com.pilot.core.tool.ToolSupport;
 
 import tools.jackson.databind.ObjectMapper;
@@ -34,17 +35,16 @@ public record InstallSkillTool(SkillInstallService installer, SkillService skill
         Map<String, Object> fields = new LinkedHashMap<>();
         fields.put("action", Map.of("type", "string", "enum", List.of("inspect", "install"), "description",
             "inspect 查看候选；install 下载并安装"));
-        fields.put("source", Map.of("type", "string", "description", "技能目录、SKILL.md 或 Git 仓库的 HTTP(S) 链接，也支持本机绝对目录"));
-        fields.put("token", Map.of("type", "string", "description", "可选：上次返回的预览 token，复用下载内容；与 source 二选一"));
+        fields.put("source", ToolSchemas.string("技能目录、SKILL.md 或 Git 仓库的 HTTP(S) 链接，也支持本机绝对目录"));
+        fields.put("token", ToolSchemas.string("可选：上次返回的预览 token，复用下载内容；与 source 二选一"));
         fields.put("names",
             Map.of("type", "array", "items", Map.of("type", "string"), "description", "选择安装的技能名；只有一个候选时可省略"));
         fields.put("scope", Map.of("type", "string", "enum", List.of("project", "user"), "description",
             "默认 project；用户明确要求所有项目共享时用 user"));
-        fields.put("ref", Map.of("type", "string", "description", "可选：分支、标签或提交；带斜杠的分支须明确指定"));
-        fields.put("path", Map.of("type", "string", "description", "可选：仓库内技能相对目录"));
-        fields.put("overwrite", Map.of("type", "boolean", "description", "默认 false；只有用户明确要求替换已有技能才用 true"));
-        return Map.of("type", "object", "properties", fields, "required", List.of("action"), "additionalProperties",
-            false);
+        fields.put("ref", ToolSchemas.string("可选：分支、标签或提交；带斜杠的分支须明确指定"));
+        fields.put("path", ToolSchemas.string("可选：仓库内技能相对目录"));
+        fields.put("overwrite", ToolSchemas.bool("默认 false；只有用户明确要求替换已有技能才用 true"));
+        return ToolSchemas.object(fields, List.of("action"));
     }
 
     @Override

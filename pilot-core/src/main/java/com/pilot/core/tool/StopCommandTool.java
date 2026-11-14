@@ -23,9 +23,7 @@ public final class StopCommandTool implements Tool {
     }
 
     public Map<String, Object> parameters() {
-        return Map.of("type", "object", "properties",
-            Map.of("taskId", Map.of("type", "string", "description", "当前会话需要停止的命令任务 ID")), "required",
-            List.of("taskId"), "additionalProperties", false);
+        return ToolSchemas.object(Map.of("taskId", ToolSchemas.string("当前会话需要停止的命令任务 ID")), List.of("taskId"));
     }
 
     public String execute(Map<String, Object> args) {

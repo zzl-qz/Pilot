@@ -52,9 +52,8 @@ public final class RememberTool implements Tool, WritesFiles {
 
     @Override
     public Map<String, Object> parameters() {
-        return Map.of("type", "object", "properties",
-            Map.of("note", Map.of("type", "string", "description", "要沉淀的一条经验/惯例/踩坑，一行以内；写成用户日后能直接执行的口令式条目")),
-            "required", List.of("note"), "additionalProperties", false);
+        return ToolSchemas.object(Map.of("note", ToolSchemas.string("要沉淀的一条经验/惯例/踩坑，一行以内；写成用户日后能直接执行的口令式条目")),
+            List.of("note"));
     }
 
     /** 写真实文件（候选区），按写操作走审批。 */

@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import com.pilot.core.util.Texts;
 import com.pilot.core.workspace.PathValidator;
 
 /** 按行读取工作区文本。结果里只有请求的窗口，行号用文件里的绝对行号。 */
@@ -18,7 +19,6 @@ public final class ReadFileTool implements Tool.ParallelReadOnly {
     private static final int DEFAULT_LINES = 200;
     private static final int MAX_LINES = 2000;
     private static final int MAX_LINE_CHARS = 2000;
-    private static final int BINARY_SAMPLE_BYTES = 8000;
 
     private final PathValidator paths;
     private final ReadGuard reads;
@@ -50,12 +50,10 @@ public final class ReadFileTool implements Tool.ParallelReadOnly {
 
     /** 附件读取沿用文本分页和 PDF 参数，调用方指定路径说明。 */
     public static Map<String, Object> schema(String pathDescription, String startLineDescription) {
-        return Map.of("type", "object", "properties",
-            Map.of("path", Map.of("type", "string", "description", pathDescription), "start_line",
-                Map.of("type", "integer", "description", startLineDescription + "。正数从 1 开始，负数从末尾数，-1 是最后一行。默认 1"),
-                "line_count", Map.of("type", "integer", "description", "最多读取行数，默认 200，最大 2000"), "pages",
-                Map.of("type", "string", "description", "仅 PDF：页码或范围，例如 \"3\" 或 \"2-5\"，默认前 10 页，单次最多 30 页")),
-            "required", List.of("path"), "additionalProperties", false);
+        return ToolSchemas.object(Map.of("path", ToolSchemas.string(pathDescription), "start_line",
+            ToolSchemas.integer(startLineDescription + "。正数从 1 开始，负数从末尾数，-1 是最后一行。默认 1"), "line_count",
+            ToolSchemas.integer("最多读取行数，默认 200，最大 2000"), "pages",
+            ToolSchemas.string("仅 PDF：页码或范围，例如 \"3\" 或 \"2-5\"，默认前 10 页，单次最多 30 页")), List.of("path"));
     }
 
     /** 图片、PDF 与 Office 文件走媒体/抽取分支，其余沿用文本读取。 */
@@ -151,7 +149,7 @@ public final class ReadFileTool implements Tool.ParallelReadOnly {
 
     private static boolean looksBinary(Path file) throws IOException {
         try (InputStream in = Files.newInputStream(file)) {
-            return ToolSupport.isBinary(in.readNBytes(BINARY_SAMPLE_BYTES));
+            return Texts.isBinary(in.readNBytes(Texts.BINARY_SAMPLE_BYTES));
         }
     }
 

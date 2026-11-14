@@ -31,6 +31,7 @@ import com.pilot.core.permission.PermissionDecision;
 import com.pilot.core.permission.PermissionGate;
 import com.pilot.core.permission.PermissionResult;
 import com.pilot.core.trace.TraceRecorder;
+import com.pilot.core.util.Texts;
 
 /**
  * 执行单次工具调用：权限检查 → （必要时）挂起等待审批 → 执行 → 钩子回注 → 上报事件。
@@ -221,7 +222,7 @@ public final class ToolExecutor {
                 result += "\n[工具输出未归档，禁止清理原文]";
             }
         }
-        events.accept(new ToolCompleted(call.callId(), ToolSupport.oneLine(result, 120), latencyMs));
+        events.accept(new ToolCompleted(call.callId(), Texts.oneLine(result, 120), latencyMs));
         // 结构化子结果里的历史检查不决定外层工具本身成败；外层状态只看正文与本工具自产检查。
         List<Attachment> images = succeeded(result) && !blocked(result) ? execution.images() : List.of();
         return new Outcome(call.name(), result, changedPaths, checks, status, images);
@@ -377,7 +378,7 @@ public final class ToolExecutor {
             long started = System.nanoTime();
             ToolResult executed =
                 executeTool(call, tool, tool.approvalDescription(call.args()), events, guard, () -> run(tool, call));
-            events.accept(new ToolCompleted(call.callId(), ToolSupport.oneLine(executed.text(), 120),
+            events.accept(new ToolCompleted(call.callId(), Texts.oneLine(executed.text(), 120),
                 (System.nanoTime() - started) / 1_000_000L));
             return tool.result(executed.text());
         });
@@ -404,10 +405,10 @@ public final class ToolExecutor {
         for (String key : List.of("path", "pattern")) {
             Object value = args.get(key);
             if (value != null) {
-                return ToolSupport.oneLine(key + "=" + value, 120);
+                return Texts.oneLine(key + "=" + value, 120);
             }
         }
-        return ToolSupport.oneLine(canonical(args), 120);
+        return Texts.oneLine(canonical(args), 120);
     }
 
     private static String canonical(Object value) {

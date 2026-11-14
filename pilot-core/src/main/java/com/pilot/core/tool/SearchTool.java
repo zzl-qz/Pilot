@@ -16,6 +16,7 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import java.util.stream.Stream;
 
+import com.pilot.core.util.Texts;
 import com.pilot.core.workspace.PathValidator;
 
 /**
@@ -44,11 +45,10 @@ public final class SearchTool implements Tool.ParallelReadOnly {
 
     @Override
     public Map<String, Object> parameters() {
-        return Map.of("type", "object", "properties",
-            Map.of("pattern", Map.of("type", "string", "description", "正则表达式；先精确定位符号再用宽松模式，避免一次命中过多"), "path",
-                Map.of("type", "string", "description", "工作区内的相对路径，省略表示根目录"), "glob",
-                Map.of("type", "string", "description", "文件 glob，例如 *.java")),
-            "required", List.of("pattern"), "additionalProperties", false);
+        return ToolSchemas.object(
+            Map.of("pattern", ToolSchemas.string("正则表达式；先精确定位符号再用宽松模式，避免一次命中过多"), "path",
+                ToolSchemas.string("工作区内的相对路径，省略表示根目录"), "glob", ToolSchemas.string("文件 glob，例如 *.java")),
+            List.of("pattern"));
     }
 
     @Override
@@ -254,7 +254,7 @@ public final class SearchTool implements Tool.ParallelReadOnly {
                 return false;
             }
             byte[] bytes = Files.readAllBytes(file);
-            if (ToolSupport.isBinary(bytes)) {
+            if (Texts.isBinary(bytes)) {
                 return false;
             }
             String[] lines = new String(bytes, StandardCharsets.UTF_8).split("\\R", -1);

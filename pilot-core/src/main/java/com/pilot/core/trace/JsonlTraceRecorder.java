@@ -9,6 +9,7 @@ import java.util.Map;
 
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolResults;
+import com.pilot.core.util.Texts;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -27,9 +28,9 @@ public final class JsonlTraceRecorder implements TraceRecorder {
         try {
             Files.createDirectories(file.getParent());
             String args = mapper.writeValueAsString(call.args() == null ? Map.of() : call.args());
-            String line = mapper.writeValueAsString(
-                Map.of("callId", call.callId(), "name", call.name(), "argsSummary", oneLine(args, 300), "resultSummary",
-                    oneLine(result, 300), "latencyMs", latencyMs, "decision", decision(result).name()));
+            String line = mapper.writeValueAsString(Map.of("callId", call.callId(), "name", call.name(), "argsSummary",
+                Texts.oneLine(args, 300), "resultSummary", Texts.oneLine(result, 300), "latencyMs", latencyMs,
+                "decision", decision(result).name()));
             Files.writeString(file, line + "\n", StandardCharsets.UTF_8, StandardOpenOption.CREATE,
                 StandardOpenOption.WRITE, StandardOpenOption.APPEND);
         } catch (IOException e) {
@@ -55,11 +56,4 @@ public final class JsonlTraceRecorder implements TraceRecorder {
         return Decision.EXECUTED;
     }
 
-    private static String oneLine(String value, int max) {
-        if (value == null) {
-            return "";
-        }
-        String normalized = value.replaceAll("\\s+", " ").strip();
-        return normalized.length() <= max ? normalized : normalized.substring(0, max) + "…";
-    }
 }

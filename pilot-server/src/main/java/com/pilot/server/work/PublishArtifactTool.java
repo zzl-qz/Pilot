@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.pilot.core.tool.Tool;
+import com.pilot.core.tool.ToolSchemas;
 import com.pilot.core.tool.ToolSupport;
 
 import tools.jackson.databind.ObjectMapper;
@@ -23,11 +24,10 @@ public record PublishArtifactTool(WorkProductService products, ObjectMapper mapp
 
     @Override
     public Map<String, Object> parameters() {
-        return Map.of("type", "object", "properties",
-            Map.of("path", Map.of("type", "string", "description", "工作区内已生成的交付文件路径"), "title", Map.of("type", "string"),
-                "summary", Map.of("type", "string"), "sources",
-                Map.of("type", "array", "items", Map.of("type", "string"))),
-            "required", List.of("path", "title"), "additionalProperties", false);
+        return ToolSchemas.object(
+            Map.of("path", ToolSchemas.string("工作区内已生成的交付文件路径"), "title", Map.of("type", "string"), "summary",
+                Map.of("type", "string"), "sources", Map.of("type", "array", "items", Map.of("type", "string"))),
+            List.of("path", "title"));
     }
 
     @Override

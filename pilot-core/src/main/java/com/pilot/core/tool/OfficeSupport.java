@@ -27,6 +27,8 @@ import org.apache.poi.xwpf.usermodel.XWPFTable;
 import org.apache.poi.xwpf.usermodel.XWPFTableCell;
 import org.apache.poi.xwpf.usermodel.XWPFTableRow;
 
+import com.pilot.core.util.FileNames;
+
 import tools.jackson.databind.JsonNode;
 
 /** office 与 read_file 共用的限额、OOXML 防护和四类文件的文本抽取。 */
@@ -95,9 +97,7 @@ final class OfficeSupport {
     }
 
     static String extension(Path file) {
-        String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
-        int dot = name.lastIndexOf('.');
-        return dot < 0 ? "" : name.substring(dot);
+        return FileNames.dotExtension(file.getFileName().toString());
     }
 
     static boolean isOoxml(Path file) {

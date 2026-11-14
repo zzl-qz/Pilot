@@ -36,6 +36,7 @@ import com.pilot.core.tool.ToolExecutor;
 import com.pilot.core.tool.ToolNames;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.ToolResult;
+import com.pilot.core.tool.ToolSchemas;
 
 /**
  * {@code spawn_agent}：把一段「读得多、结论短」的探索派给子代理。
@@ -125,14 +126,12 @@ public final class SpawnAgentTool implements Tool {
 
     @Override
     public Map<String, Object> parameters() {
-        return Map.of(
-            "type", "object", "properties", Map
-                .of("task", Map.of("type", "string", "description", "子任务的完整描述，包含目标、范围与期望产出"), "agent",
-                    Map.of("type", "string", "description", agentFieldDescription()), "name",
-                    Map.of("type", "string", "description", "子任务的简短名字（10 字以内，如「统计 Java 文件」），用于界面展示，可省略"), "fork_turns",
-                    Map.of("type", "string", "enum", List.of("none", "all"), "description",
-                        "none = 不带父对话（默认，推荐）；all = 带上当前对话记忆")),
-            "required", List.of("task"), "additionalProperties", false);
+        return ToolSchemas.object(
+            Map.of("task", ToolSchemas.string("子任务的完整描述，包含目标、范围与期望产出"), "agent",
+                ToolSchemas.string(agentFieldDescription()), "name",
+                ToolSchemas.string("子任务的简短名字（10 字以内，如「统计 Java 文件」），用于界面展示，可省略"), "fork_turns", Map.of("type", "string",
+                    "enum", List.of("none", "all"), "description", "none = 不带父对话（默认，推荐）；all = 带上当前对话记忆")),
+            List.of("task"));
     }
 
     /** agent 字段的动态说明：有可用代理时点名角色，模型不必猜名字。 */

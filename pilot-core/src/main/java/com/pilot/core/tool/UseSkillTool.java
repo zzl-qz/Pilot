@@ -40,11 +40,9 @@ public final class UseSkillTool implements Tool {
     @Override
     public Map<String, Object> parameters() {
         Map<String, Object> properties = new LinkedHashMap<>();
-        properties.put("name", Map.of("type", "string", "description", "技能目录或 install_skill 返回的技能名，必须完全一致"));
-        properties.put("file",
-            Map.of("type", "string", "description", "可选；技能目录内相对路径（如 references/api.md）。缺省返回 SKILL.md 正文"));
-        return Map.of("type", "object", "properties", properties, "required", List.of("name"), "additionalProperties",
-            false);
+        properties.put("name", ToolSchemas.string("技能目录或 install_skill 返回的技能名，必须完全一致"));
+        properties.put("file", ToolSchemas.string("可选；技能目录内相对路径（如 references/api.md）。缺省返回 SKILL.md 正文"));
+        return ToolSchemas.object(properties, List.of("name"));
     }
 
     @Override
