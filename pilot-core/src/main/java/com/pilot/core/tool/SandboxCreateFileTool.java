@@ -1,8 +1,6 @@
 package com.pilot.core.tool;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Map;
 
 import com.pilot.core.workspace.PathValidator;
 
@@ -11,48 +9,25 @@ import com.pilot.core.workspace.PathValidator;
  *
  * <p>已存在的文件仍然拒绝创建，提示改用 {@code edit_file}，与真实写工具保持一致。
  */
-public final class SandboxCreateFileTool extends PromptedTool {
-    private final PathValidator paths;
+public final class SandboxCreateFileTool extends CreateFileOperation {
     private final SandboxSink sandbox;
-    private final ReadGuard reads;
 
     public SandboxCreateFileTool(PathValidator paths, SandboxSink sandbox) {
         this(paths, sandbox, ReadGuard.allowAll());
     }
 
     public SandboxCreateFileTool(PathValidator paths, SandboxSink sandbox, ReadGuard reads) {
-        super("create_file");
-        this.paths = java.util.Objects.requireNonNull(paths, "paths must not be null");
+        super(paths, reads);
         this.sandbox = java.util.Objects.requireNonNull(sandbox, "sandbox must not be null");
-        this.reads = reads == null ? ReadGuard.allowAll() : reads;
     }
 
     @Override
-    public Map<String, Object> parameters() {
-        return CreateFileTool.schema();
+    boolean existsInSandbox(Path file) {
+        return sandbox.proposed(paths.display(file));
     }
 
     @Override
-    public String execute(Map<String, Object> args) {
-        String rawPath = ToolSupport.stringArg(args, "path");
-        if (rawPath == null) {
-            return "ERROR: 缺少参数 path";
-        }
-        Object contentValue = args == null ? null : args.get("content");
-        if (contentValue == null) {
-            return "ERROR: 缺少参数 content";
-        }
-        String content = contentValue.toString();
-
-        Path file;
-        try {
-            file = paths.resolve(rawPath);
-        } catch (RuntimeException e) {
-            return "ERROR: " + e.getMessage();
-        }
-        if (Files.exists(file) || sandbox.proposed(paths.display(file))) {
-            return "ERROR: 文件已存在: " + rawPath + "，请改用 edit_file 修改。";
-        }
+    String create(Path file, String rawPath, String content) {
         try {
             sandbox.record(paths.display(file), null, content);
             // 刚创建的文件视为已读：后续 edit_file 不会被「先读后改」拦截

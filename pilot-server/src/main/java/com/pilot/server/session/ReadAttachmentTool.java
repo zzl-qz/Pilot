@@ -2,7 +2,6 @@ package com.pilot.server.session;
 
 import java.nio.file.Path;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 
@@ -42,12 +41,7 @@ public final class ReadAttachmentTool implements Tool {
 
     @Override
     public Map<String, Object> parameters() {
-        return Map.of("type", "object", "properties",
-            Map.of("path", Map.of("type", "string", "description", "附件绝对路径，来自消息里的「已保存到」提示"), "start_line",
-                Map.of("type", "integer", "description", "文本起始行号。正数从 1 开始，负数从末尾数，-1 是最后一行。默认 1"), "line_count",
-                Map.of("type", "integer", "description", "最多读取行数，默认 200，最大 2000"), "pages",
-                Map.of("type", "string", "description", "仅 PDF：页码或范围，例如 \"3\" 或 \"2-5\"，默认前 10 页，单次最多 30 页")),
-            "required", List.of("path"), "additionalProperties", false);
+        return ReadFileTool.schema("附件绝对路径，来自消息里的「已保存到」提示", "文本起始行号");
     }
 
     @Override
