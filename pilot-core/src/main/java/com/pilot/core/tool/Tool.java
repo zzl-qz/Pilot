@@ -62,6 +62,19 @@ public interface Tool {
         return false;
     }
 
+    /** 工具主动声明其全部操作只读，并允许同一批调用并行执行。 */
+    interface ParallelReadOnly extends Tool {
+        @Override
+        default boolean readOnly() {
+            return true;
+        }
+
+        @Override
+        default boolean parallelSafe() {
+            return true;
+        }
+    }
+
     /**
      * 执行工具。
      *

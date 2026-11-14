@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.Map;
 
 /** 会话作用域内分页恢复原始观察；永不重新执行工具。 */
-public final class ReadToolOutputTool implements Tool {
+public final class ReadToolOutputTool implements Tool.ParallelReadOnly {
     private final ToolCallJournal journal;
 
     public ReadToolOutputTool(ToolCallJournal journal) {
@@ -19,16 +19,6 @@ public final class ReadToolOutputTool implements Tool {
     @Override
     public String description() {
         return "按存档引用的 run_id、call_id 分页读取本会话原始工具输出，不重放命令或修改。offset 为字符偏移，limit 最大 16000。找不到时明确返回错误。";
-    }
-
-    @Override
-    public boolean readOnly() {
-        return true;
-    }
-
-    @Override
-    public boolean parallelSafe() {
-        return true;
     }
 
     @Override

@@ -22,7 +22,7 @@ import com.pilot.core.workspace.PathValidator;
  * 在工作区内按正则搜索文本，返回 {@code 路径:行号: 内容}。
  * 跳过构建产物、依赖目录与二进制文件，结果数量有上限。
  */
-public final class SearchTool implements Tool {
+public final class SearchTool implements Tool.ParallelReadOnly {
     private static final int MAX_MATCHES = 200;
     private static final long MAX_FILE_BYTES = 1024 * 1024;
     private static final int MAX_LINE_CHARS = 300;
@@ -49,16 +49,6 @@ public final class SearchTool implements Tool {
                 Map.of("type", "string", "description", "工作区内的相对路径，省略表示根目录"), "glob",
                 Map.of("type", "string", "description", "文件 glob，例如 *.java")),
             "required", List.of("pattern"), "additionalProperties", false);
-    }
-
-    @Override
-    public boolean readOnly() {
-        return true;
-    }
-
-    @Override
-    public boolean parallelSafe() {
-        return true;
     }
 
     @Override

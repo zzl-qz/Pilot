@@ -17,7 +17,7 @@ import com.pilot.core.workspace.PathValidator;
  * 无关会话与工作区内外的其它路径均拒绝。文本分页、PDF 页码、
  * Office 抽取与图片分支全部委托 {@link ReadFileTool}，不重复实现解析逻辑。
  */
-public final class ReadAttachmentTool implements Tool {
+public final class ReadAttachmentTool implements Tool.ParallelReadOnly {
     private final Function<String, Path> resolve;
 
     public ReadAttachmentTool(Path attachmentDir) {
@@ -42,16 +42,6 @@ public final class ReadAttachmentTool implements Tool {
     @Override
     public Map<String, Object> parameters() {
         return ReadFileTool.schema("附件绝对路径，来自消息里的「已保存到」提示", "文本起始行号");
-    }
-
-    @Override
-    public boolean readOnly() {
-        return true;
-    }
-
-    @Override
-    public boolean parallelSafe() {
-        return true;
     }
 
     @Override

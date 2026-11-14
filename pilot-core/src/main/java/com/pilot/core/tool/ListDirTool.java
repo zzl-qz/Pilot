@@ -11,7 +11,7 @@ import java.util.stream.Stream;
 import com.pilot.core.workspace.PathValidator;
 
 /** 列出工作区内的一个目录，标记子目录与文件大小。 */
-public final class ListDirTool implements Tool {
+public final class ListDirTool implements Tool.ParallelReadOnly {
     private static final int MAX_ENTRIES = 300;
 
     private final PathValidator paths;
@@ -30,16 +30,6 @@ public final class ListDirTool implements Tool {
         return Map.of("type", "object", "properties",
             Map.of("path", Map.of("type", "string", "description", "工作区内的相对目录路径，省略表示根目录")), "required", List.of(),
             "additionalProperties", false);
-    }
-
-    @Override
-    public boolean readOnly() {
-        return true;
-    }
-
-    @Override
-    public boolean parallelSafe() {
-        return true;
     }
 
     @Override

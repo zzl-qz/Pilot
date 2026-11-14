@@ -20,7 +20,7 @@ import com.pilot.core.workspace.PathValidator;
  * 按 glob 在整个子树里找文件，一次调用替代逐层 list_dir。
  * 跳过依赖与构建产物目录；结果按修改时间从新到旧排列，最近改过的文件最先出现。
  */
-public final class GlobFilesTool implements Tool {
+public final class GlobFilesTool implements Tool.ParallelReadOnly {
     private static final int DEFAULT_LIMIT = 200;
     private static final int MAX_LIMIT = 1000;
     private static final int MAX_VISITED = 200_000;
@@ -46,16 +46,6 @@ public final class GlobFilesTool implements Tool {
                 "path", Map.of("type", "string", "description", "起始目录，工作区内的相对路径，默认根目录"), "limit",
                 Map.of("type", "integer", "description", "最多返回条数，默认 " + DEFAULT_LIMIT + "，最大 " + MAX_LIMIT)),
             "required", List.of("pattern"), "additionalProperties", false);
-    }
-
-    @Override
-    public boolean readOnly() {
-        return true;
-    }
-
-    @Override
-    public boolean parallelSafe() {
-        return true;
     }
 
     @Override

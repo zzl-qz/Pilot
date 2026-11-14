@@ -14,7 +14,7 @@ import java.util.Map;
 import com.pilot.core.workspace.PathValidator;
 
 /** 按行读取工作区文本。结果里只有请求的窗口，行号用文件里的绝对行号。 */
-public final class ReadFileTool implements Tool {
+public final class ReadFileTool implements Tool.ParallelReadOnly {
     private static final int DEFAULT_LINES = 200;
     private static final int MAX_LINES = 2000;
     private static final int MAX_LINE_CHARS = 2000;
@@ -56,16 +56,6 @@ public final class ReadFileTool implements Tool {
                 "line_count", Map.of("type", "integer", "description", "最多读取行数，默认 200，最大 2000"), "pages",
                 Map.of("type", "string", "description", "仅 PDF：页码或范围，例如 \"3\" 或 \"2-5\"，默认前 10 页，单次最多 30 页")),
             "required", List.of("path"), "additionalProperties", false);
-    }
-
-    @Override
-    public boolean readOnly() {
-        return true;
-    }
-
-    @Override
-    public boolean parallelSafe() {
-        return true;
     }
 
     /** 图片、PDF 与 Office 文件走媒体/抽取分支，其余沿用文本读取。 */
