@@ -167,17 +167,12 @@ public class DesktopShellInstaller {
         if (!mobileBin.isBlank()) {
             bins.add(mobileBin);
         }
-        String inherited = inheritedPath(System.getenv());
+        String inherited = ExecutablePath.inherited(System.getenv());
         if (!inherited.isBlank()) {
             bins.add(inherited);
         }
         environment.put("PATH", String.join(File.pathSeparator, bins));
         return environment;
-    }
-
-    static String inheritedPath(Map<String, String> env) {
-        return env.entrySet().stream().filter(entry -> entry.getKey().equalsIgnoreCase("PATH")).map(Map.Entry::getValue)
-            .findFirst().orElse("");
     }
 
     /** 与 npm 同目录的 node（Electron 只接受 Node 22+，就用装它的那个 Node 补二进制）。 */
@@ -188,7 +183,7 @@ public class DesktopShellInstaller {
 
     /** 本机 npm 的位置；测试可覆盖成固定值。 */
     Path npm(Path root) {
-        return npm(root, RuntimeEnvironment.bundledBinPath(), inheritedPath(System.getenv()));
+        return npm(root, RuntimeEnvironment.bundledBinPath(), ExecutablePath.inherited(System.getenv()));
     }
 
     /**

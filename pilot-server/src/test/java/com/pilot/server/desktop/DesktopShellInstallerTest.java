@@ -35,7 +35,6 @@ class DesktopShellInstallerTest {
         Files.createFile(cli);
         assertEquals(List.of(node.toString(), cli.toString(), "install", "--no-audit", "--no-fund"),
             NpmInstall.command(npm, List.of()));
-        assertEquals("system-bin", DesktopShellInstaller.inheritedPath(Map.of("Path", "system-bin")));
     }
 
     @Test

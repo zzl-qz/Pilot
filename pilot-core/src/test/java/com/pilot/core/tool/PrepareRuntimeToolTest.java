@@ -5,12 +5,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
+import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -49,6 +51,25 @@ class PrepareRuntimeToolTest {
             assertTrue(commands.get(1).contains("python-pptx==1.0.2"));
             assertTrue(commands.get(1).contains("--only-binary=:all:"));
         }
+    }
+
+    @Test
+    void resolvesPythonInPathOrderAndAddsTheWindowsLauncherFlag() throws Exception {
+        Path first = Files.createDirectory(root.resolve("中文 tools"));
+        Path second = Files.createDirectory(root.resolve("system tools"));
+        Path launcher = Files.createFile(first.resolve("py.exe"));
+        Path direct = Files.createFile(second.resolve("python.exe"));
+        Path python = Files.createFile(first.resolve("python"));
+        Path python3 = Files.createFile(second.resolve("python3"));
+        for (Path candidate : List.of(launcher, direct, python, python3)) {
+            Assumptions.assumeTrue(Files.isExecutable(candidate) || candidate.toFile().setExecutable(true));
+        }
+        String path = String.join(File.pathSeparator, "bad\0path", first.toString(), second.toString());
+
+        assertEquals(List.of(launcher.toString(), "-3"), PrepareRuntimeTool.findPython(path, true));
+        assertEquals(List.of(direct.toString()), PrepareRuntimeTool.findPython(second.toString(), true));
+        assertEquals(List.of(python.toString()), PrepareRuntimeTool.findPython(path, false));
+        assertEquals(List.of(), PrepareRuntimeTool.findPython("", false));
     }
 
     @Test

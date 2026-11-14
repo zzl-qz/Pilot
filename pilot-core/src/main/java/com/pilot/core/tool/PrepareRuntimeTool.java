@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
+import com.pilot.core.runtime.ExecutablePath;
 import com.pilot.core.util.FileTrees;
 import com.pilot.core.workspace.PathValidator;
 
@@ -30,8 +31,11 @@ public final class PrepareRuntimeTool implements Tool {
     }
 
     public PrepareRuntimeTool(PathValidator paths) {
-        this(paths, PrepareRuntimeTool::runProcess, findPython(),
-            System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("windows"));
+        this(paths, System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("windows"));
+    }
+
+    private PrepareRuntimeTool(PathValidator paths, boolean windows) {
+        this(paths, PrepareRuntimeTool::runProcess, findPython(System.getenv("PATH"), windows), windows);
     }
 
     public PrepareRuntimeTool(PathValidator paths, Runner runner, List<String> python, boolean windows) {
@@ -178,25 +182,15 @@ public final class PrepareRuntimeTool implements Tool {
         return resolved;
     }
 
-    private static List<String> findPython() {
-        boolean windows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("windows");
-        for (String entry : System.getenv().getOrDefault("PATH", "")
-            .split(java.util.regex.Pattern.quote(java.io.File.pathSeparator))) {
-            if (entry.isBlank()) {
-                continue;
-            }
-            for (String name : windows ? List.of("python.exe", "py.exe") : List.of("python3", "python")) {
-                try {
-                    Path candidate = Path.of(entry).resolve(name);
-                    if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) {
-                        return name.equals("py.exe") ? List.of(candidate.toString(), "-3")
-                            : List.of(candidate.toString());
-                    }
-                } catch (java.nio.file.InvalidPathException ignored) {
-                }
-            }
-        }
-        return List.of();
+    static List<String> findPython(String path, boolean windows) {
+        var directories = ExecutablePath.directories(path);
+        String primary = windows ? "python.exe" : "python3";
+        String fallback = windows ? "py.exe" : "python";
+        return ExecutablePath.candidates(directories, primary, fallback).filter(Files::isRegularFile)
+            .filter(Files::isExecutable).findFirst()
+            .map(candidate -> windows && candidate.getFileName().toString().equals(fallback)
+                ? List.of(candidate.toString(), "-3") : List.of(candidate.toString()))
+            .orElseGet(List::of);
     }
 
     private static int runProcess(List<String> command, Path root, Path log) throws Exception {

@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
+import com.pilot.core.runtime.ExecutablePath;
 import com.pilot.core.util.Sha256;
 
 /** 启动器与 IDE 共用的环境准备逻辑；仅依赖 JDK，也可直接作为多文件 Java 源码程序启动。 */
@@ -251,10 +252,8 @@ public final class SourceEnvironment {
     }
 
     private List<Path> pathExecutables(String executable) {
-        String path = environment.entrySet().stream().filter(entry -> entry.getKey().equalsIgnoreCase("PATH"))
-            .map(Map.Entry::getValue).findFirst().orElse("");
-        return Arrays.stream(path.split(Pattern.quote(File.pathSeparator))).filter(value -> !value.isBlank())
-            .map(value -> Path.of(value).resolve(executable)).filter(Files::isRegularFile).toList();
+        var directories = ExecutablePath.directories(ExecutablePath.inherited(environment));
+        return ExecutablePath.candidates(directories, executable).filter(Files::isRegularFile).toList();
     }
 
     private String java(Path home) {
@@ -309,7 +308,7 @@ public final class SourceEnvironment {
 
     private Map<String, String> childEnvironment(Path javaHome, Path node) {
         Map<String, String> env = new HashMap<>(environment);
-        String key = env.keySet().stream().filter(name -> name.equalsIgnoreCase("PATH")).findFirst().orElse("PATH");
+        String key = ExecutablePath.key(env);
         String prefix = javaHome.resolve("bin") + File.pathSeparator;
         if (node != null) {
             prefix = node.getParent() + File.pathSeparator + prefix;

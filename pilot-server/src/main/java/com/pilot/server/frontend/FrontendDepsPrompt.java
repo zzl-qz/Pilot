@@ -7,7 +7,6 @@ import java.io.InputStream;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.security.CodeSource;
@@ -15,7 +14,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
+import java.util.stream.Stream;
 
+import com.pilot.core.runtime.ExecutablePath;
 import com.pilot.server.runtime.SourceLayout;
 
 /**
@@ -184,22 +185,10 @@ public final class FrontendDepsPrompt {
     /** 优先用 PATH 上的 npm（Maven 的 frontend-build 用的就是它），没有才退回项目内置 Node。 */
     static Path npmHome(Path root) {
         String name = isWindows() ? "npm.cmd" : "npm";
-        String path = System.getenv().getOrDefault("PATH", "");
-        for (String entry : path.split(File.pathSeparator)) {
-            if (entry.isBlank()) {
-                continue;
-            }
-            try {
-                Path candidate = Path.of(entry).resolve(name);
-                if (Files.isRegularFile(candidate)) {
-                    return candidate.getParent();
-                }
-            } catch (InvalidPathException ignored) {
-                // PATH 里混进非法路径不稀奇，跳过即可
-            }
-        }
-        Path bundled = SourceLayout.bundledRuntime(root).resolve("node").resolve(name);
-        return Files.isRegularFile(bundled) ? bundled.getParent() : null;
+        var directories = ExecutablePath.directories(System.getenv("PATH"));
+        var bundled = SourceLayout.bundledRuntime(root).resolve("node");
+        return ExecutablePath.candidates(Stream.concat(directories, Stream.of(bundled)), name)
+            .filter(Files::isRegularFile).map(Path::getParent).findFirst().orElse(null);
     }
 
     /** 从 jar 里启动（打包分发）时不提问：classes 目录才是开发态。 */

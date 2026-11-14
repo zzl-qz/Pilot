@@ -20,6 +20,7 @@ import com.pilot.core.exec.EnvironmentSanitizer;
 import com.pilot.core.exec.OsSandbox;
 import com.pilot.core.multi.AgentScope;
 import com.pilot.core.prompt.PromptLibrary;
+import com.pilot.core.runtime.ExecutablePath;
 import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
 import com.pilot.core.workspace.PathValidator;
 
@@ -677,7 +678,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
      * 都指向当前运行时的 JDK，保证构建命令看到的是同一个 Java。
      */
     private static void useCurrentJdk(Map<String, String> env) {
-        String pathKey = env.keySet().stream().filter(key -> key.equalsIgnoreCase("PATH")).findFirst().orElse("PATH");
+        String pathKey = ExecutablePath.key(env);
         String javaHome = System.getProperty("java.home");
         if (javaHome != null && !javaHome.isBlank()) {
             Path bin = Path.of(javaHome, "bin");
@@ -743,30 +744,16 @@ public final class RunCommandTool implements Tool, ProducesCheck {
 
     /** 在 PATH 中查找可执行文件；Windows 需要补全 .exe/.cmd/.bat 后缀。 */
     static Path resolveOnPath(String name) {
-        String pathEnv = effectivePath();
-        if (pathEnv == null || pathEnv.isBlank()) {
-            return null;
-        }
         boolean windows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+        return resolveOnPath(name, effectivePath(), windows);
+    }
+
+    static Path resolveOnPath(String name, String path, boolean windows) {
+        var directories = ExecutablePath.directories(path, String::trim);
         // Windows 上只看带后缀的文件：Maven 的 bin 目录同时有 Unix 脚本 mvn 和 mvn.cmd，
         // 直接执行 Unix 脚本会报 "不是有效的 Win32 应用程序"
-        List<String> extensions = windows ? List.of(".exe", ".cmd", ".bat") : List.of("");
-        for (String dir : pathEnv.split(java.io.File.pathSeparator)) {
-            if (dir == null || dir.isBlank()) {
-                continue;
-            }
-            for (String extension : extensions) {
-                try {
-                    Path candidate = Path.of(dir.trim(), name + extension);
-                    if (Files.isRegularFile(candidate)) {
-                        return candidate;
-                    }
-                } catch (RuntimeException ignored) {
-                    // 跳过非法 PATH 项
-                }
-            }
-        }
-        return null;
+        String[] names = windows ? new String[] {name + ".exe", name + ".cmd", name + ".bat"} : new String[] {name};
+        return ExecutablePath.candidates(directories, names).filter(Files::isRegularFile).findFirst().orElse(null);
     }
 
     /** PATH 前面先放内置的 Python/Node，再放当前 JDK，避免用到系统里另一套解释器。 */

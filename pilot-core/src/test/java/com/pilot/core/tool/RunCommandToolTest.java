@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -194,6 +195,24 @@ class RunCommandToolTest {
         assertNull(RunCommandTool.resolveOnPath("definitely-not-a-real-binary-xyz"));
         assertTrue(resolved != null && resolved.getFileName().toString().toLowerCase().contains("mvn"),
             String.valueOf(resolved));
+    }
+
+    @Test
+    void preservesDirectoryAndWindowsSuffixPriority() throws Exception {
+        Path first = Files.createDirectory(workspace.resolve("中文 tools"));
+        Path second = Files.createDirectory(workspace.resolve("fallback"));
+        Path unix = Files.createFile(first.resolve("tool"));
+        Path batch = Files.createFile(first.resolve("tool.bat"));
+        Path laterExe = Files.createFile(second.resolve("tool.exe"));
+        String path = String.join(File.pathSeparator, "bad\0path", " " + first + " ", second.toString());
+
+        assertEquals(unix, RunCommandTool.resolveOnPath("tool", path, false));
+        assertEquals(batch, RunCommandTool.resolveOnPath("tool", path, true));
+        Path cmd = Files.createFile(first.resolve("tool.cmd"));
+        assertEquals(cmd, RunCommandTool.resolveOnPath("tool", path, true));
+        Files.delete(cmd);
+        Files.delete(batch);
+        assertEquals(laterExe, RunCommandTool.resolveOnPath("tool", path, true));
     }
 
     @Test
