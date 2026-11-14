@@ -105,34 +105,36 @@ pilot:
     # 工具能碰到的根目录，默认是进程工作目录。建议显式指到项目根
     workspace: ${PILOT_WORKSPACE:${user.dir}}
     # 单轮步数上限，只当事故熔断。触顶后界面可以继续接着跑
-    max-steps: ${PILOT_AGENT_MAX_STEPS:1000}
+    # 默认值由 AgentProperties 提供，可用 PILOT_AGENT_MAX_STEPS 覆盖。
     # 执行预算只是高位事故熔断，不作为日常收尾条件，也不在半额度强制改变策略。
     # 触发后保留进度、证据、待执行动作和预期观察；继续才开启新的预算段。
-    direct-max-requests: ${PILOT_AGENT_DIRECT_MAX_REQUESTS:1000}
-    direct-max-input-tokens: ${PILOT_AGENT_DIRECT_MAX_INPUT_TOKENS:50000000}
-    direct-max-output-tokens: ${PILOT_AGENT_DIRECT_MAX_OUTPUT_TOKENS:2000000}
-    direct-max-active-millis: ${PILOT_AGENT_DIRECT_MAX_ACTIVE_MILLIS:28800000}
+    # 留空使用 AgentProperties 的默认值。
+    direct-max-requests: ${PILOT_AGENT_DIRECT_MAX_REQUESTS:}
+    direct-max-input-tokens: ${PILOT_AGENT_DIRECT_MAX_INPUT_TOKENS:}
+    direct-max-output-tokens: ${PILOT_AGENT_DIRECT_MAX_OUTPUT_TOKENS:}
+    direct-max-active-millis: ${PILOT_AGENT_DIRECT_MAX_ACTIVE_MILLIS:}
     # 兼容旧配置的高位调查诊断值；运行时不据此拒绝合法的读取和搜索。
-    direct-max-investigation-tools: ${PILOT_AGENT_DIRECT_MAX_INVESTIGATION_TOOLS:512}
+    direct-max-investigation-tools: ${PILOT_AGENT_DIRECT_MAX_INVESTIGATION_TOOLS:}
     # Goal 长任务的高位事故熔断。
-    goal-max-input-tokens: ${PILOT_AGENT_GOAL_MAX_INPUT_TOKENS:50000000}
-    goal-max-output-tokens: ${PILOT_AGENT_GOAL_MAX_OUTPUT_TOKENS:2000000}
-    goal-max-active-millis: ${PILOT_AGENT_GOAL_MAX_ACTIVE_MILLIS:28800000}
+    goal-max-input-tokens: ${PILOT_AGENT_GOAL_MAX_INPUT_TOKENS:}
+    goal-max-output-tokens: ${PILOT_AGENT_GOAL_MAX_OUTPUT_TOKENS:}
+    goal-max-active-millis: ${PILOT_AGENT_GOAL_MAX_ACTIVE_MILLIS:}
     # 计划只作为给模型和用户的进度提示，不因为没写完就拦住收尾
-    max-plan-continues: ${PILOT_AGENT_MAX_PLAN_CONTINUES:0}
+    max-plan-continues: ${PILOT_AGENT_MAX_PLAN_CONTINUES:}
     # 上下文预算（字符估算）。太小会频繁压缩、丢细节；128k 窗口的模型可以开到 300000 左右
-    context-max-chars: ${PILOT_AGENT_CONTEXT_MAX_CHARS:400000}
+    context-max-chars: ${PILOT_AGENT_CONTEXT_MAX_CHARS:}
     # 连续相同工具调用只注入提醒，不再中断运行
-    repeat-remind-at: 3
+    repeat-remind-at: ${PILOT_AGENT_REPEAT_REMIND_AT:}
     # READ_ONLY 只读；ASK 写入与命令逐次批准；
     # AUTO_EDIT 写入直接生效、命令仍批准；AUTO 全部放行（Pilot 默认，工作区边界仍生效）
     permission-mode: ${PILOT_PERMISSION_MODE:AUTO}
-    approval-timeout-seconds: 300
+    # PILOT_AGENT_APPROVAL_TIMEOUT_SECONDS 可覆盖审批等待时限，默认 300 秒。
     # 通用收尾检查门默认开启；Direct 按实际证据报告检查通过、失败、陈旧或未验证。
     # 执行结束不代表已核验；Goal 独立核验不受此开关影响。
-    completion-checks: ${PILOT_AGENT_COMPLETION_CHECKS:true}
+    # 留空时兼容 JVM 参数 -Dpilot.completion.checks。
+    completion-checks: ${PILOT_AGENT_COMPLETION_CHECKS:}
     # 同时能跑的任务数。一个任务卡住时，不要把后面的任务全堵死
-    run-threads: ${PILOT_AGENT_RUN_THREADS:4}
+    # PILOT_AGENT_RUN_THREADS 可覆盖默认的 4 个运行线程。
   web-search:
     # true：启动时在本机拉起 SearXNG。false：不拉起。不需要搜索密钥。
     local: ${PILOT_WEB_SEARCH_LOCAL:true}

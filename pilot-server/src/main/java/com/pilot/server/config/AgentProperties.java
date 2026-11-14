@@ -31,6 +31,11 @@ public record AgentProperties(String workspace, PermissionMode permissionMode, i
     Integer contextMaxChars, Boolean completionChecks, Boolean goalModeEnabled, Integer directMaxRequests,
     Long directMaxInputTokens, Long directMaxOutputTokens, Long directMaxActiveMillis,
     Integer directMaxInvestigationTools, Long goalMaxInputTokens, Long goalMaxOutputTokens, Long goalMaxActiveMillis) {
+    private static final int DEFAULT_MAX_STEPS = 1_000;
+    private static final long DEFAULT_MAX_INPUT_TOKENS = 50_000_000L;
+    private static final long DEFAULT_MAX_OUTPUT_TOKENS = 2_000_000L;
+    private static final long DEFAULT_MAX_ACTIVE_MILLIS = 8 * 60 * 60_000L;
+
     public AgentProperties(String workspace, PermissionMode mode, int steps, Integer remind, Integer abort, int timeout,
         int threads, Integer continues, Integer chars, Boolean checks) {
         this(workspace, mode, steps, remind, abort, timeout, threads, continues, chars, checks, false, null, null, null,
@@ -53,7 +58,7 @@ public record AgentProperties(String workspace, PermissionMode permissionMode, i
             : Path.of(workspace).toAbsolutePath().normalize().toString();
         // Pilot 默认 AUTO；READ_ONLY、ASK、AUTO_EDIT 可按任务需要配置，工作区边界仍生效。
         permissionMode = permissionMode == null ? PermissionMode.AUTO : permissionMode;
-        maxSteps = maxSteps < 1 ? 1_000 : maxSteps;
+        maxSteps = maxSteps < 1 ? DEFAULT_MAX_STEPS : maxSteps;
         int abort = repeatAbortAt == null || repeatAbortAt < 1 ? 5 : repeatAbortAt;
         // 提醒档必须早于中断档：配反了启动就报错，不静默修正
         int remind = repeatRemindAt == null ? 3 : repeatRemindAt;
@@ -73,29 +78,29 @@ public record AgentProperties(String workspace, PermissionMode permissionMode, i
         // 通用收尾检查门默认开启；Direct 收尾仍按实际证据区分检查通过、失败、陈旧或未验证。
         // Goal 的独立核验不受此开关影响；执行结束本身不代表已核验。
         // 可配置 pilot.agent.completion-checks；仅未显式配置时才回退读取 -Dpilot.completion.checks。
-        String flag = System.getProperty("pilot.completion.checks");
         if (completionChecks == null) {
+            String flag = System.getProperty("pilot.completion.checks");
             completionChecks = flag == null || flag.isBlank() || "true".equalsIgnoreCase(flag.strip());
         }
-        directMaxRequests =
-            directMaxRequests == null || directMaxRequests < 4 ? maxSteps : Math.min(directMaxRequests, maxSteps);
-        directMaxInputTokens =
-            directMaxInputTokens == null || directMaxInputTokens < 50_000 ? 50_000_000L : directMaxInputTokens;
-        directMaxOutputTokens =
-            directMaxOutputTokens == null || directMaxOutputTokens < 5_000 ? 2_000_000L : directMaxOutputTokens;
-        directMaxActiveMillis =
-            directMaxActiveMillis == null || directMaxActiveMillis < 60_000 ? 8 * 60 * 60_000L : directMaxActiveMillis;
+        int directRequests = directMaxRequests == null ? DEFAULT_MAX_STEPS : directMaxRequests;
+        directMaxRequests = directRequests < 4 ? maxSteps : Math.min(directRequests, maxSteps);
+        directMaxInputTokens = directMaxInputTokens == null || directMaxInputTokens < 50_000 ? DEFAULT_MAX_INPUT_TOKENS
+            : directMaxInputTokens;
+        directMaxOutputTokens = directMaxOutputTokens == null || directMaxOutputTokens < 5_000
+            ? DEFAULT_MAX_OUTPUT_TOKENS : directMaxOutputTokens;
+        directMaxActiveMillis = directMaxActiveMillis == null || directMaxActiveMillis < 60_000
+            ? DEFAULT_MAX_ACTIVE_MILLIS : directMaxActiveMillis;
         directMaxInvestigationTools =
             directMaxInvestigationTools == null || directMaxInvestigationTools < 8 ? 512 : directMaxInvestigationTools;
         goalMaxInputTokens =
-            goalMaxInputTokens == null || goalMaxInputTokens < 10_000 ? 50_000_000L : goalMaxInputTokens;
-        goalMaxOutputTokens =
-            goalMaxOutputTokens == null || goalMaxOutputTokens < 1_000 ? 2_000_000L : goalMaxOutputTokens;
-        goalMaxActiveMillis =
-            goalMaxActiveMillis == null || goalMaxActiveMillis < 60_000 ? 8 * 60 * 60_000L : goalMaxActiveMillis;
+            goalMaxInputTokens == null || goalMaxInputTokens < 10_000 ? DEFAULT_MAX_INPUT_TOKENS : goalMaxInputTokens;
+        goalMaxOutputTokens = goalMaxOutputTokens == null || goalMaxOutputTokens < 1_000 ? DEFAULT_MAX_OUTPUT_TOKENS
+            : goalMaxOutputTokens;
+        goalMaxActiveMillis = goalMaxActiveMillis == null || goalMaxActiveMillis < 60_000 ? DEFAULT_MAX_ACTIVE_MILLIS
+            : goalMaxActiveMillis;
     }
 
-    /** 通用收尾提醒门是否启用（默认关闭）；与实际验证状态、Goal 独立核验分别处理。 */
+    /** 通用收尾提醒门默认开启，与实际验证状态和 Goal 独立核验分别处理。 */
     public boolean completionChecksEnabled() {
         return Boolean.TRUE.equals(completionChecks);
     }
