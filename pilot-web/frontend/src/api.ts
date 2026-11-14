@@ -207,6 +207,13 @@ export const api = {
   fileDiff: (id: string, path: string) => apiJson<ApiResults['fileDiff']>(`/api/sessions/${encodeURIComponent(id)}/diff/file?path=${encodeURIComponent(path)}`),
   restoreChanges: (id: string, body: { paths?: string[]; all?: boolean }) => apiJson<ApiResults['restoreChanges']>(`/api/sessions/${encodeURIComponent(id)}/diff/restore`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }),
   capabilities: (id: string) => apiJson<ApiResults['capabilities']>(`/api/sessions/${encodeURIComponent(id)}/capabilities`),
+  /** MCP：合并视图只读、写用户级配置、信任管理。 */
+  mcpServers: (id: string) => apiJson<ApiResults['mcpServers']>(`/api/sessions/${encodeURIComponent(id)}/mcp/servers`),
+  mcpAddServer: (id: string, body: Update<S.McpConfigControllerAddRequest>) => apiJson<ApiResults['mcpAddServer']>(`/api/sessions/${encodeURIComponent(id)}/mcp/servers`, jsonBody('POST', body)),
+  mcpImportServers: (id: string, body: Update<S.McpConfigControllerImportRequest>) => apiJson<ApiResults['mcpImportServers']>(`/api/sessions/${encodeURIComponent(id)}/mcp/servers/import`, jsonBody('POST', body)),
+  mcpDeleteServer: (id: string, name: string) => apiJson<ApiResults['mcpDeleteServer']>(`/api/sessions/${encodeURIComponent(id)}/mcp/servers/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  mcpTrust: (id: string, body: Update<S.McpTrustControllerTrustRequest>) => apiJson<ApiResults['mcpTrust']>(`/api/sessions/${encodeURIComponent(id)}/mcp/trust`, jsonBody('POST', body)),
+  mcpTrustView: (id: string) => apiJson<ApiResults['mcpTrustView']>(`/api/sessions/${encodeURIComponent(id)}/mcp/trust`),
   browserStatus: (id: string) => apiJson<ApiResults['browserStatus']>(`/api/sessions/${encodeURIComponent(id)}/browser/status`),
   stopCommand: (id: string, taskId: string) => apiJson<ApiResults['stopCommand']>(`/api/sessions/${encodeURIComponent(id)}/commands/${encodeURIComponent(taskId)}/stop`, { method: 'POST' }),
   runChanges: (runId: string) => apiJson<ApiResults['runChanges']>(`/api/runs/${encodeURIComponent(runId)}/changes`),

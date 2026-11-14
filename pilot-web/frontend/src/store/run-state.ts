@@ -5,7 +5,7 @@ import { errorInfo } from '../lib/errors.js';
 import { normalizeQueue } from '../lib/queue.js';
 
 /** 运行面板的数据同步：计划、队列、任务契约和上下文各自保留现有响应归属检查。 */
-export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'resolveApproval' | 'resolveArbitration' | 'loadPlan' | 'loadQueue' | 'mutateQueue' | 'steerQueueItem' | 'saveQueueItem' | 'removeQueueItem' | 'moveQueueItem' | 'loadTask' | 'saveTask' | 'refreshContext' | 'refreshActiveRun'> {
+export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'resolveApproval' | 'resolveApprovalWithTrust' | 'resolveArbitration' | 'loadPlan' | 'loadQueue' | 'mutateQueue' | 'steerQueueItem' | 'saveQueueItem' | 'removeQueueItem' | 'moveQueueItem' | 'loadTask' | 'saveTask' | 'refreshContext' | 'refreshActiveRun'> {
   let queueLoadSequence = 0;
   let activeRunSequence = 0;
   return {
@@ -20,6 +20,26 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
       } catch (error) {
         if (!current()) return;
         get().showNotice('提交审批失败：' + errorInfo(error).message);
+        set((draft) => { if (draft.pendingApprovals[callId]) draft.pendingApprovals[callId].busy = false; });
+      }
+    },
+
+    /**
+     * 「批准并信任」/「始终允许此工具」：先落信任再批准本次调用（串行，信任失败不批准）。
+     * 信任写入失败时本次调用保持待审批状态，用户可单独点批准。
+     */
+    async resolveApprovalWithTrust(callId, approved, trust) {
+      const { sessionId, sessionEpoch, pendingApprovals } = get();
+      const entry = pendingApprovals[callId];
+      if (!sessionId || !entry || entry.busy) return;
+      const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
+      set((draft) => { draft.pendingApprovals[callId].busy = true; });
+      try {
+        await api.mcpTrust(sessionId, trust);
+        await api.approval(callId, approved);
+      } catch (error) {
+        if (!current()) return;
+        get().showNotice('信任未生效，未批准本次调用：' + errorInfo(error).message);
         set((draft) => { if (draft.pendingApprovals[callId]) draft.pendingApprovals[callId].busy = false; });
       }
     },

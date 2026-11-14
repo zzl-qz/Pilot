@@ -5,6 +5,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -34,12 +35,13 @@ public final class InMemoryApprovalBroker implements ApprovalBroker {
     }
 
     @Override
-    public CompletableFuture<Boolean> register(String callId, String toolName, String argsSummary) {
+    public CompletableFuture<Boolean> register(String callId, String toolName, String argsSummary,
+        Map<String, Object> args) {
         if (callId == null || callId.isBlank()) {
             throw new IllegalArgumentException("callId must not be blank");
         }
         CompletableFuture<Boolean> future = new CompletableFuture<Boolean>();
-        Entry entry = new Entry(new PendingApproval(callId, toolName, argsSummary, clock.instant()), future);
+        Entry entry = new Entry(new PendingApproval(callId, toolName, argsSummary, args, clock.instant()), future);
         if (pending.putIfAbsent(callId, entry) != null) {
             throw new IllegalStateException("approval already pending: " + callId);
         }

@@ -1,8 +1,10 @@
 package com.pilot.core.mcp;
 
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -22,7 +24,9 @@ import tools.jackson.databind.ObjectMapper;
  * 以及可选的用户级文件，同名时工作区优先。服务器按「工作区 + 名字」懒启动：
  * 模型第一次真正用到时才拉起进程，之后复用，服务关闭时统一回收。
  *
- * <p>启动一个服务器等于执行配置里的命令，因此调用方（工具层）必须把「启动」当作需要审批的动作。
+ * <p>启动一个服务器等于执行配置里的命令，因此调用方（工具层）必须把「启动」当作需要审批的动作；
+ * 信任记录与决策矩阵见 {@link McpTrustStore} 与 {@link McpTrustPolicy}：启动成功后把服务器声明的
+ * 工具钉进记录，之后的调用按「已信任 + 哈希未漂移」放行，检测到定义漂移则退回审批。
  */
 public final class McpManager implements AutoCloseable {
     static final Duration START_TIMEOUT = Duration.ofSeconds(40);
@@ -33,8 +37,10 @@ public final class McpManager implements AutoCloseable {
     private final Path userConfig;
     private final Path logDir;
     private final Supplier<String> extraPath;
+    private final McpTrustStore trustStore;
     private final Map<String, McpClient> clients = new ConcurrentHashMap<>();
     private final Map<String, String> failures = new ConcurrentHashMap<>();
+    private final Map<String, String> notes = new ConcurrentHashMap<>();
     private boolean closed;
 
     /**
@@ -44,10 +50,19 @@ public final class McpManager implements AutoCloseable {
      *                   因为内置运行时在 Bean 创建之后才准备好
      */
     public McpManager(ObjectMapper mapper, Path userConfig, Path logDir, Supplier<String> extraPath) {
+        this(mapper, userConfig, logDir, extraPath, null);
+    }
+
+    /**
+     * @param trustStore 信任记录；{@code null} 表示没有信任能力，所有服务器按未信任处理（每次审批）
+     */
+    public McpManager(ObjectMapper mapper, Path userConfig, Path logDir, Supplier<String> extraPath,
+        McpTrustStore trustStore) {
         this.mapper = mapper;
         this.userConfig = userConfig;
         this.logDir = logDir;
         this.extraPath = extraPath == null ? () -> "" : extraPath;
+        this.trustStore = trustStore;
     }
 
     /** 某个工作区当前配置的全部服务器（按名字排序）。配置文件每次现读；已启动进程的启动配置变化须重启服务。 */
@@ -99,6 +114,117 @@ public final class McpManager implements AutoCloseable {
         return failures.get(key(workspace, server));
     }
 
+    /** 信任记录；没有信任能力时为 {@code null}。 */
+    public McpTrustStore trustStore() {
+        return trustStore;
+    }
+
+    /**
+     * 服务器是否定义在用户级配置（数据目录 mcp.json）中。同名时工作区会覆盖用户级，
+     * 但定义本身在哪儿是这个判断；设置页签的「来源」徽标与写保护都依赖它。
+     */
+    public boolean definedInUserConfig(String server) {
+        return readUserConfig().path("mcpServers").has(server);
+    }
+
+    /**
+     * 用户级配置的整体树（只读快照）：没有文件或解析失败时返回空对象——
+     * 让上层在损坏时仍能展示配置不可用，而不是抛错或被悄悄覆盖。
+     */
+    public JsonNode readUserConfig() {
+        if (userConfig == null || !Files.isRegularFile(userConfig)) {
+            return mapper.createObjectNode();
+        }
+        try {
+            return McpJson.readConfig(userConfig);
+        } catch (IOException | RuntimeException e) {
+            return mapper.createObjectNode();
+        }
+    }
+
+    /** 写回用户级配置：先落在临时文件再原子替换，避免读者看到半截 JSON。 */
+    public void saveUserConfig(JsonNode root) throws IOException {
+        Objects.requireNonNull(root, "root must not be null");
+        if (userConfig == null) {
+            throw new IOException("没有配置用户级 mcp.json 的路径");
+        }
+        Path absolute = userConfig.toAbsolutePath();
+        if (absolute.getParent() != null) {
+            Files.createDirectories(absolute.getParent());
+        }
+        Path tmp = absolute.resolveSibling(absolute.getFileName() + ".tmp");
+        Files.writeString(tmp, mapper.writeValueAsString(root));
+        try {
+            Files.move(tmp, absolute, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(tmp, absolute, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    /** 上次启动时检测到的工具定义漂移说明；无漂移或未信任时为 {@code null}。 */
+    public String trustNote(Path workspace, String server) {
+        return notes.get(key(workspace, server));
+    }
+
+    /**
+     * 信任状态四态（供设置页签与能力面板展示，语义对应 McpTrustPolicy）：
+     * UNTRUSTED 无记录；TRUSTED_UNPINNED 已批准当前命令但工具未钉住（下次启动钉）；
+     * TRUSTED 已批准且已钉住工具定义；STALE 有记录但当前命令与批准时不一致。
+     */
+    public String trustState(Path workspace, String server) {
+        if (trustStore == null) {
+            return "UNTRUSTED";
+        }
+        McpTrustStore.ServerTrust record = trustStore.record(workspace, server).orElse(null);
+        if (record == null) {
+            return "UNTRUSTED";
+        }
+        McpServerConfig config = servers(workspace).get(server);
+        if (config == null || !config.usable()) {
+            return "UNTRUSTED";
+        }
+        return record.configHash().equals(McpTrustStore.hash(config))
+            ? (record.tools().isEmpty() ? "TRUSTED_UNPINNED" : "TRUSTED")
+            : "STALE";
+    }
+
+    /**
+     * 信任动作发出后：若服务器已在运行，立即把当前观测的工具清单钉进信任记录（S1 → S2）。
+     * 服务器未运行、配置哈希不匹配或已钉住时不动。
+     *
+     * @return 本次调用后服务器是否处于「已钉住」状态
+     */
+    public boolean pinIfRunning(Path workspace, String server) {
+        if (trustStore == null) {
+            return false;
+        }
+        Selection selected = selection(workspace, server);
+        McpServerConfig config = selected.config();
+        if (config == null || !config.usable()) {
+            return false;
+        }
+        McpTrustStore.ServerTrust record = trustStore.record(workspace, server).orElse(null);
+        if (record == null) {
+            return false;
+        }
+        String currentHash = McpTrustStore.hash(config);
+        if (!record.configHash().equals(currentHash)) {
+            return false;
+        }
+        if (!record.tools().isEmpty()) {
+            return true;
+        }
+        if (!current(selected) || !selected.client().running()) {
+            return false;
+        }
+        List<McpToolInfo> observed = selected.client().cachedTools();
+        if (observed.isEmpty()) {
+            return false;
+        }
+        trustStore.pinTools(workspace, server, currentHash, pins(observed));
+        return true;
+    }
+
     /** 只有工具发现入口可以启动进程；实际调用不隐式启动或重新连接。 */
     McpClient client(Path workspace, String server) {
         return client(workspace, server, selection(workspace, server), true);
@@ -139,12 +265,13 @@ public final class McpManager implements AutoCloseable {
         McpClient fresh = new McpClient(server, config, workspace, log, mapper, selected.extraPath());
         try {
             fresh.start(START_TIMEOUT);
-            fresh.tools(LIST_TIMEOUT);
+            List<McpToolInfo> declared = fresh.tools(LIST_TIMEOUT);
             Selection after = selection(workspace, server);
             if (!Objects.equals(after.config(), config) || !after.extraPath().equals(selected.extraPath())
                 || !after.workspace().equals(selected.workspace())) {
                 throw new McpException("MCP 配置在启动期间已变化，已关闭旧进程；请重新发现工具");
             }
+            noteTrust(workspace, server, config, declared);
         } catch (McpException e) {
             fresh.close();
             clients.remove(key);
@@ -234,6 +361,50 @@ public final class McpManager implements AutoCloseable {
         closed = true;
         clients.values().forEach(McpClient::close);
         clients.clear();
+        notes.clear();
+    }
+
+    /**
+     * 启动成功后的信任维护：S1（已批准命令但未观测过工具）钉住本次声明；S2 与钉住值比对，
+     * 已钉住工具的哈希漂移记录为说明——不改动记录，调用时自然退回审批。
+     */
+    private void noteTrust(Path workspace, String server, McpServerConfig config, List<McpToolInfo> declared) {
+        notes.remove(key(workspace, server));
+        if (trustStore == null || !config.usable()) {
+            return;
+        }
+        McpTrustStore.ServerTrust record = trustStore.record(workspace, server).orElse(null);
+        if (record == null || !record.configHash().equals(McpTrustStore.hash(config))) {
+            return;
+        }
+        if (record.tools().isEmpty()) {
+            trustStore.pinTools(workspace, server, record.configHash(), pins(declared));
+            return;
+        }
+        List<String> drifted = new ArrayList<>();
+        for (Map.Entry<String, McpTrustStore.ToolPin> pinned : record.tools().entrySet()) {
+            McpToolInfo current = null;
+            for (McpToolInfo info : declared) {
+                if (info.name().equals(pinned.getKey())) {
+                    current = info;
+                    break;
+                }
+            }
+            if (current != null && !McpTrustStore.hash(current).equals(pinned.getValue().hash())) {
+                drifted.add(pinned.getKey());
+            }
+        }
+        if (!drifted.isEmpty()) {
+            notes.put(key(workspace, server), "工具定义与受信任版本不一致：" + String.join("、", drifted));
+        }
+    }
+
+    private static Map<String, McpTrustStore.ToolPin> pins(List<McpToolInfo> tools) {
+        Map<String, McpTrustStore.ToolPin> pins = new LinkedHashMap<>();
+        for (McpToolInfo info : tools) {
+            pins.put(info.name(), new McpTrustStore.ToolPin(McpTrustStore.hash(info), false));
+        }
+        return pins;
     }
 
     private Map<String, McpServerConfig> load(Path file) {

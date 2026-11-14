@@ -1,6 +1,7 @@
 package com.pilot.core.approval;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -11,8 +12,11 @@ public interface ApprovalBroker {
     /**
      * 注册一次待审批调用。返回的 Future 在批准时为 {@code true}，拒绝或超时为 {@code false}。
      * 同一个 callId 只能注册一次，避免批准落到错误的调用上。
+     *
+     * @param args 结构化参数（仅短标量值），供前端展示与「批准并信任」等次级决策
      */
-    CompletableFuture<Boolean> register(String callId, String toolName, String argsSummary);
+    CompletableFuture<Boolean> register(String callId, String toolName, String argsSummary,
+        Map<String, Object> args);
 
     /** @return 是否成功唤醒了一个等待中的审批（找不到或已超时返回 false） */
     default boolean resolve(String callId, boolean approved) {
@@ -25,6 +29,6 @@ public interface ApprovalBroker {
 
     /** 无审批能力的默认实现：任何需要审批的调用都直接视为拒绝。 */
     static ApprovalBroker denyAll() {
-        return (callId, toolName, argsSummary) -> CompletableFuture.completedFuture(false);
+        return (callId, toolName, argsSummary, args) -> CompletableFuture.completedFuture(false);
     }
 }

@@ -54,7 +54,8 @@ class McpPermissionsTest {
                 new PolicyPermissionGate(PermissionMode.ASK).check(call, tool).decision());
             assertEquals(PermissionDecision.DENY,
                 new PolicyPermissionGate(PermissionMode.READ_ONLY).check(call, tool).decision());
-            assertEquals(PermissionDecision.ALLOW,
+            // 未获本地信任的调用即使 AUTO 档也要审批：远程工具副作用无法本地回滚（信任模型决策行 6/8）
+            assertEquals(PermissionDecision.ASK,
                 new PolicyPermissionGate(PermissionMode.AUTO).check(call, tool).decision());
         }
     }
@@ -72,7 +73,8 @@ class McpPermissionsTest {
                 var args = Map.<String, Object>of("server", "fake", "tool", name);
                 assertEquals(PermissionDecision.ALLOW,
                     gate.check(new ToolCall(name, "mcp_call", args), tool).decision());
-                assertEquals("ok", tool.execute(args));
+                // 工具返回头部有外部数据定界行，正文以实际内容结尾
+                assertTrue(tool.execute(args).endsWith("ok"), name);
             }
             assertFalse(tool.readOnly(Map.of("server", "fake", "tool", "unknown")));
             assertTrue(new McpToolsTool(manager, root).execute(Map.of("server", "fake")).contains("[本地策略只读]"));
@@ -152,7 +154,7 @@ class McpPermissionsTest {
             var registry = new ToolRegistry();
             registry.register(new McpCallTool(manager, root));
             var executor = new ToolExecutor(registry, new PolicyPermissionGate(PermissionMode.READ_ONLY),
-                (id, name, summary) -> CompletableFuture.completedFuture(false));
+                (id, name, summary, structuredArgs) -> CompletableFuture.completedFuture(false));
             var result = executor.execute(new ToolCall("check", "mcp_call", Map.of("server", "fake", "tool", "first")),
                 event -> {
                 }, () -> {
@@ -193,10 +195,11 @@ class McpPermissionsTest {
             var registry = new ToolRegistry();
             registry.register(tool);
             var executor = new ToolExecutor(registry, new PolicyPermissionGate(PermissionMode.AUTO),
-                (id, name, summary) -> CompletableFuture.completedFuture(true));
+                (id, name, summary, structuredArgs) -> CompletableFuture.completedFuture(true));
             var result = executor.execute(new ToolCall("approved", "mcp_call", args), event -> {
             });
-            assertEquals("ok", result.result());
+            // 工具返回头部有外部数据定界行，正文以实际内容结尾
+            assertTrue(result.result().endsWith("ok"));
             assertTrue(result.usableEvidence());
         }
     }

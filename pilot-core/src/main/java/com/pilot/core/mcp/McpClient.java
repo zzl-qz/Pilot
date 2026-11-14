@@ -180,7 +180,7 @@ final class McpClient implements AutoCloseable {
                 }
                 boolean readOnly = item.path("annotations").path("readOnlyHint").asBoolean(false);
                 all.add(new McpToolInfo(toolName, item.path("description").asString(""), item.path("inputSchema"),
-                    readOnly));
+                    readOnly, item.path("annotations")));
             }
             cursor = result.path("nextCursor").asString("");
             if (cursor.isBlank()) {

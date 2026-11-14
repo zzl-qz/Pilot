@@ -63,7 +63,7 @@ class HookPermissionsTest {
     void readOnlyCannotWriteThroughWorkspaceOrUserHook() throws Exception {
         for (boolean user : List.of(false, true)) {
             var approvals = new AtomicInteger();
-            var result = read(executor(new PolicyPermissionGate(PermissionMode.READ_ONLY), (id, name, args) -> {
+            var result = read(executor(new PolicyPermissionGate(PermissionMode.READ_ONLY), (id, name, args, structured) -> {
                 approvals.incrementAndGet();
                 return CompletableFuture.completedFuture(true);
             }, hooks("PostToolUse", user)));
@@ -78,7 +78,7 @@ class HookPermissionsTest {
     void workspaceHookRequiresActionApprovalEvenUnderAuto() throws Exception {
         var approvals = new AtomicInteger();
         var configuration = hooks("PostToolUse", false);
-        read(executor(new PolicyPermissionGate(PermissionMode.AUTO), (id, name, args) -> {
+        read(executor(new PolicyPermissionGate(PermissionMode.AUTO), (id, name, args, structured) -> {
             approvals.incrementAndGet();
             assertTrue(args.contains("settings.json"));
             assertTrue(args.contains("echo changed > hook-marker.txt"));
@@ -87,7 +87,7 @@ class HookPermissionsTest {
         assertEquals(1, approvals.get());
         assertFalse(Files.exists(workspace.resolve("hook-marker.txt")));
         read(executor(new PolicyPermissionGate(PermissionMode.AUTO),
-            (id, name, args) -> CompletableFuture.completedFuture(true), configuration));
+            (id, name, args, structured) -> CompletableFuture.completedFuture(true), configuration));
         assertTrue(Files.readString(workspace.resolve("hook-marker.txt")).contains("changed"));
     }
 
@@ -112,7 +112,7 @@ class HookPermissionsTest {
     @Test
     void permissionChangeDuringApprovalPreventsHookExecution() throws Exception {
         var mode = new AtomicReference<>(PermissionMode.AUTO);
-        var result = read(executor(new PolicyPermissionGate(mode::get), (id, name, args) -> {
+        var result = read(executor(new PolicyPermissionGate(mode::get), (id, name, args, structured) -> {
             mode.set(PermissionMode.READ_ONLY);
             return CompletableFuture.completedFuture(true);
         }, hooks("PostToolUse", false)));
@@ -151,7 +151,7 @@ class HookPermissionsTest {
             }
         };
         var tool = executor(new PolicyPermissionGate(PermissionMode.AUTO),
-            (id, name, args) -> CompletableFuture.completedFuture(true), configuration);
+            (id, name, args, structured) -> CompletableFuture.completedFuture(true), configuration);
         tool.withHookExecution(new ExecutionBackends.Selection(backend, ExecutionIsolation.CONTAINER, true,
             "missing image", ExecutionSettings.local()));
         assertTrue(read(tool).result().contains("隔离不可用"));
@@ -175,7 +175,7 @@ class HookPermissionsTest {
         var tools = new ToolRegistry();
         tools.register(new CreateFileTool(new PathValidator(workspace)));
         var approvals = new AtomicInteger();
-        var executor = new ToolExecutor(tools, new PolicyPermissionGate(PermissionMode.ASK), (id, name, args) -> {
+        var executor = new ToolExecutor(tools, new PolicyPermissionGate(PermissionMode.ASK), (id, name, args, structured) -> {
             approvals.incrementAndGet();
             return CompletableFuture.completedFuture(true);
         }).withHooks(Hooks.load(workspace, userHome));
@@ -188,7 +188,7 @@ class HookPermissionsTest {
         var readTools = new ToolRegistry();
         readTools.register(new ReadFileTool(new PathValidator(workspace)));
         var forbidden = new ToolExecutor(readTools, (call, tool) -> "run_command".equals(call.name())
-            ? PermissionResult.deny("命令禁止") : PermissionResult.allow(), (id, name, args) -> {
+            ? PermissionResult.deny("命令禁止") : PermissionResult.allow(), (id, name, args, structured) -> {
                 throw new AssertionError("拒绝的命令不能再请求审批");
             }).withHooks(hooks("PostToolUse", false));
         assertTrue(read(forbidden).result().contains("命令禁止"));

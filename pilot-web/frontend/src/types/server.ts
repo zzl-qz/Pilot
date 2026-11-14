@@ -5,6 +5,7 @@ export interface ApprovalRequired {
   callId: string;
   name: string;
   argsSummary: string;
+  args?: Record<string, unknown> | null;
 }
 
 /** ApprovalResolved.java / ApprovalResolved */
@@ -150,6 +151,64 @@ export interface CapabilitiesControllerMcpServerPayload {
   failure: string;
   unsupported: string;
   tools: (string)[];
+  source: string;
+  trustState: string;
+}
+
+/** McpConfigController.java / ServerPayload */
+export interface McpConfigControllerServerPayload {
+  name: string;
+  source: string;
+  command: string;
+  commandOnly: string;
+  usable: boolean;
+  running: boolean;
+  failure: string;
+  unsupported: string;
+  toolCount: number;
+  tools: (string)[];
+  trustState: string;
+  trustNote: string;
+}
+
+/** McpConfigController.java / AddRequest */
+export interface McpConfigControllerAddRequest {
+  name: string;
+  command: string;
+  args?: string;
+  env?: Record<string, string>;
+}
+
+/** McpConfigController.java / ImportRequest */
+export interface McpConfigControllerImportRequest {
+  config: string;
+}
+
+/** McpConfigController.java / ImportResponse */
+export interface McpConfigControllerImportResponse {
+  imported: (string)[];
+  overwritten: (string)[];
+}
+
+/** McpTrustController.java / TrustRequest */
+export interface McpTrustControllerTrustRequest {
+  action: string;
+  server: string;
+  tool?: string;
+}
+
+/** McpTrustController.java / TrustResponse */
+export interface McpTrustControllerTrustResponse {
+  action: string;
+  server: string;
+  state: string;
+}
+
+/** McpTrustController.java / TrustedServer */
+export interface McpTrustControllerTrustedServer {
+  server: string;
+  state: string;
+  note: string;
 }
 
 /** CapabilitiesController.java / ToolPayload */

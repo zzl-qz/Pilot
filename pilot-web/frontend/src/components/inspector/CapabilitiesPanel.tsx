@@ -12,6 +12,13 @@ const PERMISSION_LABELS: Record<string, string> = {
   READ_ONLY: '只读'
 };
 
+const MCP_TRUST_LABELS: Record<string, string> = {
+  UNTRUSTED: '未信任',
+  TRUSTED_UNPINNED: '已信任',
+  TRUSTED: '已信任 · 已钉住工具',
+  STALE: '信任失效：配置已变化'
+};
+
 export function CapabilitiesPanel() {
   const sessionId = useStore((state) => state.sessionId);
   const data = useStore((state) => state.capabilities);
@@ -100,8 +107,14 @@ export function CapabilitiesPanel() {
                 <li key={server.name} className="cap-item">
                   <div className="cap-item-head">
                     <code className="cap-name">{server.name}</code>
+                    <span className="cap-tag">{server.source === 'user' ? '用户级' : '工作区'}</span>
                     <span className={`cap-tag${server.running ? ' is-on' : ''}`}>{server.running ? '运行中' : (server.usable ? '未启动' : '不可用')}</span>
                     {server.running && <span className="cap-tag is-readonly">{server.tools?.length || 0} 个工具</span>}
+                    {server.usable && server.trustState !== 'UNTRUSTED' && (
+                      <span className={`cap-tag${server.trustState === 'STALE' ? ' is-stale' : ' is-readonly'}`}>
+                        {MCP_TRUST_LABELS[server.trustState] || server.trustState}
+                      </span>
+                    )}
                   </div>
                   {server.command && <p className="cap-desc cap-mono">{server.command}</p>}
                   {server.unsupported && <p className="cap-reason">{server.unsupported}</p>}
@@ -110,7 +123,7 @@ export function CapabilitiesPanel() {
               ))}
             </ul>
           ) : (
-            <p className="panel-empty">没有配置 MCP 服务器。在工作区放一个 .mcp.json 就能接上外部工具。</p>
+            <p className="panel-empty">没有配置 MCP 服务器。在设置 → MCP 里可以添加，或在项目根放一个 .mcp.json。</p>
           )}
         </section>
         <section className="cap-section">
