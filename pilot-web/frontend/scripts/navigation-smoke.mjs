@@ -15,11 +15,8 @@ const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="view
 import React from 'react';import {createRoot} from 'react-dom/client';import App from '/src/components/App.jsx';import {useStore} from '/src/store.js';import {api} from '/src/api.js';
 import '/src/styles.css';import '/src/shell-vanilla.css';import '/src/styles-addendum.css';import '/src/workbench.css';
 document.documentElement.dataset.theme='dark';window.store=useStore;window.api=api;window.cancelled=0;
-for(const name of Object.keys(api))if(typeof api[name]==='function')api[name]=async()=>({});api.schedules=async()=>[];api.worktreeInfo=async()=>({});api.queue=async()=>({items:[]});api.filesFlat=async()=>({files:[]});
-api.bookmarks=async(session)=>JSON.parse(localStorage.getItem('mock-server-bookmarks:'+session)||'[]');
-api.saveBookmark=async(session,sequence)=>navigator.locks.request('fixture-bookmarks:'+session,async()=>{const values=await api.bookmarks(session);const row={sequence,title:'已收藏的消息 '+sequence,preview:'同步书签'};if(!values.some(b=>b.sequence===sequence))values.push(row);localStorage.setItem('mock-server-bookmarks:'+session,JSON.stringify(values));return row;});
-api.deleteBookmark=async(session,sequence)=>navigator.locks.request('fixture-bookmarks:'+session,async()=>localStorage.setItem('mock-server-bookmarks:'+session,JSON.stringify((await api.bookmarks(session)).filter(b=>b.sequence!==sequence))));
-api.importBookmarks=async(session,sequences)=>{for(const seq of sequences)await api.saveBookmark(session,seq);return{bookmarks:await api.bookmarks(session),skipped:[]};};
+const bookmarkMethods=new Set(['bookmarks','saveBookmark','deleteBookmark','importBookmarks']);
+for(const name of Object.keys(api))if(typeof api[name]==='function'&&!bookmarkMethods.has(name))api[name]=async()=>({});api.schedules=async()=>[];api.worktreeInfo=async()=>({});api.queue=async()=>({});api.filesFlat=async()=>({files:[]});
 const topics=['复用现有任务执行链路','加入持久化的到期计划','核对重启后的恢复边界','实现定时任务管理界面','保持人工暂停的状态','验证 Windows 和 Linux 路径','补充开源调研门禁','完成自动核验与结果通知','调整会话导航和消息书签','检查长对话中的滚动行为','验证浅色与窄屏布局','整理最终验证记录'];
 window.makeRows=()=>topics.flatMap((title,i)=>[{type:'user',key:'message:'+i,sequence:i+1,text:title+'\\n请结合现有代码和成熟开源实现，说明复用理由。\\n保留工作区约束，并验证正常、失败及边界情况。'}, {type:'turn',key:'turn:'+i,runIds:['run:'+i],tools:[],reply:{text:'已检查「'+title+'」涉及的现有实现。\\n\\n'+Array(3).fill('执行与验证继续沿用原有链路。对应的测试、错误反馈和恢复路径已记录，可在这轮消息中查看。').join('\\n\\n'),live:false},stats:{}}]);
 useStore.setState({init:async()=>{},sessionId:'nav-test',sessionTitle:'完善无人值守任务与对话导航',workspace:'/workspace/pilot',cancelRun:()=>window.cancelled++,thread:{...useStore.getState().thread,rows:makeRows(),history:{...useStore.getState().thread.history,hasMore:false}},projects:[]});
@@ -27,7 +24,46 @@ createRoot(document.getElementById('root')).render(React.createElement(App));
 </script></body></html>`;
 try {await writeFile(file,fixture);await build({root,build:{outDir:output,emptyOutDir:false,rollupOptions:{input:file}}});}finally{await rm(file,{force:true});}
 await cp(join(root,'../src/main/resources/static/fonts'),join(output,'fonts'),{recursive:true});
-const server=await preview({root,build:{outDir:output},preview:{host:'127.0.0.1',port:0,proxy:{}}});
+// 两扇窗口使用同一个服务端夹具；localStorage 只承担应用自己的变更通知。
+const bookmarks = new Map();
+let failBookmarkSave = false;
+const bookmarkFixture = {
+  name: 'navigation-bookmarks',
+  configurePreviewServer(server) {
+    server.middlewares.use(async (request, response, next) => {
+      const route = new URL(request.url, 'http://localhost').pathname.match(/^\/api\/library\/([^/]+)\/bookmarks(?:\/(\d+|import))?$/);
+      if (!route) return next();
+      const [, session, action] = route;
+      const sequence = Number(action);
+      if (!bookmarks.has(session)) bookmarks.set(session, new Map());
+      const rows = bookmarks.get(session);
+      const save = number => {
+        const row = { sequence: number, title: '已收藏的消息 ' + number, preview: '同步书签' };
+        rows.set(number, row);
+        return row;
+      };
+      const json = (status, data) => {
+        response.writeHead(status, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify(data));
+      };
+      if (request.method === 'GET' && !action) {
+        json(200, [...rows.values()]);
+      } else if (request.method === 'PUT' && Number.isSafeInteger(sequence)) {
+        if (failBookmarkSave) json(503, { message: '模拟书签保存失败' });
+        else json(200, save(sequence));
+      } else if (request.method === 'DELETE' && Number.isSafeInteger(sequence)) {
+        rows.delete(sequence);
+        response.writeHead(204).end();
+      } else if (request.method === 'POST' && action === 'import') {
+        let body = '';
+        for await (const chunk of request) body += chunk;
+        JSON.parse(body).sequences.forEach(save);
+        json(200, { bookmarks: [...rows.values()], skipped: [] });
+      } else next();
+    });
+  }
+};
+const server=await preview({root,build:{outDir:output},preview:{host:'127.0.0.1',port:0,proxy:{}},plugins:[bookmarkFixture]});
 const url=`http://127.0.0.1:${server.httpServer.address().port}/${entry}`;
 let browser,electron;
 async function checkMultipleWindows(page, name) {
@@ -110,9 +146,11 @@ async function run(page,name) {
   await page.locator('#sidebar-toggle').click();
   await page.locator('.thread-nav-tick').last().waitFor();assert.equal(await page.locator('.thread-nav-tick').count(),12);
   await page.waitForFunction(()=>document.querySelector('.thread-nav-tick:last-child').getAttribute('aria-current')==='location');
-  await page.locator('.thread-nav-tick').nth(2).hover();await page.getByRole('dialog',{name:'消息预览'}).waitFor();
+  const previewTick = page.locator('.thread-nav-tick').nth(2);
+  await previewTick.hover();await page.getByRole('dialog',{name:'消息预览'}).waitFor();
   await page.getByRole('button',{name:'添加书签',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.thread-nav-tick.is-saved').length===1);
   await page.screenshot({path:join(output,`${name}-1440-preview.png`),timeout:20000,animations:'disabled'});
+  await previewTick.hover();
   await page.locator('.thread-nav-preview-title').click();
   await page.waitForFunction(()=>{const el=document.querySelector('[data-sequence="3"]'),scroll=document.querySelector('.thread');return Math.abs(el.getBoundingClientRect().top-scroll.getBoundingClientRect().top-24)<3;});
   // Streaming content must not pull a navigated viewport back to the latest message.
@@ -134,11 +172,11 @@ async function run(page,name) {
   await page.reload();await page.locator('.thread-nav-tick.is-saved').waitFor();
   await page.getByRole('button',{name:'打开对话导航和书签'}).click();await page.getByRole('button',{name:'书签 1',exact:true}).click();assert.equal(await page.locator('.thread-nav-item').count(),1);
   await page.getByRole('button',{name:'取消书签',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.thread-nav-item').length===0);
-  // Quota failures are visible and must not report a bookmark as saved.
+  // A failed server write is visible and must not report a bookmark as saved.
   await page.keyboard.press('Escape');await page.locator('.thread-nav-tick').nth(1).hover();
-  await page.evaluate(()=>{window.realSet=Storage.prototype.setItem;Storage.prototype.setItem=function(){throw Error('quota');};});
+  failBookmarkSave = true;
   await page.getByRole('button',{name:'添加书签',exact:true}).click();await page.getByText(/书签保存失败/).waitFor();assert.equal(await page.locator('.thread-nav-tick.is-saved').count(),0);
-  await page.evaluate(()=>Storage.prototype.setItem=window.realSet);
+  failBookmarkSave = false;
   await page.keyboard.press('Escape');
   await checkMultipleWindows(page, name);
   // Session switches discard previews/bookmarks from the old conversation.
@@ -222,6 +260,7 @@ try {
   browser=await chromium.launch(browserOptions({ headless: true }));const context=await browser.newContext();await run(await context.newPage(),'chromium');
   for (const capability of ['anchor','popover']) await checkMenuFallback(browser,capability);
   await browser.close();browser=null;
+  bookmarks.clear();
   const main=join(output,'main.cjs');await writeFile(main,`const {app,BrowserWindow}=require('electron');app.setPath('userData',${JSON.stringify(join(output,'profile'))});app.whenReady().then(()=>{let w=new BrowserWindow({show:process.platform==='linux',webPreferences:{contextIsolation:true,nodeIntegration:false}});w.loadURL(${JSON.stringify(url)});});`);
   const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;electron=await _electron.launch({executablePath:electronBinary(),args:[main],env});await run(await electron.firstWindow(),'electron');console.log('Screenshots:',output);
 } finally {await browser?.close();await electron?.close();await new Promise(resolve=>server.httpServer.close(resolve));}
