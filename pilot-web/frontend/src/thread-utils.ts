@@ -38,16 +38,6 @@ export function formatTime(value: unknown) {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
-export function formatBytes(bytes: unknown) {
-  const size = Number(bytes);
-  if (!Number.isFinite(size) || size < 0) {
-    return '';
-  }
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / 1024 / 1024).toFixed(1)} MB`;
-}
-
 export function sameUserInput(left: unknown, right: unknown) {
   return String(left || '').replace(/\s+/g, ' ').trim() === String(right || '').replace(/\s+/g, ' ').trim();
 }

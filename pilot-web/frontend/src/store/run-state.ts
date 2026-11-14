@@ -1,5 +1,5 @@
 import type { StoreContext, StoreSlice } from './context.js';
-import type { PlanRow } from '../types/thread.js';
+import { planInOpenSegment } from '../thread-reducer.js';
 import { api } from '../api.js';
 import { errorInfo } from '../lib/errors.js';
 import { normalizeQueue } from '../lib/queue.js';
@@ -45,17 +45,7 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
         if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
         if (Array.isArray(data?.plan) && data.plan.length) {
           set((draft) => {
-            let existing: PlanRow | null = null;
-            for (let i = draft.thread.rows.length - 1; i >= 0; i -= 1) {
-              const row = draft.thread.rows[i];
-              if (row.type === 'user') {
-                break;
-              }
-              if (row.type === 'plan') {
-                existing = row;
-                break;
-              }
-            }
+            const existing = planInOpenSegment(draft.thread.rows);
             if (existing) {
               existing.items = data.plan;
             } else {

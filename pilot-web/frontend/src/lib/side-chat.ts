@@ -7,6 +7,7 @@ import type { SimpleEvent, SideChatTab, SideChatsState, SideTranscript } from '.
  * 切换主任务时只看到属于它的侧边对话，关掉即丢弃。
  */
 
+import { sameUserInput } from '../thread-utils.js';
 import { isRunEnd } from './events.js';
 import { samePath } from './projects.js';
 
@@ -139,10 +140,6 @@ export function messagePeek(text: unknown, maxLines = 4) {
   };
 }
 
-function sameText(left: unknown, right: unknown) {
-  return String(left || '').replace(/\s+/g, ' ').trim() === String(right || '').replace(/\s+/g, ' ').trim();
-}
-
 /**
  * 侧边对话只留人话和回复。工具、计划和用量都不进这张简易对话框。
  * user.message 与随后的 run.started 会带同一句输入，只留一次。
@@ -160,7 +157,7 @@ export function reduceSideChat(state: Partial<SideTranscript> | null | undefined
       return current;
     }
     const last = current.messages[current.messages.length - 1];
-    if (last?.role === 'user' && sameText(last.text, text)) {
+    if (last?.role === 'user' && sameUserInput(last.text, text)) {
       return { ...current, live: '' };
     }
     current.messages.push({ role: 'user', text });

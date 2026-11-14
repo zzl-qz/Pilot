@@ -20,7 +20,7 @@ import {
 } from './lib/history.js';
 import { classifyRunFailure, isEphemeral, isRunEnd, planProgressLabel, type RUN_END_EVENTS } from './lib/events.js';
 import { eventTimestamp, parseTimestamp, toolLabel } from './lib/tool-meta.js';
-import { preview, estimateTokens } from './thread-utils.js';
+import { preview, estimateTokens, sameUserInput } from './thread-utils.js';
 import { splitAttachmentMarkers } from './lib/attachments.js';
 
 /** 活动流保留上限，与旧版 MAX_TIMELINE_EVENTS 一致。 */
@@ -38,8 +38,7 @@ export const initialThread = (): ThreadState => ({
 });
 
 /** 计划跟着当前这段用户消息走。上一问的计划卡片留在原处，不再被后来的更新改掉。 */
-function planInOpenSegment(draft: ReducerState): PlanRow | null {
-  const rows = draft.thread.rows;
+export function planInOpenSegment(rows: readonly ThreadRow[]): PlanRow | null {
   for (let i = rows.length - 1; i >= 0; i -= 1) {
     const row = rows[i];
     if (row.type === 'user') {
@@ -424,7 +423,6 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
       }
       const payload = event.payload || {};
       const input = payload.input || '';
-      const same = (a: unknown, b: unknown) => String(a || '').replace(/\s+/g, ' ').trim() === String(b || '').replace(/\s+/g, ' ').trim();
       const parsedInput = splitAttachmentMarkers(input);
       const pendingRow = draft.thread.rows.findLast((row): row is UserRow => row.type === 'user' && row.sequence == null);
       const receivedNames = [...parsedInput.files, ...(payload.attachments || [])].map(item => item.name).filter(Boolean).sort();
@@ -432,11 +430,11 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
       const sameAttachments = receivedNames.length > 0 && receivedNames.length === pendingNames.length
         && receivedNames.every((name, index) => name === pendingNames[index]);
       const inputForMatch = parsedInput.files.length ? parsedInput.body : input;
-      if (draft.pendingInputs.length && (same(draft.pendingInputs[0], inputForMatch) || sameAttachments)) {
+      if (draft.pendingInputs.length && (sameUserInput(draft.pendingInputs[0], inputForMatch) || sameAttachments)) {
         draft.pendingInputs.shift();
         stampLastUserRow(draft, event.sequence, input, payload.attachments || [], payload.imagePositions || []);
       } else {
-        const queued = draft.queue.length > 0 && same(draft.queue[0], input);
+        const queued = draft.queue.length > 0 && sameUserInput(draft.queue[0], input);
         if (queued) draft.queue.shift();
         if (queued || input) appendUserRow(draft, input, event.sequence, {
           attachments: payload.attachments || [],
@@ -736,7 +734,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
 
     case 'plan.updated': {
       const items = Array.isArray(event.payload?.plan) ? event.payload.plan : [];
-      const existing = planInOpenSegment(draft);
+      const existing = planInOpenSegment(draft.thread.rows);
       if (existing) {
         existing.items = items;
         existing.end = event.sequence;
