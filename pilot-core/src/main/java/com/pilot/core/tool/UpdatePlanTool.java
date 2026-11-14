@@ -25,7 +25,7 @@ public final class UpdatePlanTool implements Tool {
 
     @Override
     public String name() {
-        return "update_plan";
+        return ToolNames.UPDATE_PLAN;
     }
 
     @Override

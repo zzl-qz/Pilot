@@ -40,7 +40,7 @@ public final class ReadFileTool implements Tool.ParallelReadOnly {
 
     @Override
     public String name() {
-        return "read_file";
+        return ToolNames.READ_FILE;
     }
 
     @Override

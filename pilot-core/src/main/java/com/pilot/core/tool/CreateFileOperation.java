@@ -14,7 +14,7 @@ abstract class CreateFileOperation extends PromptedTool {
     final ReadGuard reads;
 
     CreateFileOperation(PathValidator paths, ReadGuard reads) {
-        super("create_file");
+        super(ToolNames.CREATE_FILE);
         this.paths = Objects.requireNonNull(paths, "paths must not be null");
         this.reads = reads == null ? ReadGuard.allowAll() : reads;
     }

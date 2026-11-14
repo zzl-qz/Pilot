@@ -21,6 +21,7 @@ import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolCallJournal;
+import com.pilot.core.tool.ToolNames;
 import com.pilot.core.util.Sha256;
 
 /**
@@ -617,8 +618,8 @@ public final class ContextCompactor {
                     continue;
                 }
                 switch (call.name()) {
-                    case "read_file" -> read.add(path);
-                    case "edit_file", "create_file" -> modified.add(path);
+                    case ToolNames.READ_FILE -> read.add(path);
+                    case ToolNames.EDIT_FILE, ToolNames.CREATE_FILE -> modified.add(path);
                     default -> {
                     }
                 }

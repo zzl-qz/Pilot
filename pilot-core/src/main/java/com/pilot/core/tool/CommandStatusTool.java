@@ -22,7 +22,7 @@ public final class CommandStatusTool implements Tool, ProducesCheck {
     }
 
     public String name() {
-        return "command_status";
+        return ToolNames.COMMAND_STATUS;
     }
 
     public boolean readOnly() {

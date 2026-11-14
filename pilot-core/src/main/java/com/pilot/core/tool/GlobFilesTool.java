@@ -35,7 +35,7 @@ public final class GlobFilesTool implements Tool.ParallelReadOnly {
 
     @Override
     public String name() {
-        return "glob_files";
+        return ToolNames.GLOB_FILES;
     }
 
     @Override

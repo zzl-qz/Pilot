@@ -15,6 +15,7 @@ import com.pilot.core.multi.AgentScope;
 import com.pilot.core.multi.RiskLevel;
 import com.pilot.core.multi.TaskSpec;
 import com.pilot.core.tool.Tool;
+import com.pilot.core.tool.ToolNames;
 import com.pilot.server.session.SpawnAgentTool;
 
 /**
@@ -77,7 +78,7 @@ public final class DispatchAgentsTool implements Tool {
 
     @Override
     public String name() {
-        return "dispatch_agents";
+        return ToolNames.DISPATCH_AGENTS;
     }
 
     @Override

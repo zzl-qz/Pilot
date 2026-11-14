@@ -24,7 +24,7 @@ public final class WebFetchTool implements Tool {
 
     @Override
     public String name() {
-        return "web_fetch";
+        return ToolNames.WEB_FETCH;
     }
 
     @Override

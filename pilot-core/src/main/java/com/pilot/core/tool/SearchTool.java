@@ -39,7 +39,7 @@ public final class SearchTool implements Tool.ParallelReadOnly {
 
     @Override
     public String name() {
-        return "search_text";
+        return ToolNames.SEARCH_TEXT;
     }
 
     @Override

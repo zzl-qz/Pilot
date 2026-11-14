@@ -15,7 +15,7 @@ public final class CommandLogsTool implements Tool {
     }
 
     public String name() {
-        return "command_logs";
+        return ToolNames.COMMAND_LOGS;
     }
 
     public boolean readOnly() {

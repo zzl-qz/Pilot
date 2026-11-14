@@ -24,7 +24,7 @@ public final class SandboxEditFileTool extends PromptedTool {
     }
 
     public SandboxEditFileTool(PathValidator paths, SandboxSink sandbox, ReadGuard reads) {
-        super("edit_file");
+        super(ToolNames.EDIT_FILE);
         this.paths = java.util.Objects.requireNonNull(paths, "paths must not be null");
         this.sandbox = java.util.Objects.requireNonNull(sandbox, "sandbox must not be null");
         this.reads = reads == null ? ReadGuard.allowAll() : reads;

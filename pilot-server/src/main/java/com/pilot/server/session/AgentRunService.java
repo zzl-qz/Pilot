@@ -72,6 +72,7 @@ import com.pilot.core.tool.CommandStatusTool;
 import com.pilot.core.tool.CommandTaskManager;
 import com.pilot.core.tool.RunCommandTool;
 import com.pilot.core.tool.StopCommandTool;
+import com.pilot.core.tool.ToolNames;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.UseSkillTool;
 import com.pilot.core.trace.JsonlTraceRecorder;
@@ -1004,10 +1005,10 @@ public class AgentRunService implements RunStarter {
 
     private static void addNativeToolNames(Set<String> names, Set<com.pilot.core.model.NativeCapability> capabilities) {
         if (capabilities.contains(com.pilot.core.model.NativeCapability.WEB_SEARCH)) {
-            names.add("web_search");
+            names.add(ToolNames.WEB_SEARCH);
         }
         if (capabilities.contains(com.pilot.core.model.NativeCapability.WEB_FETCH)) {
-            names.add("web_fetch");
+            names.add(ToolNames.WEB_FETCH);
         }
     }
 
@@ -1017,8 +1018,8 @@ public class AgentRunService implements RunStarter {
      * 命令保留：git 只读子命令在内置白名单里，写命令照旧走权限门。
      */
     private ToolRegistry reviewTools(String workspace) {
-        AgentScope scope = AgentScope.readOnly(List.of(), List.of()).withTools(
-            List.of("read_*", "list_*", "glob_*", "search_*", "run_command", "web_search", "web_fetch"), List.of());
+        AgentScope scope = AgentScope.readOnly(List.of(), List.of()).withTools(List.of("read_*", "list_*", "glob_*",
+            "search_*", ToolNames.RUN_COMMAND, ToolNames.WEB_SEARCH, ToolNames.WEB_FETCH), List.of());
         return toolFactory.registryForScope(workspace, scope, com.pilot.core.tool.SandboxSink.rejectAll());
     }
 
@@ -1031,9 +1032,9 @@ public class AgentRunService implements RunStarter {
      */
     private Set<String> sessionTools(ToolRegistry base) {
         Set<String> names = new java.util.LinkedHashSet<>(base.names());
-        names.add("spawn_agent");
+        names.add(ToolNames.SPAWN_AGENT);
         if (multiProperties.enabled()) {
-            names.add("dispatch_agents");
+            names.add(ToolNames.DISPATCH_AGENTS);
         }
         return Set.copyOf(names);
     }
@@ -1635,8 +1636,8 @@ public class AgentRunService implements RunStarter {
     /** 会话命令有独立的任务归属；默认和受限子代理工具集不共享这个入口。 */
     private ToolRegistry sessionTools(String sessionId, String runId, String workspace, PlanSink planSink) {
         ToolRegistry tools = new ToolRegistry();
-        toolFactory.registryFor(workspace, planSink).tools().stream().filter(tool -> !"run_command".equals(tool.name()))
-            .forEach(tools::register);
+        toolFactory.registryFor(workspace, planSink).tools().stream()
+            .filter(tool -> !ToolNames.RUN_COMMAND.equals(tool.name())).forEach(tools::register);
         tools.register(
             new RunCommandTool(new PathValidator(toolFactory.resolve(workspace)), commandTasks, sessionId, snapshots));
         tools.register(new CommandStatusTool(commandTasks, sessionId, snapshots));

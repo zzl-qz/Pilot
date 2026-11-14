@@ -46,7 +46,7 @@ public final class ApplyPatchTool extends PromptedTool implements WritesFiles {
     private final ReadGuard reads;
 
     public ApplyPatchTool(PathValidator paths, SnapshotSink snapshots, ReadGuard reads) {
-        super("apply_patch");
+        super(ToolNames.APPLY_PATCH);
         this.paths = Objects.requireNonNull(paths, "paths must not be null");
         this.snapshots = Objects.requireNonNull(snapshots, "snapshots must not be null");
         this.reads = reads == null ? ReadGuard.allowAll() : reads;

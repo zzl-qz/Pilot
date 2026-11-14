@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 import com.pilot.core.tool.ToolCall;
+import com.pilot.core.tool.ToolNames;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -165,7 +166,7 @@ public final class PermissionRules {
         if (targets.isEmpty()) {
             return false;
         }
-        boolean command = "run_command".equalsIgnoreCase(call.name());
+        boolean command = ToolNames.RUN_COMMAND.equalsIgnoreCase(call.name());
         for (String target : targets) {
             if (command ? commandMatches(rule.specifier(), target) : globMatches(rule.specifier(), target)) {
                 return true;

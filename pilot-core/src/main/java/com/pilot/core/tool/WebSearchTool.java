@@ -48,7 +48,7 @@ public final class WebSearchTool implements Tool {
 
     @Override
     public String name() {
-        return "web_search";
+        return ToolNames.WEB_SEARCH;
     }
 
     @Override

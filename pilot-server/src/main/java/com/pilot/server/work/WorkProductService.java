@@ -25,6 +25,7 @@ import com.pilot.core.loop.Message;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.core.tool.ToolNames;
 import com.pilot.core.util.Sha256;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.config.PilotDataDir;
@@ -222,7 +223,7 @@ public class WorkProductService {
         Map<String, String> observed = new LinkedHashMap<>();
         for (Message message : messages) {
             for (var call : message.toolCalls()) {
-                if ("web_fetch".equals(call.name())) {
+                if (ToolNames.WEB_FETCH.equals(call.name())) {
                     try {
                         calls.put(call.callId(), sourceUrl(Objects.toString(call.args().get("url"), "")));
                     } catch (IllegalArgumentException ignored) {

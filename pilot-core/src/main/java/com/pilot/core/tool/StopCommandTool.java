@@ -15,7 +15,7 @@ public final class StopCommandTool implements Tool {
     }
 
     public String name() {
-        return "stop_command";
+        return ToolNames.STOP_COMMAND;
     }
 
     public boolean readOnly() {

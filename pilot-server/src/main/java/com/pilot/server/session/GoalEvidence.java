@@ -10,6 +10,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import com.pilot.core.tool.ToolNames;
 import com.pilot.core.tool.VerificationCheck;
 import com.pilot.core.util.Sha256;
 import com.pilot.core.util.WireEnum;
@@ -28,9 +29,10 @@ final class GoalEvidence {
         }
         LinkedHashMap<String, TaskControlService.Evidence> retained = new LinkedHashMap<>();
         Set<String> completedTasks = completedTasks(all);
-        all.stream().filter(e -> Set.of("edit_file", "create_file", "apply_patch").contains(e.tool())
-            || ("record_research".equals(e.tool()) && EvidenceStatus.SUCCESS.is(e.status())) || isVerificationAttempt(e)
-            || ("run_command".equals(e.tool()) && isBackgroundLaunch(e) && !completedTasks.contains(taskId(e))))
+        all.stream().filter(e -> ToolNames.FILE_EDITS.contains(e.tool())
+            || (ToolNames.RECORD_RESEARCH.equals(e.tool()) && EvidenceStatus.SUCCESS.is(e.status()))
+            || isVerificationAttempt(e)
+            || (ToolNames.RUN_COMMAND.equals(e.tool()) && isBackgroundLaunch(e) && !completedTasks.contains(taskId(e))))
             .forEach(e -> retained.put(e.id(), e));
         recentHistoricalWaits(all).forEach(e -> retained.put(e.id(), e));
         int ordinaryStart = Math.max(0, all.size() - 120);
@@ -40,13 +42,13 @@ final class GoalEvidence {
             return result;
         }
         // 无论普通窗口多大，未结束 task 的启动版本都不能被尾裁掉。
-        List<TaskControlService.Evidence> pending = result.stream()
-            .filter(e -> "run_command".equals(e.tool()) && isBackgroundLaunch(e) && !completedTasks.contains(taskId(e)))
+        List<TaskControlService.Evidence> pending = result.stream().filter(
+            e -> ToolNames.RUN_COMMAND.equals(e.tool()) && isBackgroundLaunch(e) && !completedTasks.contains(taskId(e)))
             .toList();
         LinkedHashMap<String, TaskControlService.Evidence> bounded = new LinkedHashMap<>();
         pending.forEach(e -> bounded.put(e.id(), e));
         latestChecks(all).values().forEach(e -> bounded.put(e.id(), e));
-        result.stream().filter(e -> "record_research".equals(e.tool()) && EvidenceStatus.SUCCESS.is(e.status()))
+        result.stream().filter(e -> ToolNames.RECORD_RESEARCH.equals(e.tool()) && EvidenceStatus.SUCCESS.is(e.status()))
             .reduce((a, b) -> b).ifPresent(e -> bounded.put(e.id(), e));
         recentHistoricalWaits(all).forEach(e -> bounded.put(e.id(), e));
         int remaining = Math.max(0, 220 - bounded.size());
@@ -58,7 +60,7 @@ final class GoalEvidence {
     /** 有界保留最近的等待预约，避免续跑观察挤掉无法重新执行的历史事实。 */
     static List<TaskControlService.Evidence> recentHistoricalWaits(List<TaskControlService.Evidence> all) {
         List<TaskControlService.Evidence> waits =
-            all.stream().filter(e -> "wait_until".equals(e.tool()) && successfulEvidence(e)).toList();
+            all.stream().filter(e -> ToolNames.WAIT_UNTIL.equals(e.tool()) && successfulEvidence(e)).toList();
         return waits.subList(Math.max(0, waits.size() - 4), waits.size());
     }
 
@@ -67,7 +69,7 @@ final class GoalEvidence {
     }
 
     private static Set<String> completedTasks(List<TaskControlService.Evidence> evidenceList) {
-        return evidenceList.stream().filter(e -> "command_status".equals(e.tool()))
+        return evidenceList.stream().filter(e -> ToolNames.COMMAND_STATUS.equals(e.tool()))
             .filter(e -> !WireEnum.in(e.status(), EvidenceStatus.RUNNING, EvidenceStatus.STOPPING))
             .map(GoalEvidence::taskId).filter(value -> !value.isBlank()).collect(Collectors.toSet());
     }

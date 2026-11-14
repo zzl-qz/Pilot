@@ -81,7 +81,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
 
     @Override
     public String name() {
-        return "run_command";
+        return ToolNames.RUN_COMMAND;
     }
 
     @Override

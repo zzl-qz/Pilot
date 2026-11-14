@@ -33,6 +33,7 @@ import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolExecutor;
+import com.pilot.core.tool.ToolNames;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.ToolResult;
 
@@ -51,8 +52,9 @@ public final class SpawnAgentTool implements Tool {
     private static final int MAX_SPAWNS_PER_RUN = 4;
     /** 所有子任务共享的模型请求池，不能靠不断更换 task 文案绕过单子任务上限。 */
     private static final int MAX_SUBAGENT_REQUESTS_PER_RUN = 24;
-    private static final Set<String> FORBIDDEN_TOOLS = Set.of("spawn_agent", "dispatch_agents", "promote_goal",
-        "create_goal", "update_goal", "update_plan", "stop_command", "wait_until", "record_research");
+    private static final Set<String> FORBIDDEN_TOOLS =
+        Set.of(ToolNames.SPAWN_AGENT, ToolNames.DISPATCH_AGENTS, ToolNames.PROMOTE_GOAL, "create_goal", "update_goal",
+            ToolNames.UPDATE_PLAN, ToolNames.STOP_COMMAND, ToolNames.WAIT_UNTIL, ToolNames.RECORD_RESEARCH);
     private static final PromptLibrary PROMPTS = PromptLibrary.standard();
 
     private final ModelClient client;
@@ -118,7 +120,7 @@ public final class SpawnAgentTool implements Tool {
 
     @Override
     public String name() {
-        return "spawn_agent";
+        return ToolNames.SPAWN_AGENT;
     }
 
     @Override

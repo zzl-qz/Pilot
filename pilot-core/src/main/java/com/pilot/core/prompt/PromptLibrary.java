@@ -21,6 +21,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import com.pilot.core.model.ContextComposition.Source;
+import com.pilot.core.tool.ToolNames;
 
 /**
  * 提示词仓库：喂给模型的指令性文本放在 {@code prompts/} 目录里维护，Java 代码只引用名字。
@@ -81,11 +82,13 @@ public final class PromptLibrary {
     private static final List<SystemSection> SYSTEM_SECTIONS = List.of(new SystemSection("system/base", 0),
         new SystemSection("system/workflow", 100),
         new SystemSection("system/deliverables", 150, Set.of("publish_artifact")),
-        new SystemSection("system/tools", 200), new SystemSection("system/skills", 250, Set.of("use_skill")),
-        new SystemSection("system/tools-spawn", 300, Set.of("spawn_agent")),
-        new SystemSection("system/tools-dispatch", 310, Set.of("dispatch_agents")),
-        new SystemSection("system/browser", 350, Set.of("browser")), new SystemSection("system/orchestration", 400),
-        new SystemSection("system/dispatch", 500, Set.of("dispatch_agents")), new SystemSection("system/output", 9000));
+        new SystemSection("system/tools", 200), new SystemSection("system/skills", 250, Set.of(ToolNames.USE_SKILL)),
+        new SystemSection("system/tools-spawn", 300, Set.of(ToolNames.SPAWN_AGENT)),
+        new SystemSection("system/tools-dispatch", 310, Set.of(ToolNames.DISPATCH_AGENTS)),
+        new SystemSection("system/browser", 350, Set.of(ToolNames.BROWSER)),
+        new SystemSection("system/orchestration", 400),
+        new SystemSection("system/dispatch", 500, Set.of(ToolNames.DISPATCH_AGENTS)),
+        new SystemSection("system/output", 9000));
 
     /** frontmatter 解析结果：声明的依赖工具 + 去掉声明头之后的正文。 */
     private record Parsed(Set<String> requires, String body) {

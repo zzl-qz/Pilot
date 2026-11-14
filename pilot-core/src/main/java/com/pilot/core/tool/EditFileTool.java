@@ -27,7 +27,7 @@ public final class EditFileTool extends PromptedTool implements WritesFiles {
     }
 
     public EditFileTool(PathValidator paths, SnapshotSink snapshots, ReadGuard reads) {
-        super("edit_file");
+        super(ToolNames.EDIT_FILE);
         this.paths = java.util.Objects.requireNonNull(paths, "paths must not be null");
         this.snapshots = java.util.Objects.requireNonNull(snapshots, "snapshots must not be null");
         this.reads = reads == null ? ReadGuard.allowAll() : reads;

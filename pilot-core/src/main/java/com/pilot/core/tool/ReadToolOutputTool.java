@@ -13,7 +13,7 @@ public final class ReadToolOutputTool implements Tool.ParallelReadOnly {
 
     @Override
     public String name() {
-        return "read_tool_output";
+        return ToolNames.READ_TOOL_OUTPUT;
     }
 
     @Override

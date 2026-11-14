@@ -19,6 +19,7 @@ import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.core.tool.ToolNames;
 import com.pilot.core.util.WireEnum;
 import com.pilot.server.schedule.ScheduleService;
 import com.pilot.server.schedule.ScheduleState;
@@ -230,7 +231,7 @@ public class ResultInboxService {
         }
         List<Research> result = new ArrayList<>();
         for (var e : task.execution().evidence()) {
-            if (!"record_research".equals(e.tool()) || !EvidenceStatus.SUCCESS.is(e.status())) {
+            if (!ToolNames.RECORD_RESEARCH.equals(e.tool()) || !EvidenceStatus.SUCCESS.is(e.status())) {
                 continue;
             }
             try {

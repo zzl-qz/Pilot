@@ -34,7 +34,7 @@ public final class UseSkillTool implements Tool {
 
     @Override
     public String name() {
-        return "use_skill";
+        return ToolNames.USE_SKILL;
     }
 
     @Override

@@ -22,7 +22,7 @@ public final class ListDirTool implements Tool.ParallelReadOnly {
 
     @Override
     public String name() {
-        return "list_dir";
+        return ToolNames.LIST_DIR;
     }
 
     @Override

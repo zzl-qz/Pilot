@@ -9,6 +9,7 @@ import java.util.Map;
 
 import com.pilot.core.loop.ContextCompactor;
 import com.pilot.core.loop.Message;
+import com.pilot.core.tool.ToolNames;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -60,7 +61,8 @@ public record ContextComposition(long totalTokens, boolean estimated, int attach
             } else {
                 String category = remaining.startsWith("[上下文交接摘要") ? "summary"
                     : remaining.startsWith("[已激活技能") || remaining.startsWith("（用户为本任务指定了技能 ")
-                        || "use_skill".equals(calledTools.get(message.toolCallId())) ? "skills" : "conversation";
+                        || ToolNames.USE_SKILL.equals(calledTools.get(message.toolCallId())) ? "skills"
+                            : "conversation";
                 add(totals, category, remaining);
             }
             for (var call : message.toolCalls()) {
@@ -70,7 +72,7 @@ public record ContextComposition(long totalTokens, boolean estimated, int attach
         }
         for (ToolDefinition tool : tools == null ? List.<ToolDefinition>of() : tools) {
             String category = tool.name().startsWith("mcp") ? "mcp"
-                : List.of("spawn_agent", "dispatch_agents").contains(tool.name()) ? "agents" : "tools";
+                : List.of(ToolNames.SPAWN_AGENT, ToolNames.DISPATCH_AGENTS).contains(tool.name()) ? "agents" : "tools";
             add(totals, category,
                 tool.name() + tool.description() + JSON.writeValueAsString(CanonicalJson.ordered(tool.parameters())));
         }

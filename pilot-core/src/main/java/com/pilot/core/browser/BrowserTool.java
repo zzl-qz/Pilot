@@ -18,6 +18,7 @@ import com.pilot.core.tool.Availability;
 import com.pilot.core.tool.LocalInteraction;
 import com.pilot.core.tool.PromptedTool;
 import com.pilot.core.tool.ToolArtifacts;
+import com.pilot.core.tool.ToolNames;
 import com.pilot.core.tool.ToolResult;
 import com.pilot.core.tool.ToolSupport;
 import com.pilot.core.workspace.PathValidator;
@@ -54,7 +55,7 @@ public final class BrowserTool extends PromptedTool implements LocalInteraction 
     private final AtomicLong shots = new AtomicLong();
 
     public BrowserTool(BrowserBackend backend, String sessionId, PathValidator paths) {
-        super("browser");
+        super(ToolNames.BROWSER);
         this.backend = backend;
         this.sessionId = sessionId == null || sessionId.isBlank() ? "default" : sessionId;
         this.paths = paths;

@@ -40,6 +40,7 @@ import com.pilot.core.tool.SandboxSink;
 import com.pilot.core.tool.SearchTool;
 import com.pilot.core.tool.SnapshotSink;
 import com.pilot.core.tool.Tool;
+import com.pilot.core.tool.ToolNames;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.UpdatePlanTool;
 import com.pilot.core.tool.WebFetchTool;
@@ -168,33 +169,33 @@ public class WorkspaceToolFactory {
         ToolRegistry registry = new ToolRegistry();
         // 每个子 Agent 一份「先读后改」记录，与父级互不共享
         ReadTracker reads = new ReadTracker();
-        if (view.allowsTool("read_file")) {
+        if (view.allowsTool(ToolNames.READ_FILE)) {
             registry.register(new ReadFileTool(validator, reads, sandbox));
         }
-        if (view.allowsTool("list_dir")) {
+        if (view.allowsTool(ToolNames.LIST_DIR)) {
             registry.register(new ListDirTool(validator));
         }
-        if (view.allowsTool("glob_files")) {
+        if (view.allowsTool(ToolNames.GLOB_FILES)) {
             registry.register(new GlobFilesTool(validator));
         }
-        if (view.allowsTool("search_text")) {
+        if (view.allowsTool(ToolNames.SEARCH_TEXT)) {
             registry.register(new SearchTool(validator));
         }
-        if (view.allowsTool("web_search")) {
+        if (view.allowsTool(ToolNames.WEB_SEARCH)) {
             registry.register(searchTool());
         }
-        if (view.allowsTool("web_fetch")) {
+        if (view.allowsTool(ToolNames.WEB_FETCH)) {
             registry.register(new WebFetchTool(webClient));
         }
         // 只读任务默认不注册通用命令：命令白名单为空时 run_command 会退回内置可执行白名单，
         // 那已经超出「只读调研」的范围。需要跑命令的调研任务必须显式声明 commands。
-        if ((view.writable() || !view.allowCommands().isEmpty()) && view.allowsTool("run_command")) {
+        if ((view.writable() || !view.allowCommands().isEmpty()) && view.allowsTool(ToolNames.RUN_COMMAND)) {
             registry.register(new SandboxCommandTool(validator, sandbox, execution));
         }
-        if (view.writable() && view.allowsTool("edit_file")) {
+        if (view.writable() && view.allowsTool(ToolNames.EDIT_FILE)) {
             registry.register(new SandboxEditFileTool(validator, sandbox, reads));
         }
-        if (view.writable() && view.allowsTool("create_file")) {
+        if (view.writable() && view.allowsTool(ToolNames.CREATE_FILE)) {
             registry.register(new SandboxCreateFileTool(validator, sandbox, reads));
         }
         return registry;

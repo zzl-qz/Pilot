@@ -45,6 +45,7 @@ import com.pilot.core.tool.ReadToolOutputTool;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolCallJournal;
 import com.pilot.core.tool.ToolExecutor;
+import com.pilot.core.tool.ToolNames;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.ToolSupport;
 import com.pilot.core.trace.TraceRecorder;
@@ -221,7 +222,7 @@ public final class AgentLoop {
     /** 工具调用幂等账本：重启接管后同一参数写文件调用不重复落盘。 */
     public AgentLoop withToolJournal(String runId, ToolCallJournal journal) {
         this.toolExecutor.withJournal(runId, journal);
-        if (journal != null && tools.find("read_tool_output").isEmpty()) {
+        if (journal != null && tools.find(ToolNames.READ_TOOL_OUTPUT).isEmpty()) {
             tools.register(new ReadToolOutputTool(journal));
         }
         return this;
@@ -1314,9 +1315,9 @@ public final class AgentLoop {
             for (int i = 0; i < calls.size(); i++) {
                 ToolCall call = calls.get(i);
                 ToolExecutor.Outcome outcome = outcomes.get(i);
-                boolean callAwaiting =
-                    outcome.status() == ToolExecutor.OutcomeStatus.RUNNING || ("command_logs".equals(call.name())
-                        && outcome.result() != null && outcome.result().contains("eof: false"));
+                boolean callAwaiting = outcome.status() == ToolExecutor.OutcomeStatus.RUNNING
+                    || (ToolNames.COMMAND_LOGS.equals(call.name()) && outcome.result() != null
+                        && outcome.result().contains("eof: false"));
                 stillAwaiting &= callAwaiting;
                 current.append(call.name()).append(':').append(outcome.status()).append(':').append(outcome.result())
                     .append('\n');
@@ -1346,8 +1347,8 @@ public final class AgentLoop {
         }
 
         private static boolean dynamicBatch(List<ToolCall> calls) {
-            return !calls.isEmpty() && calls.stream()
-                .allMatch(call -> "command_status".equals(call.name()) || "command_logs".equals(call.name()));
+            return !calls.isEmpty() && calls.stream().allMatch(
+                call -> ToolNames.COMMAND_STATUS.equals(call.name()) || ToolNames.COMMAND_LOGS.equals(call.name()));
         }
 
         private record Decision(boolean remind, boolean abort, int unchangedCount) {

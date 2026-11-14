@@ -28,6 +28,7 @@ import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolCall;
 import com.pilot.core.tool.ToolExecutor;
+import com.pilot.core.tool.ToolNames;
 import com.pilot.core.tool.ToolSupport;
 import com.pilot.core.tool.VerificationCheck;
 import com.pilot.core.util.Sha256;
@@ -52,7 +53,18 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private static final int REVIEWER_RESERVED_REQUESTS = 2;
     private static final int MAX_CONSECUTIVE_RESEARCH_FAILURES = 3;
     private static final int INVESTIGATION_NUDGE_AT = 16;
-    private static final Set<String> RESEARCH_TOOLS = Set.of("web_search", "web_fetch");
+    private static final Set<String> RESEARCH_TOOLS = Set.of(ToolNames.WEB_SEARCH, ToolNames.WEB_FETCH);
+    /** 命令的发起与查询：两者的证据按同一条命令归并。 */
+    private static final Set<String> COMMAND_TOOLS = Set.of(ToolNames.RUN_COMMAND, ToolNames.COMMAND_STATUS);
+    /** 只看不改的工具：连续用太多次说明一直在观察、没有推进。 */
+    private static final Set<String> OBSERVATION_TOOLS =
+        Set.of(ToolNames.READ_FILE, ToolNames.SEARCH_TEXT, ToolNames.LIST_DIR, ToolNames.GLOB_FILES);
+    /** 还欠调研结论时允许用的工具：只能查资料、读文件、记结论。 */
+    private static final Set<String> RESEARCH_PHASE_TOOLS = Set.of(ToolNames.WEB_SEARCH, ToolNames.WEB_FETCH,
+        ToolNames.READ_FILE, ToolNames.LIST_DIR, ToolNames.SEARCH_TEXT, ToolNames.GLOB_FILES, ToolNames.RECORD_RESEARCH,
+        ToolNames.USE_SKILL, ToolNames.UPDATE_PLAN, ToolNames.PROMOTE_GOAL);
+    /** 旧记录里的伪工具名，只用来识别执行前已有的改动，现在不再写入。 */
+    private static final String LEGACY_WORKSPACE_BASELINE = "workspace_baseline";
 
     private final ModelClient model;
     private final ObjectMapper mapper;
@@ -121,8 +133,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         TaskControlService.TaskContract task = task();
         if (task != null && task.execution() != null) {
             changedPaths.addAll(task.execution().changedPaths());
-            task.execution().evidence().stream()
-                .filter(e -> Set.of("edit_file", "create_file", "apply_patch").contains(e.tool()))
+            task.execution().evidence().stream().filter(e -> ToolNames.FILE_EDITS.contains(e.tool()))
                 .map(TaskControlService.Evidence::target).filter(p -> !p.isBlank()).forEach(changedPaths::add);
         }
     }
@@ -231,12 +242,11 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         int observations = 0;
         String phase = "start";
         for (TaskControlService.Evidence evidence : state.evidence()) {
-            if (GoalEvidence.successfulEvidence(evidence)
-                && (Set.of("edit_file", "create_file", "apply_patch").contains(evidence.tool())
-                    || GoalEvidence.isQualifyingVerification(evidence))) {
+            if (GoalEvidence.successfulEvidence(evidence) && (ToolNames.FILE_EDITS.contains(evidence.tool())
+                || GoalEvidence.isQualifyingVerification(evidence))) {
                 observations = 0;
                 phase = evidence.id();
-            } else if (Set.of("read_file", "search_text", "list_dir", "glob_files").contains(evidence.tool())) {
+            } else if (OBSERVATION_TOOLS.contains(evidence.tool())) {
                 observations++;
             }
         }
@@ -471,7 +481,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         return new Tool() {
             @Override
             public String name() {
-                return "promote_goal";
+                return ToolNames.PROMOTE_GOAL;
             }
 
             @Override
@@ -530,13 +540,13 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private boolean needsResearch() {
         var t = task();
         return t != null && t.automation() != null && t.automation().requireResearch() && state().evidence().stream()
-            .noneMatch(e -> "record_research".equals(e.tool()) && EvidenceStatus.SUCCESS.is(e.status()));
+            .noneMatch(e -> ToolNames.RECORD_RESEARCH.equals(e.tool()) && EvidenceStatus.SUCCESS.is(e.status()));
     }
 
     Tool researchTool() {
         return new Tool() {
             public String name() {
-                return "record_research";
+                return ToolNames.RECORD_RESEARCH;
             }
 
             public boolean readOnly() {
@@ -576,7 +586,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                         || uri.getPath() == null || uri.getPath().split("/").length < 3) {
                         return "ERROR: 请提供具体的开源仓库或源码链接";
                     }
-                    if (state().evidence().stream().noneMatch(e -> "web_fetch".equals(e.tool())
+                    if (state().evidence().stream().noneMatch(e -> ToolNames.WEB_FETCH.equals(e.tool())
                         && EvidenceStatus.SUCCESS.is(e.status()) && source.equals(e.target()))) {
                         return "ERROR: 链接还没有成功读取，请先用 web_fetch 阅读：" + source;
                     }
@@ -584,7 +594,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                 return mapper.writeValueAsString(
                     Map.of("sources", sources, "decision", decision, "license", license, "sourceEvidence",
                         state()
-                            .evidence().stream().filter(e -> "web_fetch".equals(e.tool())
+                            .evidence().stream().filter(e -> ToolNames.WEB_FETCH.equals(e.tool())
                                 && EvidenceStatus.SUCCESS.is(e.status()) && sources.contains(e.target()))
                             .map(TaskControlService.Evidence::id).toList()));
             }
@@ -602,8 +612,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         if (task() != null && TaskControlStatus.WAITING.is(task().status())) {
             return false;
         }
-        if (needsResearch() && !Set.of("web_search", "web_fetch", "read_file", "list_dir", "search_text", "glob_files",
-            "record_research", "use_skill", "update_plan", "promote_goal").contains(call.name())) {
+        if (needsResearch() && !RESEARCH_PHASE_TOOLS.contains(call.name())) {
             return false;
         }
         if (RESEARCH_TOOLS.contains(call.name()) && researchRouteUnavailable) {
@@ -641,13 +650,11 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                 researchRouteUnavailable = consecutiveResearchFailures >= MAX_CONSECUTIVE_RESEARCH_FAILURES;
             }
         }
-        String path =
-            Objects
-                .toString(
-                    call.args() == null ? null : call.args().get("web_fetch".equals(call.name()) ? "url" : "path"), "")
-                .strip();
+        String path = Objects.toString(
+            call.args() == null ? null : call.args().get(ToolNames.WEB_FETCH.equals(call.name()) ? "url" : "path"), "")
+            .strip();
         var command = commandMetadata(call, outcome.result());
-        if ("run_command".equals(call.name())) {
+        if (ToolNames.RUN_COMMAND.equals(call.name())) {
             path = commandWorkdir(command == null
                 ? Objects.toString(call.args() == null ? null : call.args().get("workdir"), "") : command.workdir());
         }
@@ -658,7 +665,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         }
         String endVersion = sourceVersion();
         boolean knownCommandLaunch = true;
-        if ("command_status".equals(call.name())) {
+        if (ToolNames.COMMAND_STATUS.equals(call.name())) {
             String taskId = Objects.toString(call.args() == null ? null : call.args().get("taskId"), "");
             String launched = launchedVersion(taskId);
             path = command == null ? launchedWorkdir(taskId) : commandWorkdir(command.workdir());
@@ -686,10 +693,10 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         String actualCommand = command == null
             ? Objects.toString(call.args() == null ? null : call.args().get("command"), "").strip() : command.command();
         String operation = operationKey(call);
-        if (Set.of("run_command", "command_status").contains(call.name())) {
+        if (COMMAND_TOOLS.contains(call.name())) {
             if (!actualCommand.isBlank()) {
                 operation = "command:" + GoalEvidence.hash(path + "\n" + actualCommand);
-            } else if ("command_status".equals(call.name())) {
+            } else if (ToolNames.COMMAND_STATUS.equals(call.name())) {
                 String launchedOperation = launchedOperation(Objects.toString(call.args().get("taskId"), ""));
                 if (!launchedOperation.isBlank()) {
                     operation = launchedOperation;
@@ -697,7 +704,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
             }
         }
         evidence.add(new TaskControlService.Evidence(UUID.randomUUID().toString(), call.name(), path,
-            ("record_research".equals(call.name()) ? Objects.toString(outcome.result(), "")
+            (ToolNames.RECORD_RESEARCH.equals(call.name()) ? Objects.toString(outcome.result(), "")
                 : clip(outcome.result() == null ? "" : outcome.result(), 3_000)),
             endVersion, null, currentRequirements ? outcome.status().name() : EvidenceStatus.STALE.name(), startVersion,
             endVersion, System.currentTimeMillis(), operation));
@@ -707,14 +714,14 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
             EvidenceStatus status = !currentRequirements ? EvidenceStatus.STALE
                 : outcome.status() == ToolExecutor.OutcomeStatus.RUNNING ? EvidenceStatus.RUNNING
                     : check.matches("(?s).+ → exit 0") ? EvidenceStatus.SUCCESS : EvidenceStatus.PERMANENT_FAILURE;
-            String checkResult = "command_status".equals(call.name())
+            String checkResult = ToolNames.COMMAND_STATUS.equals(call.name())
                 ? "任务ID: " + Objects.toString(call.args().get("taskId"), "") + "\n" + check : check;
             evidence.add(new TaskControlService.Evidence(UUID.randomUUID().toString(), call.name(), path, checkResult,
                 endVersion, check, status.name(), startVersion, endVersion, System.currentTimeMillis(),
                 operation + ":check:" + index));
         }
         String launchedCheck = actualCommand;
-        if ("run_command".equals(call.name()) && outcome.status() == ToolExecutor.OutcomeStatus.RUNNING
+        if (ToolNames.RUN_COMMAND.equals(call.name()) && outcome.status() == ToolExecutor.OutcomeStatus.RUNNING
             && VerificationCheck.classifyCommand(launchedCheck).qualifies()) {
             evidence.add(new TaskControlService.Evidence(UUID.randomUUID().toString(), call.name(), path,
                 outcome.result(), startVersion, launchedCheck,
@@ -730,7 +737,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         if (taskId == null || taskId.isBlank()) {
             return "";
         }
-        return state().evidence().stream().filter(e -> "run_command".equals(e.tool()))
+        return state().evidence().stream().filter(e -> ToolNames.RUN_COMMAND.equals(e.tool()))
             .filter(e -> !EvidenceStatus.STALE.is(e.status()) && taskId.equals(GoalEvidence.taskId(e)))
             .map(TaskControlService.Evidence::startVersion).findFirst().orElse("");
     }
@@ -739,23 +746,23 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         if (taskId == null || taskId.isBlank()) {
             return "";
         }
-        return state().evidence().stream().filter(e -> "run_command".equals(e.tool()))
+        return state().evidence().stream().filter(e -> ToolNames.RUN_COMMAND.equals(e.tool()))
             .filter(e -> taskId.equals(GoalEvidence.taskId(e))).map(TaskControlService.Evidence::target).findFirst()
             .orElse("");
     }
 
     private String launchedOperation(String id) {
         return state().evidence().stream()
-            .filter(e -> "run_command".equals(e.tool()) && id.equals(GoalEvidence.taskId(e)))
+            .filter(e -> ToolNames.RUN_COMMAND.equals(e.tool()) && id.equals(GoalEvidence.taskId(e)))
             .map(TaskControlService.Evidence::operationKey).filter(key -> key.startsWith("command:")).findFirst()
             .orElse("");
     }
 
     private com.pilot.core.tool.CommandTaskManager.Task commandMetadata(ToolCall call, String result) {
-        if (!Set.of("run_command", "command_status").contains(call.name())) {
+        if (!COMMAND_TOOLS.contains(call.name())) {
             return null;
         }
-        String taskId = "command_status".equals(call.name()) ? Objects.toString(call.args().get("taskId"), "")
+        String taskId = ToolNames.COMMAND_STATUS.equals(call.name()) ? Objects.toString(call.args().get("taskId"), "")
             : GoalEvidence.taskId(result);
         if (taskId.isBlank()) {
             return null;
@@ -1037,14 +1044,14 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         LinkedHashMap<String, TaskControlService.Evidence> selected = new LinkedHashMap<>();
         addRecent(selected, all, 20);
         addRecent(selected,
-            all.stream().filter(e -> Set.of("edit_file", "create_file", "apply_patch", "spawn_agent").contains(e.tool())
-                || GoalEvidence.isVerificationAttempt(e)).toList(),
-            18);
-        addRecent(selected,
             all.stream()
-                .filter(e -> GoalEvidence.successfulEvidence(e) && Set.of("web_fetch", "read_file").contains(e.tool()))
+                .filter(e -> Set
+                    .of(ToolNames.EDIT_FILE, ToolNames.CREATE_FILE, ToolNames.APPLY_PATCH, ToolNames.SPAWN_AGENT)
+                    .contains(e.tool()) || GoalEvidence.isVerificationAttempt(e))
                 .toList(),
-            12);
+            18);
+        addRecent(selected, all.stream().filter(e -> GoalEvidence.successfulEvidence(e)
+            && Set.of(ToolNames.WEB_FETCH, ToolNames.READ_FILE).contains(e.tool())).toList(), 12);
         addRecent(selected, GoalEvidence.recentHistoricalWaits(all), 4);
         String currentVersion = sourceVersion();
         List<Map<String, Object>> rows = selected.values().stream().map(e -> {
@@ -1056,8 +1063,8 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
             row.put("result", oneLine(e.result(), 250));
             row.put("check", oneLine(Objects.toString(e.check(), ""), 180));
             row.put("source_version", e.endVersion());
-            row.put("evidence_scope", "wait_until".equals(e.tool()) ? "historical_action"
-                : Set.of("web_search", "web_fetch").contains(e.tool()) ? "external_source" : "current_workspace");
+            row.put("evidence_scope", ToolNames.WAIT_UNTIL.equals(e.tool()) ? "historical_action"
+                : RESEARCH_TOOLS.contains(e.tool()) ? "external_source" : "current_workspace");
             String issue = evidenceIssue(e, currentVersion);
             row.put("eligible_for_coverage", issue == null);
             row.put("ineligible_reason", issue == null ? "" : issue);
@@ -1150,16 +1157,17 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     }
 
     private static boolean codeEvidence(TaskControlService.Execution state) {
-        return state.changedPaths().stream().anyMatch(GoalExecutionPolicy::isCodePath) || state.evidence().stream()
-            .anyMatch(e -> Set.of("edit_file", "create_file", "apply_patch").contains(e.tool())
-                && isCodePath(e.target()) && GoalEvidence.successfulEvidence(e));
+        return state.changedPaths().stream().anyMatch(GoalExecutionPolicy::isCodePath)
+            || state.evidence().stream().anyMatch(e -> ToolNames.FILE_EDITS.contains(e.tool()) && isCodePath(e.target())
+                && GoalEvidence.successfulEvidence(e));
     }
 
     private static boolean coverageEligible(TaskControlService.Evidence evidence) {
         if (!GoalEvidence.successfulEvidence(evidence)) {
             return false;
         }
-        if (Set.of("promote_goal", "update_plan", "workspace_baseline").contains(evidence.tool())) {
+        if (Set.of(ToolNames.PROMOTE_GOAL, ToolNames.UPDATE_PLAN, LEGACY_WORKSPACE_BASELINE)
+            .contains(evidence.tool())) {
             return false;
         }
         // check 证据必须真的是测试/构建/静态检查，任意 exit 0 不能充当验收依据。
@@ -1170,7 +1178,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private static boolean evidenceFreshForCoverage(TaskControlService.Evidence evidence, String currentVersion) {
         // 等待预约是已发生的历史操作，后续文件写入不会使它失真；它不证明文件当前状态或唤醒结果。
         // 外部资料同样不依赖本地源码；本地实现、行为与验证仍要求当前版本。
-        if (Set.of("web_search", "web_fetch", "wait_until").contains(evidence.tool())) {
+        if (Set.of(ToolNames.WEB_SEARCH, ToolNames.WEB_FETCH, ToolNames.WAIT_UNTIL).contains(evidence.tool())) {
             return true;
         }
         return Objects.equals(currentVersion, evidence.endVersion());
@@ -1188,13 +1196,13 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         if (GoalEvidence.isQualifyingVerification(evidence)) {
             return true;
         }
-        if (GoalEvidence.successfulEvidence(evidence) && "web_fetch".equals(evidence.tool())) {
+        if (GoalEvidence.successfulEvidence(evidence) && ToolNames.WEB_FETCH.equals(evidence.tool())) {
             return true;
         }
-        if (GoalEvidence.successfulEvidence(evidence) && "read_file".equals(evidence.tool()) && researchOnly) {
+        if (GoalEvidence.successfulEvidence(evidence) && ToolNames.READ_FILE.equals(evidence.tool()) && researchOnly) {
             return true;
         }
-        return "command_status".equals(evidence.tool())
+        return ToolNames.COMMAND_STATUS.equals(evidence.tool())
             && evidence.result().matches("(?is).*状态:\\s*(COMPLETED|FAILED|CANCELLED).*");
     }
 

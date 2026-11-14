@@ -22,6 +22,7 @@ import org.springframework.stereotype.Service;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.Tool;
+import com.pilot.core.tool.ToolNames;
 import com.pilot.core.util.WireEnum;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.maintenance.DataMaintenance;
@@ -55,7 +56,7 @@ public class ScheduleService {
     private final WorkspaceToolFactory toolFactory;
     private volatile boolean ready;
     /** wait_until 工具名；模型按这个名字调用，改名等于改协议。 */
-    private static final String WAKE_TOOL = "wait_until";
+    private static final String WAKE_TOOL = ToolNames.WAIT_UNTIL;
     private static final String ID_PREFIX = "schedule_";
     /** 进入这些状态时，把历史里还在 RUNNING 的那次调用收尾。 */
     private static final Set<ScheduleState> ENDS_INVOCATION = Set.of(ScheduleState.COMPLETED, ScheduleState.CANCELLED,
