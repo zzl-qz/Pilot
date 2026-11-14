@@ -26,15 +26,15 @@ import com.pilot.core.tool.ToolNames;
 import com.pilot.core.util.WireEnum;
 import com.pilot.server.common.data.DataMaintenance;
 import com.pilot.server.common.data.PilotDataDir;
-import com.pilot.server.session.RunStarter;
-import com.pilot.server.session.RunSubmissionService;
-import com.pilot.server.session.SkillService;
-import com.pilot.server.session.TaskControlService;
-import com.pilot.server.session.TaskControlStatus;
-import com.pilot.server.workspace.GitWorktrees;
-import com.pilot.server.workspace.GitWorktrees.Created;
-import com.pilot.server.workspace.GitWorktrees.Preview;
-import com.pilot.server.workspace.WorkspaceToolFactory;
+import com.pilot.server.git.GitWorktrees;
+import com.pilot.server.git.GitWorktrees.Created;
+import com.pilot.server.git.GitWorktrees.Preview;
+import com.pilot.server.run.RunStarter;
+import com.pilot.server.run.RunSubmissionService;
+import com.pilot.server.run.TaskControlService;
+import com.pilot.server.run.TaskControlStatus;
+import com.pilot.server.skill.SkillService;
+import com.pilot.server.tool.WorkspaceToolFactory;
 
 /** 持久计划只负责投递；所有模型工作仍由 RunStarter 执行。服务就绪后才收敛/调度。 */
 @Service

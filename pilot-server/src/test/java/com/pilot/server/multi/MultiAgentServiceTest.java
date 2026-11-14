@@ -47,7 +47,7 @@ import com.pilot.server.multi.JdbcDispatchStore.Lease;
 import com.pilot.server.permission.PermissionSettings;
 import com.pilot.server.store.SettingsStore;
 import com.pilot.server.store.SqliteStore;
-import com.pilot.server.workspace.WorkspaceToolFactory;
+import com.pilot.server.tool.WorkspaceToolFactory;
 
 import tools.jackson.databind.json.JsonMapper;
 

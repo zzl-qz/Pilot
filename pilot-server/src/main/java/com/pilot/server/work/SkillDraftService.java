@@ -22,9 +22,9 @@ import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.util.Sha256;
 import com.pilot.core.util.WireEnum;
-import com.pilot.server.session.SkillService;
+import com.pilot.server.skill.SkillService;
 import com.pilot.server.store.AutomationStore;
-import com.pilot.server.workspace.WorkspaceToolFactory;
+import com.pilot.server.tool.WorkspaceToolFactory;
 
 import tools.jackson.databind.ObjectMapper;
 

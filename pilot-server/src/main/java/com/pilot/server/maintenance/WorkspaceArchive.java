@@ -21,7 +21,7 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import com.pilot.server.common.data.PilotDataDir;
-import com.pilot.server.workspace.GitWorktrees;
+import com.pilot.server.git.GitWorktrees;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;

@@ -3,7 +3,7 @@ package com.pilot.server.schedule;
 import java.time.Instant;
 import java.util.List;
 
-import com.pilot.server.session.TaskControlService;
+import com.pilot.server.run.TaskControlService;
 
 /** 一次性计划；同一个目标可以因等待外部事件被多次唤醒，历史不覆盖。 */
 public record ScheduledTask(String id, String name, String sessionId, String taskId, String content,

@@ -9,7 +9,7 @@ import java.sql.SQLException;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
-import com.pilot.server.session.AttachmentReferences;
+import com.pilot.server.attachment.AttachmentReferences;
 
 import tools.jackson.databind.ObjectMapper;
 

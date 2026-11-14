@@ -33,12 +33,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.tool.CommandTaskManager;
+import com.pilot.server.attachment.AttachmentService;
 import com.pilot.server.common.data.DataMaintenance;
 import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.common.data.StorageHealth;
-import com.pilot.server.session.AttachmentService;
+import com.pilot.server.git.GitWorktrees;
 import com.pilot.server.store.SqliteStore;
-import com.pilot.server.workspace.GitWorktrees;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;

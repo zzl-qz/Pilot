@@ -12,7 +12,7 @@ import java.util.Map;
 import java.util.Set;
 
 import com.pilot.server.common.data.PilotDataDir;
-import com.pilot.server.workspace.GitWorktrees;
+import com.pilot.server.git.GitWorktrees;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;

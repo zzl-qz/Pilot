@@ -22,8 +22,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.ContentCachingResponseWrapper;
 
-import com.pilot.server.config.AttachmentLimits;
-import com.pilot.server.http.AttachmentBodyLimitFilter;
+import com.pilot.server.attachment.AttachmentBodyLimitFilter;
+import com.pilot.server.attachment.AttachmentLimits;
 
 /**
  * 手机与 Web 写操作的持久回执。先落盘占位再执行；断电时宁可返回待核实，也不自动重做一次命令。

@@ -82,7 +82,7 @@ import com.pilot.server.config.MultiAgentBudget;
 import com.pilot.server.config.MultiAgentProperties;
 import com.pilot.server.multi.SpawnAgentTool.UsageSink;
 import com.pilot.server.permission.PermissionSettings;
-import com.pilot.server.workspace.WorkspaceToolFactory;
+import com.pilot.server.tool.WorkspaceToolFactory;
 
 import tools.jackson.databind.ObjectMapper;
 

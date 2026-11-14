@@ -21,8 +21,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import com.pilot.core.session.SessionService;
 import com.pilot.server.common.data.PilotDataDir;
-import com.pilot.server.session.RunStarter;
-import com.pilot.server.session.TaskControlService;
+import com.pilot.server.run.RunStarter;
+import com.pilot.server.run.TaskControlService;
 import com.pilot.server.store.AutomationStore;
 import com.pilot.server.store.SqliteStore;
 

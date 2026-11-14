@@ -20,12 +20,12 @@ import org.springframework.stereotype.Component;
 
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.server.attachment.AttachmentReferences;
+import com.pilot.server.attachment.AttachmentService;
 import com.pilot.server.common.data.DataMaintenance;
 import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.common.data.StorageHealth;
-import com.pilot.server.session.AttachmentReferences;
-import com.pilot.server.session.AttachmentService;
-import com.pilot.server.session.RunRegistry;
+import com.pilot.server.run.RunRegistry;
 import com.pilot.server.store.SqliteStore;
 import com.pilot.server.validation.ValidationLedger;
 import com.pilot.server.workspace.RunSnapshotService;

@@ -35,12 +35,12 @@ import org.mockito.Mockito;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.common.data.PilotDataDir;
-import com.pilot.server.session.RunStarter;
-import com.pilot.server.session.TaskControlService;
+import com.pilot.server.git.GitWorktrees;
+import com.pilot.server.run.RunStarter;
+import com.pilot.server.run.TaskControlService;
 import com.pilot.server.store.AutomationStore;
 import com.pilot.server.store.SqliteStore;
-import com.pilot.server.workspace.GitWorktrees;
-import com.pilot.server.workspace.WorkspaceToolFactory;
+import com.pilot.server.tool.WorkspaceToolFactory;
 
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;

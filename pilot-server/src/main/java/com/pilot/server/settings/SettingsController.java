@@ -15,7 +15,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.pilot.core.model.ModelClientException;
 import com.pilot.core.permission.PermissionMode;
-import com.pilot.server.config.AttachmentLimits;
+import com.pilot.server.attachment.AttachmentLimits;
 import com.pilot.server.model.ModelCatalogService;
 import com.pilot.server.model.ModelSettings;
 import com.pilot.server.permission.PermissionSettings;

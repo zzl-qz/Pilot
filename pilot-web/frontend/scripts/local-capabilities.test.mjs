@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { readFile } from 'node:fs/promises';
 
 const servicePath = new URL('../../../pilot-server/src/main/java/com/pilot/server/capability/LocalCapabilityService.java', import.meta.url);
-const controllerPath = new URL('../../../pilot-server/src/main/java/com/pilot/server/controller/CapabilitiesController.java', import.meta.url);
+const controllerPath = new URL('../../../pilot-server/src/main/java/com/pilot/server/tool/CapabilitiesController.java', import.meta.url);
 const inspectorPath = new URL('../src/components/inspector/CapabilitiesPanel.tsx', import.meta.url);
 
 test('本机能力发现只检查可执行文件，不启动、下载或安装', async () => {

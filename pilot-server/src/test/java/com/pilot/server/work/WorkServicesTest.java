@@ -30,10 +30,10 @@ import com.pilot.core.tool.ToolCall;
 import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.SkillProperties;
-import com.pilot.server.session.SkillService;
+import com.pilot.server.skill.SkillService;
 import com.pilot.server.store.AutomationStore;
 import com.pilot.server.store.SqliteStore;
-import com.pilot.server.workspace.WorkspaceToolFactory;
+import com.pilot.server.tool.WorkspaceToolFactory;
 
 import tools.jackson.databind.ObjectMapper;
 

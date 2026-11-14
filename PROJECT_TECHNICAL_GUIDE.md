@@ -82,7 +82,7 @@ sequenceDiagram
 
 如果测试失败，工具结果会回传给模型，模型可以继续修复；如果权限被拒绝，也会返回拒绝原因。如果发生模型服务错误、取消或达到步数上限，运行会以相应状态结束并保留可用记录。
 
-入口源码：[SessionController](pilot-server/src/main/java/com/pilot/server/controller/SessionController.java)、[AgentRunService](pilot-server/src/main/java/com/pilot/server/session/AgentRunService.java)、[AgentLoop](pilot-core/src/main/java/com/pilot/core/loop/AgentLoop.java)。
+入口源码：[SessionController](pilot-server/src/main/java/com/pilot/server/session/SessionController.java)、[AgentRunService](pilot-server/src/main/java/com/pilot/server/agent/AgentRunService.java)、[AgentLoop](pilot-core/src/main/java/com/pilot/core/loop/AgentLoop.java)。
 
 ## 3 物理模块和功能模块
 
@@ -175,7 +175,7 @@ AgentLoop 负责“接下来还要不要继续”，不是“这些业务代码�
 
 兼容这里指请求响应的接口形状，不要求模型一定来自某一家。实际能否正确调用工具、理解图片和完成开发任务，仍要针对所选服务测试。当前服务端没有独立的无密钥 Mock Agent 实现；界面可以先配置，真实任务需要可用的模型服务及该服务要求的鉴权。
 
-源码：[ModelClient](pilot-core/src/main/java/com/pilot/core/model/ModelClient.java)、[OpenAiCompatibleModelClient](pilot-core/src/main/java/com/pilot/core/model/OpenAiCompatibleModelClient.java)、[ModelClientProvider](pilot-server/src/main/java/com/pilot/server/config/ModelClientProvider.java)、[ModelSettings](pilot-server/src/main/java/com/pilot/server/config/ModelSettings.java)。
+源码：[ModelClient](pilot-core/src/main/java/com/pilot/core/model/ModelClient.java)、[OpenAiCompatibleModelClient](pilot-core/src/main/java/com/pilot/core/model/OpenAiCompatibleModelClient.java)、[ModelClientProvider](pilot-server/src/main/java/com/pilot/server/model/ModelClientProvider.java)、[ModelSettings](pilot-server/src/main/java/com/pilot/server/model/ModelSettings.java)。
 
 ### PromptLibrary 提供工作规则
 
@@ -187,7 +187,7 @@ AgentLoop 负责“接下来还要不要继续”，不是“这些业务代码�
 
 提示词能告诉模型“不要越权”“先运行测试”。真正是否允许执行，还要由工具权限和代码检查决定。
 
-源码：[PromptLibrary](pilot-core/src/main/java/com/pilot/core/prompt/PromptLibrary.java)、[提示词目录](pilot-core/src/main/resources/prompts)、[运行时提示装配](pilot-server/src/main/java/com/pilot/server/session/AgentRunService.java)。
+源码：[PromptLibrary](pilot-core/src/main/java/com/pilot/core/prompt/PromptLibrary.java)、[提示词目录](pilot-core/src/main/resources/prompts)、[运行时提示装配](pilot-server/src/main/java/com/pilot/server/agent/AgentRunService.java)。
 
 ### ToolRegistry 和 ToolExecutor 执行明确能力
 
@@ -213,7 +213,7 @@ ToolRegistry 是工具目录；ToolExecutor 是单次调用的执行流程。执
 
 工具参数定义帮助模型使用正确形状，后端仍必须校验输入。给模型看不到某个工具可以减少误用，但也应确认其他工具没有绕过相同边界的能力。
 
-源码：[Tool](pilot-core/src/main/java/com/pilot/core/tool/Tool.java)、[ToolRegistry](pilot-core/src/main/java/com/pilot/core/tool/ToolRegistry.java)、[ToolExecutor](pilot-core/src/main/java/com/pilot/core/tool/ToolExecutor.java)、[WorkspaceToolFactory](pilot-server/src/main/java/com/pilot/server/workspace/WorkspaceToolFactory.java)。
+源码：[Tool](pilot-core/src/main/java/com/pilot/core/tool/Tool.java)、[ToolRegistry](pilot-core/src/main/java/com/pilot/core/tool/ToolRegistry.java)、[ToolExecutor](pilot-core/src/main/java/com/pilot/core/tool/ToolExecutor.java)、[WorkspaceToolFactory](pilot-server/src/main/java/com/pilot/server/tool/WorkspaceToolFactory.java)。
 
 ## 6 权限 文件边界和沙箱分别负责什么
 
@@ -232,7 +232,7 @@ ToolRegistry 是工具目录；ToolExecutor 是单次调用的执行流程。执
 
 审批请求通过 callId 登记，执行线程等待 CompletableFuture；界面批准或拒绝后完成该等待。超时按拒绝处理。审批当前在内存中，重启后不能把旧请求当成仍已获准。
 
-源码：[PolicyPermissionGate](pilot-core/src/main/java/com/pilot/core/permission/PolicyPermissionGate.java)、[InMemoryApprovalBroker](pilot-core/src/main/java/com/pilot/core/approval/InMemoryApprovalBroker.java)、[ApprovalController](pilot-server/src/main/java/com/pilot/server/controller/ApprovalController.java)。
+源码：[PolicyPermissionGate](pilot-core/src/main/java/com/pilot/core/permission/PolicyPermissionGate.java)、[InMemoryApprovalBroker](pilot-core/src/main/java/com/pilot/core/approval/InMemoryApprovalBroker.java)、[ApprovalController](pilot-server/src/main/java/com/pilot/server/permission/ApprovalController.java)。
 
 ### PathValidator 决定文件工具可以解析哪个路径
 
@@ -266,7 +266,7 @@ SessionController 接收请求，RunRegistry 占用会话运行槽，AgentRunSer
 
 RunRegistry 还协调回退和切换分支等工作区操作。它不保证多个不同会话自动使用独立文件树，也不属于跨进程的分布式锁。
 
-源码：[AgentRunService](pilot-server/src/main/java/com/pilot/server/session/AgentRunService.java)、[RunRegistry](pilot-server/src/main/java/com/pilot/server/session/RunRegistry.java)。
+源码：[AgentRunService](pilot-server/src/main/java/com/pilot/server/agent/AgentRunService.java)、[RunRegistry](pilot-server/src/main/java/com/pilot/server/run/RunRegistry.java)。
 
 ### Queue 和 Steer 区分下一件事与当前纠正
 
@@ -281,7 +281,7 @@ RunRegistry 还协调回退和切换分支等工作区操作。它不保证多�
 
 当前暂停主要在步骤边界生效，已开始的工具会先完成；后台命令有独立任务，应通过命令停止入口管理。暂停不会撤销已经写入的代码。
 
-源码：[QueuedMessageRepository](pilot-server/src/main/java/com/pilot/server/store/QueuedMessageRepository.java)、[AgentLoop 控制信号](pilot-core/src/main/java/com/pilot/core/loop/AgentLoop.java)、[TaskControlController](pilot-server/src/main/java/com/pilot/server/controller/TaskControlController.java)。
+源码：[QueuedMessageRepository](pilot-server/src/main/java/com/pilot/server/store/QueuedMessageRepository.java)、[AgentLoop 控制信号](pilot-core/src/main/java/com/pilot/core/loop/AgentLoop.java)、[TaskControlController](pilot-server/src/main/java/com/pilot/server/run/TaskControlController.java)。
 
 ### 任务卡保存目标 计划记录过程 验收判断结果
 
@@ -293,7 +293,7 @@ CompletionGate 会在改了代码却没有成功检查记录时催模型去验�
 
 三种结束应分别判断：模型本轮不再调用工具、计划步骤全部完成、任务通过用户验收。任何一种都不能自动替代另外两种。
 
-源码：[TaskControlService](pilot-server/src/main/java/com/pilot/server/session/TaskControlService.java)、[UpdatePlanTool](pilot-core/src/main/java/com/pilot/core/tool/UpdatePlanTool.java)、[CompletionGate](pilot-core/src/main/java/com/pilot/core/loop/CompletionGate.java)。
+源码：[TaskControlService](pilot-server/src/main/java/com/pilot/server/run/TaskControlService.java)、[UpdatePlanTool](pilot-core/src/main/java/com/pilot/core/tool/UpdatePlanTool.java)、[CompletionGate](pilot-core/src/main/java/com/pilot/core/loop/CompletionGate.java)。
 
 ### CommandTaskManager 管理真实进程
 
@@ -307,7 +307,7 @@ RUNNING 和 STOPPING 不能算验证成功；检查摘要需要匹配实际任�
 
 恢复记录不代表恢复进程所有权。重启时，旧 RUNNING 或 STOPPING 命令会标记为 INTERRUPTED，不会按旧 PID 操作进程。当前基于 ProcessHandle 的追踪也无法可靠兜住所有已经脱离父进程的后台程序，这正是原生进程管理和隔离后端后续要加强的部分。
 
-源码：[CommandTaskManager](pilot-core/src/main/java/com/pilot/core/tool/CommandTaskManager.java)、[RunCommandTool](pilot-core/src/main/java/com/pilot/core/tool/RunCommandTool.java)、[CommandToolSupport](pilot-core/src/main/java/com/pilot/core/tool/CommandToolSupport.java)、[CommandTaskController](pilot-server/src/main/java/com/pilot/server/controller/CommandTaskController.java)、[前端命令逻辑](pilot-web/src/main/resources/static/lib/command-tasks.js)。
+源码：[CommandTaskManager](pilot-core/src/main/java/com/pilot/core/tool/CommandTaskManager.java)、[RunCommandTool](pilot-core/src/main/java/com/pilot/core/tool/RunCommandTool.java)、[CommandToolSupport](pilot-core/src/main/java/com/pilot/core/tool/CommandToolSupport.java)、[CommandTaskController](pilot-server/src/main/java/com/pilot/server/tool/CommandTaskController.java)、[前端命令逻辑](pilot-web/src/main/resources/static/lib/command-tasks.js)。
 
 ## 8 记忆 历史和本地存储各保存什么
 
@@ -329,7 +329,7 @@ ContextBudget 在采样前检查预算，逐步减少旧工具输出、截短超
 
 测试可以切换到内存仓储，不污染用户数据。存储接口与实现分开，也使核心执行机制不必知道 SQLite 的 SQL 细节。当前采用本地单机取向，没有引入 ORM 或外部数据库服务。
 
-源码：[StoreConfiguration](pilot-server/src/main/java/com/pilot/server/config/StoreConfiguration.java)、[SqliteStore](pilot-server/src/main/java/com/pilot/server/store/SqliteStore.java)、[JDBC 仓储目录](pilot-server/src/main/java/com/pilot/server/store)。
+源码：[StoreConfiguration](pilot-server/src/main/java/com/pilot/server/store/StoreConfiguration.java)、[SqliteStore](pilot-server/src/main/java/com/pilot/server/store/SqliteStore.java)、[JDBC 仓储目录](pilot-server/src/main/java/com/pilot/server/store)。
 
 ### 本地文件补充保存大内容和运行材料
 
@@ -359,7 +359,7 @@ SSE 是服务端向浏览器推送的通道；提交消息、批准工具和停�
 
 界面用原生 JavaScript 管理状态和 DOM，部分纯逻辑放在 `static/lib/` 中，便于用 Node 测试。当前没有 React、Vue 或前端打包构建链；UI 资源随后端发布。
 
-源码：[EventEnvelope](pilot-core/src/main/java/com/pilot/core/event/EventEnvelope.java)、[SessionService](pilot-core/src/main/java/com/pilot/core/session/SessionService.java)、[事件类型](pilot-core/src/main/java/com/pilot/core/event/EventType.java)、[SessionController](pilot-server/src/main/java/com/pilot/server/controller/SessionController.java)、[app.js](pilot-web/src/main/resources/static/app.js)、[前端事件处理](pilot-web/src/main/resources/static/lib/events.js)。
+源码：[EventEnvelope](pilot-core/src/main/java/com/pilot/core/event/EventEnvelope.java)、[SessionService](pilot-core/src/main/java/com/pilot/core/session/SessionService.java)、[事件类型](pilot-core/src/main/java/com/pilot/core/event/EventType.java)、[SessionController](pilot-server/src/main/java/com/pilot/server/session/SessionController.java)、[app.js](pilot-web/src/main/resources/static/app.js)、[前端事件处理](pilot-web/src/main/resources/static/lib/events.js)。
 
 ## 10 变更 检查点和 Git 分支分别解决什么
 
@@ -376,7 +376,7 @@ RunSnapshotService 在文件写工具第一次修改某个路径前保存原内�
 
 只撤代码、只撤对话和一起撤有不同后果。检查点解决本地操作恢复，Git 负责长期版本历史。未来独立子任务工作区和产物应用还需要另外的提交、验证与恢复协议。
 
-源码：[RunSnapshotService](pilot-server/src/main/java/com/pilot/server/workspace/RunSnapshotService.java)、[ChangeService](pilot-server/src/main/java/com/pilot/server/workspace/ChangeService.java)、[CheckpointController](pilot-server/src/main/java/com/pilot/server/controller/CheckpointController.java)、[BranchController](pilot-server/src/main/java/com/pilot/server/controller/BranchController.java)。
+源码：[RunSnapshotService](pilot-server/src/main/java/com/pilot/server/workspace/RunSnapshotService.java)、[ChangeService](pilot-server/src/main/java/com/pilot/server/workspace/ChangeService.java)、[CheckpointController](pilot-server/src/main/java/com/pilot/server/session/CheckpointController.java)、[BranchController](pilot-server/src/main/java/com/pilot/server/git/BranchController.java)。
 
 ## 11 多子智能体在分担什么工作
 
@@ -407,7 +407,7 @@ DiffSandbox 保存子任务提交的 unified diff 和目标内容。MergePrechec
 
 其他需要完成的环节包括：有代码改动时跳过验证仍可能算整批通过；接受接口没有完整验证门控；仲裁选择缺少状态恢复；内存沙箱没有自动从审计 JSON 重建。当前的“校验”和“仲裁”已有组件，但不能据此宣称生产交付闭环已经完成。
 
-源码：[SpawnAgentTool](pilot-server/src/main/java/com/pilot/server/session/SpawnAgentTool.java)、[DispatchAgentsTool](pilot-server/src/main/java/com/pilot/server/multi/DispatchAgentsTool.java)、[MultiAgentService](pilot-server/src/main/java/com/pilot/server/multi/MultiAgentService.java)、[TaskGraph](pilot-core/src/main/java/com/pilot/core/multi/TaskGraph.java)、[SandboxEditFileTool](pilot-core/src/main/java/com/pilot/core/tool/SandboxEditFileTool.java)、[CommandVerificationGate](pilot-server/src/main/java/com/pilot/server/multi/CommandVerificationGate.java)、[SandboxStore](pilot-server/src/main/java/com/pilot/server/multi/SandboxStore.java)。
+源码：[SpawnAgentTool](pilot-server/src/main/java/com/pilot/server/multi/SpawnAgentTool.java)、[DispatchAgentsTool](pilot-server/src/main/java/com/pilot/server/multi/DispatchAgentsTool.java)、[MultiAgentService](pilot-server/src/main/java/com/pilot/server/multi/MultiAgentService.java)、[TaskGraph](pilot-core/src/main/java/com/pilot/core/multi/TaskGraph.java)、[SandboxEditFileTool](pilot-core/src/main/java/com/pilot/core/tool/SandboxEditFileTool.java)、[CommandVerificationGate](pilot-server/src/main/java/com/pilot/server/multi/CommandVerificationGate.java)、[SandboxStore](pilot-server/src/main/java/com/pilot/server/multi/SandboxStore.java)。
 
 ## 12 辅助能力也有各自的问题边界
 
@@ -419,7 +419,7 @@ WebSearchTool 请求 SearXNG 搜索服务，返回资料线索；WebFetchTool �
 
 AttachmentService 将可解码文本内联到消息，图片保存后由模型客户端按图片内容传递，其他二进制保存并提供引用。保存 PDF 或 Office 文件不代表已经内置完整文档解析器；如何进一步读取，要看可用工具和模型能力。
 
-源码：[WebSearchTool](pilot-core/src/main/java/com/pilot/core/tool/WebSearchTool.java)、[WebFetchTool](pilot-core/src/main/java/com/pilot/core/tool/WebFetchTool.java)、[LocalSearchRuntime](pilot-server/src/main/java/com/pilot/server/search/LocalSearchRuntime.java)、[AttachmentService](pilot-server/src/main/java/com/pilot/server/session/AttachmentService.java)。
+源码：[WebSearchTool](pilot-core/src/main/java/com/pilot/core/tool/WebSearchTool.java)、[WebFetchTool](pilot-core/src/main/java/com/pilot/core/tool/WebFetchTool.java)、[LocalSearchRuntime](pilot-server/src/main/java/com/pilot/server/search/LocalSearchRuntime.java)、[AttachmentService](pilot-server/src/main/java/com/pilot/server/attachment/AttachmentService.java)。
 
 ### 工具链准备与配置热更新
 
@@ -427,7 +427,7 @@ BundledRuntime 为 Python 和 Node 准备数据目录中的运行时，并让命
 
 ModelSettings 和 PermissionSettings 从保存的设置及默认配置恢复，并提供当前生效值；模型配置代理和权限网关在后续调用读取新配置。构建时和运行时版本问题仍需分开看，例如 core 修改后只单独启动 server 可能读到本机 Maven 仓库里的旧包，启动脚本先安装依赖链就是为减少这个问题。
 
-源码：[BundledRuntime](pilot-server/src/main/java/com/pilot/server/runtime/BundledRuntime.java)、[ModelSettings](pilot-server/src/main/java/com/pilot/server/config/ModelSettings.java)、[PermissionSettings](pilot-server/src/main/java/com/pilot/server/config/PermissionSettings.java)、[start.sh](start.sh)、[start.cmd](start.cmd)。
+源码：[BundledRuntime](pilot-server/src/main/java/com/pilot/server/runtime/BundledRuntime.java)、[ModelSettings](pilot-server/src/main/java/com/pilot/server/model/ModelSettings.java)、[PermissionSettings](pilot-server/src/main/java/com/pilot/server/permission/PermissionSettings.java)、[start.sh](start.sh)、[start.cmd](start.cmd)。
 
 ### 恢复 日志 指标和数据清理
 
@@ -437,7 +437,7 @@ JsonlTraceRecorder 记录工具名、参数和结果摘要、权限结果分类�
 
 RetentionService 根据保留天数清理旧的事件、快照和 trace 等材料。保留策略会影响旧检查点和历史材料是否还能使用；不能把“数据库中还有会话”当成“所有早期恢复材料仍存在”。
 
-源码：[InterruptedRunRecovery](pilot-server/src/main/java/com/pilot/server/session/InterruptedRunRecovery.java)、[JsonlTraceRecorder](pilot-core/src/main/java/com/pilot/core/trace/JsonlTraceRecorder.java)、[RunMetrics](pilot-server/src/main/java/com/pilot/server/observability/RunMetrics.java)、[RetentionService](pilot-server/src/main/java/com/pilot/server/maintenance/RetentionService.java)。
+源码：[InterruptedRunRecovery](pilot-server/src/main/java/com/pilot/server/run/InterruptedRunRecovery.java)、[JsonlTraceRecorder](pilot-core/src/main/java/com/pilot/core/trace/JsonlTraceRecorder.java)、[RunMetrics](pilot-server/src/main/java/com/pilot/server/observability/RunMetrics.java)、[RetentionService](pilot-server/src/main/java/com/pilot/server/maintenance/RetentionService.java)。
 
 ## 13 已实现机制和未来执行后端的分界
 
@@ -465,8 +465,8 @@ Windows 原生方案可评估受限令牌、文件 ACL、Job Objects 和 AppCont
 
 ### 第一遍阅读五个位置
 
-1. [SessionController](pilot-server/src/main/java/com/pilot/server/controller/SessionController.java)：先找 messages 和 events，理解页面输入如何进入、过程如何出来。
-2. [AgentRunService](pilot-server/src/main/java/com/pilot/server/session/AgentRunService.java)：看 execute，理解本轮的历史、模型、工具、权限和事件出口如何装配。
+1. [SessionController](pilot-server/src/main/java/com/pilot/server/session/SessionController.java)：先找 messages 和 events，理解页面输入如何进入、过程如何出来。
+2. [AgentRunService](pilot-server/src/main/java/com/pilot/server/agent/AgentRunService.java)：看 execute，理解本轮的历史、模型、工具、权限和事件出口如何装配。
 3. [AgentLoop](pilot-core/src/main/java/com/pilot/core/loop/AgentLoop.java)：看循环中模型回答、工具执行、结果回填和结束判断。
 4. [ToolExecutor](pilot-core/src/main/java/com/pilot/core/tool/ToolExecutor.java)：看允许、拒绝、审批和真正开始执行前的检查。
 5. [EditFileTool](pilot-core/src/main/java/com/pilot/core/tool/EditFileTool.java)：选一项具体工具，把路径检查、快照、写入和结果串起来。

@@ -28,7 +28,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.pilot.core.plan.PlanSink;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.ToolRegistry;
-import com.pilot.server.session.AgentRunService;
+import com.pilot.server.agent.AgentRunService;
 
 @SpringBootTest(properties = {"pilot.store=memory", "pilot.runtime.provision=false", "pilot.web-search.local=false"})
 @AutoConfigureMockMvc

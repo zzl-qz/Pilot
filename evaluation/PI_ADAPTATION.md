@@ -14,10 +14,10 @@
 
 ## 已有功能的质量差距
 
-- **完成门**：Pilot 原来在普通任务第一次缺少成功验证后只给一次机会，即使随后出现新的源码修改或失败诊断也会停止。现改为只在源码与最近各类验证结果都无变化时停止；旧版成功的受限检查可经现有权限门自动复跑一次，失败信息会继续引导修复，并标出过期检查与本任务改动文件。代码见 [`GoalExecutionPolicy`](../pilot-server/src/main/java/com/pilot/server/session/GoalExecutionPolicy.java)。
+- **完成门**：Pilot 原来在普通任务第一次缺少成功验证后只给一次机会，即使随后出现新的源码修改或失败诊断也会停止。现改为只在源码与最近各类验证结果都无变化时停止；旧版成功的受限检查可经现有权限门自动复跑一次，失败信息会继续引导修复，并标出过期检查与本任务改动文件。代码见 [`GoalExecutionPolicy`](../pilot-server/src/main/java/com/pilot/server/agent/GoalExecutionPolicy.java)。
 - **上下文保真**：Pilot 的摘要输入原来只写工具名，文件路径靠模型从有限输出中推断。现把工具目标写入摘要输入，读过与改过的文件清单由代码提取并跨次继承；不把模型摘要当作唯一记忆。代码见 [`ContextCompactor`](../pilot-core/src/main/java/com/pilot/core/loop/ContextCompactor.java)。
 - **工具吞吐**：Pilot 原来虽允许模型一轮给多个调用，执行仍完全串行。现只并行明确标记安全且无需审批的本地读、列目录与搜索，结果顺序保持稳定；其他工具保持顺序。代码见 [`AgentLoop`](../pilot-core/src/main/java/com/pilot/core/loop/AgentLoop.java)。
-- **项目规则**：Pilot 原来只加载工作区根目录第一份规则；现沿祖先目录加载每层最高优先级的规则，按来源分段并限制读取与总提示词长度。代码见 [`ProjectRuleLoader`](../pilot-server/src/main/java/com/pilot/server/session/ProjectRuleLoader.java)。
+- **项目规则**：Pilot 原来只加载工作区根目录第一份规则；现沿祖先目录加载每层最高优先级的规则，按来源分段并限制读取与总提示词长度。代码见 [`ProjectRuleLoader`](../pilot-server/src/main/java/com/pilot/server/agent/ProjectRuleLoader.java)。
 - **尚未解决**：Pi 的原始会话树可在压缩后追溯完整历史；Pilot 仍覆盖写入平面模型记忆。Pi 的技能按需加载与扩展机制也比 Pilot 完整。应按真实任务收益与安全边界逐项移植，不能仅凭“已支持”判为对等。
 
 ## 验收方式

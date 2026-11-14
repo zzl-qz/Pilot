@@ -14,9 +14,9 @@ import java.util.Set;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import org.springframework.context.ConfigurableApplicationContext;
 
+import com.pilot.server.attachment.AttachmentLimits;
+import com.pilot.server.attachment.AttachmentService;
 import com.pilot.server.common.data.PilotDataDir;
-import com.pilot.server.config.AttachmentLimits;
-import com.pilot.server.session.AttachmentService;
 import com.pilot.server.store.SqliteStore;
 
 import tools.jackson.databind.ObjectMapper;

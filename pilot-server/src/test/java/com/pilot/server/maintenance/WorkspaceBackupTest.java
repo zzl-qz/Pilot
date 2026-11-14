@@ -18,13 +18,13 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 
 import com.pilot.core.session.SessionService;
+import com.pilot.server.attachment.AttachmentLimits;
+import com.pilot.server.attachment.AttachmentService;
 import com.pilot.server.common.data.PilotDataDir;
-import com.pilot.server.config.AttachmentLimits;
-import com.pilot.server.session.AttachmentService;
+import com.pilot.server.git.GitWorktrees;
 import com.pilot.server.store.EventCodec;
 import com.pilot.server.store.JdbcSessionRepository;
 import com.pilot.server.store.SqliteStore;
-import com.pilot.server.workspace.GitWorktrees;
 
 import tools.jackson.databind.json.JsonMapper;
 
