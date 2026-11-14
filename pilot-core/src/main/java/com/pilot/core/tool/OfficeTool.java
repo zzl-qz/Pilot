@@ -2,9 +2,7 @@ package com.pilot.core.tool;
 
 import java.awt.Color;
 import java.awt.Dimension;
-import java.awt.RenderingHints;
 import java.awt.geom.Rectangle2D;
-import java.awt.image.BufferedImage;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
@@ -500,16 +498,7 @@ public final class OfficeTool implements Tool {
             }
             Files.createDirectory(directory);
             for (var slide : deck.getSlides()) {
-                var image = new BufferedImage(size.width, size.height, BufferedImage.TYPE_INT_RGB);
-                var graphics = image.createGraphics();
-                try {
-                    graphics.setColor(Color.WHITE);
-                    graphics.fillRect(0, 0, size.width, size.height);
-                    graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                    slide.draw(graphics);
-                } finally {
-                    graphics.dispose();
-                }
+                var image = FilePreviews.renderSlide(slide, size);
                 Path png = directory.resolve("slide-" + slide.getSlideNumber() + ".png");
                 snapshots.beforeWrite(png);
                 ImageIO.write(image, "png", png.toFile());

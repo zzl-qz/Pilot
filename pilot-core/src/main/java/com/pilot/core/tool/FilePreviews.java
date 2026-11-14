@@ -80,22 +80,26 @@ public final class FilePreviews {
                 if (page > total) {
                     break;
                 }
-                BufferedImage image = new BufferedImage(size.width, size.height, BufferedImage.TYPE_INT_RGB);
-                Graphics2D graphics = image.createGraphics();
-                try {
-                    graphics.setColor(Color.WHITE);
-                    graphics.fillRect(0, 0, size.width, size.height);
-                    graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                    slide.draw(graphics);
-                } finally {
-                    graphics.dispose();
-                }
-                write(image, directory.resolve("page-" + page + ".png"));
+                write(renderSlide(slide, size), directory.resolve("page-" + page + ".png"));
                 page++;
             }
             return new Result(total,
                 "按幻灯片版式逐页渲染；字体依赖本机，请检查缺字与重叠" + (slides.size() > MAX_PAGES ? "，仅前 " + MAX_PAGES + " 页" : ""));
         }
+    }
+
+    static BufferedImage renderSlide(XSLFSlide slide, Dimension size) {
+        BufferedImage image = new BufferedImage(size.width, size.height, BufferedImage.TYPE_INT_RGB);
+        Graphics2D graphics = image.createGraphics();
+        try {
+            graphics.setColor(Color.WHITE);
+            graphics.fillRect(0, 0, size.width, size.height);
+            graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            slide.draw(graphics);
+        } finally {
+            graphics.dispose();
+        }
+        return image;
     }
 
     /** 结构化内容预览：按可读行宽折行分页，明确不冒充 Office 排版。 */
