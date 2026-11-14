@@ -38,6 +38,7 @@ import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunContinued;
 import com.pilot.core.event.RunFailed;
+import com.pilot.core.event.RunFailureCode;
 import com.pilot.core.event.RunRetrying;
 import com.pilot.core.event.RunUsageUpdated;
 import com.pilot.core.event.SandboxDiffReady;
@@ -608,11 +609,11 @@ public class MultiAgentService {
             @Override
             public boolean cancelled() {
                 if (MultiAgentService.cancelled(dispatch)) {
-                    cancellationReason.set("CANCELLED");
+                    cancellationReason.set(RunFailureCode.CANCELLED.name());
                     return true;
                 }
                 if (budget.shouldCancelCurrentWorker()) {
-                    cancellationReason.set("BUDGET_EXHAUSTED:" + budget.reason());
+                    cancellationReason.set(RunFailureCode.BUDGET_EXHAUSTED.name() + ":" + budget.reason());
                     return true;
                 }
                 cancellationReason.remove();
@@ -622,11 +623,11 @@ public class MultiAgentService {
             @Override
             public boolean cancelledBeforeTool() {
                 if (MultiAgentService.cancelled(dispatch)) {
-                    cancellationReason.set("CANCELLED");
+                    cancellationReason.set(RunFailureCode.CANCELLED.name());
                     return true;
                 }
                 if (budget.shouldCancelBeforeTool()) {
-                    cancellationReason.set("BUDGET_EXHAUSTED:" + budget.reason());
+                    cancellationReason.set(RunFailureCode.BUDGET_EXHAUSTED.name() + ":" + budget.reason());
                     return true;
                 }
                 cancellationReason.remove();
@@ -653,7 +654,7 @@ public class MultiAgentService {
             if (result.failed()) {
                 String budgetReason = budget.reason();
                 if (!cancelled(dispatch)
-                    && ("BUDGET_EXHAUSTED".equals(result.failureCode()) || !budgetReason.isEmpty())) {
+                    && (RunFailureCode.BUDGET_EXHAUSTED.is(result.failureCode()) || !budgetReason.isEmpty())) {
                     return budgetStopped(dispatch, lease, agentId, sandboxId, sandbox, meter.snapshot(), budgetReason);
                 }
                 String reason = "子 Agent 未完成：" + result.failureCode();
@@ -746,7 +747,7 @@ public class MultiAgentService {
                     ContextCompactor.estimateTokens(messages) + ContextCompactor.estimateTokens(String.valueOf(tools));
                 MultiAgentBudgetLedger.RequestPermit permit = budget.beginRequest(estimatedInput);
                 if (permit == null) {
-                    throw new ExecutionPolicy.Stop("BUDGET_EXHAUSTED", budget.reason());
+                    throw new ExecutionPolicy.Stop(RunFailureCode.BUDGET_EXHAUSTED, budget.reason());
                 }
 
                 ModelResponse response = null;
@@ -773,13 +774,13 @@ public class MultiAgentService {
                     String stopReason = budget.reason();
                     if (!stopReason.isEmpty()) {
                         Thread.interrupted();
-                        throw new ExecutionPolicy.Stop("BUDGET_EXHAUSTED", stopReason);
+                        throw new ExecutionPolicy.Stop(RunFailureCode.BUDGET_EXHAUSTED, stopReason);
                     }
                     throw failure;
                 }
                 if (settlement.stoppedBeforeSettle()) {
                     Thread.interrupted();
-                    throw new ExecutionPolicy.Stop("BUDGET_EXHAUSTED", settlement.stopReason());
+                    throw new ExecutionPolicy.Stop(RunFailureCode.BUDGET_EXHAUSTED, settlement.stopReason());
                 }
                 return response;
             }

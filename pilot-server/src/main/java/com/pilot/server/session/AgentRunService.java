@@ -43,6 +43,7 @@ import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunContinued;
 import com.pilot.core.event.RunFailed;
+import com.pilot.core.event.RunFailureCode;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.event.RunUsageUpdated;
 import com.pilot.core.event.SessionEvent;
@@ -74,6 +75,7 @@ import com.pilot.core.tool.StopCommandTool;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.UseSkillTool;
 import com.pilot.core.trace.JsonlTraceRecorder;
+import com.pilot.core.util.WireEnum;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.ModelSettings;
@@ -98,8 +100,11 @@ import tools.jackson.databind.ObjectMapper;
 public class AgentRunService implements RunStarter {
     private static final Logger log = LoggerFactory.getLogger(AgentRunService.class);
     private static final int MAX_AUTO_CONTINUE = 3;
-    private static final Set<String> PRESERVED_FAILURE_STATUSES = Set.of("BLOCKED", "BUDGET_LIMITED", "WAITING",
-        "NEED_INPUT", "UNVERIFIED", "NO_PROGRESS", "REVIEW_UNAVAILABLE", "VERIFICATION_FAILED");
+    /** 这些失败码与任务状态同名：运行停下后任务直接记为同名状态，不归并成 INTERRUPTED。 */
+    private static final Set<TaskControlStatus> PRESERVED_FAILURE_STATUSES =
+        Set.of(TaskControlStatus.BLOCKED, TaskControlStatus.BUDGET_LIMITED, TaskControlStatus.WAITING,
+            TaskControlStatus.NEED_INPUT, TaskControlStatus.UNVERIFIED, TaskControlStatus.NO_PROGRESS,
+            TaskControlStatus.REVIEW_UNAVAILABLE, TaskControlStatus.VERIFICATION_FAILED);
     /** 提示词正文在 {@code prompts/} 资源里，这里只做变量注入与拼接。 */
     private static final PromptLibrary PROMPTS = PromptLibrary.standard();
     /** 仓库快照：顶层条目与未提交改动都限行，避免 system 被大仓库撑爆。 */
@@ -677,7 +682,8 @@ public class AgentRunService implements RunStarter {
                     }
                     queuedMessages.save("steer:" + sessionId, List.of());
                 } else if (previous != null) {
-                    if (continuation && previous.automation() == null && "BUDGET_LIMITED".equals(previous.status())) {
+                    if (continuation && previous.automation() == null
+                        && TaskControlStatus.BUDGET_LIMITED.is(previous.status())) {
                         taskControls.extendBudget(sessionId);
                     }
                     if (regenerate) {
@@ -689,7 +695,7 @@ public class AgentRunService implements RunStarter {
                                 .toList());
                         queuedMessages.save("steer:" + sessionId, List.of());
                     }
-                    taskControls.status(sessionId, "ACTIVE");
+                    taskControls.status(sessionId, TaskControlStatus.ACTIVE);
                 } else {
                     String original = sessions.events(sessionId).stream()
                         .filter(event -> event.payload() instanceof RunStarted started
@@ -719,7 +725,7 @@ public class AgentRunService implements RunStarter {
             handle.workerThread = Thread.currentThread();
         }
         long startedAt = System.currentTimeMillis();
-        String status = "FAILED";
+        String status = TaskControlStatus.FAILED.name();
         boolean continued = false;
         boolean resultCaptured = false;
         try {
@@ -729,8 +735,8 @@ public class AgentRunService implements RunStarter {
             continued = maybeAutoContinue(sessionId, runId, status, handle);
         } catch (RuntimeException e) {
             log.error("Run {} 收尾失败", runId, e);
-            taskControls.status(sessionId, "FAILED");
-            publish(sessionId, runId, new RunFailed("INTERNAL_ERROR", "执行失败：" + e.getMessage(), true));
+            taskControls.status(sessionId, TaskControlStatus.FAILED);
+            publish(sessionId, runId, new RunFailed(RunFailureCode.INTERNAL_ERROR, "执行失败：" + e.getMessage(), true));
         } finally {
             synchronized (handle) {
                 handle.workerThread = null;
@@ -753,7 +759,7 @@ public class AgentRunService implements RunStarter {
                 synchronized (queue) {
                     // 释放槽位和启动排队消息必须连在一起，HTTP 新请求不能抢进交接窗口。
                     registry.unregister(runId);
-                    if (!continued && "COMPLETED".equals(status) && !handle.cancelled.get()
+                    if (!continued && TaskControlStatus.COMPLETED.is(status) && !handle.cancelled.get()
                         && plans.load(sessionId).stream().allMatch(com.pilot.core.plan.PlanItem::done)) {
                         drainQueue(sessionId, queue);
                     }
@@ -842,7 +848,7 @@ public class AgentRunService implements RunStarter {
             launch(sessionId, runId, next.content(), next.attachments(), next.imagePositions(), false, null);
         } catch (RuntimeException e) {
             registry.unregister(runId);
-            publish(sessionId, runId, new RunFailed("QUEUE_START_FAILED", "排队消息启动失败，消息已保留", false));
+            publish(sessionId, runId, new RunFailed(RunFailureCode.QUEUE_START_FAILED, "排队消息启动失败，消息已保留", false));
             throw e;
         }
         queue.remove();
@@ -854,7 +860,8 @@ public class AgentRunService implements RunStarter {
         Deque<String> queue = inbox(sessionId);
         synchronized (queue) {
             TaskControlService.TaskContract task = taskControls.load(sessionId);
-            if (task == null || !"COMPLETED".equals(task.status()) || registry.activeRun(sessionId).isPresent()
+            if (task == null || !TaskControlStatus.COMPLETED.is(task.status())
+                || registry.activeRun(sessionId).isPresent()
                 || plans.load(sessionId).stream().anyMatch(item -> !item.done())) {
                 return;
             }
@@ -872,7 +879,7 @@ public class AgentRunService implements RunStarter {
      * <p>两道刹车：最多连续 {@value #MAX_AUTO_CONTINUE} 次；计划状态连续两轮没有变化即视为卡住，停下等人工介入。
      */
     private boolean maybeAutoContinue(String sessionId, String finishedRunId, String status, RunHandle handle) {
-        if (!"MAX_STEPS".equals(status) || handle.cancelled.get()
+        if (!RunFailureCode.MAX_STEPS.is(status) || handle.cancelled.get()
             || runStates != null && runStates.leaseLost(finishedRunId)) {
             autoContinueAttempts.remove(sessionId);
             autoContinueSignature.remove(sessionId);
@@ -1364,27 +1371,27 @@ public class AgentRunService implements RunStarter {
             if (result.failureCode() == null) {
                 recordValidation(sessionId, runId, workspace, lastCompleted.get());
                 TaskControlService.TaskContract task = taskControls.load(sessionId);
-                return task == null ? "COMPLETED" : task.status();
+                return task == null ? TaskControlStatus.COMPLETED.name() : task.status();
             }
             if (handle.paused) {
-                return "PAUSED";
+                return TaskControlStatus.PAUSED.name();
             }
             // 步数触顶要单独返回，外层才会按未完成计划自动接下一轮。
             // 以前一律收成 FAILED，自动继续的判断永远进不去。
-            if (PRESERVED_FAILURE_STATUSES.contains(result.failureCode())) {
+            if (preservedAsTaskStatus(result.failureCode())) {
                 return result.failureCode();
             }
-            if ("CANCELLED".equals(result.failureCode()) || "MAX_STEPS".equals(result.failureCode())) {
+            if (WireEnum.in(result.failureCode(), RunFailureCode.CANCELLED, RunFailureCode.MAX_STEPS)) {
                 return result.failureCode();
             }
-            return "FAILED";
+            return TaskControlStatus.FAILED.name();
         } catch (RuntimeException e) {
             log.error("Agent run {} failed unexpectedly", runId, e);
             String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            taskControls.status(sessionId, "FAILED");
+            taskControls.status(sessionId, TaskControlStatus.FAILED);
             finishSnapshots(runId);
-            publish(sessionId, runId, new RunFailed("INTERNAL_ERROR", "执行失败：" + reason, false));
-            return "FAILED";
+            publish(sessionId, runId, new RunFailed(RunFailureCode.INTERNAL_ERROR, "执行失败：" + reason, false));
+            return TaskControlStatus.FAILED.name();
         } finally {
             try {
                 finishSnapshots(runId);
@@ -1455,11 +1462,11 @@ public class AgentRunService implements RunStarter {
                 taskControls.status(sessionId,
                     handle.paused
                         || (handle.interruptedReason == null && stoppedTask != null && stoppedTask.automation() != null)
-                            ? "PAUSED" : "INTERRUPTED");
+                            ? TaskControlStatus.PAUSED : TaskControlStatus.INTERRUPTED);
                 if (handle.paused) {
-                    delivered = new RunFailed("PAUSED", "任务已暂停，目标、约束、验收条件和排队消息已保留。", true);
+                    delivered = new RunFailed(RunFailureCode.PAUSED, "任务已暂停，目标、约束、验收条件和排队消息已保留。", true);
                 } else if (handle.interruptedReason != null) {
-                    delivered = new RunFailed("INTERRUPTED", handle.interruptedReason, true);
+                    delivered = new RunFailed(RunFailureCode.INTERRUPTED, handle.interruptedReason, true);
                 }
             } else if (event instanceof RunFailed failed) {
                 taskControls.status(sessionId, failureTaskStatus(failed.code()));
@@ -1481,16 +1488,21 @@ public class AgentRunService implements RunStarter {
     }
 
     private String failureTaskStatus(String code) {
-        if ("MAX_STEPS".equals(code) && properties.goalModeEnabledValue()) {
-            return "BUDGET_LIMITED";
+        if (RunFailureCode.MAX_STEPS.is(code) && properties.goalModeEnabledValue()) {
+            return TaskControlStatus.BUDGET_LIMITED.name();
         }
-        return PRESERVED_FAILURE_STATUSES.contains(code) ? code : "INTERRUPTED";
+        return preservedAsTaskStatus(code) ? code : TaskControlStatus.INTERRUPTED.name();
+    }
+
+    private static boolean preservedAsTaskStatus(String code) {
+        return WireEnum.parse(TaskControlStatus.class, code).filter(PRESERVED_FAILURE_STATUSES::contains).isPresent();
     }
 
     private RunCompleted completedEvent(String sessionId, PlanSink planSink, RunCompleted completed) {
         TaskControlService.TaskContract verified = taskControls.load(sessionId);
-        boolean goalVerified = verified != null && verified.execution() != null
-            && "GOAL".equals(verified.execution().mode()) && "VERIFIED".equals(verified.execution().phase());
+        boolean goalVerified =
+            verified != null && verified.execution() != null && ExecutionMode.GOAL.is(verified.execution().mode())
+                && ExecutionPhase.VERIFIED.is(verified.execution().phase());
         RunCompleted effective = completed;
         if (goalVerified) {
             planSink.update(List.of(), "目标已核验完成，清理执行计划");
@@ -1501,9 +1513,9 @@ public class AgentRunService implements RunStarter {
         }
         // 显式未完成的计划保留为待复核，不能直接把任务置为已完成。
         TaskControlService.TaskContract task = effective.openSteps().isEmpty() ? taskControls.finish(sessionId)
-            : taskControls.status(sessionId, "AWAITING_REVIEW");
+            : taskControls.status(sessionId, TaskControlStatus.AWAITING_REVIEW);
         RunCompleted delivered = effective;
-        if (task != null && "AWAITING_REVIEW".equals(task.status())) {
+        if (task != null && TaskControlStatus.AWAITING_REVIEW.is(task.status())) {
             ArrayList<String> open = new ArrayList<>(effective.openSteps());
             task.acceptance().stream().filter(item -> !item.checked()).forEach(item -> open.add("待验收：" + item.text()));
             delivered = new RunCompleted(effective.summary(), effective.changedFiles(), effective.checks(),
@@ -1534,12 +1546,14 @@ public class AgentRunService implements RunStarter {
             }
             List<String> checks = completed == null ? List.of() : completed.checks();
             TaskControlService.TaskContract task = taskControls.load(sessionId);
-            String phase = task == null || task.execution() == null ? "UNVERIFIED" : task.execution().phase();
+            String phase =
+                task == null || task.execution() == null ? ExecutionPhase.UNVERIFIED.name() : task.execution().phase();
             // 使用已绑定当前源码版本的账本判断，不能把旧检查或普通 exit 0 重新包装成通过。
             boolean qualifying =
                 checks.stream().anyMatch(check -> com.pilot.core.tool.VerificationCheck.passingKind(check).qualifies());
-            String status = "CHECKS_FAILED".equals(phase) ? "failed"
-                : qualifying && Set.of("CHECKS_PASSED", "VERIFIED").contains(phase) ? "passed" : "skipped";
+            String status = ExecutionPhase.CHECKS_FAILED.is(phase) ? "failed"
+                : qualifying && WireEnum.in(phase, ExecutionPhase.CHECKS_PASSED, ExecutionPhase.VERIFIED) ? "passed"
+                    : "skipped";
             validations.record(new com.pilot.server.validation.ValidationEvidence("val_" + java.util.UUID.randomUUID(),
                 sessionId, runId, candidate, files, checks, status,
                 com.pilot.server.multi.SandboxStore.environmentFingerprint(), "run", java.time.Instant.now()));

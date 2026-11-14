@@ -15,8 +15,11 @@ import org.springframework.stereotype.Component;
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunFailed;
+import com.pilot.core.event.RunFailureCode;
+import com.pilot.core.event.SessionEvent;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.core.util.WireEnum;
 
 /** 结束事件是事实来源；这里只持久化用户的阅读/处理标记。 */
 @Component
@@ -40,6 +43,12 @@ public class ResultInboxRepository {
         this.sessions = sessions;
     }
 
+    /** 等待唤醒和暂停还不算结果，不进收件箱。下面 SQL 里的同名条件要和这里一致。 */
+    public static boolean stillPending(SessionEvent payload) {
+        return payload instanceof RunFailed failed
+            && WireEnum.in(failed.code(), RunFailureCode.WAITING, RunFailureCode.PAUSED);
+    }
+
     public List<EventEnvelope> endings(int limit) {
         return endings(limit, Instant.EPOCH);
     }
@@ -56,8 +65,7 @@ public class ResultInboxRepository {
                     byRun.forEach(latest::putIfAbsent);
                 });
             return latest.values().stream().filter(e -> !e.timestamp().isBefore(since))
-                .filter(e -> !(e.payload() instanceof RunCancelled)
-                    && !(e.payload() instanceof RunFailed f && Set.of("WAITING", "PAUSED").contains(f.code())))
+                .filter(e -> !(e.payload() instanceof RunCancelled) && !stillPending(e.payload()))
                 .sorted(Comparator.comparing(EventEnvelope::timestamp).reversed()).limit(limit).toList();
         }
         String createdAt = SqliteStore.normalizedInstantSql("created_at");

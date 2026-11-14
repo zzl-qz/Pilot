@@ -11,7 +11,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -26,8 +25,6 @@ import tools.jackson.databind.ObjectMapper;
 /** 独立于压缩后的对话记忆保存任务目标、边界、验收证据和纠正记录。 */
 @Component
 public class TaskControlService {
-    private static final Set<String> DIRECT_FINISHED_PHASES =
-        Set.of("CHECKS_PASSED", "CHECKS_FAILED", "CHECKS_STALE", "UNVERIFIED");
     private final ObjectMapper mapper;
     private final PilotDataDir data;
 
@@ -84,8 +81,8 @@ public class TaskControlService {
     public record Evidence(String id, String tool, String target, String result, String sourceVersion, String check,
         String status, String startVersion, String endVersion, Long observedAtEpochMillis, String operationKey) {
         public Evidence(String id, String tool, String target, String result, String sourceVersion, String check) {
-            this(id, tool, target, result, sourceVersion, check, "SUCCESS", sourceVersion, sourceVersion,
-                System.currentTimeMillis(), "");
+            this(id, tool, target, result, sourceVersion, check, EvidenceStatus.SUCCESS.name(), sourceVersion,
+                sourceVersion, System.currentTimeMillis(), "");
         }
 
         public Evidence(String id, String tool, String target, String result, String sourceVersion, String check,
@@ -95,7 +92,7 @@ public class TaskControlService {
         }
 
         public Evidence {
-            status = status == null || status.isBlank() ? "SUCCESS" : status;
+            status = status == null || status.isBlank() ? EvidenceStatus.SUCCESS.name() : status;
             startVersion = startVersion == null ? "" : startVersion;
             endVersion = endVersion == null ? "" : endVersion;
             observedAtEpochMillis = observedAtEpochMillis == null ? 0L : observedAtEpochMillis;
@@ -158,8 +155,8 @@ public class TaskControlService {
             timeAllowanceMillis = timeAllowanceMillis == null ? 0L : timeAllowanceMillis;
             assessmentVersion = assessmentVersion == null ? 0 : assessmentVersion;
             // 旧版 Direct 无条件写 VERIFIED；历史快照不能继续展示为独立核验通过。
-            if ("DIRECT".equals(mode) && "VERIFIED".equals(phase)) {
-                phase = "UNVERIFIED";
+            if (ExecutionMode.DIRECT.is(mode) && ExecutionPhase.VERIFIED.is(phase)) {
+                phase = ExecutionPhase.UNVERIFIED.name();
                 gap = "旧版普通执行仅记录模型收尾，未独立核验；历史检查请查看实际证据。";
             }
             usage = usage == null ? Usage.empty() : usage;
@@ -175,7 +172,7 @@ public class TaskControlService {
         }
 
         public boolean directFinished() {
-            return "DIRECT".equals(mode) && DIRECT_FINISHED_PHASES.contains(phase);
+            return ExecutionMode.DIRECT.is(mode) && ExecutionPhase.directFinished(phase);
         }
     }
 
@@ -211,8 +208,8 @@ public class TaskControlService {
     /** 新的独立任务才建立新目标；续跑应沿用 load 的记录。 */
     public synchronized TaskContract start(String sessionId, String originalGoal, List<String> constraints,
         List<Acceptance> acceptance) {
-        TaskContract task =
-            new TaskContract("task_" + UUID.randomUUID(), originalGoal, constraints, acceptance, List.of(), "ACTIVE");
+        TaskContract task = new TaskContract("task_" + UUID.randomUUID(), originalGoal, constraints, acceptance,
+            List.of(), TaskControlStatus.ACTIVE.name());
         save(sessionId, task);
         return task;
     }
@@ -240,13 +237,13 @@ public class TaskControlService {
         TaskContract task = requireTask(sessionId);
         Requirements requirements = new Requirements(constraints, acceptance);
         String status = task.status();
-        if ("AWAITING_REVIEW".equals(status) || "COMPLETED".equals(status)) {
-            status = allChecked(requirements.acceptance()) ? "COMPLETED" : "AWAITING_REVIEW";
+        if (WireEnum.in(status, TaskControlStatus.AWAITING_REVIEW, TaskControlStatus.COMPLETED)) {
+            status = reviewedStatus(requirements.acceptance()).name();
         }
         boolean changed = !task.constraints().equals(requirements.constraints()) || !task.acceptance().stream()
             .map(Acceptance::text).toList().equals(requirements.acceptance().stream().map(Acceptance::text).toList());
         if (changed && task.execution() != null) {
-            status = "INTERRUPTED";
+            status = TaskControlStatus.INTERRUPTED.name();
         }
         TaskContract updated = new TaskContract(task.taskId(), task.originalGoal(), requirements.constraints(),
             requirements.acceptance(), task.corrections(), status,
@@ -276,21 +273,21 @@ public class TaskControlService {
     /** 模型运行完成和用户验收完成分别记录；未勾选的明确验收条件不会自动通过。 */
     public synchronized TaskContract finish(String sessionId) {
         TaskContract task = load(sessionId);
-        if (task != null && task.execution() != null && !"VERIFIED".equals(task.execution().phase())
+        if (task != null && task.execution() != null && !ExecutionPhase.VERIFIED.is(task.execution().phase())
             && !task.execution().directFinished()) {
-            return status(sessionId, "INTERRUPTED");
+            return status(sessionId, TaskControlStatus.INTERRUPTED);
         }
         if (task != null && task.automation() != null && task.execution() != null
-            && "VERIFIED".equals(task.execution().phase())) {
+            && ExecutionPhase.VERIFIED.is(task.execution().phase())) {
             String evidence = "自动核验通过；证据：" + task.execution().evidence().stream()
-                .filter(e -> "SUCCESS".equals(e.status())).map(Evidence::id).collect(Collectors.joining(", "));
+                .filter(e -> EvidenceStatus.SUCCESS.is(e.status())).map(Evidence::id).collect(Collectors.joining(", "));
             save(sessionId,
                 new TaskContract(task.taskId(), task.originalGoal(), task.constraints(),
                     task.acceptance().stream().map(a -> new Acceptance(a.text(), true, evidence)).toList(),
-                    task.corrections(), "COMPLETED", task.execution(), task.automation()));
+                    task.corrections(), TaskControlStatus.COMPLETED.name(), task.execution(), task.automation()));
             return load(sessionId);
         }
-        return task == null ? null : status(sessionId, allChecked(task.acceptance()) ? "COMPLETED" : "AWAITING_REVIEW");
+        return task == null ? null : status(sessionId, reviewedStatus(task.acceptance()));
     }
 
     public synchronized TaskContract correct(String sessionId, String text) {
@@ -301,7 +298,7 @@ public class TaskControlService {
         List<Acceptance> acceptance =
             task.acceptance().stream().map(item -> new Acceptance(item.text(), false, item.evidence())).toList();
         TaskContract updated = new TaskContract(task.taskId(), task.originalGoal(), task.constraints(), acceptance,
-            corrections, "ACTIVE", invalidate(task.execution()), task.automation());
+            corrections, TaskControlStatus.ACTIVE.name(), invalidate(task.execution()), task.automation());
         save(sessionId, updated);
         return updated;
     }
@@ -309,14 +306,14 @@ public class TaskControlService {
     public synchronized void extendBudget(String sessionId) {
         TaskContract t = requireTask(sessionId);
         Execution s = t.execution();
-        if (s == null || !"BUDGET_LIMITED".equals(t.status())) {
+        if (s == null || !TaskControlStatus.BUDGET_LIMITED.is(t.status())) {
             return;
         }
         Usage usage = s.usage();
         execution(sessionId, t,
             new Execution(s.mode(), s.reason(), s.criteria(), s.unknowns(), s.requests(), s.activeMillis(),
-                s.evidence(), "EXECUTING", s.gap(), s.idleReviews(), s.progress(), s.requests(), s.activeMillis(),
-                s.assessmentVersion(),
+                s.evidence(), ExecutionPhase.EXECUTING.name(), s.gap(), s.idleReviews(), s.progress(), s.requests(),
+                s.activeMillis(), s.assessmentVersion(),
                 new Usage(usage.inputTokens(), usage.outputTokens(), usage.reasoningTokens(), usage.inputTokens(),
                     usage.outputTokens(), usage.continuationRounds()),
                 s.changedPaths(), s.nextAction(), s.expectedObservation(), s.budgetSegments() + 1));
@@ -329,9 +326,10 @@ public class TaskControlService {
 
     private static Execution invalidate(Execution old) {
         return old == null ? null
-            : new Execution("DIRECT", "任务要求已更新，按最新要求重新执行", List.of(), List.of(), old.requests(), old.activeMillis(),
-                List.of(), "EXECUTING", "", 0, "", old.requestAllowance(), old.timeAllowanceMillis(),
-                old.assessmentVersion(), old.usage(), old.changedPaths(), "", "", old.budgetSegments());
+            : new Execution(ExecutionMode.DIRECT.name(), "任务要求已更新，按最新要求重新执行", List.of(), List.of(), old.requests(),
+                old.activeMillis(), List.of(), ExecutionPhase.EXECUTING.name(), "", 0, "", old.requestAllowance(),
+                old.timeAllowanceMillis(), old.assessmentVersion(), old.usage(), old.changedPaths(), "", "",
+                old.budgetSegments());
     }
 
     public synchronized boolean executionForRequirements(String sessionId, TaskContract expected, Execution execution) {
@@ -469,6 +467,11 @@ public class TaskControlService {
             throw new IllegalStateException("该会话还没有任务目标，请先发送任务");
         }
         return task;
+    }
+
+    /** 验收条件全部勾选才算完成，否则停在待复核。 */
+    private static TaskControlStatus reviewedStatus(List<Acceptance> acceptance) {
+        return allChecked(acceptance) ? TaskControlStatus.COMPLETED : TaskControlStatus.AWAITING_REVIEW;
     }
 
     private static boolean allChecked(List<Acceptance> acceptance) {

@@ -23,6 +23,8 @@ import com.pilot.core.util.WireEnum;
 import com.pilot.server.schedule.ScheduleService;
 import com.pilot.server.schedule.ScheduleState;
 import com.pilot.server.schedule.ScheduledTask;
+import com.pilot.server.session.EvidenceStatus;
+import com.pilot.server.session.ExecutionPhase;
 import com.pilot.server.session.TaskControlService;
 import com.pilot.server.store.ResultInboxRepository;
 
@@ -44,6 +46,19 @@ public class ResultInboxService {
         this.tasks = tasks;
         this.mapper = mapper;
     }
+
+    /** 条目来源，名字就是接口里的 source。 */
+    private enum Source {
+        SCHEDULE, CHAT
+    }
+
+    /** 对话结果的状态，名字就是接口里的 state；计划条目直接沿用计划状态。 */
+    private enum ChatState {
+        COMPLETED, NEEDS_ATTENTION, AWAITING_REVIEW
+    }
+
+    /** 没有执行记录时详情里的核验阶段。 */
+    private static final String UNKNOWN_VERIFICATION = "UNKNOWN";
 
     public record Item(String id, String revision, String sessionId, String title, String source, String state,
         String summary, Instant at, String runId, String scheduleId, boolean read, boolean handled,
@@ -94,7 +109,7 @@ public class ResultInboxService {
             String revision =
                 job.state() + ":" + job.runId() + ":" + job.attempts() + ":" + (end == null ? 0 : end.sequence());
             var receipt = receipt(receipts, job.id(), revision);
-            items.add(new Item(job.id(), revision, job.sessionId(), job.name(), "SCHEDULE", job.state(),
+            items.add(new Item(job.id(), revision, job.sessionId(), job.name(), Source.SCHEDULE.name(), job.state(),
                 scheduleSummary(job, end),
                 job.endedAt() != null ? job.endedAt() : end == null ? job.runAt() : end.timestamp(), job.runId(),
                 job.id(), receipt.seen(), receipt.handled(), completed == null ? List.of() : completed.changedFiles(),
@@ -105,7 +120,7 @@ public class ResultInboxService {
             if (scheduledSessions.contains(end.sessionId())) {
                 continue;
             }
-            if (end.payload() instanceof RunFailed failed && Set.of("WAITING", "PAUSED").contains(failed.code())) {
+            if (ResultInboxRepository.stillPending(end.payload())) {
                 continue;
             }
             if (end.payload() instanceof RunCancelled) {
@@ -117,13 +132,14 @@ public class ResultInboxService {
             }
             var completed = end.payload() instanceof RunCompleted c ? c : null;
             var resultTask = tasks.result(end.runId());
-            String state = completed == null || verificationNeedsAttention(resultTask, completed) ? "NEEDS_ATTENTION"
-                : completed.openSteps().isEmpty() ? "COMPLETED" : "AWAITING_REVIEW";
+            ChatState state =
+                completed == null || verificationNeedsAttention(resultTask, completed) ? ChatState.NEEDS_ATTENTION
+                    : completed.openSteps().isEmpty() ? ChatState.COMPLETED : ChatState.AWAITING_REVIEW;
             String summary = completed == null ? ((RunFailed)end.payload()).message() : completed.summary();
             String revision = end.sessionId() + ":" + end.sequence();
             var receipt = receipt(receipts, end.runId(), revision);
-            items.add(new Item(end.runId(), revision, session.id(), session.title(), "CHAT", state, summary,
-                end.timestamp(), end.runId(), null, receipt.seen(), receipt.handled(),
+            items.add(new Item(end.runId(), revision, session.id(), session.title(), Source.CHAT.name(), state.name(),
+                summary, end.timestamp(), end.runId(), null, receipt.seen(), receipt.handled(),
                 completed == null ? List.of() : completed.changedFiles(),
                 completed == null ? List.of() : completed.checks(),
                 completed == null ? List.of() : completed.openSteps(), null));
@@ -138,16 +154,16 @@ public class ResultInboxService {
             return false;
         }
         var execution = task.execution();
-        if (Set.of("CHECKS_FAILED", "CHECKS_STALE").contains(execution.phase())) {
+        if (WireEnum.in(execution.phase(), ExecutionPhase.CHECKS_FAILED, ExecutionPhase.CHECKS_STALE)) {
             return true;
         }
-        if (!"UNVERIFIED".equals(execution.phase())) {
+        if (!ExecutionPhase.UNVERIFIED.is(execution.phase())) {
             return false;
         }
         // 问答与文档修改可以正常交付；代码改动缺证据则需要关注，不能冒充验证完成。
         return Stream.concat(execution.changedPaths().stream(), completed.changedFiles().stream())
             .anyMatch(path -> path != null && !path.isBlank() && !path.matches("(?i).*\\.(md|txt|rst|adoc)$"))
-            || execution.evidence().stream().anyMatch(e -> "RUNNING".equals(e.status()) && e.check() != null);
+            || execution.evidence().stream().anyMatch(e -> EvidenceStatus.RUNNING.is(e.status()) && e.check() != null);
     }
 
     private static String scheduleSummary(ScheduledTask job, EventEnvelope end) {
@@ -191,7 +207,7 @@ public class ResultInboxService {
             }
         }
         return new Detail(item, research(task),
-            task == null || task.execution() == null ? "UNKNOWN" : task.execution().phase(),
+            task == null || task.execution() == null ? UNKNOWN_VERIFICATION : task.execution().phase(),
             task == null ? List.of() : task.acceptance(),
             task == null || task.execution() == null ? "" : task.execution().gap());
     }
@@ -209,7 +225,7 @@ public class ResultInboxService {
         }
         List<Research> result = new ArrayList<>();
         for (var e : task.execution().evidence()) {
-            if (!"record_research".equals(e.tool()) || !"SUCCESS".equals(e.status())) {
+            if (!"record_research".equals(e.tool()) || !EvidenceStatus.SUCCESS.is(e.status())) {
                 continue;
             }
             try {

@@ -14,6 +14,7 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.event.RunFailed;
+import com.pilot.core.event.RunFailureCode;
 import com.pilot.core.session.InterruptedRun;
 import com.pilot.core.session.RunCheckpoint;
 import com.pilot.core.session.RunRepository;
@@ -124,7 +125,7 @@ public class InterruptedRunRecovery implements ApplicationRunner {
 
     private void closeSession(String sessionId, String runId) {
         try {
-            sessions.publish(sessionId, runId, new RunFailed("INTERRUPTED", MESSAGE, true));
+            sessions.publish(sessionId, runId, new RunFailed(RunFailureCode.INTERRUPTED, MESSAGE, true));
             log.warn("会话 {} 上次运行 {} 未正常结束，已补 run.failed(INTERRUPTED) 收敛为中断", sessionId, runId);
         } catch (RuntimeException e) {
             log.warn("收敛会话 {} 的中断状态失败：{}", sessionId, e.toString());

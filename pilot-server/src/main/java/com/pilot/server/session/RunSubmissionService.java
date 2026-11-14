@@ -3,6 +3,7 @@ package com.pilot.server.session;
 import java.util.List;
 
 import com.pilot.core.event.RunFailed;
+import com.pilot.core.event.RunFailureCode;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.loop.Attachment;
 import com.pilot.core.session.SessionService;
@@ -31,7 +32,8 @@ public final class RunSubmissionService {
         } catch (RuntimeException e) {
             runs.abandon(runId);
             try {
-                sessions.publish(sessionId, runId, new RunFailed("START_FAILED", "启动失败：" + e.getMessage(), true));
+                sessions.publish(sessionId, runId,
+                    new RunFailed(RunFailureCode.START_FAILED, "启动失败：" + e.getMessage(), true));
             } catch (RuntimeException reportingFailure) {
                 // 回执失败不能盖过原始投递异常，也不能丢掉第二次失败的诊断信息。
                 if (reportingFailure != e) {

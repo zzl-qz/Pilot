@@ -36,8 +36,8 @@ public class TaskControlRecovery implements ApplicationRunner {
     private void recover() {
         for (Session session : sessions.list()) {
             TaskControlService.TaskContract task = tasks.load(session.id());
-            if (task != null && "ACTIVE".equals(task.status())) {
-                tasks.status(session.id(), "INTERRUPTED");
+            if (task != null && TaskControlStatus.ACTIVE.is(task.status())) {
+                tasks.status(session.id(), TaskControlStatus.INTERRUPTED);
             }
         }
     }

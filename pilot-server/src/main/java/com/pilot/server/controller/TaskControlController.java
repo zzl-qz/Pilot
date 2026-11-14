@@ -13,6 +13,7 @@ import com.pilot.core.session.SessionService;
 import com.pilot.server.common.web.SessionLookup;
 import com.pilot.server.session.RunStarter;
 import com.pilot.server.session.TaskControlService;
+import com.pilot.server.session.TaskControlStatus;
 
 import tools.jackson.databind.node.NullNode;
 
@@ -50,8 +51,8 @@ public class TaskControlController {
         try {
             TaskControlService.TaskContract before = tasks.load(id);
             TaskControlService.TaskContract updated = tasks.update(id, request.constraints(), request.acceptance());
-            completedTransition =
-                "COMPLETED".equals(updated.status()) && (before == null || !"COMPLETED".equals(before.status()));
+            completedTransition = TaskControlStatus.COMPLETED.is(updated.status())
+                && (before == null || !TaskControlStatus.COMPLETED.is(before.status()));
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         } catch (IllegalStateException e) {

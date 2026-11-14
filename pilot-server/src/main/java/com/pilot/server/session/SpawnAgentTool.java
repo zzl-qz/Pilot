@@ -15,6 +15,7 @@ import java.util.function.Supplier;
 
 import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.event.RunCompleted;
+import com.pilot.core.event.RunFailureCode;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.event.SubagentFinished;
 import com.pilot.core.event.SubagentStarted;
@@ -231,10 +232,11 @@ public final class SpawnAgentTool implements Tool {
         AtomicInteger requests = new AtomicInteger();
         return MeteredModelClient.observeUsage(client, () -> {
             if (requests.incrementAndGet() > maxRequests) {
-                throw new ExecutionPolicy.Stop("MAX_STEPS", "子代理已达到独立模型请求上限 " + maxRequests + "，返回已有证据给父代理收尾。");
+                throw new ExecutionPolicy.Stop(RunFailureCode.MAX_STEPS,
+                    "子代理已达到独立模型请求上限 " + maxRequests + "，返回已有证据给父代理收尾。");
             }
             if (runRequests.incrementAndGet() > MAX_SUBAGENT_REQUESTS_PER_RUN) {
-                throw new ExecutionPolicy.Stop("MAX_STEPS",
+                throw new ExecutionPolicy.Stop(RunFailureCode.MAX_STEPS,
                     "本轮所有子代理累计模型请求已达到 " + MAX_SUBAGENT_REQUESTS_PER_RUN + "，请由父代理合并已有证据并收尾。");
             }
             usageSink.beforeRequest();

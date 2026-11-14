@@ -12,6 +12,7 @@ import java.util.stream.Collectors;
 
 import com.pilot.core.tool.VerificationCheck;
 import com.pilot.core.util.Sha256;
+import com.pilot.core.util.WireEnum;
 
 /** 归并目标执行记录中的命令与验证证据。 */
 final class GoalEvidence {
@@ -27,10 +28,9 @@ final class GoalEvidence {
         }
         LinkedHashMap<String, TaskControlService.Evidence> retained = new LinkedHashMap<>();
         Set<String> completedTasks = completedTasks(all);
-        all.stream()
-            .filter(e -> Set.of("edit_file", "create_file", "apply_patch").contains(e.tool())
-                || ("record_research".equals(e.tool()) && "SUCCESS".equals(e.status())) || isVerificationAttempt(e)
-                || ("run_command".equals(e.tool()) && isBackgroundLaunch(e) && !completedTasks.contains(taskId(e))))
+        all.stream().filter(e -> Set.of("edit_file", "create_file", "apply_patch").contains(e.tool())
+            || ("record_research".equals(e.tool()) && EvidenceStatus.SUCCESS.is(e.status())) || isVerificationAttempt(e)
+            || ("run_command".equals(e.tool()) && isBackgroundLaunch(e) && !completedTasks.contains(taskId(e))))
             .forEach(e -> retained.put(e.id(), e));
         recentHistoricalWaits(all).forEach(e -> retained.put(e.id(), e));
         int ordinaryStart = Math.max(0, all.size() - 120);
@@ -46,7 +46,7 @@ final class GoalEvidence {
         LinkedHashMap<String, TaskControlService.Evidence> bounded = new LinkedHashMap<>();
         pending.forEach(e -> bounded.put(e.id(), e));
         latestChecks(all).values().forEach(e -> bounded.put(e.id(), e));
-        result.stream().filter(e -> "record_research".equals(e.tool()) && "SUCCESS".equals(e.status()))
+        result.stream().filter(e -> "record_research".equals(e.tool()) && EvidenceStatus.SUCCESS.is(e.status()))
             .reduce((a, b) -> b).ifPresent(e -> bounded.put(e.id(), e));
         recentHistoricalWaits(all).forEach(e -> bounded.put(e.id(), e));
         int remaining = Math.max(0, 220 - bounded.size());
@@ -63,13 +63,13 @@ final class GoalEvidence {
     }
 
     private static boolean isBackgroundLaunch(TaskControlService.Evidence evidence) {
-        return "RUNNING".equals(evidence.status()) && !taskId(evidence).isBlank();
+        return EvidenceStatus.RUNNING.is(evidence.status()) && !taskId(evidence).isBlank();
     }
 
     private static Set<String> completedTasks(List<TaskControlService.Evidence> evidenceList) {
         return evidenceList.stream().filter(e -> "command_status".equals(e.tool()))
-            .filter(e -> !Set.of("RUNNING", "STOPPING").contains(e.status())).map(GoalEvidence::taskId)
-            .filter(value -> !value.isBlank()).collect(Collectors.toSet());
+            .filter(e -> !WireEnum.in(e.status(), EvidenceStatus.RUNNING, EvidenceStatus.STOPPING))
+            .map(GoalEvidence::taskId).filter(value -> !value.isBlank()).collect(Collectors.toSet());
     }
 
     static String taskId(TaskControlService.Evidence evidence) {
@@ -89,7 +89,7 @@ final class GoalEvidence {
             if (!isVerificationAttempt(evidence)) {
                 continue;
             }
-            if ("RUNNING".equals(evidence.status()) && completedTasks.contains(taskId(evidence))) {
+            if (EvidenceStatus.RUNNING.is(evidence.status()) && completedTasks.contains(taskId(evidence))) {
                 continue;
             }
             String command = commandFromCheck(evidence);
@@ -104,11 +104,11 @@ final class GoalEvidence {
 
     static boolean keepEvidence(TaskControlService.Evidence evidence) {
         return evidence != null && evidence.result() != null && !evidence.result().isBlank()
-            && !"SKIPPED".equals(evidence.status());
+            && !EvidenceStatus.SKIPPED.is(evidence.status());
     }
 
     static boolean successfulEvidence(TaskControlService.Evidence evidence) {
-        return keepEvidence(evidence) && "SUCCESS".equals(evidence.status());
+        return keepEvidence(evidence) && EvidenceStatus.SUCCESS.is(evidence.status());
     }
 
     static boolean isVerificationAttempt(TaskControlService.Evidence evidence) {

@@ -21,6 +21,7 @@ import com.pilot.core.event.ApprovalResolved;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunFailed;
+import com.pilot.core.event.RunFailureCode;
 import com.pilot.core.event.RunRetrying;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.event.SessionEvent;
@@ -28,6 +29,7 @@ import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.event.ToolStarted;
 import com.pilot.core.session.RunCheckpoint;
 import com.pilot.core.session.RunCheckpointRepository;
+import com.pilot.core.util.WireEnum;
 import com.pilot.server.config.PilotDataDir;
 import com.pilot.server.maintenance.DataMaintenance;
 import com.pilot.server.maintenance.StorageHealth;
@@ -263,13 +265,19 @@ public class RunStateTracker {
             || event instanceof RunCompleted || event instanceof RunCancelled || event instanceof RunFailed;
     }
 
+    /** 运行结束状态可能是任务状态，也可能是失败码；这里归并成检查点的四种终态。 */
     private static String terminalStatus(String status) {
-        return switch (status == null ? "" : status) {
-            case "COMPLETED" -> RunCheckpoint.STATUS_COMPLETED;
-            case "PAUSED" -> RunCheckpoint.STATUS_PAUSED;
-            case "INTERRUPTED", "CANCELLED", "MAX_STEPS" -> RunCheckpoint.STATUS_INTERRUPTED;
-            default -> RunCheckpoint.STATUS_FAILED;
-        };
+        if (TaskControlStatus.COMPLETED.is(status)) {
+            return RunCheckpoint.STATUS_COMPLETED;
+        }
+        if (TaskControlStatus.PAUSED.is(status)) {
+            return RunCheckpoint.STATUS_PAUSED;
+        }
+        if (TaskControlStatus.INTERRUPTED.is(status)
+            || WireEnum.in(status, RunFailureCode.CANCELLED, RunFailureCode.MAX_STEPS)) {
+            return RunCheckpoint.STATUS_INTERRUPTED;
+        }
+        return RunCheckpoint.STATUS_FAILED;
     }
 
     private static String clip(String value, int max) {

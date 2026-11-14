@@ -15,6 +15,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
 
+import com.pilot.core.event.RunFailureCode;
 import com.pilot.core.loop.Attachment;
 import com.pilot.core.loop.ExecutionPolicy;
 import com.pilot.core.loop.Message;
@@ -30,6 +31,7 @@ import com.pilot.core.tool.ToolExecutor;
 import com.pilot.core.tool.ToolSupport;
 import com.pilot.core.tool.VerificationCheck;
 import com.pilot.core.util.Sha256;
+import com.pilot.core.util.WireEnum;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -154,9 +156,10 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                 java.util.stream.Stream.concat(current.acceptance().stream().map(TaskControlService.Acceptance::text),
                     current.constraints().stream()))
             .map(c -> new TaskControlService.Criterion(c, "引用真实工具结果与当前版本验证证据", true)).toList() : List.of();
-        return new TaskControlService.Execution(automated ? "GOAL" : "DIRECT",
+        return new TaskControlService.Execution((automated ? ExecutionMode.GOAL : ExecutionMode.DIRECT).name(),
             automated ? "无人值守目标须独立核验" : "普通任务直接执行；需要跨轮追踪时由执行模型升级 Goal", criteria, List.of(), 0, 0, List.of(),
-            "EXECUTING", "", 0, "", 0, 0L, POLICY_VERSION, TaskControlService.Usage.empty(), List.of(), "", "", 0);
+            ExecutionPhase.EXECUTING.name(), "", 0, "", 0, 0L, POLICY_VERSION, TaskControlService.Usage.empty(),
+            List.of(), "", "", 0);
     }
 
     private TaskControlService.Execution state() {
@@ -164,12 +167,14 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         return task == null || task.execution() == null ? initial() : task.execution();
     }
 
-    private TaskControlService.Execution copy(TaskControlService.Execution state, String mode, String phase, String gap,
-        List<TaskControlService.Evidence> evidence, int idle, String progress, TaskControlService.Usage usage) {
+    private TaskControlService.Execution copy(TaskControlService.Execution state, String mode, ExecutionPhase phase,
+        String gap, List<TaskControlService.Evidence> evidence, int idle, String progress,
+        TaskControlService.Usage usage) {
         return new TaskControlService.Execution(mode, state.reason(), state.criteria(), state.unknowns(),
-            state.requests(), state.activeMillis(), evidence, phase, gap, idle, progress, state.requestAllowance(),
-            state.timeAllowanceMillis(), POLICY_VERSION, usage == null ? state.usage() : usage,
-            List.copyOf(changedPaths), state.nextAction(), state.expectedObservation(), state.budgetSegments());
+            state.requests(), state.activeMillis(), evidence, phase.name(), gap, idle, progress,
+            state.requestAllowance(), state.timeAllowanceMillis(), POLICY_VERSION,
+            usage == null ? state.usage() : usage, List.copyOf(changedPaths), state.nextAction(),
+            state.expectedObservation(), state.budgetSegments());
     }
 
     @Override
@@ -178,10 +183,10 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
             .orElse(List.of());
         initializeOrMigrate();
         if (researchRouteUnavailable && needsResearch()) {
-            throw new Stop("NEED_INPUT", "开源调研路径连续失败；请恢复网络或检索工具后继续，尚未跳过调研开始实现。");
+            throw new Stop(RunFailureCode.NEED_INPUT, "开源调研路径连续失败；请恢复网络或检索工具后继续，尚未跳过调研开始实现。");
         }
-        if (task() != null && "WAITING".equals(task().status())) {
-            throw new Stop("WAITING", "已预约后续唤醒");
+        if (task() != null && TaskControlStatus.WAITING.is(task().status())) {
+            throw new Stop(RunFailureCode.WAITING, "已预约后续唤醒");
         }
         if (!finalizing) {
             checkBudget();
@@ -192,7 +197,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     public String requestGuidance() {
         TaskControlService.Execution state = state();
         String guidance = taskGuidance(state);
-        long limit = "GOAL".equals(state.mode()) ? requestBudget : directMaxRequests;
+        long limit = ExecutionMode.GOAL.is(state.mode()) ? requestBudget : directMaxRequests;
         long remaining = limit - (state.requests() - state.requestAllowance());
         if (!finalizing && remaining > 0 && remaining <= Math.min(2, Math.max(1, limit / 4))) {
             String reminder = prompts.render("loop/budget-approaching", Map.of()).strip();
@@ -210,7 +215,8 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         if (investigation != null) {
             return investigation;
         }
-        if (!"GOAL".equals(state.mode()) || state.nextAction().isBlank() || state.expectedObservation().isBlank()) {
+        if (!ExecutionMode.GOAL.is(state.mode()) || state.nextAction().isBlank()
+            || state.expectedObservation().isBlank()) {
             return null;
         }
         String signature = continuationSignature(state);
@@ -253,29 +259,31 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
             }
             return;
         }
-        if (task.automation() != null && !"GOAL".equals(old.mode())) {
+        if (task.automation() != null && !ExecutionMode.GOAL.is(old.mode())) {
             var fresh = initial();
             tasks.execution(session, task,
-                new TaskControlService.Execution("GOAL", fresh.reason(), fresh.criteria(), List.of(), old.requests(),
-                    old.activeMillis(), old.evidence(), "EXECUTING", "", 0, "", old.requestAllowance(),
-                    old.timeAllowanceMillis(), POLICY_VERSION, old.usage(), old.changedPaths(), "", "",
-                    old.budgetSegments()));
+                new TaskControlService.Execution(ExecutionMode.GOAL.name(), fresh.reason(), fresh.criteria(), List.of(),
+                    old.requests(), old.activeMillis(), old.evidence(), ExecutionPhase.EXECUTING.name(), "", 0, "",
+                    old.requestAllowance(), old.timeAllowanceMillis(), POLICY_VERSION, old.usage(), old.changedPaths(),
+                    "", "", old.budgetSegments()));
             return;
         }
-        if (old.assessmentVersionValue() >= POLICY_VERSION && !Set.of("UNASSESSED", "PROBE").contains(old.mode())) {
+        if (old.assessmentVersionValue() >= POLICY_VERSION
+            && !WireEnum.in(old.mode(), ExecutionMode.UNASSESSED, ExecutionMode.PROBE)) {
             return;
         }
-        String mode = "GOAL".equals(old.mode()) ? "GOAL" : "DIRECT";
-        boolean retryOldNoProgress = old.assessmentVersionValue() < POLICY_VERSION && "NO_PROGRESS".equals(old.phase());
+        String mode = (ExecutionMode.GOAL.is(old.mode()) ? ExecutionMode.GOAL : ExecutionMode.DIRECT).name();
+        boolean retryOldNoProgress =
+            old.assessmentVersionValue() < POLICY_VERSION && ExecutionPhase.NO_PROGRESS.is(old.phase());
         List<TaskControlService.Evidence> retained =
             old.evidence().stream().filter(GoalEvidence::keepEvidence).toList();
-        TaskControlService.Execution migrated =
-            new TaskControlService.Execution(mode, "执行策略已升级：取消每次请求的独立预判", old.criteria(), old.unknowns(),
-                old.requests(), old.activeMillis(), retained, "VERIFIED".equals(old.phase()) ? "VERIFIED" : "EXECUTING",
-                old.gap(), retryOldNoProgress ? 0 : old.idleReviews(), retryOldNoProgress ? "" : old.progress(),
-                old.requestAllowance(), old.timeAllowanceMillis(), POLICY_VERSION, old.usage(),
-                List.copyOf(changedPaths), retryOldNoProgress ? "" : old.nextAction(),
-                retryOldNoProgress ? "" : old.expectedObservation(), old.budgetSegments());
+        TaskControlService.Execution migrated = new TaskControlService.Execution(mode, "执行策略已升级：取消每次请求的独立预判",
+            old.criteria(), old.unknowns(), old.requests(), old.activeMillis(), retained,
+            (ExecutionPhase.VERIFIED.is(old.phase()) ? ExecutionPhase.VERIFIED : ExecutionPhase.EXECUTING).name(),
+            old.gap(), retryOldNoProgress ? 0 : old.idleReviews(), retryOldNoProgress ? "" : old.progress(),
+            old.requestAllowance(), old.timeAllowanceMillis(), POLICY_VERSION, old.usage(), List.copyOf(changedPaths),
+            retryOldNoProgress ? "" : old.nextAction(), retryOldNoProgress ? "" : old.expectedObservation(),
+            old.budgetSegments());
         if (tasks.execution(session, task, migrated)) {
             updates.accept(migrated);
         }
@@ -283,11 +291,11 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
 
     private synchronized void checkBudget() {
         if (cancelled.getAsBoolean()) {
-            throw new Stop("CANCELLED", "任务已暂停或取消");
+            throw new Stop(RunFailureCode.CANCELLED, "任务已暂停或取消");
         }
         TaskControlService.Execution state = state();
         TaskControlService.Usage usage = state.usage();
-        boolean goal = "GOAL".equals(state.mode());
+        boolean goal = ExecutionMode.GOAL.is(state.mode());
         long requests = state.requests() - state.requestAllowance();
         long active = state.activeMillis() - state.timeAllowanceMillis();
         long input = usage.inputTokens() - usage.inputAllowance();
@@ -319,7 +327,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
 
     private Stop budgetStop(String mode, String metric, long actual, long limit) {
         String reason = mode + "本段" + metric + "已达到 " + actual + "/" + limit + "；已有进度和证据已保存。继续执行会开启新一段额度。";
-        return new Stop("BUDGET_LIMITED", reason + "\n\n" + budgetWindDown(state(), reason));
+        return new Stop(RunFailureCode.BUDGET_LIMITED, reason + "\n\n" + budgetWindDown(state(), reason));
     }
 
     private synchronized void chargeRequest() {
@@ -329,13 +337,13 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         if (reviewing) {
             TaskControlService.Execution state = state();
             long used = state.requests() - state.requestAllowance();
-            long normalLimit = "GOAL".equals(state.mode()) ? requestBudget : directMaxRequests;
+            long normalLimit = ExecutionMode.GOAL.is(state.mode()) ? requestBudget : directMaxRequests;
             if (used >= normalLimit + REVIEWER_RESERVED_REQUESTS) {
                 throw budgetStop("Goal 核验", "模型请求", used, normalLimit + REVIEWER_RESERVED_REQUESTS);
             }
         }
         if (finalizing && finalizationUsed) {
-            throw new Stop("BUDGET_LIMITED", "收尾请求已使用");
+            throw new Stop(RunFailureCode.BUDGET_LIMITED, "收尾请求已使用");
         }
         if (finalizing) {
             finalizationUsed = true;
@@ -435,7 +443,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
 
     @Override
     public boolean goalActive() {
-        return "GOAL".equals(state().mode());
+        return ExecutionMode.GOAL.is(state().mode());
     }
 
     /** 只有主 Agent 显式升级的 Goal 才走独立核验；普通执行不额外拦一道门。 */
@@ -505,10 +513,11 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                     criteria =
                         List.of(new TaskControlService.Criterion(task.originalGoal(), "用与原始目标直接相关的实际证据核验", true));
                 }
-                TaskControlService.Execution promoted = new TaskControlService.Execution("GOAL", reason, criteria,
-                    state.unknowns(), state.requests(), state.activeMillis(), state.evidence(), "EXECUTING", "", 0,
-                    meaningfulProgress(state.evidence()), state.requestAllowance(), state.timeAllowanceMillis(),
-                    POLICY_VERSION, state.usage(), List.copyOf(changedPaths), "", "", state.budgetSegments());
+                TaskControlService.Execution promoted =
+                    new TaskControlService.Execution(ExecutionMode.GOAL.name(), reason, criteria, state.unknowns(),
+                        state.requests(), state.activeMillis(), state.evidence(), ExecutionPhase.EXECUTING.name(), "",
+                        0, meaningfulProgress(state.evidence()), state.requestAllowance(), state.timeAllowanceMillis(),
+                        POLICY_VERSION, state.usage(), List.copyOf(changedPaths), "", "", state.budgetSegments());
                 if (!tasks.executionForRequirements(session, task, promoted)) {
                     return "ERROR: 用户要求已更新，请重新核对后再升级";
                 }
@@ -521,7 +530,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private boolean needsResearch() {
         var t = task();
         return t != null && t.automation() != null && t.automation().requireResearch() && state().evidence().stream()
-            .noneMatch(e -> "record_research".equals(e.tool()) && "SUCCESS".equals(e.status()));
+            .noneMatch(e -> "record_research".equals(e.tool()) && EvidenceStatus.SUCCESS.is(e.status()));
     }
 
     Tool researchTool() {
@@ -568,7 +577,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                         return "ERROR: 请提供具体的开源仓库或源码链接";
                     }
                     if (state().evidence().stream().noneMatch(e -> "web_fetch".equals(e.tool())
-                        && "SUCCESS".equals(e.status()) && source.equals(e.target()))) {
+                        && EvidenceStatus.SUCCESS.is(e.status()) && source.equals(e.target()))) {
                         return "ERROR: 链接还没有成功读取，请先用 web_fetch 阅读：" + source;
                     }
                 }
@@ -576,7 +585,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                     Map.of("sources", sources, "decision", decision, "license", license, "sourceEvidence",
                         state()
                             .evidence().stream().filter(e -> "web_fetch".equals(e.tool())
-                                && "SUCCESS".equals(e.status()) && sources.contains(e.target()))
+                                && EvidenceStatus.SUCCESS.is(e.status()) && sources.contains(e.target()))
                             .map(TaskControlService.Evidence::id).toList()));
             }
         };
@@ -590,7 +599,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
 
     @Override
     public boolean permits(ToolCall call) {
-        if (task() != null && "WAITING".equals(task().status())) {
+        if (task() != null && TaskControlStatus.WAITING.is(task().status())) {
             return false;
         }
         if (needsResearch() && !Set.of("web_search", "web_fetch", "read_file", "list_dir", "search_text", "glob_files",
@@ -606,7 +615,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
 
     @Override
     public String denialReason(ToolCall call) {
-        if (task() != null && "WAITING".equals(task().status())) {
+        if (task() != null && TaskControlStatus.WAITING.is(task().status())) {
             return "已预约唤醒，本轮不再执行工具";
         }
         if (needsResearch()) {
@@ -690,28 +699,30 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         evidence.add(new TaskControlService.Evidence(UUID.randomUUID().toString(), call.name(), path,
             ("record_research".equals(call.name()) ? Objects.toString(outcome.result(), "")
                 : clip(outcome.result() == null ? "" : outcome.result(), 3_000)),
-            endVersion, null, currentRequirements ? outcome.status().name() : "STALE", startVersion, endVersion,
-            System.currentTimeMillis(), operation));
+            endVersion, null, currentRequirements ? outcome.status().name() : EvidenceStatus.STALE.name(), startVersion,
+            endVersion, System.currentTimeMillis(), operation));
         // 结构化工具（例如 spawn_agent）可能汇总多次真实检查；从第 0 条起逐条入账。
         for (int index = 0; index < outcome.checks().size(); index++) {
             String check = outcome.checks().get(index);
-            String status = !currentRequirements ? "STALE" : outcome.status() == ToolExecutor.OutcomeStatus.RUNNING
-                ? "RUNNING" : check.matches("(?s).+ → exit 0") ? "SUCCESS" : "PERMANENT_FAILURE";
+            EvidenceStatus status = !currentRequirements ? EvidenceStatus.STALE
+                : outcome.status() == ToolExecutor.OutcomeStatus.RUNNING ? EvidenceStatus.RUNNING
+                    : check.matches("(?s).+ → exit 0") ? EvidenceStatus.SUCCESS : EvidenceStatus.PERMANENT_FAILURE;
             String checkResult = "command_status".equals(call.name())
                 ? "任务ID: " + Objects.toString(call.args().get("taskId"), "") + "\n" + check : check;
             evidence.add(new TaskControlService.Evidence(UUID.randomUUID().toString(), call.name(), path, checkResult,
-                endVersion, check, status, startVersion, endVersion, System.currentTimeMillis(),
+                endVersion, check, status.name(), startVersion, endVersion, System.currentTimeMillis(),
                 operation + ":check:" + index));
         }
         String launchedCheck = actualCommand;
         if ("run_command".equals(call.name()) && outcome.status() == ToolExecutor.OutcomeStatus.RUNNING
             && VerificationCheck.classifyCommand(launchedCheck).qualifies()) {
             evidence.add(new TaskControlService.Evidence(UUID.randomUUID().toString(), call.name(), path,
-                outcome.result(), startVersion, launchedCheck, currentRequirements ? "RUNNING" : "STALE", startVersion,
+                outcome.result(), startVersion, launchedCheck,
+                (currentRequirements ? EvidenceStatus.RUNNING : EvidenceStatus.STALE).name(), startVersion,
                 startVersion, System.currentTimeMillis(), operation + ":pending-check"));
         }
         evidence = GoalEvidence.trimEvidence(evidence);
-        tasks.execution(session, task, copy(state, state.mode(), "EXECUTING", state.gap(), evidence,
+        tasks.execution(session, task, copy(state, state.mode(), ExecutionPhase.EXECUTING, state.gap(), evidence,
             state.idleReviews(), state.progress(), state.usage()));
     }
 
@@ -720,7 +731,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
             return "";
         }
         return state().evidence().stream().filter(e -> "run_command".equals(e.tool()))
-            .filter(e -> !"STALE".equals(e.status()) && taskId.equals(GoalEvidence.taskId(e)))
+            .filter(e -> !EvidenceStatus.STALE.is(e.status()) && taskId.equals(GoalEvidence.taskId(e)))
             .map(TaskControlService.Evidence::startVersion).findFirst().orElse("");
     }
 
@@ -771,11 +782,11 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     @Override
     public String review(List<Message> history, Set<String> changedFiles, List<String> checks) {
         if (cancelled.getAsBoolean()) {
-            throw new Stop("CANCELLED", "任务已暂停");
+            throw new Stop(RunFailureCode.CANCELLED, "任务已暂停");
         }
         TaskControlService.TaskContract requirements = task();
-        if (requirements != null && "WAITING".equals(requirements.status())) {
-            throw new Stop("WAITING", "已预约后续唤醒");
+        if (requirements != null && TaskControlStatus.WAITING.is(requirements.status())) {
+            throw new Stop(RunFailureCode.WAITING, "已预约后续唤醒");
         }
         if (needsResearch()) {
             return "尚未完成开源调研；请阅读开源仓库并调用 record_research。不能将任务标记完成。";
@@ -786,7 +797,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         }
         TaskControlService.Execution state =
             requirements == null || requirements.execution() == null ? state() : requirements.execution();
-        if (!"GOAL".equals(state.mode())) {
+        if (!ExecutionMode.GOAL.is(state.mode())) {
             return finishDirect(state, requirements) ? null : "用户要求已变更，请重新核对目标。";
         }
         return reviewGoal(history, state);
@@ -795,13 +806,15 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private boolean finishDirect(TaskControlService.Execution state, TaskControlService.TaskContract requirements) {
         Map<String, TaskControlService.Evidence> checks = GoalEvidence.latestChecks(state.evidence());
         String version = sourceVersion();
-        boolean failed = checks.values().stream().anyMatch(e -> version.equals(e.endVersion())
-            && !Set.of("STALE", "RUNNING").contains(e.status()) && !GoalEvidence.isQualifyingVerification(e));
-        boolean running = checks.values().stream().anyMatch(e -> "RUNNING".equals(e.status()));
-        boolean stale =
-            checks.values().stream().anyMatch(e -> "STALE".equals(e.status()) || !version.equals(e.endVersion()));
-        String phase = failed ? "CHECKS_FAILED"
-            : running ? "UNVERIFIED" : stale ? "CHECKS_STALE" : checks.isEmpty() ? "UNVERIFIED" : "CHECKS_PASSED";
+        boolean failed = checks.values().stream()
+            .anyMatch(e -> version.equals(e.endVersion())
+                && !WireEnum.in(e.status(), EvidenceStatus.STALE, EvidenceStatus.RUNNING)
+                && !GoalEvidence.isQualifyingVerification(e));
+        boolean running = checks.values().stream().anyMatch(e -> EvidenceStatus.RUNNING.is(e.status()));
+        boolean stale = checks.values().stream()
+            .anyMatch(e -> EvidenceStatus.STALE.is(e.status()) || !version.equals(e.endVersion()));
+        ExecutionPhase phase = failed ? ExecutionPhase.CHECKS_FAILED : running ? ExecutionPhase.UNVERIFIED : stale
+            ? ExecutionPhase.CHECKS_STALE : checks.isEmpty() ? ExecutionPhase.UNVERIFIED : ExecutionPhase.CHECKS_PASSED;
         String detail = failed ? "当前版本仍有未通过的检查；执行已结束，不能声称验证通过。"
             : running ? "验证命令仍在后台运行，尚未取得终态与退出码。" : stale ? "部分检查早于当前代码或用户要求，不能用旧结果证明当前版本。"
                 : checks.isEmpty() ? "未记录测试、构建或静态检查证据；执行结束不等于已核验。" : "已记录的当前版本检查通过；结果仅覆盖实际检查范围，不代表全部目标已独立验收。";
@@ -821,7 +834,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     }
 
     private String reviewGoal(List<Message> history, TaskControlService.Execution beforeReview) {
-        updatePhase(beforeReview, "VERIFYING", beforeReview.gap());
+        updatePhase(beforeReview, ExecutionPhase.VERIFYING, beforeReview.gap());
         TaskControlService.TaskContract requirements = task();
         TaskControlService.Execution state = state();
         Map<String, Object> answer = reviewDecision(reviewContext(history, state));
@@ -836,32 +849,34 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         String expected = string(answer, "expected_observation");
         String progress = meaningfulProgress(state.evidence());
         int idle = progress.equals(state.progress()) ? state.idleReviews() + 1 : 0;
-        String coverageIssue = "COMPLETE".equals(decision) ? coverageIssue(answer, state) : null;
-        boolean complete = "COMPLETE".equals(decision) && coverageIssue == null;
-        if ("COMPLETE".equals(decision) && !complete) {
-            decision = "CONTINUE";
+        String coverageIssue = ReviewDecision.COMPLETE.is(decision) ? coverageIssue(answer, state) : null;
+        boolean complete = ReviewDecision.COMPLETE.is(decision) && coverageIssue == null;
+        if (ReviewDecision.COMPLETE.is(decision) && !complete) {
+            decision = ReviewDecision.CONTINUE.name();
             gap = "核验结论缺少可追溯的必需条件证据：" + coverageIssue;
             nextAction = "补充与未覆盖条件直接相关的验证证据";
             expected = "每个必需条件都能引用实际成功证据";
         }
         if (complete && codeEvidence(state) && !passingCurrentCheck(state)) {
-            decision = "CONTINUE";
+            decision = ReviewDecision.CONTINUE.name();
             complete = false;
             gap = "代码改动缺少当前版本的成功验证";
             nextAction = "运行最贴近改动的测试或构建";
             expected = "当前源码版本对应的验证命令成功退出";
         }
         TaskControlService.Usage usage = state.usage();
-        if ("CONTINUE".equals(decision)) {
+        if (ReviewDecision.CONTINUE.is(decision)) {
             usage = new TaskControlService.Usage(usage.inputTokens(), usage.outputTokens(), usage.reasoningTokens(),
                 usage.inputAllowance(), usage.outputAllowance(), usage.continuationRounds() + 1);
         }
-        String phase = complete ? "VERIFIED"
-            : Set.of("WAIT", "NEED_INPUT", "BLOCKED", "IMPOSSIBLE").contains(decision) ? decision : "EXECUTING";
-        TaskControlService.Execution reviewed = new TaskControlService.Execution("GOAL", state.reason(),
-            state.criteria(), state.unknowns(), state.requests(), state.activeMillis(), state.evidence(), phase, gap,
-            idle, progress, state.requestAllowance(), state.timeAllowanceMillis(), POLICY_VERSION, usage,
-            List.copyOf(changedPaths), complete ? "" : nextAction, complete ? "" : expected, state.budgetSegments());
+        // 让任务停下的结论原样记为阶段，两边名字相同
+        String phase = complete ? ExecutionPhase.VERIFIED.name()
+            : ReviewDecision.stops(decision) ? decision : ExecutionPhase.EXECUTING.name();
+        TaskControlService.Execution reviewed =
+            new TaskControlService.Execution(ExecutionMode.GOAL.name(), state.reason(), state.criteria(),
+                state.unknowns(), state.requests(), state.activeMillis(), state.evidence(), phase, gap, idle, progress,
+                state.requestAllowance(), state.timeAllowanceMillis(), POLICY_VERSION, usage, List.copyOf(changedPaths),
+                complete ? "" : nextAction, complete ? "" : expected, state.budgetSegments());
         if (!tasks.executionForRequirements(session, requirements, reviewed)) {
             return "用户要求已变更，请重新核对目标。";
         }
@@ -869,20 +884,20 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         if (complete) {
             return null;
         }
-        if ("WAIT".equals(decision)) {
-            throw new Stop("WAITING", detail(gap, expected));
+        if (ReviewDecision.WAIT.is(decision)) {
+            throw new Stop(RunFailureCode.WAITING, detail(gap, expected));
         }
-        if ("NEED_INPUT".equals(decision)) {
-            throw new Stop("NEED_INPUT", detail(gap, expected));
+        if (ReviewDecision.NEED_INPUT.is(decision)) {
+            throw new Stop(RunFailureCode.NEED_INPUT, detail(gap, expected));
         }
-        if (Set.of("BLOCKED", "IMPOSSIBLE").contains(decision)) {
-            throw new Stop("BLOCKED", detail(gap, expected));
+        if (WireEnum.in(decision, ReviewDecision.BLOCKED, ReviewDecision.IMPOSSIBLE)) {
+            throw new Stop(RunFailureCode.BLOCKED, detail(gap, expected));
         }
-        if (!"CONTINUE".equals(decision) || nextAction.isBlank() || expected.isBlank()) {
-            throw new Stop("REVIEW_UNAVAILABLE", "核验器没有返回可执行的下一步，现有结果保持为未核验状态。");
+        if (!ReviewDecision.CONTINUE.is(decision) || nextAction.isBlank() || expected.isBlank()) {
+            throw new Stop(RunFailureCode.REVIEW_UNAVAILABLE, "核验器没有返回可执行的下一步，现有结果保持为未核验状态。");
         }
         if (idle >= 2) {
-            throw new Stop("NO_PROGRESS", "同一目标缺口连续多轮没有新增有效证据：" + gap + "\n\n" + stuckNudge(reviewed));
+            throw new Stop(RunFailureCode.NO_PROGRESS, "同一目标缺口连续多轮没有新增有效证据：" + gap + "\n\n" + stuckNudge(reviewed));
         }
         issuedGuidanceSignature = continuationSignature(reviewed);
         return continuationPrompt(reviewed);
@@ -926,7 +941,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         String verification = state.evidence().stream().filter(GoalEvidence::isVerificationAttempt)
             .map(e -> "- " + Objects.toString(e.check(), e.tool()) + " [" + e.status() + "]")
             .reduce((left, right) -> left + "\n" + right).orElse("- 暂无可确认的验证记录");
-        String completed = "VERIFIED".equals(state.phase()) ? "- 当前执行状态已通过核验" : "- 尚无可以宣称完成的必需条件";
+        String completed = ExecutionPhase.VERIFIED.is(state.phase()) ? "- 当前执行状态已通过核验" : "- 尚无可以宣称完成的必需条件";
         String remaining = state.gap().isBlank() ? reason : state.gap();
         String next = state.nextAction().isBlank() ? "继续后先对照缺口执行一个能产生新证据的动作" : state.nextAction();
         return prompts.render("loop/budget-wind-down",
@@ -979,23 +994,22 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
             }
         }
         String reason = lastFailure == null ? "核验器重试后仍未返回有效结构" : Objects.toString(lastFailure.getMessage(), "未知错误");
-        updatePhase(state(), "VERIFICATION_FAILED", reason);
-        throw new Stop("VERIFICATION_FAILED", "收尾核验暂时不可用，现有结果保持为未核验状态：" + oneLine(reason, 180));
+        updatePhase(state(), ExecutionPhase.VERIFICATION_FAILED, reason);
+        throw new Stop(RunFailureCode.VERIFICATION_FAILED, "收尾核验暂时不可用，现有结果保持为未核验状态：" + oneLine(reason, 180));
     }
 
     private static boolean validDecisionShape(Map<String, Object> args) {
         String decision = string(args, "decision");
-        if (!Set.of("COMPLETE", "CONTINUE", "WAIT", "NEED_INPUT", "BLOCKED", "IMPOSSIBLE").contains(decision)
-            || !(args.get("coverage") instanceof List<?>)) {
+        if (WireEnum.parse(ReviewDecision.class, decision).isEmpty() || !(args.get("coverage") instanceof List<?>)) {
             return false;
         }
-        if ("COMPLETE".equals(decision)) {
+        if (ReviewDecision.COMPLETE.is(decision)) {
             return true;
         }
         if (string(args, "gap").isBlank() || string(args, "expected_observation").isBlank()) {
             return false;
         }
-        return !"CONTINUE".equals(decision) || !string(args, "next_action").isBlank();
+        return !ReviewDecision.CONTINUE.is(decision) || !string(args, "next_action").isBlank();
     }
 
     private String reviewContext(List<Message> history, TaskControlService.Execution state) {
@@ -1121,12 +1135,12 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private Map<String, TaskControlService.Evidence> latestCurrentChecks(TaskControlService.Execution state) {
         String version = sourceVersion();
         Map<String, TaskControlService.Evidence> latest = GoalEvidence.latestChecks(state.evidence());
-        latest.entrySet().removeIf(
-            entry -> !version.equals(entry.getValue().endVersion()) || "STALE".equals(entry.getValue().status()));
+        latest.entrySet().removeIf(entry -> !version.equals(entry.getValue().endVersion())
+            || EvidenceStatus.STALE.is(entry.getValue().status()));
         return latest;
     }
 
-    private void updatePhase(TaskControlService.Execution state, String phase, String gap) {
+    private void updatePhase(TaskControlService.Execution state, ExecutionPhase phase, String gap) {
         TaskControlService.TaskContract task = task();
         TaskControlService.Execution next = copy(state, state.mode(), phase, gap, state.evidence(), state.idleReviews(),
             state.progress(), state.usage());
@@ -1242,10 +1256,8 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
 
     private static Map<String, Object> reviewSchema() {
         return object(
-            Map.of("decision",
-                Map.of("type", "string", "enum",
-                    List.of("COMPLETE", "CONTINUE", "WAIT", "NEED_INPUT", "BLOCKED", "IMPOSSIBLE")),
-                "gap", str(), "next_action", str(), "expected_observation", str(), "coverage",
+            Map.of("decision", Map.of("type", "string", "enum", ReviewDecision.names()), "gap", str(), "next_action",
+                str(), "expected_observation", str(), "coverage",
                 array(object(Map.of("criterion", Map.of("type", "integer"), "satisfied", Map.of("type", "boolean"),
                     "evidence", array(str())), "criterion", "satisfied", "evidence"))),
             "decision", "gap", "next_action", "expected_observation", "coverage");
