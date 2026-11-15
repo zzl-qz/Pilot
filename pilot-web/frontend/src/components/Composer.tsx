@@ -17,7 +17,7 @@ import { SubmissionNotice } from './SubmissionNotice.jsx';
 import { MessageQueue } from './MessageQueue.jsx';
 import { SessionNotes } from './SessionNotes.jsx';
 import { createComposerInput } from '../lib/composer-input.js';
-import { resolveComposerAction } from '../lib/composer-state.js';
+import { resolveComposerAction, resolveSteerEntry } from '../lib/composer-state.js';
 import { rankFileMatches } from '../lib/mention.js';
 import { filterQuickCommands, expandQuickCommand } from '../lib/commands.js';
 import { stepHistory } from '../lib/input-history.js';
@@ -102,6 +102,9 @@ export function Composer() {
   const [voiceBusy, setVoiceBusy] = useState(false);
   const voiceBusyRef = useRef(false);
   const [dragging, setDragging] = useState(false);
+  const [steerPending, setSteerPending] = useState<{ runId: string; text: string; baseline: number } | null>(null);
+  const runId = useStore((state) => state.runId);
+  const steeredCount = useStore((state) => (state.thread?.rows || []).filter((row) => row.type === 'user' && row.steered).length);
   const sessionDraftsRef = useRef(new Map<string | null, { html: string; files: Map<string, DraftAttachment> }>());
   const previousSessionRef = useRef(sessionId);
   const snapshotTimer = useRef<number | null>(null);
@@ -465,6 +468,51 @@ export function Composer() {
     }
   }
 
+  /** 「纠正本轮」：绑定点击时看到的运行，成功后才清空输入；本轮结束仍未应用时把内容放回输入框。 */
+  async function steerCurrent() {
+    const input = inputRef.current;
+    if (!input || !runId || steerPending) return;
+    const text = input.getText();
+    if (!text.trim()) return;
+    const baseline = steeredCount;
+    const state = useStore.getState();
+    const sent = await state.steer(text, []);
+    if (!sent) {
+      // store 已提示失败原因；文本保留在输入框
+      return;
+    }
+    if (!inputRef.current) return;
+    const submitter = useStore.getState();
+    inputRef.current.setText('');
+    draftFilesRef.current.clear();
+    writeDraft(localStorage, submitter.sessionId, '');
+    dropDraftSnapshot(localStorage, submitter.sessionId);
+    setSteerPending({ runId, text, baseline });
+    submitter.showNotice('纠正已提交，等待本轮在安全点应用。');
+  }
+
+  /* 收到对应的纠正事件后才显示已应用 */
+  useEffect(() => {
+    if (!steerPending) return;
+    if (steeredCount > steerPending.baseline) {
+      useStore.getState().showNotice('纠正已应用。');
+      setSteerPending(null);
+    }
+  }, [steeredCount, steerPending]);
+
+  /* 本轮结束后仍未看到纠正事件：内容放回输入框，避免用户以为已经生效 */
+  useEffect(() => {
+    if (!steerPending || runId === steerPending.runId) return;
+    const pending = steerPending;
+    setSteerPending(null);
+    const input = inputRef.current;
+    if (input && !input.getText().trim()) {
+      input.setText(pending.text);
+      writeDraft(localStorage, useStore.getState().sessionId, pending.text);
+    }
+    useStore.getState().showNotice('本轮已结束，纠正可能未被应用；内容已放回输入框，可重试或加入队列。');
+  }, [runId, steerPending]);
+
   /* @ 引用菜单：按光标前文本过滤 */
   function onInput(event: React.FormEvent<HTMLDivElement>) {
     if ((event.nativeEvent as InputEvent).isComposing) return;
@@ -822,6 +870,17 @@ export function Composer() {
             <VoiceInput ownerKey={sessionEpoch + ':' + (sessionId || '') + ':' + workspace} disabled={submitting} feedbackRef={voiceFeedbackRef}
               onBusy={value => { voiceBusyRef.current = value; setVoiceBusy(value); }}
               onText={text => { const input = inputRef.current; input?.appendText((input.getText().trim() ? '\n' : '') + text); input?.focus(); }} />
+            {(() => {
+              const steerAction = resolveSteerEntry({
+                running, editing: editTarget != null, hasText: Boolean(inputRef.current?.getText().trim()),
+                attachmentCount: inputRef.current?.attachmentIds?.().length || 0,
+                steering, pending: steerPending != null
+              });
+              return steerAction.visible ? <span title={steerAction.title}>
+                <Button id="steer-current" className="composer-choice" size="sm" variant="ghost"
+                  label={steerAction.label} isDisabled={steerAction.disabled} onClick={() => void steerCurrent()} />
+              </span> : null;
+            })()}
             <span title={sendAction.title}>
               <IconButton id="send" className="composer-primary" variant="primary"
                 type={sendAction.stop ? 'button' : 'submit'} label={sendAction.ariaLabel}
