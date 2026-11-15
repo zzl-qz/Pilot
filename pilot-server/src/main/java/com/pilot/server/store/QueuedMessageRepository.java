@@ -3,6 +3,7 @@ package com.pilot.server.store;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -10,6 +11,7 @@ import java.util.concurrent.ConcurrentMap;
 public final class QueuedMessageRepository {
     private final SqliteStore store;
     private final ConcurrentMap<String, List<String>> memory = new ConcurrentHashMap<>();
+    private final Set<String> held = ConcurrentHashMap.newKeySet();
 
     public QueuedMessageRepository(SqliteStore store) {
         this.store = store;
@@ -29,6 +31,43 @@ public final class QueuedMessageRepository {
 
     public void save(String sessionId, List<String> messages) {
         saveAll(Map.of(sessionId, messages));
+    }
+
+    /** 队列是否被用户手动暂停；暂停只影响「自动开始下一条」，当前运行继续。 */
+    public boolean held(String sessionId) {
+        if (store == null) {
+            return held.contains(sessionId);
+        }
+        return JdbcSupport
+            .queryOne(store, "SELECT held FROM queue_holds WHERE session_id = ?",
+                statement -> statement.setString(1, sessionId), rows -> rows.getInt(1) != 0, "读取队列暂停状态失败")
+            .orElse(false);
+    }
+
+    public void setHeld(String sessionId, boolean value) {
+        if (store == null) {
+            if (value) {
+                held.add(sessionId);
+            } else {
+                held.remove(sessionId);
+            }
+            return;
+        }
+        if (value) {
+            JdbcSupport.update(store,
+                "INSERT INTO queue_holds(session_id, held) VALUES (?, 1) "
+                    + "ON CONFLICT(session_id) DO UPDATE SET held = 1",
+                statement -> statement.setString(1, sessionId), "保存队列暂停状态失败");
+        } else {
+            JdbcSupport.update(store, "DELETE FROM queue_holds WHERE session_id = ?",
+                statement -> statement.setString(1, sessionId), "清理队列暂停状态失败");
+        }
+    }
+
+    /** 会话删除时清掉暂停状态（队列行本身由 save(sessionId, List.of()) 清）。 */
+    public void clearHold(String sessionId) {
+        setHeld(sessionId, false);
+        held.remove(sessionId);
     }
 
     /** 一次事务移动普通队列与引导队列，失败时两个队列一起回滚。 */

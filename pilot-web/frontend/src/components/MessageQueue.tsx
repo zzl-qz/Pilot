@@ -14,17 +14,19 @@ export function MessageQueue() {
   const queueEdit = useStore((state) => state.ui.queueEdit);
   const collapsed = useStore((state) => state.ui.queueCollapsed);
   const queueHeld = useStore((state) => state.queueHeld);
-  const header = queueHeader({ count: entries.length, held: queueHeld });
+  const queueWaitingReason = useStore((state) => state.queueWaitingReason);
+  const header = queueHeader({ count: entries.length, held: queueHeld, waitingReason: queueWaitingReason });
   // 队列被取空时编辑区还要留着，否则用户没保存的文字会一起消失
   if (!header && !queueEdit) {
     return null;
   }
   return (
-    <QueueList entries={entries} queueEdit={queueEdit} collapsed={collapsed} header={header} />
+    <QueueList entries={entries} queueEdit={queueEdit} collapsed={collapsed} header={header} held={queueHeld} />
   );
 }
 
-function QueueList({ entries, queueEdit, collapsed, header }: { entries: QueueEntry[]; queueEdit: QueueEditTarget | null; collapsed: boolean; header: ReturnType<typeof queueHeader> }) {
+function QueueList({ entries, queueEdit, collapsed, header, held }: { entries: QueueEntry[]; queueEdit: QueueEditTarget | null; collapsed: boolean; header: ReturnType<typeof queueHeader>; held: boolean }) {
+  const holding = useStore((state) => state.queueHolding);
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const headRef = useRef<HTMLButtonElement>(null);
   const closeEditor = () => {
@@ -35,11 +37,17 @@ function QueueList({ entries, queueEdit, collapsed, header }: { entries: QueueEn
   const orphan = Boolean(queueEdit) && editAt < 0;
   return (
     <div id="message-queue" className="message-queue">
-      {header && <button ref={headRef} type="button" className="queue-head" aria-expanded={!collapsed} onClick={() => useStore.getState().setUi({ queueCollapsed: !collapsed })}>
-        <span className="queue-title">{header.title}</span>
-        <span className="queue-head-meta">{header.meta}</span>
-        {!!entries.length && <span className="queue-toggle">{collapsed ? '展开' : '收起'}</span>}
-      </button>}
+      {header && <div className="queue-head-row">
+        <button ref={headRef} type="button" className="queue-head" aria-expanded={!collapsed} onClick={() => useStore.getState().setUi({ queueCollapsed: !collapsed })}>
+          <span className="queue-title">{header.title}</span>
+          <span className="queue-head-meta">{header.meta}</span>
+          {!!entries.length && <span className="queue-toggle">{collapsed ? '展开' : '收起'}</span>}
+        </button>
+        {!!entries.length && <span className="queue-hold" title={held ? '恢复后若已空闲且验收通过，会立即开始队首' : '暂停只阻止自动开始下一条，当前任务继续执行'}>
+          <Button id="queue-hold" size="sm" variant="ghost" label={held ? '恢复队列' : '暂停队列'}
+            isDisabled={holding} onClick={() => void useStore.getState().setQueueHeld(!held)} />
+        </span>}
+      </div>}
       {orphan && <div className="queue-orphan">
         <p role="status">原来的排队消息已被发送、删除或修改。未保存的输入已保留，可复制后重新选择目标。</p>
         <QueueEditor target={queueEdit!} text="" orphan onClose={closeEditor} />

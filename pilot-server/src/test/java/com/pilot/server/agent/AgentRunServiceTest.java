@@ -256,6 +256,47 @@ class AgentRunServiceTest {
     }
 
     @Test
+    void heldQueueWaitsForResumeAndOnlyStartsHeadOnce() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger calls = new AtomicInteger();
+        ModelClient model = (messages, tools) -> {
+            if (calls.getAndIncrement() == 0) {
+                entered.countDown();
+                await(release);
+            }
+            return done();
+        };
+        try (Fixture fixture = new Fixture(model, 8)) {
+            fixture.start();
+            await(entered);
+            assertTrue(fixture.service.followup(fixture.sessionId, "下一条"));
+            assertTrue(fixture.service.setQueueHeld(fixture.sessionId, true));
+            assertEquals("队列已暂停，恢复后才会开始下一条", fixture.service.queueWaitingReason(fixture.sessionId));
+
+            // 暂停与当前任务结束同时发生：只结束当前轮，队列保留
+            release.countDown();
+            fixture.awaitFinished("COMPLETED");
+            assertEquals(List.of("下一条"), fixture.queue());
+            assertTrue(fixture.service.activeRun(fixture.sessionId).isEmpty());
+            assertTrue(fixture.service.setQueueHeld(fixture.sessionId, true), "重复暂停保持幂等");
+
+            // 恢复：空闲且验收完成，只启动队首一次
+            assertTrue(fixture.service.setQueueHeld(fixture.sessionId, false));
+            fixture.awaitFinished("COMPLETED");
+            assertEquals(List.of(), fixture.queue());
+            // 重复恢复不会再多开一轮
+            assertTrue(fixture.service.setQueueHeld(fixture.sessionId, true));
+            assertTrue(fixture.service.setQueueHeld(fixture.sessionId, false));
+            fixture.awaitFinished();
+            assertEquals(List.of(), fixture.queue());
+            assertEquals(2, calls.get(), "只有首条排队消息被启动一次");
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
     void queuedImagesSurviveEditsAndReachTheNextRun() throws Exception {
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);

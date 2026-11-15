@@ -52,7 +52,7 @@ export interface StoreData extends Omit<ReducerState, 'ui'> {
   runId: string | null; lastRunId: string | null; running: boolean; cancelling: boolean; pausing: boolean; steering: boolean;
   queueBusy: boolean; queueRevision: string | null; runStartedAt: number; lastEventAt: number; modelRetryUntil: number;
   runUsage: RunUsage | null; requestReports: RequestReport[]; latestContextReport: RequestReport | null; liveOutputTokens: number;
-  lastOutcome: string; queueHeld: boolean; turnRuns: string[]; changedFiles: ChangeFile[];
+  lastOutcome: string; queueHeld: boolean; queueWaitingReason: string; queueHolding: boolean; turnRuns: string[]; changedFiles: ChangeFile[];
   contextStatus: ContextStatus | null; compactingContext: boolean; queueEntries: QueueEntry[];
   taskDirty: boolean; taskBusy: boolean; taskDraftRevision: number; planItems: PlanItem[];
   skills: (S.SkillsControllerSkillPayload & { id?: string })[]; skillsMeta: { projectRoot: string; userRoot: string; invalid: S.SkillProblem[] };
@@ -91,7 +91,7 @@ export interface StoreActions {
   loadPlan(options?: StrictOptions): Promise<void>; loadQueue(options?: StrictOptions): Promise<void>;
   mutateQueue(operation: (id: string, revision: string | null) => Promise<unknown>, failure: string): Promise<boolean>;
   steerQueueItem(index: number): Promise<boolean>; saveQueueItem(target: QueueEditTarget, text: string): Promise<boolean>;
-  removeQueueItem(index: number): Promise<boolean>; moveQueueItem(from: number, to: number): Promise<boolean>;
+  removeQueueItem(index: number): Promise<boolean>; moveQueueItem(from: number, to: number): Promise<boolean>; setQueueHeld(held: boolean): Promise<boolean>;
   loadTask(options?: StrictOptions): Promise<void>; saveTask(constraints: string[], acceptance: S.TaskControlServiceAcceptance[]): Promise<void>;
   refreshContext(options?: StrictOptions): Promise<void>; ensureMirror(): void; compactContext(): Promise<void>;
   openCheckpoint(sequence: number): Promise<void>; restoreCheckpoint(sequence: number, mode: string, revision: number): Promise<void>;

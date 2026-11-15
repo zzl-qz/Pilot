@@ -5,8 +5,9 @@ import { errorInfo } from '../lib/errors.js';
 import { locateQueueTarget, normalizeQueue } from '../lib/queue.js';
 
 /** 运行面板的数据同步：计划、队列、任务契约和上下文各自保留现有响应归属检查。 */
-export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'resolveApproval' | 'resolveApprovalWithTrust' | 'resolveArbitration' | 'loadPlan' | 'loadQueue' | 'mutateQueue' | 'steerQueueItem' | 'saveQueueItem' | 'removeQueueItem' | 'moveQueueItem' | 'loadTask' | 'saveTask' | 'refreshContext' | 'refreshActiveRun'> {
+export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'resolveApproval' | 'resolveApprovalWithTrust' | 'resolveArbitration' | 'loadPlan' | 'loadQueue' | 'mutateQueue' | 'setQueueHeld' | 'steerQueueItem' | 'saveQueueItem' | 'removeQueueItem' | 'moveQueueItem' | 'loadTask' | 'saveTask' | 'refreshContext' | 'refreshActiveRun'> {
   let queueLoadSequence = 0;
+  let queueHoldSequence = 0;
   let activeRunSequence = 0;
   return {
     /* ---------- 审批 / 仲裁 ---------- */
@@ -111,8 +112,37 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
           draft.queue = normalized.texts;
           draft.queueEntries = normalized.rows;
           draft.queueRevision = data?.revision || null;
+          draft.queueHeld = Boolean(data?.held);
+          draft.queueWaitingReason = data?.waitingReason || '';
         });
       } catch (error) { if (strict) throw error; /* 队列读取失败不阻塞 */ }
+    },
+
+    /** 暂停/恢复队列：服务端持久化，切换会话或重开后仍保持。 */
+    async setQueueHeld(held) {
+      const { sessionId, sessionEpoch } = get();
+      if (!sessionId || get().queueHolding) return false;
+      const request = ++queueHoldSequence;
+      set((draft) => { draft.queueHolding = true; });
+      try {
+        const data = await api.holdQueue(sessionId, held);
+        if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch || request !== queueHoldSequence) return false;
+        const normalized = normalizeQueue(data);
+        set((draft) => {
+          draft.queueEntries = normalized.rows;
+          draft.queueRevision = data?.revision || null;
+          draft.queueHeld = Boolean(data?.held);
+          draft.queueWaitingReason = data?.waitingReason || '';
+        });
+        return true;
+      } catch (error) {
+        if (get().sessionId === sessionId && get().sessionEpoch === sessionEpoch) {
+          get().showNotice('切换队列状态失败：' + errorInfo(error).message);
+        }
+        return false;
+      } finally {
+        if (get().sessionId === sessionId && get().sessionEpoch === sessionEpoch) set((draft) => { draft.queueHolding = false; });
+      }
     },
 
     async mutateQueue(operation, failure) {

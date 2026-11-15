@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { locateQueueTarget, queueEntryKey } from '../src/lib/queue.js';
+import { locateQueueTarget, queueEntryKey, queueHeader } from '../src/lib/queue.js';
 
 const image = (name) => ({ name, url: `/api/sessions/s/attachments/${name}` });
 const entry = (text, attachments = [], imagePositions = []) => ({ content: text, text, attachments, imagePositions });
@@ -51,4 +51,11 @@ test('附件顺序和图片位置参与指纹，正文变化后原目标不再�
   assert.notEqual(queueEntryKey(withPositions), queueEntryKey(noPositions));
   const target = { index: 0, key: queueEntryKey(withPositions) };
   assert.equal(locateQueueTarget([{ ...withPositions, content: '改过', text: '改过' }], target), -1);
+});
+test('队列标题展示服务端等待原因与暂停文案', () => {
+  assert.deepEqual(queueHeader({ count: 2, held: false }), { title: '2 条排队', meta: '这轮结束后按顺序发送' });
+  assert.match(queueHeader({ count: 1, held: true }).meta, /已暂停/);
+  assert.equal(queueHeader({ count: 1, held: true, waitingReason: '等待本轮结束' }).meta, '等待本轮结束');
+  assert.equal(queueHeader({ count: 1, held: false, waitingReason: '等待验收' }).meta, '等待验收');
+  assert.equal(queueHeader({ count: 0, held: true }), null);
 });

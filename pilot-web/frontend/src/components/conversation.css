@@ -373,3 +373,7 @@ html[data-theme] .conversation-composer .voice-timer { font-family: var(--sans);
 .submission-notice .submission-broken > div { display: flex; flex-wrap: wrap; gap: 6px; }
 .queue-orphan { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px dashed var(--warn, var(--line)); border-radius: 8px; }
 .queue-orphan p { margin: 0; font-size: 12px; line-height: 1.5; color: var(--warn, var(--ink-2)); }
+
+.message-queue .queue-head-row { display: flex; align-items: center; gap: 8px; }
+.message-queue .queue-head-row .queue-head { flex: 1 1 auto; min-width: 0; }
+.message-queue .queue-hold { flex: none; }

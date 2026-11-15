@@ -84,6 +84,7 @@ export interface ApiResults {
   task: S.TaskControlServiceTaskContract;
   saveTask: S.TaskControlServiceTaskContract;
   queue: QueueResponse;
+  holdQueue: QueueResponse;
   updateQueueItem: QueueResponse;
   deleteQueueItem: QueueResponse;
   moveQueueItem: QueueResponse;

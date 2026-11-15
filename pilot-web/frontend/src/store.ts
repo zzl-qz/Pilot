@@ -152,6 +152,8 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   liveOutputTokens: 0,
   lastOutcome: '',
   queueHeld: false,
+  queueWaitingReason: '',
+  queueHolding: false,
   turnRuns: [],
   changedFiles: [],
   contextStatus: null,

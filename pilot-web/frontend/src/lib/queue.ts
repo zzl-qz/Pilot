@@ -45,16 +45,14 @@ export function normalizeQueue(data: QueueResponse | null | undefined) {
 }
 
 /** 排队标题：运行中按顺序发送，停止后保留队列。 */
-export function queueHeader({ count = 0, held = false }: { count?: number; held?: boolean } = {}) {
+export function queueHeader({ count = 0, held = false, waitingReason = '' }: { count?: number; held?: boolean; waitingReason?: string } = {}) {
   const n = Number(count) || 0;
   if (!n) {
     return null;
   }
   return {
-    title: n ? `${n} 条排队` : '排队已停下',
-    meta: held
-      ? '已暂停，等待继续执行'
-      : '这轮结束后按顺序发送'
+    title: `${n} 条排队`,
+    meta: waitingReason || (held ? '队列已暂停，等待你恢复' : '这轮结束后按顺序发送')
   };
 }
 

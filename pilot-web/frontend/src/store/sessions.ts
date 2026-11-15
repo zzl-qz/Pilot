@@ -60,6 +60,8 @@ function resetSessionState(draft: StoreState) {
   draft.latestContextReport = null;
   draft.lastOutcome = '';
   draft.queueHeld = false;
+  draft.queueWaitingReason = '';
+  draft.queueHolding = false;
   draft.liveOutputTokens = 0;
   draft.contextStatus = null;
   draft.compactingContext = false;

@@ -232,6 +232,25 @@ public interface RunStarter {
         return List.of();
     }
 
+    /** 队列是否被用户手动暂停；暂停只阻止「自动开始下一条」，不打断当前运行。 */
+    default boolean queueHeld(String sessionId) {
+        return false;
+    }
+
+    /**
+     * 暂停或恢复队列。恢复时若当前没有运行且验收条件已满足，只尝试启动队首一次。
+     *
+     * @return 是否成功切换（重复暂停/恢复保持幂等）
+     */
+    default boolean setQueueHeld(String sessionId, boolean held) {
+        return false;
+    }
+
+    /** 给界面展示的等待原因：手动暂停 / 等待本轮结束 / 等待验收；能立即开始时为空。 */
+    default String queueWaitingReason(String sessionId) {
+        return "";
+    }
+
     default void discardSteering(String sessionId) {
     }
 

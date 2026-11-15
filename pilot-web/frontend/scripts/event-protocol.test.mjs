@@ -35,7 +35,7 @@ const cases = [
   ['approval.resolved', { callId: 'c', decision: 'APPROVED' }, [start, approval], state => { assert.equal(state.pendingApprovals.c, undefined); assert.equal(turn(state).tools[0].status, 'run'); }],
   ['tool.completed', { callId: 'c', resultSummary: '内容', latencyMs: 10 }, [start, tool], state => { assert.equal(turn(state).tools[0].status, 'ok'); assert.equal(turn(state).tools[0].body, '内容'); }],
   ['run.failed', { code: 'MODEL_ERROR', message: '失败', retryable: false }, [start, tool], state => { assert.equal(state.lastOutcome, 'MODEL_ERROR'); assert.equal(turn(state).tools[0].status, 'interrupted'); }],
-  ['run.cancelled', { reason: '取消' }, [start], state => { assert.equal(state.running, false); assert.equal(state.queueHeld, true); }],
+  ['run.cancelled', { reason: '取消' }, [start], state => { assert.equal(state.running, false); assert.equal(state.thread.rows.at(-1).title, '运行已取消'); }],
   ['run.completed', { summary: '完成', changedFiles: [], checks: [] }, [start], state => { assert.equal(state.lastOutcome, 'completed'); assert.equal(state.thread.rows.at(-1).title, '执行结束'); }]
 ];
 test('协议回归覆盖每个已注册的 SSE 类型且没有重复', () => {

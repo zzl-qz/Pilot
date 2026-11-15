@@ -61,6 +61,7 @@ import com.pilot.server.run.TaskControlService;
 import com.pilot.server.skill.SkillService;
 import com.pilot.server.workspace.WorkspaceService;
 
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 @RestController
@@ -415,7 +416,16 @@ public class SessionController {
                 .map(message -> new QueueEntry(message.content(),
                     attachments.displayAttachments(id, message.attachments()), message.imagePositions()))
                 .toList(),
-            RunStarter.queueRevision(messages));
+            RunStarter.queueRevision(messages), runStarter.queueHeld(id), runStarter.queueWaitingReason(id));
+    }
+
+    /** 暂停或恢复当前会话的消息队列；暂停不打断正在运行的一轮。 */
+    @PostMapping("/{id}/queue/hold")
+    public QueueResponse holdQueue(@PathVariable String id, @RequestBody(required = false) JsonNode body) {
+        requireSession(id);
+        boolean held = body != null && body.path("held").asBoolean(false);
+        runStarter.setQueueHeld(id, held);
+        return queueResponse(id);
     }
 
     /** 取回当前会话上传的附件；二进制文件用 attachment disposition 下载。 */
@@ -860,7 +870,15 @@ public class SessionController {
      * @param items   排队消息正文，顺序即执行顺序（保持旧契约）
      * @param entries 同一批消息的结构化版本，额外带上图片附件和它们在正文里的位置
      */
-    public record QueueResponse(List<String> items, List<QueueEntry> entries, String revision) {
+    /**
+     * @param held          队列是否被手动暂停
+     * @param waitingReason 界面展示的等待原因（手动暂停 / 等待本轮结束 / 等待验收）
+     */
+    public record QueueResponse(List<String> items, List<QueueEntry> entries, String revision, boolean held,
+        String waitingReason) {
+        public QueueResponse(List<String> items, List<QueueEntry> entries, String revision) {
+            this(items, entries, revision, false, "");
+        }
     }
 
     public record QueueEntry(String content, List<AttachmentService.DisplayAttachment> attachments,

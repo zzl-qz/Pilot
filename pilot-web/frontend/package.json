@@ -19,6 +19,7 @@
     "test:workbench-sync": "node --import ./scripts/register-typescript.mjs --test scripts/workbench-sync.test.mjs && node scripts/workbench-refresh-smoke.mjs",
     "test:steer": "node --import ./scripts/register-typescript.mjs --test scripts/composer-state.test.mjs && node scripts/steer-smoke.mjs",
     "test:draft-attachments": "node --import ./scripts/register-typescript.mjs --test scripts/draft-attachments.test.mjs && node scripts/draft-attachments-smoke.mjs",
+    "test:queue-hold": "node --import ./scripts/register-typescript.mjs --test scripts/queue-target.test.mjs && node scripts/queue-hold-smoke.mjs",
     "test:queue-edit": "node --import ./scripts/register-typescript.mjs --test scripts/queue-target.test.mjs && node scripts/queue-edit-smoke.mjs",
     "test:submission-notice": "node --import ./scripts/register-typescript.mjs --test scripts/submissions.test.mjs && node scripts/submission-notice-smoke.mjs",
     "dev:ui": "vite",

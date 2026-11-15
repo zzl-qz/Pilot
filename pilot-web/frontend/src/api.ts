@@ -191,6 +191,7 @@ export const api = {
   task: (id: string) => apiJson<ApiResults['task']>(`/api/sessions/${encodeURIComponent(id)}/task`),
   saveTask: (id: string, body: Update<S.TaskControlServiceRequirements>) => apiJson<ApiResults['saveTask']>(`/api/sessions/${encodeURIComponent(id)}/task`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   queue: (id: string) => apiJson<ApiResults['queue']>(`/api/sessions/${encodeURIComponent(id)}/queue`),
+  holdQueue: (id: string, held: boolean) => apiJson<ApiResults['holdQueue']>(`/api/sessions/${encodeURIComponent(id)}/queue/hold`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ held }) }),
   updateQueueItem: (id: string, index: number, body: { content: string; revision?: string | null }) => apiJson<ApiResults['updateQueueItem']>(`/api/sessions/${encodeURIComponent(id)}/queue/${index}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   deleteQueueItem: (id: string, index: number, revision?: string | null) => apiJson<ApiResults['deleteQueueItem']>(`/api/sessions/${encodeURIComponent(id)}/queue/${index}?revision=${encodeURIComponent(revision || '')}`, { method: 'DELETE' }),
   moveQueueItem: (id: string, from: number, to: number, revision?: string | null) => apiJson<ApiResults['moveQueueItem']>(`/api/sessions/${encodeURIComponent(id)}/queue/${from}/move?to=${to}&revision=${encodeURIComponent(revision || '')}`, { method: 'POST' }),

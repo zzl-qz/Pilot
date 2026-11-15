@@ -201,13 +201,11 @@ function appendRunResult(draft: ReducerState, event: Extract<EventEnvelope, { ty
   let attention = 'idle';
   let status: string;
   if (event.type === 'run.completed') {
-    draft.queueHeld = false;
     draft.lastOutcome = 'completed';
     result.detail = event.payload?.summary || null;
     if (turn?.runIds?.length) result.runIds = turn.runIds;
     status = '结束';
   } else if (event.type === 'run.cancelled') {
-    draft.queueHeld = true;
     Object.assign(result, { tone: 'warn', title: '运行已取消', detail: event.payload?.reason || null, resumable: true });
     status = '取消';
   } else {

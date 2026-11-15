@@ -68,6 +68,7 @@ class SessionApiTest {
     static class TestRunStarter implements RunStarter {
         private final AtomicBoolean running = new AtomicBoolean();
         private final List<String> queue = new ArrayList<>();
+        private boolean held;
 
         void setRunning(boolean value) {
             running.set(value);
@@ -104,6 +105,22 @@ class SessionApiTest {
         @Override
         public List<String> queued(String sessionId) {
             return List.copyOf(queue);
+        }
+
+        @Override
+        public boolean queueHeld(String sessionId) {
+            return held;
+        }
+
+        @Override
+        public boolean setQueueHeld(String sessionId, boolean value) {
+            held = value;
+            return true;
+        }
+
+        @Override
+        public String queueWaitingReason(String sessionId) {
+            return held ? "队列已暂停，恢复后才会开始下一条" : "";
         }
 
         @Override
@@ -587,6 +604,40 @@ class SessionApiTest {
             assertEquals(1, sessions.events(sessionId).size());
         } finally {
             runStarter.setRunning(false);
+        }
+    }
+
+    @Test
+    void pausesAndResumesQueueWithoutLosingEntries() throws Exception {
+        String id = createSession();
+        runStarter.setRunning(true);
+        try {
+            runStarter.followup(id, "任务一");
+            runStarter.followup(id, "任务二");
+            mvc.perform(post("/api/sessions/{id}/queue/hold", id).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"held\":true}")).andExpect(status().isOk()).andExpect(jsonPath("$.held").value(true))
+                .andExpect(jsonPath("$.waitingReason").value(Matchers.containsString("暂停")))
+                .andExpect(jsonPath("$.items.length()").value(2));
+            mvc.perform(get("/api/sessions/{id}/queue", id)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.held").value(true)).andExpect(jsonPath("$.items[0]").value("任务一"))
+                .andExpect(jsonPath("$.items[1]").value("任务二"));
+            // 重复暂停幂等
+            mvc.perform(post("/api/sessions/{id}/queue/hold", id).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"held\":true}")).andExpect(status().isOk()).andExpect(jsonPath("$.held").value(true));
+            // 恢复后队列顺序不变，仍可编辑
+            mvc.perform(post("/api/sessions/{id}/queue/hold", id).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"held\":false}")).andExpect(status().isOk()).andExpect(jsonPath("$.held").value(false))
+                .andExpect(jsonPath("$.items.length()").value(2));
+            assertEquals(List.of("任务一", "任务二"), runStarter.queued(id));
+            mvc.perform(put("/api/sessions/{id}/queue/0", id).contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(
+                    Map.of("content", "改过的任务一", "revision", RunStarter.queueRevision(runStarter.queuedMessages(id))))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items[0]").value("改过的任务一"));
+            // 缺少 held 字段按恢复处理，不报 500
+            mvc.perform(post("/api/sessions/{id}/queue/hold", id).contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.held").value(false));
+        } finally {
+            runStarter.running.set(false);
         }
     }
 

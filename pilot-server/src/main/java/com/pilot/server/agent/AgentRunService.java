@@ -826,11 +826,71 @@ public class AgentRunService implements RunStarter {
     }
 
     @Override
+    public boolean queueHeld(String sessionId) {
+        return queuedMessages.held(sessionId);
+    }
+
+    @Override
+    public boolean setQueueHeld(String sessionId, boolean held) {
+        Deque<String> queue = inbox(sessionId);
+        synchronized (queue) {
+            boolean current = queuedMessages.held(sessionId);
+            if (current == held) {
+                return true;
+            }
+            queuedMessages.setHeld(sessionId, held);
+            if (!held) {
+                // 空闲且验收已满足时只启动队首一次；运行中则等它结束时由 drainQueue 接手
+                resumeHeldQueue(sessionId, queue);
+            }
+            return true;
+        }
+    }
+
+    /** 恢复后的启动尝试：条件不满足就什么都不做，等运行结束或验收完成时的常规交接。 */
+    private void resumeHeldQueue(String sessionId, Deque<String> queue) {
+        if (registry.activeRun(sessionId).isPresent()) {
+            return;
+        }
+        TaskControlService.TaskContract task = taskControls.load(sessionId);
+        if (task == null || !TaskControlStatus.COMPLETED.is(task.status())
+            || plans.load(sessionId).stream().anyMatch(item -> !item.done())) {
+            return;
+        }
+        try {
+            drainQueue(sessionId, queue);
+        } catch (RuntimeException e) {
+            log.error("恢复队列后启动队首失败，队列已保留：{}", sessionId, e);
+        }
+    }
+
+    @Override
+    public String queueWaitingReason(String sessionId) {
+        if (queuedMessages.held(sessionId)) {
+            return "队列已暂停，恢复后才会开始下一条";
+        }
+        if (registry.activeRun(sessionId).isPresent()) {
+            return "等待本轮结束";
+        }
+        TaskControlService.TaskContract task = taskControls.load(sessionId);
+        if (task == null || !TaskControlStatus.COMPLETED.is(task.status())
+            || plans.load(sessionId).stream().anyMatch(item -> !item.done())) {
+            return "等待验收";
+        }
+        return "";
+    }
+
+    @Override
     public void forget(String sessionId) {
         registry.forget(sessionId);
         inboxes.remove(sessionId);
         autoContinueAttempts.remove(sessionId);
         autoContinueSignature.remove(sessionId);
+        try {
+            queuedMessages.clearHold(sessionId);
+        } catch (RuntimeException e) {
+            log.warn("清理会话 {} 的队列暂停状态失败", sessionId, e);
+        }
         try {
             queuedMessages.save(sessionId, List.of());
             queuedMessages.save("steer:" + sessionId, List.of());
@@ -848,6 +908,10 @@ public class AgentRunService implements RunStarter {
 
     /** 当前任务完整结束后，在队列锁内占位并启动下一条；失败、暂停、计划未完成时不消费。 */
     private void drainQueue(String sessionId, Deque<String> queue) {
+        // 手动暂停时保留队列；当前运行照常继续，恢复后再走同一条启动路径
+        if (queuedMessages.held(sessionId)) {
+            return;
+        }
         String raw = queue.peek();
         if (raw == null) {
             return;
