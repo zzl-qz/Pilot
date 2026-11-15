@@ -1,4 +1,4 @@
-package com.pilot.server.maintenance;
+package com.pilot.server.compat;
 
 import java.nio.file.Path;
 import java.time.Instant;
@@ -25,9 +25,9 @@ import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.skill.SkillCatalog;
 import com.pilot.core.skill.SkillManifest;
+import com.pilot.server.common.data.WorkspaceToolLookup;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.skill.SkillService;
-import com.pilot.server.tool.WorkspaceToolFactory;
 
 import lombok.RequiredArgsConstructor;
 
@@ -72,7 +72,7 @@ public class PluginCompatService {
     }
 
     private final SessionService sessions;
-    private final WorkspaceToolFactory toolFactory;
+    private final WorkspaceToolLookup toolFactory;
     private final SkillService skills;
     private final AgentProperties agentProperties;
     private final ObjectProvider<McpManager> mcpManager;
@@ -236,13 +236,11 @@ public class PluginCompatService {
     // ————— 公共 —————
 
     private Set<String> currentToolNames(Path workspace) {
-        try {
-            return new HashSet<>(toolFactory.registryFor(workspace.toString()).names());
-        } catch (RuntimeException e) {
-            return Set.of(ToolNames.READ_FILE, ToolNames.LIST_DIR, ToolNames.GLOB_FILES, ToolNames.SEARCH_TEXT,
-                ToolNames.EDIT_FILE, ToolNames.CREATE_FILE, ToolNames.APPLY_PATCH, ToolNames.RUN_COMMAND,
-                ToolNames.WEB_SEARCH, ToolNames.WEB_FETCH, ToolNames.UPDATE_PLAN);
-        }
+        Set<String> names = toolFactory.toolNames(workspace.toString());
+        // 拿不到注册表时退回一份常见工具名：宁可少报，也不要因为取不到而把全部钩子误判成失效。
+        return names.isEmpty() ? Set.of(ToolNames.READ_FILE, ToolNames.LIST_DIR, ToolNames.GLOB_FILES,
+            ToolNames.SEARCH_TEXT, ToolNames.EDIT_FILE, ToolNames.CREATE_FILE, ToolNames.APPLY_PATCH,
+            ToolNames.RUN_COMMAND, ToolNames.WEB_SEARCH, ToolNames.WEB_FETCH, ToolNames.UPDATE_PLAN) : names;
     }
 
     /** 允许技能/钩子写通配或前缀形式；只要任一已注册工具命中就算仍然有效。 */

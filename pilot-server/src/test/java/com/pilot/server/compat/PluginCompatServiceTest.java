@@ -1,4 +1,4 @@
-package com.pilot.server.maintenance;
+package com.pilot.server.compat;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;

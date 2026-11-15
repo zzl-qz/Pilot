@@ -11,10 +11,12 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.pilot.core.contract.Contracts;
 import com.pilot.core.contract.Contracts.Contract;
 import com.pilot.core.exec.ExecutionBackends;
 import com.pilot.server.common.data.DataMaintenance;
 import com.pilot.server.common.data.StorageHealth;
+import com.pilot.server.compat.PluginCompatService;
 
 import lombok.RequiredArgsConstructor;
 
@@ -56,16 +58,15 @@ public class MaintenanceController {
      * 对外暴露出来，插件作者不必读源码就能确认自己声明的东西还在不在。
      */
     @GetMapping("/contracts")
-    public Contracts contracts() {
-        return new Contracts(com.pilot.core.contract.Contracts.publishedContracts(),
-            com.pilot.core.contract.Contracts.catalogue());
+    public ContractCatalogue contracts() {
+        return new ContractCatalogue(Contracts.publishedContracts(), Contracts.catalogue());
     }
 
     /**
      * @param contracts 已发布契约，含 id、major、引入版本与说明
      * @param catalogue {@code id@major → 说明} 的扁平对照
      */
-    public record Contracts(List<Contract> contracts, Map<String, String> catalogue) {
+    public record ContractCatalogue(List<Contract> contracts, Map<String, String> catalogue) {
     }
 
     @PostMapping("/backup")

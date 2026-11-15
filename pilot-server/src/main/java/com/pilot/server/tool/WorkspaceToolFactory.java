@@ -49,6 +49,7 @@ import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.attachment.AttachmentReferences;
 import com.pilot.server.attachment.ReadAttachmentTool;
 import com.pilot.server.capability.LocalResourcesTool;
+import com.pilot.server.common.data.WorkspaceToolLookup;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.WebSearchProperties;
 
@@ -64,7 +65,7 @@ import lombok.RequiredArgsConstructor;
  */
 @Component
 @RequiredArgsConstructor
-public class WorkspaceToolFactory {
+public class WorkspaceToolFactory implements WorkspaceToolLookup {
     private static final Duration WEB_CONNECT_TIMEOUT = Duration.ofSeconds(5);
 
     private final AgentProperties properties;
@@ -150,6 +151,20 @@ public class WorkspaceToolFactory {
     public Path resolve(String workspace) {
         String target = workspace == null || workspace.isBlank() ? properties.workspace() : workspace;
         return Path.of(target).toAbsolutePath().normalize();
+    }
+
+    /**
+     * 当前工作区已注册的工具名，供诊断判断「钩子的 matcher 还命中得了谁」。
+     *
+     * <p>取不到就返回空集：诊断宁可显示「无法判断」，也不能因为这里抛异常把整次体检打挂。
+     */
+    @Override
+    public java.util.Set<String> toolNames(String workspace) {
+        try {
+            return java.util.Set.copyOf(registryFor(workspace).names());
+        } catch (RuntimeException e) {
+            return java.util.Set.of();
+        }
     }
 
     /**

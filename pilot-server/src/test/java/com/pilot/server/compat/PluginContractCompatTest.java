@@ -1,4 +1,4 @@
-package com.pilot.server.maintenance;
+package com.pilot.server.compat;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -28,6 +28,7 @@ import com.pilot.core.tool.ToolRegistry;
 import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.SkillProperties;
+import com.pilot.server.maintenance.MaintenanceController;
 import com.pilot.server.skill.SkillService;
 import com.pilot.server.tool.WorkspaceToolFactory;
 
