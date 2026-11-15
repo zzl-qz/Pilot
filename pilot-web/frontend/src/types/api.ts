@@ -51,6 +51,8 @@ export interface ApiResults {
   notes: S.SessionNotesNote[];
   searchNotes: S.ProjectNotesControllerResult;
   createNote: S.SessionNotesNote;
+  noteStatus: S.SessionNotesNote;
+  promoteNote: S.SessionNotesPromotion;
   updateNote: S.SessionNotesNote;
   deleteNote: null;
   deliverySettings: S.DeliveryServiceSettings;

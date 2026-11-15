@@ -436,6 +436,11 @@ public final class SqliteStore {
         // 让 checkpoint / resume / 进程重启后仍能重建同一条多模态消息。
         addColumnIfMissing(statement, "conversation_messages", "attachments", "TEXT");
         addColumnIfMissing(statement, "conversation_messages", "image_positions", "TEXT");
+        // 想法从「只记下来」扩成「可转待办」：状态与关联目标单独成列，正文不动。
+        // 老记录没有这一列时按 inbox 处理，语义正好是「只记下来、还没安排」。
+        addColumnIfMissing(statement, "session_notes", "status", "TEXT NOT NULL DEFAULT 'inbox'");
+        addColumnIfMissing(statement, "session_notes", "link_kind", "TEXT");
+        addColumnIfMissing(statement, "session_notes", "link_id", "TEXT");
         // 索引依赖上面补出来的列，必须放在补列之后
         statement.execute("CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id, created_at)");
         // 按父会话找侧边对话（关闭父对话时一并清理）走这条索引

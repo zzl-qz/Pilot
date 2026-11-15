@@ -8,6 +8,8 @@ export interface StoredNote {
   content: string;
   createdAt: string;
   updatedAt: string;
+  /** 与后端一致：草稿阶段一律是收件箱。 */
+  status: string;
 }
 
 export const DRAFT_NOTES_KEY = 'pilot.notes.draft';
@@ -41,7 +43,8 @@ export function readDraftNotes(storage: Pick<Storage, 'getItem'>): StoredNote[] 
         id: typeof record.id === 'string' && record.id ? record.id : 'draft_note_' + draftId(),
         content,
         createdAt,
-        updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : createdAt
+        updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : createdAt,
+        status: typeof record.status === 'string' && record.status ? record.status : 'inbox'
       });
       if (notes.length >= NOTE_COUNT_LIMIT) break;
     }
@@ -70,7 +73,8 @@ export function createDraftNote(content: string, now: Date = new Date()): Stored
     id: 'draft_note_' + draftId(),
     content,
     createdAt: now.toISOString(),
-    updatedAt: now.toISOString()
+    updatedAt: now.toISOString(),
+    status: 'inbox'
   };
 }
 

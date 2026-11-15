@@ -1059,6 +1059,20 @@ export interface SessionNotesNote {
   createdAt: string;
   updatedAt: string;
   source?: NoteSource | null;
+  status: string;
+  link?: SessionNotesLink | null;
+}
+
+/** SessionNotes.java / Link：想法安排到了哪（队列或会话）。 */
+export interface SessionNotesLink {
+  kind: string;
+  id: string;
+}
+
+/** SessionNotes.java / Promotion：转任务返回的正文与更新后的想法。 */
+export interface SessionNotesPromotion {
+  text: string;
+  note: SessionNotesNote;
 }
 
 /** 想法引用的来源消息；历史编辑或清理后 available=false。 */

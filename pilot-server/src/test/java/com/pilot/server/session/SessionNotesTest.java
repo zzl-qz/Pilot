@@ -27,6 +27,62 @@ class SessionNotesTest {
     }
 
     @Test
+    void noteStartsInInboxAndStatusSurvivesEditingAndReopen() {
+        SessionNotes first = open("status.db");
+        SessionNotes.Note note = first.create("s1", "顺手想到的点子");
+        assertEquals(SessionNotes.INBOX, note.status(), "新想法默认在收件箱，还没安排");
+        assertEquals(null, note.link());
+
+        SessionNotes.Note planned =
+            first.setStatus("s1", note.id(), SessionNotes.PLANNED, new SessionNotes.Link("session", "s1"));
+        assertEquals(SessionNotes.PLANNED, planned.status());
+        assertEquals("session", planned.link().kind());
+
+        // 改正文不能把状态和关联目标改回收件箱。
+        SessionNotes.Note edited = first.update("s1", note.id(), "顺手想到的点子（补充）");
+        assertEquals(SessionNotes.PLANNED, edited.status());
+        assertEquals("s1", edited.link().id());
+
+        SessionNotes reopened = open("status.db");
+        assertEquals(SessionNotes.PLANNED, reopened.list("s1").getFirst().status());
+    }
+
+    @Test
+    void promoteComposesTextWithSourceQuoteAndMarksPlanned() {
+        SessionNotes notes = open("promote.db");
+        SessionNotes.Note note =
+            notes.create("s1", "把这个想法做成任务", new SessionNotes.SourceInput(7, "选中并记下来的原文", "assistant"));
+
+        SessionNotes.Promotion promotion = notes.promote("s1", note.id(), new SessionNotes.Link("queue", "s1"));
+        assertTrue(promotion.text().startsWith("把这个想法做成任务"), promotion.text());
+        assertTrue(promotion.text().contains("第 7 条"), "转成任务后仍要能看出这句是从哪条对话来的");
+        assertTrue(promotion.text().contains("> 选中并记下来的原文"), "引用原文要保留，否则丢掉当初的上下文");
+        assertTrue(promotion.text().contains("助手回复"));
+        assertEquals(SessionNotes.PLANNED, promotion.note().status());
+        assertEquals("queue", promotion.note().link().kind());
+        // 正文本身不被改写：想法是原话，组装只发生在提交用的文本里。
+        assertEquals("把这个想法做成任务", notes.list("s1").getFirst().content());
+    }
+
+    @Test
+    void promoteWithoutSourceStillProducesCleanText() {
+        SessionNotes notes = open("promote2.db");
+        SessionNotes.Note note = notes.create("s1", "没有来源的想法");
+        assertEquals("没有来源的想法", notes.promote("s1", note.id(), null).text());
+    }
+
+    @Test
+    void unknownStatusAndMissingNoteAreRejected() {
+        SessionNotes notes = open("status2.db");
+        SessionNotes.Note note = notes.create("s1", "想法");
+        assertThrows(IllegalArgumentException.class, () -> notes.setStatus("s1", note.id(), "archived", null));
+        assertThrows(IllegalArgumentException.class, () -> notes.setStatus("s1", "note_missing", "done", null));
+        // 不做隐式恢复：被删除的想法不会因为一次转任务而回来。
+        notes.delete("s1", note.id());
+        assertThrows(IllegalArgumentException.class, () -> notes.promote("s1", note.id(), null));
+    }
+
+    @Test
     void notesSurviveReopenAndDeletedStayDeleted() {
         SessionNotes first = open("notes.db");
         SessionNotes.Note older = first.create("s1", "第一条想法\n第二行也保留");

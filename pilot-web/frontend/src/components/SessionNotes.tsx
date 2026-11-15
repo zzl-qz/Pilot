@@ -10,6 +10,14 @@ import './notes.css';
 
 const NOTE_LIMIT = 4000;
 
+/** 想法的四种状态；刻意做得很少，它不是看板，只用来把「还没安排的」挑出来。 */
+const NOTE_STATUS_LABELS: Record<string, string> = {
+  inbox: '待安排',
+  planned: '已安排',
+  done: '已完成',
+  dropped: '已放弃'
+};
+
 /**
  * 当前会话的「想法」面板：随手记下暂时不发送的内容，需要时点一下带回输入框。
  *
@@ -122,7 +130,34 @@ export function SessionNotes({ onClose }: { onClose: () => void }) {
     input.focus();
   }
 
+  /**
+   * 转为任务：取回组装好的正文放进输入框，状态由服务端标为已安排。
+   *
+   * <p>仍然不替用户发送——转任务只是「把随笔整理成一句能执行的话」，
+   * 发不发、什么时候发，和手打一条消息完全一样。
+   */
+  async function promote(id: string) {
+    setLocalError('');
+    const text = await useStore.getState().promoteNote(id);
+    if (!text) return;
+    const input = useStore.getState().composerApi;
+    if (!input) {
+      setLocalError('任务正文已生成，但输入框还没准备好；请稍后再点一次。');
+      return;
+    }
+    input.appendText(noteInsertion(input.getText(), text));
+    input.focus();
+  }
+
+  async function changeStatus(id: string, status: string) {
+    setLocalError('');
+    await useStore.getState().setNoteStatus(id, status);
+  }
+
   const error = localError || notesError;
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const visible = statusFilter === 'all' ? notes : notes.filter(note => (note.status || 'inbox') === statusFilter);
+  const inboxCount = notes.filter(note => (note.status || 'inbox') === 'inbox').length;
   return <div id="notes-menu" className="composer-flyout notes-flyout" role="dialog" aria-label="想法">
     <header className="notes-head">
       <strong>想法</strong>
@@ -173,7 +208,12 @@ export function SessionNotes({ onClose }: { onClose: () => void }) {
       {!localError && <Button label="重试" size="sm" variant="ghost" onClick={() => void useStore.getState().loadNotes()} />}
     </p>}
     <ul className="notes-list" aria-label="已保存的想法">
-      {notes.map(note => <li key={note.id} className="note-row" data-note-id={note.id}>
+      {notes.length > 0 && <li className="notes-filters" aria-label="按状态筛选想法">
+        {[['all', `全部 ${notes.length}`], ['inbox', `待安排 ${inboxCount}`], ['planned', '已安排'], ['done', '已完成'], ['dropped', '已放弃']]
+          .map(([value, label]) => <button key={value} type="button" className={`note-filter${statusFilter === value ? ' is-active' : ''}`}
+            aria-pressed={statusFilter === value} onClick={() => setStatusFilter(value)}>{label}</button>)}
+      </li>}
+      {visible.map(note => <li key={note.id} className="note-row" data-note-id={note.id}>
         {editing === note.id
           ? <div className="note-edit">
             <textarea ref={editRef} aria-label="编辑想法" rows={3} maxLength={NOTE_LIMIT} value={editText}
@@ -194,6 +234,19 @@ export function SessionNotes({ onClose }: { onClose: () => void }) {
             </button>
             {note.source && <NoteSource source={note.source} />}
             <div className="note-actions">
+              <span className="note-status" data-status={note.status || 'inbox'}>{NOTE_STATUS_LABELS[note.status || 'inbox'] || note.status}</span>
+              {note.status !== 'planned' && note.status !== 'done' && (
+                <Button size="sm" variant="ghost" label="转为任务" isDisabled={Boolean(saving)}
+                  onClick={() => void promote(note.id)} />
+              )}
+              {(note.status || 'inbox') !== 'done' && (
+                <Button size="sm" variant="ghost" label="标记完成" isDisabled={Boolean(saving)}
+                  onClick={() => void changeStatus(note.id, 'done')} />
+              )}
+              {note.status !== 'dropped' && (
+                <IconButton label="放弃这条想法" icon={<Icon name="close" />} variant="ghost"
+                  isDisabled={Boolean(saving)} onClick={() => void changeStatus(note.id, 'dropped')} />
+              )}
               <IconButton label="编辑想法" icon={<Icon name="edit" />} variant="ghost"
                 isDisabled={Boolean(saving)} onClick={() => startEdit(note.id, note.content)} />
               <IconButton label="删除想法" icon={<Icon name="trash" />} variant="ghost"
@@ -201,6 +254,7 @@ export function SessionNotes({ onClose }: { onClose: () => void }) {
             </div>
           </>}
       </li>)}
+      {!visible.length && notesState === 'ready' && notes.length > 0 && <li className="notes-empty">这个状态下没有想法。</li>}
       {notesState === 'ready' && !notes.length && <li className="notes-empty">还没有想法。执行任务时可以在这里记下稍后要用的内容。</li>}
     </ul>
   </div>;

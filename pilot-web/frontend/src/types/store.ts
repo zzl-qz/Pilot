@@ -78,6 +78,7 @@ export interface StoreActions {
   loadProjects(options?: StrictOptions): Promise<void>; loadSessions(options?: StrictOptions): Promise<SessionSummary[]>;
   loadNotes(): Promise<void>; addNote(content: string, source?: NoteSeed['source']): Promise<boolean>; openNoteFromSelection(selection: NoteSeed | null): void; focusNote(noteId: string | null): void;
   editNote(id: string, content: string): Promise<boolean>; removeNote(id: string): Promise<boolean>;
+  setNoteStatus(id: string, status: string): Promise<boolean>; promoteNote(id: string): Promise<string | null>;
   startNewSession(options?: Partial<DraftSession>): null; ensureSession(): Promise<string | null>; activate(id: string): Promise<boolean>;
   loadHistory(): Promise<boolean>; prefetchEarlier(): Promise<boolean>; applyEarlierPage(): boolean; loadEarlier(): Promise<boolean>;
   requestEarlierHistory(options?: ForceOptions): Promise<boolean>; loadLater(): Promise<boolean>; requestLaterHistory(options?: ForceOptions): Promise<boolean>;

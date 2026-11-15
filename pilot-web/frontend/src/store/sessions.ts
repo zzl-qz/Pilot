@@ -102,7 +102,7 @@ function resetSessionState(draft: StoreState) {
 }
 
 /** 会话生命周期拥有列表请求和创建请求；连接由调用方提供，避免反向依赖全局 store。 */
-export function createSessionActions({ set, get }: StoreContext, { closeStreams, connectMirror, connectCommandTasks }: SessionConnections): StoreSlice<'loadProjects' | 'loadSessions' | 'loadNotes' | 'addNote' | 'openNoteFromSelection' | 'focusNote' | 'editNote' | 'removeNote' | 'startNewSession' | 'ensureSession' | 'activate' | 'renameSession' | 'updateSessionPreferences' | 'archiveSession' | 'deleteSession'> {
+export function createSessionActions({ set, get }: StoreContext, { closeStreams, connectMirror, connectCommandTasks }: SessionConnections): StoreSlice<'loadProjects' | 'loadSessions' | 'loadNotes' | 'addNote' | 'openNoteFromSelection' | 'focusNote' | 'editNote' | 'removeNote' | 'setNoteStatus' | 'promoteNote' | 'startNewSession' | 'ensureSession' | 'activate' | 'renameSession' | 'updateSessionPreferences' | 'archiveSession' | 'deleteSession'> {
   let activationSequence = 0;
   let sessionCreation: { epoch: number; promise: Promise<string> } | null = null;
   let projectLoadSequence = 0;
@@ -302,6 +302,70 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
           set((draft) => { draft.notesError = errorInfo(error).message || '删除想法失败，请重试。'; });
         }
         return false;
+      } finally {
+        if (get().sessionId === sessionId) set((draft) => { draft.notesSaving = ''; });
+      }
+    },
+
+    /**
+     * 改想法状态：收件箱 / 已安排 / 已完成 / 已放弃。
+     *
+     * <p>状态是用户自己的安排，不会因此发送任何消息；还没建会话时只改本机草稿。
+     */
+    async setNoteStatus(id, status) {
+      const sessionId = get().sessionId;
+      if (!sessionId) {
+        const next = get().notes.map((note) => note.id === id ? { ...note, status } : note);
+        writeDraftNotes(localStorage, next);
+        set((draft) => { draft.notes = next; draft.notesError = ''; });
+        return true;
+      }
+      set((draft) => { draft.notesSaving = id; draft.notesError = ''; });
+      try {
+        const note = await api.noteStatus(sessionId, id, { status });
+        if (!note || typeof note.id !== 'string') throw new Error('服务端没有返回想法内容，请重试。');
+        if (get().sessionId === sessionId) {
+          set((draft) => { draft.notes = draft.notes.map((item) => item.id === id ? note : item); });
+        }
+        return true;
+      } catch (error) {
+        if (get().sessionId === sessionId) {
+          set((draft) => { draft.notesError = errorInfo(error).message || '修改想法状态失败，请重试。'; });
+        }
+        return false;
+      } finally {
+        if (get().sessionId === sessionId) set((draft) => { draft.notesSaving = ''; });
+      }
+    },
+
+    /**
+     * 把想法转成一段可直接提交的任务正文。
+     *
+     * <p>只取回文本、把状态标为已安排，**不代发消息**：提交仍然走正常输入路径，
+     * 运行中就排队、空闲就开新任务，和用户自己打字完全一致。
+     */
+    async promoteNote(id) {
+      const sessionId = get().sessionId;
+      if (!sessionId) {
+        set((draft) => { draft.notesError = '这个想法还没有归属的对话，发出第一条消息后可以转为任务。'; });
+        return null;
+      }
+      set((draft) => { draft.notesSaving = id; draft.notesError = ''; });
+      try {
+        const promotion = await api.promoteNote(sessionId, id, get().running ? 'queue' : 'session');
+        if (!promotion || !promotion.text) throw new Error('服务端没有返回任务正文，请重试。');
+        if (get().sessionId === sessionId && promotion.note) {
+          const updated = promotion.note;
+          set((draft) => {
+            draft.notes = draft.notes.map((item) => item.id === id ? updated : item);
+          });
+        }
+        return promotion.text;
+      } catch (error) {
+        if (get().sessionId === sessionId) {
+          set((draft) => { draft.notesError = errorInfo(error).message || '转为任务失败，请重试。'; });
+        }
+        return null;
       } finally {
         if (get().sessionId === sessionId) set((draft) => { draft.notesSaving = ''; });
       }

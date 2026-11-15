@@ -68,6 +68,38 @@ public class SessionNotesController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * 改状态：inbox / planned / done / dropped。
+     *
+     * <p>状态是用户自己的安排，不产生事件、不推进执行；只有下面的转任务接口会组装正文。
+     */
+    @PostMapping("/{noteId}/status")
+    public SessionNotes.Note status(@PathVariable String session, @PathVariable String noteId,
+        @RequestBody(required = false) StatusRequest request) {
+        SessionLookup.require(sessions, session);
+        if (request == null || request.status() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "status 必填");
+        }
+        SessionNotes.Link link =
+            request.link() == null ? null : new SessionNotes.Link(request.link().kind(), request.link().id());
+        return notes.setStatus(session, noteId, request.status(), link);
+    }
+
+    /**
+     * 把想法转成可直接提交的任务正文，并标记为已安排。
+     *
+     * <p>只返回文本，不代发消息：想法与执行是两件事，提交必须由用户触发（前端交给正常的输入路径，
+     * 运行中就进队列、空闲就新开任务）。
+     */
+    @PostMapping("/{noteId}/promote")
+    public SessionNotes.Promotion promote(@PathVariable String session, @PathVariable String noteId,
+        @RequestBody(required = false) PromoteRequest request) {
+        SessionLookup.require(sessions, session);
+        SessionNotes.Link link =
+            new SessionNotes.Link(request == null || request.kind() == null ? "session" : request.kind(), session);
+        return notes.promote(session, noteId, link);
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<?> bad(RuntimeException e) {
         return ApiErrors.badRequest(e);
@@ -81,5 +113,16 @@ public class SessionNotesController {
 
     /** 从对话选中文字保存时的来源：消息序号、原文与角色；旧客户端只传 content。 */
     public record SourceRequest(Integer sequence, String excerpt, String role) {
+    }
+
+    /** @param status inbox / planned / done / dropped；link 可选，用于记录安排到了哪 */
+    public record StatusRequest(String status, LinkRequest link) {
+    }
+
+    /** @param kind queue（运行中进队列）或 session（空闲时新开任务） */
+    public record PromoteRequest(String kind) {
+    }
+
+    public record LinkRequest(String kind, String id) {
     }
 }

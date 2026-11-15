@@ -101,9 +101,19 @@
 .note-content:hover { color: var(--ink); }
 .note-content:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; border-radius: 4px; }
 
-.note-actions { display: flex; flex: none; opacity: 0; transition: opacity 0.12s ease; }
+.note-actions { display: flex; flex: none; align-items: center; gap: 4px; opacity: 0; transition: opacity 0.12s ease; }
 .note-row:hover .note-actions,
 .note-row:focus-within .note-actions { opacity: 1; }
+
+/* 想法状态：只用来把「还没安排的」挑出来，不追求看板级别的视觉。 */
+.note-status { flex: none; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; font-size: 10.5px; color: var(--dim); white-space: nowrap; }
+.note-status[data-status='planned'] { color: var(--accent); border-color: var(--accent-line, var(--line)); }
+.note-status[data-status='done'] { color: var(--ok); border-color: rgba(62, 207, 142, 0.4); }
+.note-status[data-status='dropped'] { opacity: 0.6; text-decoration: line-through; }
+.notes-filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 8px 4px; }
+.note-filter { padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; background: none; color: var(--dim); font: inherit; font-size: 11.5px; cursor: pointer; }
+.note-filter.is-active { color: var(--ink); border-color: var(--accent-line, var(--line)); }
+.note-filter:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .note-edit { flex: 1; display: grid; gap: 6px; min-width: 0; }
 .note-edit-actions { display: flex; justify-content: flex-end; gap: 6px; }
@@ -123,6 +133,7 @@
 @media (pointer: coarse) {
   .note-actions { opacity: 1; }
   .notes-form textarea, .note-edit textarea { font-size: 16px; }
+  .note-filter { min-height: 32px; }
 }
 
 .notes-flyout .note-source { display: inline-block; margin-top: 4px; font-size: 11px; color: var(--dim); background: none; border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; cursor: pointer; }
