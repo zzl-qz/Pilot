@@ -24,6 +24,9 @@ import com.pilot.core.tool.ToolRegistry;
 import com.pilot.server.capability.LocalCapabilityService;
 import com.pilot.server.common.web.SessionLookup;
 import com.pilot.server.config.AgentProperties;
+import com.pilot.server.maintenance.PluginCompatService;
+import com.pilot.server.maintenance.PluginCompatService.Counts;
+import com.pilot.server.maintenance.PluginCompatService.Item;
 import com.pilot.server.model.ModelSettings;
 import com.pilot.server.permission.PermissionSettings;
 
@@ -50,6 +53,7 @@ public class CapabilitiesController {
     private final ObjectProvider<WorkspaceToolFactory> toolFactory;
     private final ObjectProvider<McpManager> mcpManager;
     private final LocalCapabilityService localCapabilities;
+    private final PluginCompatService pluginCompat;
 
     @GetMapping("/capabilities")
     public CapabilitiesResponse capabilities(@PathVariable String id) {
@@ -57,9 +61,12 @@ public class CapabilitiesController {
         String workspace = session.workspace() == null || session.workspace().isBlank() ? agentProperties.workspace()
             : session.workspace();
         Path root = Path.of(workspace);
+        // 插件体检与升级前预览共用同一份判断，页面不另写一套「健康度」口径。
+        var plugins = pluginCompat.inspect(id);
 
         return new CapabilitiesResponse(root.toString(), modelSettings.snapshot().model(),
-            permissionSettings.mode().name(), tools(id, workspace), servers(root), localCapabilities.discover());
+            permissionSettings.mode().name(), tools(id, workspace), servers(root), localCapabilities.discover(),
+            plugins.items(), plugins.counts(), plugins.markdown());
     }
 
     /**
@@ -167,6 +174,7 @@ public class CapabilitiesController {
     }
 
     public record CapabilitiesResponse(String workspace, String model, String permissionMode, List<ToolPayload> tools,
-        List<McpServerPayload> mcpServers, List<LocalCapabilityService.LocalCapability> localCapabilities) {
+        List<McpServerPayload> mcpServers, List<LocalCapabilityService.LocalCapability> localCapabilities,
+        List<Item> plugins, Counts pluginCounts, String pluginReport) {
     }
 }

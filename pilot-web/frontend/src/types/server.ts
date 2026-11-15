@@ -140,6 +140,9 @@ export interface CapabilitiesControllerCapabilitiesResponse {
   tools: (CapabilitiesControllerToolPayload)[];
   mcpServers: (CapabilitiesControllerMcpServerPayload)[];
   localCapabilities: (LocalCapabilityServiceLocalCapability)[];
+  plugins: (PluginCompatServiceItem)[];
+  pluginCounts: PluginCompatServiceCounts;
+  pluginReport: string;
 }
 
 /** CapabilitiesController.java / McpServerPayload */

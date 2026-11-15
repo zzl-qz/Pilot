@@ -1,6 +1,8 @@
 import { useEffect, useMemo } from 'react';
+import type * as S from '../../types/server.js';
 import { useStore } from '../../store.js';
 import { MCP_TRUST_LABELS, mcpSourceLabel } from '../../lib/mcp.js';
+import { pluginStatusDetail, pluginStatusLabel, pluginStatusTone, pluginSummary } from '../../lib/plugin-status.js';
 
 /* ---------- 能力清单 ---------- */
 
@@ -12,6 +14,11 @@ const PERMISSION_LABELS: Record<string, string> = {
   ASK: '每次确认',
   READ_ONLY: '只读'
 };
+
+/** 插件清单里按类型与名字找一项；技能名与目录名一致，MCP 用服务器名。 */
+function pluginFor(plugins: readonly S.PluginCompatServiceItem[] | undefined, kind: string, name: string) {
+  return (plugins || []).find((item) => item.kind === kind && item.name === name);
+}
 
 export function CapabilitiesPanel() {
   const sessionId = useStore((state) => state.sessionId);
@@ -30,6 +37,8 @@ export function CapabilitiesPanel() {
     .sort((a, b) => Number(b.available) - Number(a.available) || String(a.name).localeCompare(String(b.name))), [data]);
   const servers = Array.isArray(data?.mcpServers) ? data.mcpServers : [];
   const localCapabilities = Array.isArray(data?.localCapabilities) ? data.localCapabilities : [];
+  const plugins = Array.isArray(data?.plugins) ? data.plugins : [];
+  const hooks = plugins.filter((item) => item.kind === 'hook');
   const available = tools.filter((tool) => tool.available).length;
 
   if (!sessionId) {
@@ -45,6 +54,19 @@ export function CapabilitiesPanel() {
         <button type="button" className="btn" onClick={() => useStore.getState().loadCapabilities()}>刷新</button>
       </div>
       <div className="cap-scroll">
+        <section className="cap-section">
+          <h3>接入总览</h3>
+          <p className="cap-desc" data-plugin-summary={data?.pluginCounts?.broken ? 'broken' : 'ok'}>
+            {pluginSummary(data?.pluginCounts)}
+          </p>
+          <p className="cap-desc">升级前可以先看清哪些会失效，见设置 → 诊断 → 升级前体检。</p>
+          {!!data?.pluginReport && (
+            <details>
+              <summary>查看可粘贴的兼容报告</summary>
+              <pre className="cap-mono cap-report">{data.pluginReport}</pre>
+            </details>
+          )}
+        </section>
         <section className="cap-section">
           <h3>运行环境</h3>
           <dl className="cap-kv">
@@ -129,12 +151,38 @@ export function CapabilitiesPanel() {
                   <div className="cap-item-head">
                     <code className="cap-name">/{skill.command || skill.name}</code>
                     {skill.source && <span className="cap-tag">{skill.source === 'project' ? '项目级' : '用户级'}</span>}
+                    {pluginFor(plugins, 'skill', skill.name) && (
+                      <span className="cap-tag" data-tone={pluginStatusTone(pluginFor(plugins, 'skill', skill.name)?.status)}>
+                        {pluginStatusLabel(pluginFor(plugins, 'skill', skill.name)?.status)}
+                      </span>
+                    )}
                   </div>
                   {skill.description && <p className="cap-desc" title={skill.description}>{skill.description}</p>}
+                  {pluginFor(plugins, 'skill', skill.name)?.status !== 'ok' && (
+                    <p className="cap-reason">{pluginStatusDetail(pluginFor(plugins, 'skill', skill.name))}</p>
+                  )}
                 </li>
               ))}
             </ul>
           ) : <p className="panel-empty">还没有安装技能。在设置 → 技能里可以从 git 仓库安装。</p>}
+        </section>
+        <section className="cap-section">
+          <h3>钩子<span className="cap-count">{hooks.length}</span></h3>
+          <p className="cap-desc">来自工作区与用户级 settings.json，编辑后自动重新读取。钩子失效时不会报错，只会什么都不做。</p>
+          {hooks.length ? (
+            <ul className="cap-list">
+              {hooks.map((hook) => (
+                <li key={`hook:${hook.name}`} className="cap-item" data-tone={pluginStatusTone(hook.status)}>
+                  <div className="cap-item-head">
+                    <code className="cap-name">{hook.name}</code>
+                    <span className="cap-tag" data-tone={pluginStatusTone(hook.status)}>{pluginStatusLabel(hook.status)}</span>
+                  </div>
+                  <p className="cap-desc">{pluginStatusDetail(hook)}</p>
+                  {!!hook.details.length && <p className="cap-reason">{hook.details.join('；')}</p>}
+                </li>
+              ))}
+            </ul>
+          ) : <p className="panel-empty">没有配置钩子。需要「编辑后自动格式化」一类确定性动作时再加。</p>}
         </section>
         {state === 'error' && <p className="panel-empty">读取能力清单失败，右上角「刷新」再试一次。</p>}
       </div>
