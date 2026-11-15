@@ -21,29 +21,38 @@ export function watchWorkbench({ refresh, window: win = window, document: doc = 
   };
 }
 
-/** 同步只读数据，不重发指令、不切换任务；同一窗口的并发刷新合并。 */
+/** 同步只读数据，不重发指令、不切换任务；同一窗口、同一会话与代次的并发刷新才合并。 */
 export function createWorkbenchRefresher({ get, set, api }: WorkbenchRefresherOptions) {
-  let flight: Promise<boolean> | null = null;
-  let reconnectWanted = false;
-  let notifyWanted = false;
-  let fullWanted = false;
+  type Wanted = { reconnect: boolean; notify: boolean; full: boolean };
+  const wanted = new Map<string, Wanted>();
+  let flight: { key: string; wanted: Wanted; promise: Promise<boolean> } | null = null;
+  const scopeKey = () => `${get().sessionId || 'draft'}#${get().sessionEpoch}`;
   return function refreshWorkbench({ silent = false, full = !silent, reconnect = !silent }: RefreshOptions = {}) {
-    reconnectWanted ||= reconnect;
-    notifyWanted ||= !silent;
-    fullWanted ||= full;
-    if (flight) return flight;
+    const key = scopeKey();
+    const flags = wanted.get(key) ?? { reconnect: false, notify: false, full: false };
+    flags.reconnect ||= reconnect;
+    flags.notify ||= !silent;
+    flags.full ||= full;
+    wanted.set(key, flags);
+    // 旧会话的请求不能阻塞新会话：只有同一会话与代次的刷新才复用同一个 Promise
+    if (flight && flight.key === key) return flight.promise;
     set(state => { state.ui.refreshing = true; });
-    flight = (async () => {
+    const run = async (): Promise<boolean> => {
       let ok = true;
       let superseded = false;
+      // 记录发起时的会话与代次：等待基础数据期间切换了会话，这次刷新就已失效，不能顺手刷新新会话
+      const startedSession = get().sessionId;
+      const startedEpoch = get().sessionEpoch;
+      const stillStarted = () => get().sessionId === startedSession && get().sessionEpoch === startedEpoch;
       try {
         const base = await Promise.allSettled([get().loadProjects({ strict: true }), get().loadSessions({ strict: true })]);
         const rejected = base.find(result => result.status === 'rejected');
         if (rejected) throw rejected.reason;
         get().flushEvents();
-        const { sessionId, sessionEpoch, sessionTitle, workspace, currentProjectId, runId, thread } = get();
+        if (!stillStarted()) { superseded = true; return false; }
+        const { sessionId, sessionTitle, workspace, currentProjectId, runId, thread } = get();
         const cursor = thread.cursor;
-        const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
+        const current = stillStarted;
         if (sessionId) {
           const [detail, active] = await Promise.all([api.session(sessionId), api.activeRun(sessionId)]);
           if (!current()) { superseded = true; return false; }
@@ -62,7 +71,7 @@ export function createWorkbenchRefresher({ get, set, api }: WorkbenchRefresherOp
           });
           await get().loadQueue({ strict: true });
           if (!current()) { superseded = true; return false; }
-          if (fullWanted) {
+          if (flags.full) {
             const work = [get().refreshContext({ strict: true }), get().loadPlan({ strict: true })];
             if (!get().taskDirty && !get().taskBusy) work.push(get().loadTask({ strict: true }));
             if (get().ui.inspectorOpen && ['changes', 'preview'].includes(get().ui.inspectorTab)) work.push(get().loadChanges({ strict: true }));
@@ -72,14 +81,14 @@ export function createWorkbenchRefresher({ get, set, api }: WorkbenchRefresherOp
           }
           if (!current()) { superseded = true; return false; }
           // 合并刷新期间追加的手动刷新也应续接持久游标，不清空滚动位置和输入。
-          if (reconnectWanted || get().ui.connection.status === 'error') {
+          if (flags.reconnect || get().ui.connection.status === 'error') {
             get().flushEvents();
             get().connectSse(sessionId, get().thread.cursor);
           }
         }
         set(state => {
           state.ui.syncError = ''; state.ui.lastSyncedAt = Date.now();
-          if (fullWanted) {
+          if (flags.full) {
             state.ui.filesRevision = (state.ui.filesRevision || 0) + 1;
             state.fileIndex = { items: [], sessionId: null, loading: false };
           }
@@ -88,13 +97,17 @@ export function createWorkbenchRefresher({ get, set, api }: WorkbenchRefresherOp
         ok = false;
         set(state => { state.ui.syncError = errorInfo(error).message || '无法读取最新数据'; });
       } finally {
-        if (notifyWanted && !superseded) get().showNotice(ok ? '已同步最新数据，草稿与附件已保留' : `刷新失败：${get().ui.syncError}，当前内容已保留`);
-        flight = null; reconnectWanted = false; notifyWanted = false; fullWanted = false;
+        if (flags.notify && !superseded) get().showNotice(ok ? '已同步最新数据，草稿与附件已保留' : `刷新失败：${get().ui.syncError}，当前内容已保留`);
+        // 只清理本次请求自己的状态；后来提交的新会话刷新不能被旧请求的 finally 抹掉
+        if (wanted.get(key) === flags) wanted.delete(key);
+        if (flight?.key === key && flight.wanted === flags) flight = null;
         set(state => { state.ui.refreshing = false; });
       }
       return ok;
-    })();
-    return flight;
+    };
+    const promise = run();
+    flight = { key, wanted: flags, promise };
+    return promise;
   };
 }
 
