@@ -188,10 +188,19 @@
 #settings .mcp-source-tag { flex: none; padding: 0 5px; border-radius: 4px; font-size: 10.5px; background: var(--ui-hover, rgba(255, 255, 255, 0.05)); color: var(--dim); }
 #settings .mcp-source-tag.is-user { color: var(--accent, var(--ink)); }
 #settings .cap-tag.is-on { color: var(--ok, var(--ink)); }
+#settings .cap-tag.is-stale { color: var(--warn); }
+#settings .cap-tag.is-warn { color: var(--warn); }
+#settings .cap-tag.is-trusted { color: var(--ok, var(--ink)); }
 #settings .cap-tag.is-off { opacity: 0.75; }
 #settings .mcp-server-item .cap-mono { margin: 0; font-size: 11.5px; overflow-wrap: anywhere; }
 #settings .mcp-server-item .cap-reason { margin: 0; font-size: 11.5px; color: var(--muted); }
-#settings .mcp-server-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+#settings .mcp-server-head .mcp-server-actions { margin-left: auto; display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+#settings .mcp-probe-tools { font-size: 12px; }
+#settings .mcp-probe-tools summary { color: var(--muted); cursor: pointer; user-select: none; }
+#settings .mcp-tool-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+#settings .mcp-tool-list li { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+#settings .mcp-tool-list code { font: 12px/1.4 var(--mono); flex: none; }
+#settings .mcp-tool-desc { font-size: 11.5px; color: var(--muted); overflow-wrap: anywhere; margin-right: auto; }
 #settings .mcp-add-form { margin-top: 12px; padding: 12px; border: 1px solid var(--line-soft); border-radius: 8px; display: grid; gap: 10px; }
 #settings .mcp-add-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
 #settings .mcp-env-editor { display: grid; gap: 8px; }

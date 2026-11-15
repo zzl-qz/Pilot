@@ -193,6 +193,21 @@ export interface McpConfigControllerImportResponse {
   overwritten: (string)[];
 }
 
+/** McpConfigController.java / ProbeResponse */
+export interface McpConfigControllerProbeResponse {
+  ok: boolean;
+  error: string;
+  running: boolean;
+  tools: (McpConfigControllerProbeTool)[];
+}
+
+/** McpConfigController.java / ProbeTool */
+export interface McpConfigControllerProbeTool {
+  name: string;
+  description: string;
+  readOnly: boolean;
+}
+
 /** McpTrustController.java / TrustRequest */
 export interface McpTrustControllerTrustRequest {
   action: string;
