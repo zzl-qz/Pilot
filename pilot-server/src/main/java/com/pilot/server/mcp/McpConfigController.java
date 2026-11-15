@@ -270,8 +270,8 @@ public class McpConfigController {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "没有名为 " + name + " 的 MCP 服务器");
         }
         if (!config.usable()) {
-            return new ProbeResponse(false, config.unsupported() == null ? "缺少 command" : config.unsupported(),
-                false, List.of());
+            return new ProbeResponse(false, config.unsupported() == null ? "缺少 command" : config.unsupported(), false,
+                List.of());
         }
         try {
             List<McpToolInfo> tools = manager.tools(workspace, name);

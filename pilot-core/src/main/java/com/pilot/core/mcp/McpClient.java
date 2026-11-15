@@ -377,6 +377,12 @@ final class McpClient implements AutoCloseable {
         terminate(new McpException("MCP 服务器 " + name + " 已关闭"));
     }
 
+    /** 当前子进程句柄；仅用于关闭时等待进程真正退出（Windows 上目录句柄会阻止临时目录删除）。 */
+    ProcessHandle handle() {
+        Process current = process;
+        return current == null ? null : current.toHandle();
+    }
+
     private void terminate(McpException failure) {
         if (!closed.compareAndSet(false, true)) {
             return;

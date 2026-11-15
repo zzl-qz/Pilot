@@ -394,10 +394,34 @@ public final class McpManager implements AutoCloseable {
 
     @Override
     public synchronized void close() {
+        // 先取句柄再关闭：terminate 会把 process 置空
+        List<ProcessHandle> handles = new ArrayList<>();
+        for (McpClient client : clients.values()) {
+            ProcessHandle handle = client.handle();
+            if (handle != null) {
+                handles.add(handle);
+            }
+        }
         closed = true;
         clients.values().forEach(McpClient::close);
         clients.clear();
         notes.clear();
+        // 等待子进程真正退出：否则 Windows 上进程仍占着工作区目录，删除/重建会失败。
+        long deadline = System.nanoTime() + Duration.ofSeconds(3).toNanos();
+        for (ProcessHandle handle : handles) {
+            long remaining = (deadline - System.nanoTime()) / 1_000_000L;
+            if (remaining <= 0) {
+                break;
+            }
+            try {
+                handle.onExit().get(remaining, java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException e) {
+                // 已退出或超时都不阻塞关闭流程
+            }
+        }
     }
 
     /**

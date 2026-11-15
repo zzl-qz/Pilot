@@ -2,17 +2,18 @@ package com.pilot.server.mcp;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.lenient;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -57,6 +58,12 @@ class McpConfigControllerTest {
         controller = new McpConfigController(sessions,
             new AgentProperties(workspace.toString(), PermissionMode.AUTO, 8, 3, 5, 300, 1, 0, 60000, false), mapper,
             provider);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        // 探活会真的拉起 node 进程；不关掉会占着 @TempDir（Windows 上直接导致临时目录删不掉）
+        manager.close();
     }
 
     @Test
@@ -249,14 +256,13 @@ class McpConfigControllerTest {
 
     @Test
     void probeReportsFailuresAsOkFalseWithReason() throws IOException {
-        ResponseStatusException missing = assertThrows(ResponseStatusException.class,
-            () -> controller.probe(sessionId, "unknown"));
+        ResponseStatusException missing =
+            assertThrows(ResponseStatusException.class, () -> controller.probe(sessionId, "unknown"));
         assertEquals(HttpStatus.NOT_FOUND, missing.getStatusCode());
 
         // 启动失败的 command 与 url-only 条目都按 ok=false 返回原因（每个测试方法有独立的 @TempDir）
-        writeUserConfig(Map.of(
-            "bad", Map.of("command", "/definitely/not/here"),
-            "remote", Map.of("url", "https://example.com")));
+        writeUserConfig(
+            Map.of("bad", Map.of("command", "/definitely/not/here"), "remote", Map.of("url", "https://example.com")));
         McpConfigController.ProbeResponse broken = controller.probe(sessionId, "bad");
         assertFalse(broken.ok());
         assertTrue(broken.error().contains("无法启动"), broken.error());
@@ -271,9 +277,9 @@ class McpConfigControllerTest {
     @Test
     void probeStartsServerAndListsTools() throws IOException {
         Path node = findNode();
-        org.junit.jupiter.api.Assumptions.assumeTrue(node != null, "没有找到 Node.js");
-        writeUserConfig(Map.of("fake", Map.of("command", node.toString(),
-            "args", List.of(fakeServerScript().toString()))));
+        Assumptions.assumeTrue(node != null, "没有找到 Node.js");
+        writeUserConfig(
+            Map.of("fake", Map.of("command", node.toString(), "args", List.of(fakeServerScript().toString()))));
 
         McpConfigController.ProbeResponse response = controller.probe(sessionId, "fake");
 
@@ -288,39 +294,39 @@ class McpConfigControllerTest {
     /** 写一个最小的 stdio JSON-RPC 服务器脚本（core 的测试资源对 server 模块不可见，内联自包含）。 */
     private Path fakeServerScript() throws IOException {
         Path script = dataRoot.resolve("fake-mcp-server.mjs");
-        Files.writeString(script, """
-            import { createInterface } from 'node:readline';
-            const reply = (id, result) => console.log(JSON.stringify({ jsonrpc: '2.0', id, result }));
-            createInterface({ input: process.stdin }).on('line', line => {
-              const m = JSON.parse(line);
-              if (m.method === 'initialize')
-                return reply(m.id, { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'fake', version: '1' } });
-              if (m.method === 'tools/list')
-                return reply(m.id, { tools: [
-                  { name: 'echo', description: 'Echo back', annotations: { readOnlyHint: true }, inputSchema: { type: 'object' } },
-                  { name: 'write', description: 'Write data', inputSchema: { type: 'object' } }
-                ]});
-              if (m.id !== undefined) reply(m.id, { content: [] });
-            });
-            """);
+        Files.writeString(script,
+            """
+                import { createInterface } from 'node:readline';
+                const reply = (id, result) => console.log(JSON.stringify({ jsonrpc: '2.0', id, result }));
+                createInterface({ input: process.stdin }).on('line', line => {
+                  const m = JSON.parse(line);
+                  if (m.method === 'initialize')
+                    return reply(m.id, { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'fake', version: '1' } });
+                  if (m.method === 'tools/list')
+                    return reply(m.id, { tools: [
+                      { name: 'echo', description: 'Echo back', annotations: { readOnlyHint: true }, inputSchema: { type: 'object' } },
+                      { name: 'write', description: 'Write data', inputSchema: { type: 'object' } }
+                    ]});
+                  if (m.id !== undefined) reply(m.id, { content: [] });
+                });
+                """);
         return script;
     }
 
     /** 直接写用户级配置（绕过 AddRequest 的字段校验，用于构造 url-only 等特殊条目）。 */
     private void writeUserConfig(Map<String, Object> servers) throws IOException {
-        Files.writeString(dataRoot.resolve("mcp.json"),
-            mapper.writeValueAsString(Map.of("mcpServers", servers)));
+        Files.writeString(dataRoot.resolve("mcp.json"), mapper.writeValueAsString(Map.of("mcpServers", servers)));
     }
 
     private static Path findNode() {
         String path = System.getenv("PATH") == null ? "" : System.getenv("PATH");
-        for (String dir : path.split(java.io.File.pathSeparator)) {
+        for (String dir : path.split(File.pathSeparator)) {
             if (dir.isBlank()) {
                 continue;
             }
             for (String name : List.of("node", "node.exe")) {
                 Path candidate = Path.of(dir, name);
-                if (java.nio.file.Files.isRegularFile(candidate)) {
+                if (Files.isRegularFile(candidate)) {
                     return candidate;
                 }
             }
