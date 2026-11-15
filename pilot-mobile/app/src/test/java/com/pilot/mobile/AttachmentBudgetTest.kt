@@ -23,13 +23,13 @@ class AttachmentBudgetTest {
     @Test fun messagesUseReadableSizeAndRawLimit() {
         val budget = budget("""{"attachmentsMaxFileBytes":2097152,"attachmentsMaxBytes":6291456}""")
         val oversize = assertThrows(IllegalArgumentException::class.java) { budget.validate(listOf(file(2 * 1024 * 1024 + 1))) }
-        org.junit.Assert.assertTrue(oversize.message!!.contains("2.0 MB"), oversize.message)
-        org.junit.Assert.assertTrue(oversize.message!!.contains("2097152"), oversize.message)
+        org.junit.Assert.assertTrue(oversize.message, oversize.message!!.contains("2.0 MB"))
+        org.junit.Assert.assertTrue(oversize.message, oversize.message!!.contains("2097152"))
         val total = assertThrows(IllegalArgumentException::class.java) {
             budget.validate(listOf(file(2 * 1024 * 1024), file(2 * 1024 * 1024), file(2 * 1024 * 1024), file(1)))
         }
-        org.junit.Assert.assertTrue(total.message!!.contains("6.0 MB"), total.message)
-        org.junit.Assert.assertTrue(total.message!!.contains("6291456"), total.message)
+        org.junit.Assert.assertTrue(total.message, total.message!!.contains("6.0 MB"))
+        org.junit.Assert.assertTrue(total.message, total.message!!.contains("6291456"))
         assertEquals("512 KB（524288 字节）", AttachmentBudget.describe(512 * 1024))
         assertEquals("1.0 MB（1048576 字节）", AttachmentBudget.describe(1024 * 1024))
     }
