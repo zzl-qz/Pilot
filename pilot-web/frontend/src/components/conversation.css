@@ -365,3 +365,9 @@ html[data-theme] .conversation-composer .voice-timer { font-family: var(--sans);
   border: 1px solid var(--line);
   border-radius: 8px;
 }
+.submission-notice .submission-pending,
+.submission-notice .submission-broken { display: flex; flex-direction: column; gap: 6px; }
+.submission-notice .submission-broken { padding-bottom: 8px; border-bottom: 1px dashed var(--line); }
+.submission-notice .submission-broken > span { color: var(--warn, var(--ink-2)); }
+.submission-notice .submission-pending > div,
+.submission-notice .submission-broken > div { display: flex; flex-wrap: wrap; gap: 6px; }

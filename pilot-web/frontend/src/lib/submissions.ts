@@ -3,6 +3,8 @@ import type { InputMessage, SubmissionResult } from '../types/api.js';
 import { errorInfo } from './errors.js';
 
 export interface PendingSubmission { requestId: string; sessionId: string; createdAt: number; preview: string; resolved?: 'accepted' | 'rejected' }
+/** 无法解析的旧凭据：保留原文供核对与导出，不参与任何会话的阻止判断。 */
+export interface CorruptedSubmission { key: string; raw: string }
 type Outcome = { state: SubmissionResult['state'] | 'blocked'; message?: string; response?: SubmissionResult['response'] };
 export type SubmissionOperation = (requestId: string) => ReturnType<typeof api.sendMessage>;
 const PREFIX = 'pilot.pending-submission:';
@@ -24,22 +26,55 @@ export function createSubmissions(client = api, storage: () => Storage = () => l
       finally { acknowledging.delete(record.requestId); }
     })();
   }
-  function pending(sessionId: string): PendingSubmission[] {
+  /**
+   * 扫描全部凭据。单条损坏不能影响其他会话：
+   * 解析失败的记录单独返回，交给界面导出或删除，而不是抛出异常阻断发送。
+   */
+  function scan(sessionId: string | null): { records: PendingSubmission[]; corrupted: CorruptedSubmission[] } {
     const data = storage();
     const records: PendingSubmission[] = [];
+    const corrupted: CorruptedSubmission[] = [];
     for (let i = 0; i < data.length; i++) {
       const key = data.key(i);
       if (!key?.startsWith(PREFIX)) continue;
-      const record = JSON.parse(data.getItem(key) || 'null') as PendingSubmission | null;
-      if (!record || typeof record.requestId !== 'string' || typeof record.sessionId !== 'string') throw Error('待确认提交记录损坏，请先核对任务历史和浏览器存储。');
+      const raw = data.getItem(key) ?? '';
+      let record: PendingSubmission | null = null;
+      try {
+        record = JSON.parse(raw) as PendingSubmission | null;
+      } catch {
+        corrupted.push({ key, raw });
+        continue;
+      }
+      if (!record || typeof record.requestId !== 'string' || typeof record.sessionId !== 'string') {
+        corrupted.push({ key, raw });
+        continue;
+      }
       if (record.resolved === 'accepted' || record.resolved === 'rejected') acknowledge(record);
-      else if (record.sessionId === sessionId) records.push(record);
+      else if (record.sessionId === (sessionId ?? record.sessionId)) records.push(record);
     }
-    return records.sort((a, b) => a.createdAt - b.createdAt);
+    records.sort((a, b) => a.createdAt - b.createdAt);
+    return { records, corrupted };
+  }
+  function pending(sessionId: string): PendingSubmission[] {
+    return scan(sessionId).records;
+  }
+  function corrupted(): CorruptedSubmission[] {
+    return scan(null).corrupted;
   }
   function forget(record: PendingSubmission) {
     storage().removeItem(PREFIX + record.requestId);
     changed();
+  }
+  /** 删除一条损坏凭据：只在用户核对任务历史并明确确认后调用。 */
+  function forgetCorrupted(key: string) {
+    if (key.startsWith(PREFIX)) {
+      storage().removeItem(key);
+      changed();
+    }
+  }
+  /** 导出损坏凭据的原文，方便保留证据后再删除。 */
+  function exportCorrupted(): string {
+    return corrupted().map(item => `### ${item.key}\n${item.raw}`).join('\n\n');
   }
   function finish(record: PendingSubmission, state: 'accepted' | 'rejected') {
     const resolved = { ...record, resolved: state };
@@ -96,7 +131,7 @@ export function createSubmissions(client = api, storage: () => Storage = () => l
       return await check(record);
     }
   }
-  return { pending, submit, check, forget };
+  return { pending, corrupted, forget, forgetCorrupted, exportCorrupted, submit, check };
 }
 export const submissions = createSubmissions();
 export function watchSubmissions(listener: () => void) {

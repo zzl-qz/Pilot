@@ -16,6 +16,7 @@
     "test:composer": "node scripts/composer-smoke.mjs",
     "test:notes": "node --import ./scripts/register-typescript.mjs --test scripts/notes.test.mjs && node scripts/notes-smoke.mjs",
     "test:mcp-ui": "node scripts/mcp-ui-smoke.mjs",
+    "test:submission-notice": "node --import ./scripts/register-typescript.mjs --test scripts/submissions.test.mjs && node scripts/submission-notice-smoke.mjs",
     "dev:ui": "vite",
     "build": "node scripts/build.mjs",
     "check": "node scripts/check.mjs",

@@ -63,7 +63,7 @@ test('明确 4xx 拒绝允许修改后新提交；未知 409 与 5xx 保留凭�
     assert.equal(f.manager.pending('s').length,expected==='rejected'?0:1);
   }
 });
-test('凭据获取失败、存储不可用或损坏时不发送业务请求，锁会释放', async () => {
+test('凭据获取失败、存储不可用时不发送业务请求，锁会释放', async () => {
   const f=fixture(); const token=f.client.submissionToken;
   f.client.submissionToken=async()=>{throw Error('offline');};
   assert.equal((await f.manager.submit('s',{content:'任务'},()=>true)).state,'rejected');
@@ -71,8 +71,42 @@ test('凭据获取失败、存储不可用或损坏时不发送业务请求，�
   f.storage.setItem=()=>{throw Error('QuotaExceeded');};
   assert.equal((await f.manager.submit('s',{content:'任务'},()=>true)).state,'rejected');
   assert.equal(f.calls.length,0);
-  f.data.set('pilot.pending-submission:broken','broken');
-  assert.equal((await f.manager.submit('s',{content:'任务'},()=>true)).state,'rejected');
+});
+
+test('一条损坏的旧凭据不再阻止其他会话发送，并可导出和删除', async () => {
+  const f=fixture();
+  f.data.set('pilot.pending-submission:broken','{not json');
+  // 正常会话照常发送：损坏记录不能把整个读取打断
+  assert.equal((await f.manager.submit('s1',{content:'任务'},()=>true)).state,'accepted');
+  assert.deepEqual(f.manager.pending('s1'),[]);
+  const broken = f.manager.corrupted();
+  assert.equal(broken.length,1);
+  assert.equal(broken[0].key,'pilot.pending-submission:broken');
+  assert.equal(broken[0].raw,'{not json');
+  assert.match(f.manager.exportCorrupted(), /\{not json/);
+  // 损坏记录跨刷新仍然存在，且仍不阻塞
+  const reopened = createSubmissions(f.client, () => f.storage);
+  assert.equal(reopened.corrupted().length,1);
+  assert.equal((await reopened.submit('s2',{content:'任务'},()=>true)).state,'accepted');
+  // 人工删除后才消失；删除不会发送任何请求
+  const before = f.calls.length;
+  reopened.forgetCorrupted('pilot.pending-submission:broken');
+  assert.equal(reopened.corrupted().length,0);
+  assert.equal(f.calls.length,before);
+  assert.equal(f.data.has('pilot.pending-submission:broken'),false);
+});
+
+test('损坏凭据与正常待确认凭据共存时，正常凭据仍阻止自己的会话', async () => {
+  const f=fixture(); f.client.sendMessage=async(sessionId)=>{ if (sessionId==='s1') throw Error('超时'); f.calls.push(sessionId); return { sessionId }; };
+  assert.equal((await f.manager.submit('s1',{content:'任务'},()=>true)).state,'unknown');
+  f.data.set('pilot.pending-submission:broken','null');
+  assert.equal(f.manager.corrupted().length,1);
+  assert.equal(f.manager.pending('s1').length,1);
+  // 同一会话仍有真实待确认凭据：继续保持阻止，不能因为损坏记录被跳过而重复发送
+  assert.equal((await f.manager.submit('s1',{content:'任务'},()=>true)).state,'blocked');
+  // 其他会话不受影响
+  assert.equal((await f.manager.submit('s2',{content:'任务'},()=>true)).state,'accepted');
+  assert.deepEqual(f.calls, ['s2']);
 });
 test('同窗口并发提交只执行一次；令牌期间切换会话取消尚未发送的任务', async () => {
   const f=fixture(), gate=deferred(); f.client.submissionToken=()=>gate.promise;
