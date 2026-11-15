@@ -21,7 +21,7 @@ import { resolveComposerAction } from '../lib/composer-state.js';
 import { rankFileMatches } from '../lib/mention.js';
 import { filterQuickCommands, expandQuickCommand } from '../lib/commands.js';
 import { stepHistory } from '../lib/input-history.js';
-import { readTransferFiles, hasFileTransferHint, readTransferFilePaths } from '../lib/clipboard.js';
+import { readTransferFiles, hasFileTransferHint, readTransferFilePaths, transferDirectoryNames } from '../lib/clipboard.js';
 import { readAttachmentFile, readDesktopClipboardFiles } from '../lib/attachment-input.js';
 import { checkIncomingFile, requireAttachmentLimits } from '../lib/attachments.js';
 import { writeDraft, readDraft, dropDraft } from '../lib/drafts.js';
@@ -31,6 +31,17 @@ import { ModelPicker } from './ModelPicker.jsx';
 import { usageLevel, usagePercent } from '../lib/context-usage.js';
 import { agentStatusLabel, summarizeAgents } from '../lib/agents.js';
 import './conversation.css';
+
+/** 是否有真正阻止交互的模态弹窗；普通 <dialog open>（非模态）不算。 */
+function blockingDialogOpen() {
+  try {
+    return Boolean(document.querySelector('dialog[open]:modal'));
+  } catch {
+    // 旧内核不支持 :modal
+    const open = document.querySelector('dialog[open]') as HTMLElement | null;
+    return Boolean(open && open.getClientRects().length);
+  }
+}
 
 /**
  * 输入区：contenteditable 桥接旧版 composer-input（附件芯片 / @ 引用 / 粘贴纯文本），
@@ -219,6 +230,14 @@ export function Composer() {
       setDragging(false);
       if (!fileDrag(event)) return;
       event.preventDefault();
+      // 弹窗打开时不把文件加进背后的输入框，避免用户以为拖进了当前表单
+      if (blockingDialogOpen()) return;
+      const folders = transferDirectoryNames(event.dataTransfer);
+      if (folders.length) {
+        useStore.getState().showNotice(
+          `不能直接添加文件夹（${folders.slice(0, 3).join('、')}${folders.length > 3 ? ' 等' : ''}）；请压缩后再拖入，或拖入其中的文件。`);
+        return;
+      }
       const target = event.target;
       if (flowRef.current && target instanceof Node && flowRef.current.contains(target)) {
         inputRef.current?.placeCaretAtPoint(event.clientX, event.clientY);
@@ -247,7 +266,11 @@ export function Composer() {
 
   /** 所有入口（选择器、拖放、粘贴、桌面剪贴板路径）都经过同一条队列，保证预算和顺序一致。 */
   function queueAttachments(sources: Array<{ name: string; size: number; mimeType?: string; load: () => Promise<DraftAttachment> }>) {
-    if (submittingRef.current || !sources.length) return;
+    if (!sources.length) return;
+    if (submittingRef.current) {
+      useStore.getState().showNotice('正在发送当前消息，附件将在发送完成后才能继续添加。');
+      return;
+    }
     const owner = useStore.getState();
     const ownsDraft = () => {
       const { sessionId, sessionEpoch } = useStore.getState();
@@ -270,6 +293,13 @@ export function Composer() {
           }
           const item = await source.load();
           if (!ownsDraft() || !inputRef.current) continue;
+          // 按「同名 + 同大小 + 同内容」去重：同一张截图粘贴两次会被忽略，
+// 不同文件即使内容完全相同（例如两个都叫 hello 的 txt）也各自保留。
+          const duplicate = (inputRef.current.attachmentIds() || [])
+            .map((id) => draftFilesRef.current.get(id))
+            .some((current) => current && current.name === item.name && current.size === item.size
+              && current.dataBase64 === item.dataBase64);
+          if (duplicate) continue;
           draftFilesRef.current.set(item.id, item);
           inputRef.current.insertAttachments([item]);
           inputRef.current.focus();

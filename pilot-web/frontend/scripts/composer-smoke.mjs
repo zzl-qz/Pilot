@@ -111,6 +111,29 @@ async function run(page, name) {
   await page.waitForFunction(()=>document.querySelectorAll('[data-chip="attachment"]').length===3);
   await transfer('paste','empty.txt',''); assert.equal(await chips.count(),3);
   await transfer('paste','large.txt','x'.repeat(2*1024*1024+1)); assert.equal(await chips.count(),3);
+  // 拖到窗口空白处（不是输入框）也应加入草稿
+  await page.evaluate(() => {
+    const data = new DataTransfer();
+    data.items.add(new File(['anywhere'], 'anywhere.bin', { type: 'application/octet-stream' }));
+    document.body.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+  });
+  await page.waitForFunction(() => document.querySelectorAll('[data-chip="attachment"]').length === 4);
+  await page.locator('[data-chip="attachment"]').last().locator('.chip-remove').click();
+  // 从网页拖入富文本：只接受纯文本，不插入外部 DOM，也不能被当成附件
+  const beforeHtmlDrop = await page.evaluate(() => store.getState().composerApi.getText());
+  await input.evaluate(el => {
+    const data = new DataTransfer();
+    data.setData('text/html', '<b>加粗</b>');
+    data.setData('text/plain', '加粗');
+    el.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }));
+  });
+  assert.equal(await page.evaluate(() => store.getState().composerApi.getText()), beforeHtmlDrop + '加粗');
+  assert.equal(await chips.count(), 3, '富文本不能变成附件');
+  // SVG 是文本/文件，不能当图片附件，否则图片位置数和服务端对不上
+  await transfer('paste', 'logo.svg', '<svg/>', 'image/svg+xml');
+  assert.equal(await chips.count(), 4);
+  assert.equal(await page.locator('[data-chip="attachment"].is-image').count(), 0, 'SVG 不应生成图片芯片');
+  await page.locator('[data-chip="attachment"]').last().locator('.chip-remove').click();
   await page.evaluate(()=>store.setState({sessionId:'test-b'})); await page.waitForTimeout(50); assert.equal(await chips.count(),0);
   await page.evaluate(()=>store.setState({sessionId:'test-a'})); await page.waitForTimeout(50); assert.equal(await chips.count(),3,'切换会话保留附件');
   await page.evaluate(()=>window.failSend=true);

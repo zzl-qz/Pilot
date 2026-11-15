@@ -198,13 +198,16 @@ public class AttachmentService {
                 }
             }
             long bytes = symbols * 6L / 8L;
-            if (bytes == 0 || bytes > limits.maxFileBytes()) {
+            if (bytes == 0) {
+                throw new IllegalArgumentException("附件「" + item.name() + "」是空文件，无法添加");
+            }
+            if (bytes > limits.maxFileBytes()) {
                 throw new IllegalArgumentException(
-                    "附件「" + item.name() + "」需大于 0 且不超过 " + limits.maxFileBytes() + " 字节");
+                    "附件「" + item.name() + "」超过单文件上限（" + humanBytes(limits.maxFileBytes()) + "）");
             }
             total += bytes;
             if (total > limits.maxTotalBytes()) {
-                throw new IllegalArgumentException("附件总大小超过 " + limits.maxTotalBytes() + " 字节");
+                throw new IllegalArgumentException("附件总大小超过单条消息上限（" + humanBytes(limits.maxTotalBytes()) + "）");
             }
             encoded.add(new EncodedAttachment(item, raw));
         }
@@ -345,7 +348,15 @@ public class AttachmentService {
 
     private static String resolveMime(String mime, String name) {
         if (mime != null && !mime.isBlank() && !"application/octet-stream".equalsIgnoreCase(mime.strip())) {
-            return mime.strip().toLowerCase(Locale.ROOT);
+            String declared = mime.strip().toLowerCase(Locale.ROOT);
+            // 浏览器/系统可能给 image/jpg、image/pjpeg、image/x-png；统一到多模态支持的类型，
+            // 否则同一张图在客户端算图片、在服务端算文件，图片位置数对不上。
+            return switch (declared) {
+                case "image/jpg", "image/pjpeg" -> "image/jpeg";
+                case "image/x-png" -> "image/png";
+                case "image/x-webp" -> "image/webp";
+                default -> declared;
+            };
         }
         String lower = name == null ? "" : name.toLowerCase(Locale.ROOT);
         if (lower.endsWith(".png")) {
@@ -419,7 +430,27 @@ public class AttachmentService {
         if (sanitized.isBlank() || sanitized.matches("\\.+")) {
             sanitized = "file";
         }
-        return sanitized.codePointCount(0, sanitized.length()) <= limit ? sanitized
-            : sanitized.substring(0, sanitized.offsetByCodePoints(0, limit));
+        if (sanitized.codePointCount(0, sanitized.length()) <= limit) {
+            return sanitized;
+        }
+        // 截断时保留扩展名：预览和 read_attachment 都按扩展名判断格式，丢了 .docx 就打不开了
+        String extension = "";
+        int dot = sanitized.lastIndexOf('.');
+        if (dot > 0 && sanitized.length() - dot <= 12) {
+            extension = sanitized.substring(dot);
+        }
+        int keep = Math.max(1, limit - extension.codePointCount(0, extension.length()));
+        return sanitized.substring(0, sanitized.offsetByCodePoints(0, keep)) + extension;
+    }
+
+    /** 字节数的展示口径，与前端 formatBytes 一致：KB 保留一位、MB 一位小数。 */
+    private static String humanBytes(long bytes) {
+        if (bytes < 1024) {
+            return bytes + " B";
+        }
+        if (bytes < 1024 * 1024) {
+            return Math.round(bytes / 1024.0) + " KB";
+        }
+        return String.format(Locale.ROOT, "%.1f MB", bytes / (1024.0 * 1024.0));
     }
 }

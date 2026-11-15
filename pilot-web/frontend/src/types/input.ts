@@ -12,9 +12,14 @@ export interface AttachmentMarker { name: string; mimeType: string; kind: 'inlin
 export type MessagePart = { type: 'text'; text: string } | { type: 'image'; image: MessageAttachment } | { type: 'files'; files: MessageAttachment[] };
 export interface TransferData {
   files?: ArrayLike<File>;
-  items?: ArrayLike<{ kind: string; getAsFile?: () => File | null }>;
+  items?: ArrayLike<{ kind: string; getAsFile?: () => File | null; webkitGetAsEntry?: () => { isDirectory: boolean; name?: string } | null }>;
   types?: ArrayLike<string>;
   getData?: (format: string) => string;
+}
+/** 拖放条目上浏览器额外提供的文件系统入口，用来分辨文件夹与文件。 */
+export interface TransferItem {
+  kind: string;
+  webkitGetAsEntry?: () => { isDirectory: boolean; name?: string } | null;
 }
 interface CommandFields {
   name: string;

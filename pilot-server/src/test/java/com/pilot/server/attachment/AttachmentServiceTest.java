@@ -165,6 +165,17 @@ class AttachmentServiceTest {
             "hi",
             List.of(new AttachmentService.Inbound("big.bin", "image/png", Base64.getEncoder().encodeToString(big)))));
         assertTrue(error.getMessage().contains("超过"), error.getMessage());
+        assertTrue(error.getMessage().contains("单文件上限"), error.getMessage());
+        assertTrue(error.getMessage().contains("MB"), "提示应给出可读的大小单位：" + error.getMessage());
+    }
+
+    @Test
+    void rejectsEmptyFileWithItsOwnReason() {
+        AttachmentService service = new AttachmentService(root);
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> service.prepare("ses_1",
+            "hi", List.of(new AttachmentService.Inbound("empty.bin", "application/octet-stream", ""))));
+        assertTrue(error.getMessage().contains("空") || error.getMessage().contains("内容为空"), error.getMessage());
+        assertFalse(Files.exists(service.sessionDir("ses_1")), "预检失败不能留下目录");
     }
 
     @Test
@@ -178,6 +189,7 @@ class AttachmentServiceTest {
                     new AttachmentService.Inbound("a.bin", "image/png", Base64.getEncoder().encodeToString(file)),
                     new AttachmentService.Inbound("b.bin", "image/png", Base64.getEncoder().encodeToString(file)))));
         assertTrue(error.getMessage().contains("总大小"), error.getMessage());
+        assertTrue(error.getMessage().contains("单条消息上限"), error.getMessage());
     }
 
     @Test
@@ -253,6 +265,34 @@ class AttachmentServiceTest {
         assertTrue(prepared.content().contains("read_attachment"));
         Path saved = Path.of(prepared.content().split("已保存到 ")[1].split("，")[0].trim());
         assertEquals(docx.length, Files.size(saved));
+    }
+
+    @Test
+    void truncatesLongNamesButKeepsExtension() throws IOException {
+        AttachmentService service = new AttachmentService(root);
+        String longName = "很长的文档名称".repeat(20) + ".docx";
+        AttachmentService.Prepared prepared =
+            service.prepare("ses_long", "", List.of(new AttachmentService.Inbound(longName, "application/octet-stream",
+                Base64.getEncoder().encodeToString(new byte[] {'P', 'K', 3, 4, 1}))));
+
+        String saved = prepared.content().split("已保存到 ")[1].split("，")[0].trim();
+        String stored = Path.of(saved).getFileName().toString();
+        assertTrue(stored.endsWith(".docx"), stored);
+        // UUID 前缀 + 连字符 + 60 个码点
+        assertTrue(stored.codePointCount(0, stored.length()) <= 37 + 60, stored);
+        assertTrue(Files.isRegularFile(Path.of(saved)));
+    }
+
+    @Test
+    void normalizesAliasImageMimeTypesSoPositionsLineUp() {
+        AttachmentService service = new AttachmentService(root);
+        // 浏览器可能给 image/jpg：必须和多模态支持的 image/jpeg 视为同一类
+        AttachmentService.Prepared prepared = service.prepare("ses_mime", "看图",
+            List.of(new AttachmentService.Inbound("shot.jpg", "image/jpg", base64("jpeg"))), List.of(1));
+
+        assertEquals(1, prepared.attachments().size());
+        assertEquals("image/jpeg", prepared.attachments().getFirst().mimeType());
+        assertEquals(List.of(1), prepared.imagePositions());
     }
 
     @Test

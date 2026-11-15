@@ -32,7 +32,10 @@ export function attachmentBatchError(files: readonly { name?: string; size?: num
   return total > limits.maxTotalBytes ? `附件总量超过单条 ${formatBytes(limits.maxTotalBytes)} 的预算。` : '';
 }
 
-const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'bmp', 'ico']);
+// 服务端只会把这四种当作图片交给模型；svg/bmp/ico 必须按普通文件走，否则图片位置数与服务端不一致会导致发送失败。
+const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif']);
+const IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/pjpeg', 'image/webp', 'image/gif']);
+const IMAGE_BADGE_EXTENSIONS = new Set(['svg', 'bmp', 'ico']);
 const CODE_EXTENSIONS = new Set([
   'java', 'kt', 'kts', 'js', 'mjs', 'ts', 'tsx', 'jsx', 'css', 'html', 'vue', 'svelte', 'py', 'go', 'rs',
   'c', 'h', 'cpp', 'hpp', 'cs', 'rb', 'php', 'sh', 'bat', 'ps1', 'sql', 'gradle'
@@ -47,22 +50,29 @@ function extensionOf(name: unknown) {
   return dot > 0 && dot < text.length - 1 ? text.slice(dot + 1).toLowerCase() : '';
 }
 
+/**
+ * 能否作为图片附件（有缩略图、参与图片位置）。
+ * 只认服务端支持的栅格格式：声称 image/* 但实际按文件处理的类型（如 SVG）不能算。
+ */
 export function isImageAttachment(item: MessageAttachment | null | undefined) {
   if (!item) {
     return false;
   }
   const mime = String(item.mimeType || '').toLowerCase();
-  if (mime.startsWith('image/')) {
+  if (IMAGE_MIME_TYPES.has(mime)) {
     return true;
   }
-  return (!mime || mime === 'application/octet-stream') && IMAGE_EXTENSIONS.has(extensionOf(item.name));
+  if (mime && mime !== 'application/octet-stream') {
+    return false;
+  }
+  return IMAGE_EXTENSIONS.has(extensionOf(item.name));
 }
 
 /** 文件卡片左侧的小徽标：扩展名大写（最多 4 个字符）+ 一个用来上色的类别。 */
 export function fileBadge(name: unknown, mimeType = '') {
   const ext = extensionOf(name);
   let tone = 'file';
-  if (IMAGE_EXTENSIONS.has(ext) || String(mimeType).startsWith('image/')) {
+  if (IMAGE_EXTENSIONS.has(ext) || IMAGE_BADGE_EXTENSIONS.has(ext) || String(mimeType).startsWith('image/')) {
     tone = 'image';
   } else if (CODE_EXTENSIONS.has(ext)) {
     tone = 'code';
@@ -92,10 +102,22 @@ export function formatBytes(bytes: unknown) {
 
 /**
  * 判断一个新文件能不能加入当前草稿。
- * 重复（同名同大小）直接静默忽略，其余情况返回一句能直接展示给用户的原因。
+ *
+ * <p>同名同大小的非图片附件视为重复并静默忽略（图片在读取后按内容去重，
+ * 因为截图常常同名）；其余情况返回一句能直接展示给用户的原因。
+ *
+ * @param options.directory 拖入的是文件夹而不是文件
  */
-export function checkIncomingFile(existing: readonly MessageAttachment[] | null | undefined, file: { name?: string; size: number; mimeType?: string; type?: string }, limits: AttachmentLimitsBudget): { ok: boolean; silent?: boolean; reason: string } {
+export function checkIncomingFile(
+  existing: readonly MessageAttachment[] | null | undefined,
+  file: { name?: string; size: number; mimeType?: string; type?: string },
+  limits: AttachmentLimitsBudget,
+  options: { directory?: boolean } = {}
+): { ok: boolean; silent?: boolean; reason: string } {
   const name = (file && file.name) || '未命名文件';
+  if (options.directory) {
+    return { ok: false, reason: `「${name}」是文件夹，不能直接添加；请压缩后再拖入，或拖入其中的文件。` };
+  }
   const list = Array.isArray(existing) ? existing : [];
   const mime = String((file && (file.mimeType || file.type)) || '').toLowerCase();
   const image = mime.startsWith('image/') || IMAGE_EXTENSIONS.has(extensionOf(name));

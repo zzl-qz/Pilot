@@ -704,16 +704,22 @@ function clipboardPath(value) {
   if (/^file:/i.test(text)) {
     try { return fileURLToPath(new URL(text)); } catch { return ''; }
   }
-  if (process.platform === 'win32') return /^[A-Za-z]:[\\/]/.test(text) ? text : '';
+  if (process.platform === 'win32') {
+    // 盘符路径、UNC（\\server\share）与扩展长度前缀（\\?\）都要接受，否则网络盘文件会被当成普通文本
+    return /^[A-Za-z]:[\\/]/.test(text) || /^\\\\/.test(text) ? text : '';
+  }
   return text.startsWith('/') ? text : '';
 }
 
-function clipboardFilePaths() {
-  const found = new Set();
+function clipboardFilePaths(limit) {
+  // Windows 不区分大小写：同一个文件可能以不同大小写出现两次，去重但不能改写真实大小写
+  const found = new Map();
+  const key = path => (process.platform === 'win32' ? path.toLowerCase() : path);
   const addLines = value => {
     for (const line of String(value || '').split(/\r?\n/)) {
+      if (found.size > limit) return;
       const path = clipboardPath(line);
-      if (path) found.add(path);
+      if (path && !found.has(key(path))) found.set(key(path), path);
     }
   };
   let formats = [];
@@ -733,12 +739,13 @@ function clipboardFilePaths() {
   if (!found.size) {
     try { addLines(clipboard.readText()); } catch { /* 忽略 */ }
   }
-  return [...found];
+  return [...found.values()];
 }
 
 async function readClipboardFiles(rawLimits) {
   const limits = clipboardLimits(rawLimits);
-  const paths = clipboardFilePaths();
+  const human = bytes => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`);
+  const paths = clipboardFilePaths(limits.maxFiles);
   if (!paths.length) {
     return { ok: false, error: '系统剪贴板中没有文件。复制文件后再按 Ctrl+V，或直接拖入文件。' };
   }
@@ -752,17 +759,17 @@ async function readClipboardFiles(rawLimits) {
     let info;
     try { info = await stat(path); } catch { return { ok: false, error: `无法读取「${name}」，文件可能已移动或没有权限。` }; }
     if (!info.isFile()) {
-      return { ok: false, error: `「${name}」不是普通文件；文件夹请压缩后再拖入。` };
+      return { ok: false, error: `「${name}」不是普通文件；文件夹请压缩后再拖入，或拖入其中的文件。` };
     }
     if (info.size <= 0) {
       return { ok: false, error: `「${name}」是空文件，无法添加。` };
     }
     if (info.size > limits.maxFileBytes) {
-      return { ok: false, error: `「${name}」超过单文件大小上限。` };
+      return { ok: false, error: `「${name}」超过单文件上限（${human(limits.maxFileBytes)}）。` };
     }
     total += info.size;
     if (total > limits.maxTotalBytes) {
-      return { ok: false, error: '附件总量超过当前消息的预算。' };
+      return { ok: false, error: `附件总量超过单条消息上限（${human(limits.maxTotalBytes)}）。` };
     }
     let bytes;
     try { bytes = await readFile(path); } catch { return { ok: false, error: `无法读取「${name}」的内容。` }; }

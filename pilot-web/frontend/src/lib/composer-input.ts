@@ -258,6 +258,22 @@ export function createComposerInput(root: HTMLElement, { onChange = () => {}, on
     document.execCommand('insertText', false, text.replace(/\r\n?/g, '\n'));
   }, { signal: listeners.signal });
 
+  root.addEventListener('drop', (event) => {
+    const data = event.dataTransfer;
+    if (!data || readTransferFiles(data).length || hasFileTransferHint(data)) {
+      // 文件交给 composer 的窗口级处理；这里不能 preventDefault
+      return;
+    }
+    // 从网页拖图片/富文本进来时 contenteditable 会塞入外部 DOM；只接受纯文本
+    event.preventDefault();
+    const text = data.getData('text/plain');
+    if (!text) {
+      return;
+    }
+    root.focus();
+    document.execCommand('insertText', false, text.replace(/\r\n?/g, '\n'));
+  }, { signal: listeners.signal });
+
   refresh();
 
   return {

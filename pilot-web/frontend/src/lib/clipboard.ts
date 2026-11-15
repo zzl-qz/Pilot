@@ -1,4 +1,4 @@
-import type { TransferData } from '../types/input.js';
+import type { TransferData, TransferItem } from '../types/input.js';
 /**
  * 写剪贴板：优先异步 API，失败退回 execCommand。
  *
@@ -80,6 +80,34 @@ export function readTransferFilePaths(data: TransferData | null | undefined): st
     } catch { /* 受限 WebView 不暴露 URI 内容 */ }
   }
   return [...new Set(found)];
+}
+
+/** 拖入的来源里是否有文件夹：浏览器会把它伪装成 size 为 0 的 File，必须提前分辨。 */
+export function transferHasDirectory(data: (TransferData & { items?: ArrayLike<TransferItem> }) | null | undefined) {
+  if (!data) return false;
+  try {
+    return Array.from(data.items || []).some((item) => {
+      if (item.kind !== 'file') return false;
+      const entry = item.webkitGetAsEntry?.();
+      return Boolean(entry?.isDirectory);
+    });
+  } catch {
+    return false;
+  }
+}
+
+/** 拖入的文件名集合，用来给「文件夹被跳过」这类提示带上名字。 */
+export function transferDirectoryNames(data: (TransferData & { items?: ArrayLike<TransferItem> }) | null | undefined) {
+  if (!data) return [];
+  const names: string[] = [];
+  try {
+    for (const item of Array.from(data.items || [])) {
+      if (item.kind !== 'file') continue;
+      const entry = item.webkitGetAsEntry?.();
+      if (entry?.isDirectory) names.push(entry.name || '文件夹');
+    }
+  } catch { /* 受限 WebView 不提供 entry */ }
+  return names;
 }
 
 /** File 不可读时识别传输标记和 URI；部分 Linux 文件管理器只提供这些。普通路径文本仍可粘贴。 */
