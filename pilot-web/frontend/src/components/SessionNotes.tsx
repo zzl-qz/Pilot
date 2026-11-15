@@ -230,12 +230,16 @@ export function SessionNotes({ onClose, embedded = false, onAsk }: { onClose?: (
             </div>
           </div>
           : <>
-            <button type="button" className="note-content" title="添加到输入框" onClick={() => insert(note.content)}>
-              {note.content}
-            </button>
+            <div className="note-head">
+              <button type="button" className="note-content" title="添加到输入框" onClick={() => insert(note.content)}>
+                {note.content}
+              </button>
+              {/* 状态在 .note-actions 之外：那组按钮平时是透明的，
+                  状态跟着一起隐藏，上方的筛选器就失去了对照物。 */}
+              <span className="note-status" data-status={note.status || 'inbox'}>{NOTE_STATUS_LABELS[note.status || 'inbox'] || note.status}</span>
+            </div>
             {note.source && <NoteSource source={note.source} />}
             <div className="note-actions">
-              <span className="note-status" data-status={note.status || 'inbox'}>{NOTE_STATUS_LABELS[note.status || 'inbox'] || note.status}</span>
               {onAsk && (
                 <Button size="sm" variant="ghost" label="就这条问一下" isDisabled={Boolean(saving)}
                   onClick={() => { setLocalError(''); onAsk(note.content); }} />

@@ -101,6 +101,9 @@
 .note-content:hover { color: var(--ink); }
 .note-content:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; border-radius: 4px; }
 
+/* 想法正文与状态同一行：状态要一直看得见，否则上方的筛选器没有对照物。 */
+.note-head { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 8px; }
+
 .note-actions { display: flex; flex: none; align-items: center; gap: 4px; opacity: 0; transition: opacity 0.12s ease; }
 .note-row:hover .note-actions,
 .note-row:focus-within .note-actions { opacity: 1; }

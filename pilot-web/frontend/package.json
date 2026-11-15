@@ -25,6 +25,7 @@
     "test:queue-hold": "node --import ./scripts/register-typescript.mjs --test scripts/queue-target.test.mjs && node scripts/queue-hold-smoke.mjs",
     "test:queue-edit": "node --import ./scripts/register-typescript.mjs --test scripts/queue-target.test.mjs && node scripts/queue-edit-smoke.mjs",
     "test:submission-notice": "node --import ./scripts/register-typescript.mjs --test scripts/submissions.test.mjs && node scripts/submission-notice-smoke.mjs",
+    "test:verification-ui": "node scripts/verify-verification-ui.mjs",
     "dev:ui": "vite",
     "build": "node scripts/build.mjs",
     "check": "node scripts/check.mjs",
