@@ -32,9 +32,10 @@ public final class ModelCatalog {
     }
 
     /**
-     * 端点写法兼容，规则与 chat completions 客户端保持一致：
+     * 端点写法兼容，规则与运行客户端保持一致：
      * 服务根地址补 {@code /v1/models}、任意 {@code /v1} 结尾（含 {@code /api/llm/v1}
-     * 这类带前缀的）补 {@code /models}、完整的 {@code /chat/completions} 地址尾部替换。
+     * 这类带前缀的）补 {@code /models}、完整的 {@code /chat/completions} 或 {@code /responses}
+     * 地址把尾部替换成 {@code /models}（协议路由换成同一前缀下的目录）。
      *
      * <p>其它自定义路径原样追加 {@code /models}：猜错了会在响应里
      * fail-visible 地报出来，用户可以改端点写法再试。
@@ -50,8 +51,11 @@ public final class ModelCatalog {
         if (path.endsWith("/v1") || path.endsWith("/v1/")) {
             return appendPath(endpoint, "/models");
         }
-        if (path.endsWith("/chat/completions")) {
-            return replaceSuffix(endpoint, "/chat/completions", "/models");
+        // 完整的协议地址：把协议路由换成同一网关前缀下的模型目录
+        for (String route : List.of("/chat/completions", "/responses", "/completions")) {
+            if (path.endsWith(route)) {
+                return replaceSuffix(endpoint, route, "/models");
+            }
         }
         return appendPath(endpoint, "/models");
     }

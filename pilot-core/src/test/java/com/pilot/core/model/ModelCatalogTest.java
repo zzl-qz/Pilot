@@ -48,6 +48,20 @@ class ModelCatalogTest {
             ModelCatalog.resolveModelsUri(URI.create("https://gateway.test/v1/chat/completions?api-version=2024")));
     }
 
+    /** 完整的 Responses 地址（运行客户端已支持）也要换算成同一前缀下的 /models。 */
+    @Test
+    void resolvesModelsUriFromCompleteResponsesEndpoint() {
+        assertEquals(URI.create("https://gateway.test/v1/models"),
+            ModelCatalog.resolveModelsUri(URI.create("https://gateway.test/v1/responses")));
+        assertEquals(URI.create("https://gateway.test/relay/v1/models"),
+            ModelCatalog.resolveModelsUri(URI.create("https://gateway.test/relay/v1/responses")));
+        assertEquals(URI.create("https://gateway.test/relay/v1/models?api-version=2024"),
+            ModelCatalog.resolveModelsUri(URI.create("https://gateway.test/relay/v1/responses?api-version=2024")));
+        // 旧版 completions 同样按协议路由处理
+        assertEquals(URI.create("https://gateway.test/relay/v1/models"),
+            ModelCatalog.resolveModelsUri(URI.create("https://gateway.test/relay/v1/completions")));
+    }
+
     /** 与 chat 客户端同一套约定：带前缀的 /v1 基址也要补 /models。 */
     @Test
     void resolvesModelsUriForPrefixedV1Endpoints() {
@@ -165,6 +179,29 @@ class ModelCatalogTest {
             () -> ModelCatalog.fetch(httpClient, json, URI.create("http://127.0.0.1:1/v1"), "sk-never-leak-123"));
         assertTrue(exception.getMessage().contains("模型列表请求失败"), exception.getMessage());
         assertFalse(exception.getMessage().contains("sk-never-leak-123"), "报错里不能带密钥");
+    }
+
+    @Test
+    void fetchesModelsThroughPrefixedResponsesEndpoint() throws IOException {
+        var requested = new ConcurrentHashMap<String, String>();
+        var server = respond(exchange -> {
+            requested.put("uri", exchange.getRequestURI().toString());
+            byte[] bytes = "{\"data\":[{\"id\":\"relay-model\"}]}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (var out = exchange.getResponseBody()) {
+                out.write(bytes);
+            }
+        });
+        server.start();
+        try {
+            var endpoint = URI
+                .create("http://127.0.0.1:" + server.getAddress().getPort() + "/relay/v1/responses?api-version=2024");
+            assertEquals(List.of("relay-model"), ModelCatalog.fetch(httpClient, json, endpoint, "k"));
+            assertEquals("/relay/v1/models?api-version=2024", requested.get("uri"));
+        } finally {
+            server.stop(0);
+        }
     }
 
     private static URI base(HttpServer server) {
