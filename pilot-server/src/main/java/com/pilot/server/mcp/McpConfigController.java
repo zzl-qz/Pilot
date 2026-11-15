@@ -30,6 +30,7 @@ import com.pilot.core.mcp.McpToolInfo;
 import com.pilot.core.mcp.McpTrustStore;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.core.util.Texts;
 import com.pilot.server.common.web.ApiErrors;
 import com.pilot.server.common.web.SessionLookup;
 import com.pilot.server.config.AgentProperties;
@@ -253,6 +254,34 @@ public class McpConfigController {
         return new ImportResponse(List.copyOf(entries.keySet()), List.copyOf(overwritten));
     }
 
+    /**
+     * 测试连接：真正拉起服务器进程（执行配置里的 command）并读取工具清单。
+     * 用户在管理界面点这个按钮即视为主动授权本次启动（与对话内「批准」同语义）；
+     * 但不建立信任——信任仍由「信任此服务器」单独落库，模型调用照常按决策矩阵判定。
+     *
+     * <p>启动失败不是异常而是预期内的结果，用 {@code ok=false} 返回原因；npx 首次拉包可能较慢。
+     */
+    @PostMapping("/{name}/probe")
+    public ProbeResponse probe(@PathVariable String id, @PathVariable String name) {
+        McpManager manager = required();
+        Path workspace = workspace(id);
+        McpServerConfig config = manager.servers(workspace).get(name);
+        if (config == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "没有名为 " + name + " 的 MCP 服务器");
+        }
+        if (!config.usable()) {
+            return new ProbeResponse(false, config.unsupported() == null ? "缺少 command" : config.unsupported(),
+                false, List.of());
+        }
+        try {
+            List<McpToolInfo> tools = manager.tools(workspace, name);
+            return new ProbeResponse(true, "", manager.running(workspace, name),
+                tools.stream().limit(80).map(ProbeTool::of).toList());
+        } catch (McpException e) {
+            return new ProbeResponse(false, e.getMessage(), false, List.of());
+        }
+    }
+
     // ————— 内部 —————
 
     /** 把 ResponseStatusException 的原因带进响应体；默认错误页只给状态短语，界面上看不到原因。 */
@@ -366,5 +395,16 @@ public class McpConfigController {
     public record ServerPayload(String name, String source, String command, String commandOnly, boolean usable,
         boolean running, String failure, String unsupported, int toolCount, List<String> tools, String trustState,
         String trustNote, String configHash) {
+    }
+
+    /** 测试结果：ok=false 时 error 说明原因；tools 为启动后读到的工具清单（前 80 个）。 */
+    public record ProbeResponse(boolean ok, String error, boolean running, List<ProbeTool> tools) {
+    }
+
+    /** 工具条目：名称 + 一行描述 + 是否声明只读。 */
+    public record ProbeTool(String name, String description, boolean readOnly) {
+        static ProbeTool of(McpToolInfo info) {
+            return new ProbeTool(info.name(), Texts.oneLine(info.description(), 120), info.readOnlyHint());
+        }
     }
 }

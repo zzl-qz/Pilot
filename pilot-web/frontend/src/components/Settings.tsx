@@ -425,6 +425,9 @@ function SkillsInstall({ onDone }: { onDone: () => void }) {
 
 /* ---------- MCP 服务器与信任管理 ---------- */
 
+type McpProbeState = { loading: boolean; ok: boolean; error: string; running: boolean;
+  tools: S.McpConfigControllerProbeTool[] };
+
 function McpSettings() {
   const sessionId = useStore(state => state.sessionId);
   const [servers, setServers] = useState<S.McpConfigControllerServerPayload[] | null>(null);
@@ -434,6 +437,7 @@ function McpSettings() {
   const [hasError, setHasError] = useState(false);
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState('');
+  const [probes, setProbes] = useState<Record<string, McpProbeState>>({});
   const sequence = useRef(0);
 
   const load = useCallback(async () => {
@@ -457,19 +461,27 @@ function McpSettings() {
     return () => { sequence.current++; };
   }, [load, sessionId]);
 
-  async function revoke(server: string) {
+  /** 测试连接：真正拉起进程并读工具清单。用户点按钮即授权这次启动；信任需另行确认。 */
+  async function probe(server: string) {
     if (!sessionId || busy) return;
     setBusy(server);
-    setHint('正在撤销信任…');
     setHasError(false);
+    setProbes(current => ({ ...current, [server]: { loading: true, ok: false, error: '', running: false, tools: [] } }));
     try {
-      await api.mcpTrust(sessionId, { action: 'revoke', server });
-      setHint(`已撤销 ${server} 的信任；它的启动与调用会回到逐次审批。`);
-      await load();
-      void useStore.getState().loadCapabilities();
+      const data = await api.mcpProbeServer(sessionId, server);
+      if (data) {
+        setProbes(current => ({ ...current, [server]: { loading: false, ok: data.ok, error: data.error, running: data.running, tools: data.tools || [] } }));
+        setHint(data.ok
+          ? `${server} 连接成功，声明 ${data.tools?.length || 0} 个工具${data.running ? '' : '（进程未保持运行）'}。`
+          : `${server} 连接失败：${data.error}`);
+        setHasError(!data.ok);
+      }
+      await load();  // 启动状态可能变化
     } catch (failure) {
+      const reason = errorInfo(failure).message || '';
       setHasError(true);
-      setHint('撤销失败。' + errorInfo(failure).message);
+      setHint('测试失败。' + reason);
+      setProbes(current => ({ ...current, [server]: { loading: false, ok: false, error: reason, running: false, tools: [] } }));
     } finally {
       setBusy('');
     }
@@ -513,14 +525,32 @@ function McpSettings() {
     }
   }
 
+  async function revoke(server: string) {
+    if (!sessionId || busy) return;
+    setBusy(server);
+    setHint('正在撤销信任…');
+    setHasError(false);
+    try {
+      await api.mcpTrust(sessionId, { action: 'revoke', server });
+      setHint(`已撤销 ${server} 的信任；它的启动与调用会回到逐次审批。`);
+      await load();
+      void useStore.getState().loadCapabilities();
+    } catch (failure) {
+      setHasError(true);
+      setHint('撤销失败。' + errorInfo(failure).message);
+    } finally {
+      setBusy('');
+    }
+  }
+
   return <section className="settings-group" aria-labelledby="mcp-heading">
     <div className="settings-group-heading" id="mcp-heading">
       <h3>MCP 服务器</h3>
-      <p>配置写进用户级 mcp.json（对所有工作区生效）；工作区 .mcp.json 的条目只读展示，同名时覆盖用户级。新服务器的首次启动仍会请求批准。</p>
+      <p>添加后先用「测试连接」验证，测试通过再决定是否信任；未信任时模型每次调用都会请求批准。</p>
     </div>
     {!sessionId && <p className="settings-status" role="status">开始一个对话后即可管理当前工作区的 MCP 服务器。</p>}
     {sessionId && <div className="settings-inline-actions">
-      <Button id="mcp-add-open" label={adding ? '收起表单' : '添加服务器…'} aria-expanded={adding}
+      <Button id="mcp-add-open" variant="primary" label={adding ? '收起表单' : '添加服务器…'} aria-expanded={adding}
         aria-controls={adding ? 'mcp-add-form' : undefined} onClick={() => setAdding(open => !open)} />
       <Button label="刷新" isDisabled={loading || Boolean(busy)} onClick={() => void load()} />
     </div>}
@@ -529,38 +559,56 @@ function McpSettings() {
       <p className="settings-status" role="alert">读取失败。{error}</p>
       <Button label="重新加载" onClick={() => void load()} />
     </div>}
-    {sessionId && !loading && servers && <ul className="mcp-server-list" aria-busy={loading}>
-      {servers.map(server => <li key={server.name} className="mcp-server-item">
-        <div className="mcp-server-head">
-          <code className="mcp-server-name">{server.name}</code>
-          <span className={`mcp-source-tag is-${server.source}`}>{mcpSourceLabel(server.source)}</span>
-          <span className={`cap-tag${server.running ? ' is-on' : server.usable ? '' : ' is-off'}`}>
-            {server.running ? `运行中 · ${server.toolCount} 个工具` : (server.usable ? '未启动' : '不可用')}
-          </span>
-          {server.usable && <span className={`cap-tag${server.trustState === 'STALE' ? ' is-stale' : server.trustState !== 'UNTRUSTED' ? ' is-readonly' : ''}`}>
-            {MCP_TRUST_LABELS[server.trustState] || server.trustState}
-          </span>}
-        </div>
-        {server.command && <p className="cap-desc cap-mono" title={server.command}>{server.command}</p>}
-        {!server.usable && server.unsupported && <p className="cap-reason">{server.unsupported}</p>}
-        {server.usable && !server.running && server.failure && <p className="cap-reason">上次启动失败：{server.failure}</p>}
-        {server.trustNote && <p className="cap-reason">{server.trustNote}</p>}
-        <div className="mcp-server-actions">
-          {server.usable && (server.trustState === 'UNTRUSTED' || server.trustState === 'STALE') && <Button
-            label={busy === server.name ? '处理中…' : server.trustState === 'STALE' ? '重新信任' : '信任此服务器'}
-            variant="ghost" isDisabled={Boolean(busy)} onClick={() => void trust(server)} />}
-          {server.trustState !== 'UNTRUSTED' && <Button
-            label={busy === server.name ? '处理中…' : '撤销信任'} variant="ghost" className="settings-danger"
-            isDisabled={Boolean(busy)} onClick={() => void revoke(server.name)} />}
-          {server.source === 'user' && <Button
-            label={busy === server.name ? '处理中…' : '删除'} variant="ghost"
-            isDisabled={Boolean(busy)}
-            onClick={() => useStore.getState().askConfirm({
-              title: '删除 MCP 服务器', message: `从用户级配置删除 ${server.name}，并撤销它的信任记录；已启动的连接会在下次启动时停用。`, confirmText: '删除', danger: true,
-              onConfirm: () => void remove(server.name)
-            })} />}
-        </div>
-      </li>)}
+    {sessionId && !loading && servers && <ul className="mcp-server-list" id="settings-mcp-list" aria-busy={loading}>
+      {servers.map(server => {
+        const probeState = probes[server.name];
+        return <li key={server.name} className="mcp-server-item" data-source={server.source}>
+          <div className="mcp-server-head">
+            <code className="mcp-server-name">{server.name}</code>
+            <span className={`mcp-source-tag is-${server.source}`}>{mcpSourceLabel(server.source)}</span>
+            <span className={`cap-tag${server.running ? ' is-on' : ' is-off'}`}>
+              {server.running ? `运行中 · ${server.toolCount} 个工具` : (server.usable ? '未启动' : '不可用')}
+            </span>
+            {server.usable && <span className={`cap-tag${server.trustState === 'STALE' ? ' is-stale' : server.trustState !== 'UNTRUSTED' ? ' is-trusted' : ' is-warn'}`}>
+              {MCP_TRUST_LABELS[server.trustState] || server.trustState}
+            </span>}
+            <span className="mcp-server-actions">
+              {server.usable && <Button
+                label={probeState?.loading || busy === server.name ? '测试中…' : '测试连接'} size="sm" variant="ghost"
+                isDisabled={Boolean(busy)} onClick={() => void probe(server.name)} />}
+              {server.usable && (server.trustState === 'UNTRUSTED' || server.trustState === 'STALE') && <Button
+                label={busy === server.name ? '处理中…' : server.trustState === 'STALE' ? '重新信任' : '信任此服务器'}
+                size="sm" variant="ghost"
+                isDisabled={Boolean(busy)} onClick={() => void trust(server)} />}
+              {server.trustState !== 'UNTRUSTED' && <Button
+                label={busy === server.name ? '处理中…' : '撤销信任'} size="sm" variant="ghost" className="settings-danger"
+                isDisabled={Boolean(busy)} onClick={() => void revoke(server.name)} />}
+              {server.source === 'user' && <Button
+                label={busy === server.name ? '处理中…' : '删除'} size="sm" variant="ghost"
+                isDisabled={Boolean(busy)}
+                onClick={() => useStore.getState().askConfirm({
+                  title: '删除 MCP 服务器', message: `从用户级配置删除 ${server.name}，并撤销它的信任记录；已启动的连接会在下次启动时停用。`, confirmText: '删除', danger: true,
+                  onConfirm: () => void remove(server.name)
+                })} />}
+            </span>
+          </div>
+          {server.command && <p className="cap-desc cap-mono" title={server.command}>{server.command}</p>}
+          {!server.usable && server.unsupported && <p className="cap-reason">{server.unsupported}</p>}
+          {server.usable && !server.running && server.failure && <p className="cap-reason">上次启动失败：{server.failure}</p>}
+          {server.trustNote && <p className="cap-reason">{server.trustNote}</p>}
+          {probeState && !probeState.loading && !probeState.ok && <p className="cap-reason">测试连接失败：{probeState.error}</p>}
+          {probeState?.ok && probeState.tools.length > 0 && <details className="mcp-probe-tools">
+            <summary>已声明 {probeState.tools.length} 个工具</summary>
+            <ul className="mcp-tool-list">
+              {probeState.tools.map(tool => <li key={tool.name}>
+                <code>{tool.name}</code>
+                {tool.readOnly && <span className="cap-tag">只读</span>}
+                {tool.description && <span className="mcp-tool-desc">{tool.description}</span>}
+              </li>)}
+            </ul>
+          </details>}
+        </li>;
+      })}
       {!servers.length && <li className="panel-empty">还没有配置 MCP 服务器。点「添加服务器」接入外部工具，或在项目根放一个 .mcp.json。</li>}
     </ul>}
     {sessionId && adding && <McpAddServer onDone={(message) => { setAdding(false); if (message) { setHint(message); setHasError(false); } void load(); }} />}

@@ -211,6 +211,8 @@ export const api = {
   mcpServers: (id: string) => apiJson<ApiResults['mcpServers']>(`/api/sessions/${encodeURIComponent(id)}/mcp/servers`),
   mcpAddServer: (id: string, body: Update<S.McpConfigControllerAddRequest>) => apiJson<ApiResults['mcpAddServer']>(`/api/sessions/${encodeURIComponent(id)}/mcp/servers`, jsonBody('POST', body)),
   mcpImportServers: (id: string, body: Update<S.McpConfigControllerImportRequest>) => apiJson<ApiResults['mcpImportServers']>(`/api/sessions/${encodeURIComponent(id)}/mcp/servers/import`, jsonBody('POST', body)),
+  /** 测试连接：真正启动服务器并读工具清单；npx 首次拉包可能较慢，放宽超时。 */
+  mcpProbeServer: (id: string, name: string) => apiJson<ApiResults['mcpProbeServer']>(`/api/sessions/${encodeURIComponent(id)}/mcp/servers/${encodeURIComponent(name)}/probe`, jsonBody('POST', {}), 120000),
   mcpDeleteServer: (id: string, name: string) => apiJson<ApiResults['mcpDeleteServer']>(`/api/sessions/${encodeURIComponent(id)}/mcp/servers/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   mcpTrust: (id: string, body: Update<S.McpTrustControllerTrustRequest>) => apiJson<ApiResults['mcpTrust']>(`/api/sessions/${encodeURIComponent(id)}/mcp/trust`, jsonBody('POST', body)),
   browserStatus: (id: string) => apiJson<ApiResults['browserStatus']>(`/api/sessions/${encodeURIComponent(id)}/browser/status`),

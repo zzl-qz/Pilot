@@ -101,6 +101,7 @@ export interface ApiResults {
   mcpServers: S.McpConfigControllerServerPayload[];
   mcpAddServer: S.McpConfigControllerServerPayload;
   mcpImportServers: S.McpConfigControllerImportResponse;
+  mcpProbeServer: S.McpConfigControllerProbeResponse;
   mcpDeleteServer: null;
   mcpTrust: S.McpTrustControllerTrustResponse;
   browserStatus: BrowserStatus;
