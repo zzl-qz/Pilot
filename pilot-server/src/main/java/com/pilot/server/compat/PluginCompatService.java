@@ -190,9 +190,9 @@ public class PluginCompatService {
         }
         // 没通过校验的技能不在 list() 里，但它们同样「用户以为有、实际没有」；
         // 尤其缺必需契约的那类，必须在这里说明原因，否则页面上只会少一项。
+        // 原因直接采用校验器那句（它已含「未加载」），不再叠前缀，避免出现「未加载：…未加载：…」。
         for (var problem : catalog.invalid()) {
-            items.add(
-                new Item("skill", problem.name(), "", BROKEN, "未加载：" + problem.reason(), List.of(problem.reason())));
+            items.add(new Item("skill", problem.name(), "", BROKEN, problem.reason(), List.of(problem.reason())));
         }
         return items;
     }
