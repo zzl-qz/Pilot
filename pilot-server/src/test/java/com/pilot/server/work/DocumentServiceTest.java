@@ -114,6 +114,55 @@ class DocumentServiceTest {
     }
 
     @Test
+    void invalidFormatInBatchIsRejectedBeforeCreatingAnything() throws Exception {
+        var service = service();
+        var document = service.create(SESSION, "Report", "blocks", SPEC, "human");
+
+        assertThrows(IllegalArgumentException.class,
+            () -> service.render(SESSION, document.id(), JSON.readTree("{\"formats\":[\"docx\",\"unsupported\"]}")));
+        assertTrue(service.artifacts(SESSION, document.id()).isEmpty(), "整批校验失败不能留下产物记录");
+        Path directory = temp.resolve("studio").resolve(document.id());
+        if (Files.isDirectory(directory)) {
+            try (var files = Files.list(directory)) {
+                assertEquals(0, files.count(), "磁盘上也不能留下产物文件：" + directory);
+            }
+        }
+
+        // 正常重试只生成一份
+        var retried = service.render(SESSION, document.id(), JSON.readTree("{\"formats\":[\"docx\"]}"));
+        assertEquals(1, retried.artifacts().size());
+        assertEquals(1, service.artifacts(SESSION, document.id()).size());
+    }
+
+    @Test
+    void failedRenderInBatchRollsBackEarlierArtifacts() throws Exception {
+        var service = service();
+        var document = service.create(SESSION, "Report", "blocks", SPEC, "human");
+
+        // docx 先成功，随后 pdf 的分页操作越界导致整批失败
+        assertThrows(IllegalStateException.class, () -> service.render(SESSION, document.id(),
+            JSON.readTree("{\"formats\":[\"docx\",\"pdf\"],\"pdf_operations\":{\"keep_pages\":[99]}}")));
+        assertTrue(service.artifacts(SESSION, document.id()).isEmpty(), "失败后不能残留已生成的产物");
+        Path directory = temp.resolve("studio").resolve(document.id());
+        try (var files = Files.list(directory)) {
+            assertEquals(0, files.count(), "失败后磁盘也必须干净：" + directory);
+        }
+
+        var retried = service.render(SESSION, document.id(), JSON.readTree("{\"formats\":[\"docx\",\"pdf\"]}"));
+        assertEquals(2, retried.artifacts().size());
+        assertEquals(2, service.artifacts(SESSION, document.id()).size(), "重试不会重复登记同版本产物");
+    }
+
+    @Test
+    void duplicateFormatsAreRejected() {
+        var service = service();
+        var document = service.create(SESSION, "Report", "blocks", SPEC, "human");
+        assertThrows(IllegalArgumentException.class,
+            () -> service.render(SESSION, document.id(), JSON.readTree("{\"formats\":[\"docx\",\"docx\"]}")));
+        assertTrue(service.artifacts(SESSION, document.id()).isEmpty());
+    }
+
+    @Test
     void deletesOnlyTargetSessionDocumentsVersionsArtifactsAndExports() throws Exception {
         var service = service();
         var keep = service.create("ses_keep", "Keep", "blocks", SPEC, "human");

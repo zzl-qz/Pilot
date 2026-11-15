@@ -134,6 +134,18 @@ public class DocumentService {
         if (formats == null || !formats.isArray() || formats.isEmpty() || formats.size() > 4) {
             throw new IllegalArgumentException("formats 须为 1–4 个导出格式");
         }
+        // 整批先校验再渲染：不能让「首项有效、后项无效」留下半批产物
+        List<String> requested = new ArrayList<>();
+        for (JsonNode item : formats) {
+            if (!item.isTextual() || !DocumentRenderer.FORMATS.contains(item.asText())) {
+                throw new IllegalArgumentException("不支持的导出格式：" + item);
+            }
+            String format = item.asText();
+            if (requested.contains(format)) {
+                throw new IllegalArgumentException("导出格式不能重复：" + format);
+            }
+            requested.add(format);
+        }
         JsonNode spec;
         try {
             spec = json.readTree(document.spec());
@@ -146,11 +158,7 @@ public class DocumentService {
         try {
             Files.createDirectories(directory);
             PathValidator paths = new PathValidator(dataDir.file("studio"));
-            for (JsonNode item : formats) {
-                if (!item.isTextual() || !DocumentRenderer.FORMATS.contains(item.asText())) {
-                    throw new IllegalArgumentException("不支持的导出格式：" + item);
-                }
-                String format = item.asText();
+            for (String format : requested) {
                 Path temp = directory.resolve(".tmp-" + UUID.randomUUID() + "." + format);
                 temps.add(temp);
                 String verification = DocumentRenderer.render(temp, format, spec, paths);
@@ -170,21 +178,32 @@ public class DocumentService {
                 Artifact artifact = new Artifact(artifactId, id, document.version(), format, filename, bytes.length,
                     Sha256.hex(bytes), verification, Instant.now().toString());
                 if (!store.put(ARTIFACT_KIND, artifactId, 0, json.writeValueAsString(artifact))) {
+                    deleteFileQuietly(target);
                     throw new IllegalStateException("产物标识冲突，请重试");
                 }
                 artifacts.add(artifact);
             }
             return new RenderResult(document, artifacts);
         } catch (Exception e) {
+            // 本次已登记/已落盘的产物全部撤回，重试不会出现两份同版本文件
+            for (Artifact artifact : artifacts) {
+                String key = artifact.id();
+                store.get(ARTIFACT_KIND, key).ifPresent(row -> store.delete(ARTIFACT_KIND, key, row.version()));
+                deleteFileQuietly(directory.resolve(artifact.filename()));
+            }
             throw new IllegalStateException("导出失败：" + e.getMessage(), e);
         } finally {
             for (Path temp : temps) {
-                try {
-                    Files.deleteIfExists(temp);
-                } catch (IOException ignored) {
-                    // 临时文件清理失败不影响已交付结果
-                }
+                deleteFileQuietly(temp);
             }
+        }
+    }
+
+    private static void deleteFileQuietly(Path file) {
+        try {
+            Files.deleteIfExists(file);
+        } catch (IOException ignored) {
+            // 清理失败不影响错误上报；下次导出使用新的产物标识，不会覆盖
         }
     }
 
