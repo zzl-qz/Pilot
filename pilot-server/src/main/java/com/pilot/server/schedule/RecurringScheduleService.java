@@ -284,7 +284,7 @@ public class RecurringScheduleService {
         }
         var job = schedules.createOccurrence(new ScheduleService.Create(task.name(), task.sourceSessionId(),
             task.content(), now.plusSeconds(1), row.timezone(), task.requirements(), task.skill(), task.fullAccess(),
-            task.isolated(), task.requireResearch()), key);
+            task.isolated(), task.requireResearch()), key, true);
         replace(row, SeriesState.ACTIVE, next.toInstant(), job.id(), row.occurrences() + 1,
             "已创建第 " + (row.occurrences() + 1) + " 轮；同一计划不重叠执行");
     }

@@ -18,6 +18,8 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 
 import com.pilot.core.session.SessionService;
 import com.pilot.server.common.data.PilotDataDir;
@@ -130,6 +132,90 @@ class RecurringTimeTest {
         assertTrue(schedules.list().isEmpty());
         assertEquals(1, recurring.get(old.id()).occurrences());
         assertEquals(Instant.parse("2026-11-02T06:30:00Z"), recurring.get(old.id()).nextAt());
+    }
+
+    @Test
+    void dispatchCrossingTheOneSecondWindowStillQueuesAndKeepsScheduling() {
+        // 扫描读到 T，真正派发时时钟已到 T+2：不能把「执行时间必须在未来」当成周期配置错误
+        SteppingClock stepping = new SteppingClock(clock.at, 2000);
+        var service = new RecurringScheduleService(store, mapper, schedules, sessions, stepping);
+        var plan = recurring.create(new RecurringScheduleService.Create(new ScheduleService.Create("跨秒检查", source,
+            "检查一次", clock.at.plusSeconds(60), "UTC", null, null, true, false), "0 30 1 * * *", "ONCE"));
+        stepping.at = plan.nextAt().plusSeconds(1);
+        stepping.armed = true;
+        service.tick();
+
+        var after = service.get(plan.id());
+        assertEquals("ACTIVE", after.state());
+        assertEquals(1, after.occurrences());
+        var job = schedules.get(after.activeId());
+        assertTrue(!job.runAt().isBefore(stepping.at.minusSeconds(2)), "到期轮次按实际派发时点入队：" + job.runAt());
+        assertEquals(Instant.parse("2026-01-01T01:30:00Z"), after.nextAt());
+
+        // 后续扫描不会再补一轮，也不会卡在 ERROR
+        service.tick();
+        assertEquals(1, schedules.list().size());
+        assertEquals("ACTIVE", service.get(plan.id()).state());
+    }
+
+    @Test
+    void strictCreationStillRejectsPastRunAtSoRecurringMustClamp() {
+        // 这就是修复前的失败点：扫描算出 now+1s，真正创建时时钟已越过它
+        var request =
+            new ScheduleService.Create("严格校验", source, "检查一次", clock.at.plusSeconds(1), "UTC", null, null, true, false);
+        clock.at = clock.at.plusSeconds(3);
+        assertThrows(IllegalArgumentException.class, () -> schedules.createOccurrence(request, "strict-key"));
+        // 周期路径允许按实际派发时点入队
+        var created = schedules.createOccurrence(request, "clamped-key", true);
+        assertEquals(clock.instant(), created.runAt());
+    }
+
+    @Test
+    void transientDispatchFailureKeepsPlanActiveAndRetriesWithTheSameOccurrenceId() {
+        var schedulesSpy = Mockito.spy(schedules);
+        Mockito.doThrow(new IllegalStateException("数据库忙")).doCallRealMethod().when(schedulesSpy)
+            .createOccurrence(ArgumentMatchers.any(), ArgumentMatchers.anyString(), ArgumentMatchers.anyBoolean());
+        var service = new RecurringScheduleService(store, mapper, schedulesSpy, sessions, clock);
+        var plan = recurring.create(new RecurringScheduleService.Create(new ScheduleService.Create("重试检查", source,
+            "检查一次", clock.at.plusSeconds(60), "UTC", null, null, true, false), "0 30 1 * * *", "ONCE"));
+        clock.at = plan.nextAt();
+        service.tick();
+
+        var retry = service.get(plan.id());
+        assertEquals("ACTIVE", retry.state(), "暂时故障不能变成永久停调");
+        assertEquals(plan.nextAt(), retry.nextAt());
+        assertTrue(schedules.list().isEmpty());
+
+        service.tick();
+        assertEquals(1, schedules.list().size(), "重试只创建一轮");
+        assertEquals(1, service.get(plan.id()).occurrences());
+    }
+
+    static class SteppingClock extends Clock {
+        Instant at;
+        final long stepMillis;
+        boolean armed;
+
+        SteppingClock(Instant at, long stepMillis) {
+            this.at = at;
+            this.stepMillis = stepMillis;
+        }
+
+        public Instant instant() {
+            Instant value = at;
+            if (armed) {
+                at = at.plusMillis(stepMillis);
+            }
+            return value;
+        }
+
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
     }
 
     static class MutableClock extends Clock {

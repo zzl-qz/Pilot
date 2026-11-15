@@ -134,6 +134,14 @@ public class ScheduleService {
 
     /** 周期触发使用稳定的实例 ID；重启后重复投递只返回原任务。 */
     synchronized ScheduledTask createOccurrence(Create request, String occurrenceId) {
+        return createOccurrence(request, occurrenceId, false);
+    }
+
+    /**
+     * @param dispatchIfPast 周期轮次专用：扫描到派发之间跨过了一秒窗口时，按实际派发时点入队，
+     *                       而不是把「执行时间必须在未来」当成周期配置错误。人工创建仍要求未来时间。
+     */
+    synchronized ScheduledTask createOccurrence(Create request, String occurrenceId, boolean dispatchIfPast) {
         var existing = repository.find(occurrenceId);
         if (existing.isPresent()) {
             return existing.get();
@@ -145,8 +153,13 @@ public class ScheduleService {
             throw new IllegalArgumentException("任务目标过长");
         }
         Instant now = clock.instant();
-        if (request.runAt() == null || !request.runAt().isAfter(now)) {
-            throw new IllegalArgumentException("执行时间必须在未来");
+        Instant runAt = request.runAt();
+        if (runAt == null || !runAt.isAfter(now)) {
+            if (!dispatchIfPast) {
+                throw new IllegalArgumentException("执行时间必须在未来");
+            }
+            // 排队瞬间已经到期：立即派发，不能因为差几秒就永久停掉整个周期
+            runAt = now;
         }
         String zone = request.timezone() == null ? ScheduleLimits.DEFAULT_TIMEZONE : request.timezone();
         ZoneId.of(zone);
@@ -195,9 +208,9 @@ public class ScheduleService {
                 executionWorkspace = new ScheduledTask.Workspace(WorkspaceMode.SHARED.name(), path, path, "", "", null);
             }
             target = sessions.createSession(name, path, source.projectId(), false);
-            var task = new ScheduledTask(id, name, target.id(), null, request.content().strip(), requirements, skill,
-                request.runAt(), zone, ScheduleState.SCHEDULED.name(), null, 0, 0, null, "等待执行", List.of(), 0,
-                executionWorkspace);
+            var task =
+                new ScheduledTask(id, name, target.id(), null, request.content().strip(), requirements, skill, runAt,
+                    zone, ScheduleState.SCHEDULED.name(), null, 0, 0, null, "等待执行", List.of(), 0, executionWorkspace);
             repository.insert(task);
             return task;
         } catch (RuntimeException e) {
