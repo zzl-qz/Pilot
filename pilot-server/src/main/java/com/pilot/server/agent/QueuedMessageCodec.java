@@ -3,6 +3,7 @@ package com.pilot.server.agent;
 import java.util.List;
 
 import com.pilot.core.message.Attachment;
+import com.pilot.server.run.RunStarter.QueueRequirements;
 
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -20,20 +21,29 @@ final class QueuedMessageCodec {
     private QueuedMessageCodec() {
     }
 
-    record Stored(String content, List<Attachment> attachments, List<Integer> imagePositions) {
+    record Stored(String content, List<Attachment> attachments, List<Integer> imagePositions,
+        QueueRequirements requirements) {
         Stored {
             content = content == null ? "" : content;
             attachments = attachments == null ? List.of() : List.copyOf(attachments);
             imagePositions = imagePositions == null ? List.of() : List.copyOf(imagePositions);
         }
 
+        Stored(String content, List<Attachment> attachments, List<Integer> imagePositions) {
+            this(content, attachments, imagePositions, null);
+        }
+
         Stored withContent(String text) {
-            return new Stored(text, attachments, imagePositions);
+            return new Stored(text, attachments, imagePositions, requirements);
+        }
+
+        Stored withRequirements(QueueRequirements value) {
+            return new Stored(content, attachments, imagePositions, value);
         }
     }
 
     static String encode(Stored item) {
-        if (item.attachments().isEmpty()) {
+        if (item.attachments().isEmpty() && item.requirements() == null) {
             return item.content();
         }
         return PREFIX + MAPPER.writeValueAsString(item);

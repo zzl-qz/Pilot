@@ -297,6 +297,36 @@ class AgentRunServiceTest {
     }
 
     @Test
+    void queuedRequirementsBecomeTheNextTaskContract() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger calls = new AtomicInteger();
+        ModelClient model = (messages, tools) -> {
+            if (calls.getAndIncrement() == 0) {
+                entered.countDown();
+                await(release);
+            }
+            return done();
+        };
+        try (Fixture fixture = new Fixture(model, 8)) {
+            fixture.start();
+            await(entered);
+            assertTrue(fixture.service.followup(fixture.sessionId, "下一条", List.of(), List.of(),
+                new RunStarter.QueueRequirements(List.of("保留 API"), List.of("覆盖失败路径"))));
+            release.countDown();
+            fixture.awaitFinished("COMPLETED", "AWAITING_REVIEW");
+
+            var tasks = new TaskControlService(JsonMapper.builder().build(), new PilotDataDir(dataRoot.toString()));
+            var contract = tasks.load(fixture.sessionId);
+            assertEquals(List.of("保留 API"), contract.constraints());
+            assertEquals(List.of("覆盖失败路径"),
+                contract.acceptance().stream().map(TaskControlService.Acceptance::text).toList());
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
     void queuedImagesSurviveEditsAndReachTheNextRun() throws Exception {
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);

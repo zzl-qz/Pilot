@@ -513,6 +513,12 @@ public class AgentRunService implements RunStarter {
 
     @Override
     public boolean followup(String sessionId, String text, List<Attachment> attachments, List<Integer> imagePositions) {
+        return followup(sessionId, text, attachments, imagePositions, null);
+    }
+
+    @Override
+    public boolean followup(String sessionId, String text, List<Attachment> attachments, List<Integer> imagePositions,
+        RunStarter.QueueRequirements requirements) {
         boolean hasAttachments = attachments != null && !attachments.isEmpty();
         if ((text == null || text.isBlank()) && !hasAttachments) {
             return false;
@@ -524,7 +530,8 @@ public class AgentRunService implements RunStarter {
             if (registry.activeRun(sessionId).isEmpty()) {
                 return false;
             }
-            queue.offer(QueuedMessageCodec.encode(new QueuedMessageCodec.Stored(content, attachments, imagePositions)));
+            queue.offer(QueuedMessageCodec
+                .encode(new QueuedMessageCodec.Stored(content, attachments, imagePositions, requirements)));
             persistQueue(sessionId, queue);
         }
         return true;
@@ -547,19 +554,30 @@ public class AgentRunService implements RunStarter {
     }
 
     private static List<QueuedMessage> queueEntries(Deque<String> queue) {
-        return queue.stream().map(QueuedMessageCodec::decode)
-            .map(item -> new QueuedMessage(item.content(), item.attachments(), item.imagePositions())).toList();
+        return queue.stream().map(QueuedMessageCodec::decode).map(
+            item -> new QueuedMessage(item.content(), item.attachments(), item.imagePositions(), item.requirements()))
+            .toList();
     }
 
     @Override
     public boolean editQueued(String sessionId, int index, String text, String revision) {
+        return editQueued(sessionId, index, text, null, revision);
+    }
+
+    @Override
+    public boolean editQueued(String sessionId, int index, String text, RunStarter.QueueRequirements requirements,
+        String revision) {
         return updateQueue(sessionId, revision, items -> {
             if (text == null || text.isBlank() || index < 0 || index >= items.size()) {
                 return false;
             }
-            // 只改文字，图片附件跟着这条消息走。
-            items.set(index,
-                QueuedMessageCodec.encode(QueuedMessageCodec.decode(items.get(index)).withContent(text.strip())));
+            // 只改文字与要求，图片附件跟着这条消息走；requirements 为 null 表示保留原要求。
+            QueuedMessageCodec.Stored current = QueuedMessageCodec.decode(items.get(index));
+            QueuedMessageCodec.Stored next = current.withContent(text.strip());
+            if (requirements != null) {
+                next = next.withRequirements(requirements.empty() ? null : requirements);
+            }
+            items.set(index, QueuedMessageCodec.encode(next));
             return true;
         });
     }
@@ -924,7 +942,9 @@ public class AgentRunService implements RunStarter {
         try {
             sessions.publish(sessionId, runId,
                 new RunStarted(next.content(), next.attachments(), next.imagePositions()));
-            launch(sessionId, runId, next.content(), next.attachments(), next.imagePositions(), false, null);
+            TaskControlService.Requirements requirements =
+                next.requirements() == null ? null : next.requirements().toRequirements();
+            launch(sessionId, runId, next.content(), next.attachments(), next.imagePositions(), false, requirements);
         } catch (RuntimeException e) {
             registry.unregister(runId);
             publish(sessionId, runId, new RunFailed(RunFailureCode.QUEUE_START_FAILED, "排队消息启动失败，消息已保留", false));

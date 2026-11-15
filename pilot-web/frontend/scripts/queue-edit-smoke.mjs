@@ -16,7 +16,14 @@ window.store = useStore; window.calls = []; window.notices = [];
 window.queue = [{ content: '按图检查', text: '按图检查', attachments: [{ name: 'one.png', url: '/one.png' }], imagePositions: [0] }];
 window.revision = 'r1';
 api.sessionQueue = async () => ({ entries: window.queue, revision: window.revision });
-api.updateQueueItem = async (sessionId, index, body) => { window.calls.push({ sessionId, index, body }); return {}; };
+api.queue = api.sessionQueue;
+api.updateQueueItem = async (sessionId, index, body) => {
+  window.calls.push({ sessionId, index, body });
+  if (body.constraints || body.acceptance) window.queue = window.queue.map((item, i) => i === index
+    ? { ...item, requirements: { constraints: body.constraints || [], acceptance: body.acceptance || [] } }
+    : item);
+  return {};
+};
 useStore.setState({
   sessionId: 's1',
   queueEntries: window.queue,
@@ -53,7 +60,7 @@ try {
   await tab.goto(url);
 
   await tab.locator('.queue-text').click();
-  const editor = tab.locator('#queue-edit textarea');
+  const editor = tab.locator('#queue-edit textarea[aria-label="编辑排队消息"]');
   await editor.fill('改后的正文');
 
   // 另一端（或自动取走队首）让原消息消失：编辑区要留在页面上，文字不能丢
@@ -63,7 +70,7 @@ try {
     window.store.setState({ queueEntries: window.queue, queueRevision: 'r2' });
   });
   await tab.locator('.queue-orphan').waitFor();
-  assert.equal(await tab.locator('#queue-edit textarea').inputValue(), '改后的正文', '刷新后仍保留未保存文字');
+  assert.equal(await tab.locator('#queue-edit textarea[aria-label="编辑排队消息"]').inputValue(), '改后的正文', '刷新后仍保留未保存文字');
   assert.equal(await tab.getByRole('button', { name: '保存' }).isDisabled(), true, '目标消失时不能保存到别的消息');
   assert.match(await tab.locator('.queue-orphan').innerText(), /已被发送、删除或修改|未保存的输入已保留/);
 
@@ -77,16 +84,33 @@ try {
     window.store.setState({ queueEntries: window.queue, queueRevision: 'r3' });
   });
   await tab.locator('.queue-orphan').waitFor({ state: 'detached' });
-  await tab.locator('#queue-edit textarea').waitFor();
-  assert.equal(await tab.locator('#queue-edit textarea').inputValue(), '改后的正文');
+  await tab.locator('#queue-edit textarea[aria-label="编辑排队消息"]').waitFor();
+  assert.equal(await tab.locator('#queue-edit textarea[aria-label="编辑排队消息"]').inputValue(), '改后的正文');
   await tab.getByRole('button', { name: '保存' }).click();
   await tab.waitForFunction(() => window.calls.length === 1);
   const call = await tab.evaluate(() => window.calls[0]);
   assert.equal(call.index, 1, '应修改原消息现在所在的下标');
   assert.equal(call.body.content, '改后的正文');
   assert.equal(call.body.revision, 'r3', '保存使用最新队列版本');
+  await tab.waitForFunction(() => !document.querySelector('#queue-edit')).catch(async error => {
+    const dump = await tab.evaluate(() => ({ calls: window.calls, notices: window.notices, queue: window.queue }));
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync('E:/Pilot/.analysis/queue-debug.json', JSON.stringify(dump, null, 2));
+    throw error;
+  });
   assert.equal(await tab.locator('#queue-edit').count(), 0, '保存成功后关闭编辑区');
   assert.ok(!(await tab.evaluate(() => window.notices)).some(text => /已发送、删除或修改/.test(text)));
+  // 同一编辑区可填写这一条自己的约束与验收
+  await tab.locator('.queue-text').first().click();
+  await tab.locator('#queue-edit textarea[aria-label="这条排队消息的约束"]').fill('别动 pom\n保留 API');
+  await tab.locator('#queue-edit textarea[aria-label="这条排队消息的验收条件"]').fill('覆盖失败路径');
+  await tab.getByRole('button', { name: '保存' }).click();
+  await tab.waitForFunction(() => window.calls.some(call => call.body?.constraints?.length === 2));
+  const requirementsCall = await tab.evaluate(() => window.calls.find(call => call.body?.constraints?.length === 2).body);
+  assert.deepEqual(requirementsCall.constraints, ['别动 pom', '保留 API']);
+  assert.deepEqual(requirementsCall.acceptance, ['覆盖失败路径']);
+  await tab.waitForFunction(() => document.querySelector('.queue-requirements')?.textContent?.includes('约束 2'));
+  assert.match(await tab.locator('.queue-requirements').innerText(), /约束 2 · 验收 1/);
   assert.deepEqual(errors, []);
   console.log('PASS 队列编辑：目标消失时保留输入、不误改；目标移动后按指纹命中并使用最新版本');
 } finally {

@@ -75,5 +75,5 @@ export interface MessageAttachment {
   raw?: string;
   lines?: number;
 }
-export interface QueueEntry { text?: string; content?: string; attachments?: MessageAttachment[]; imagePositions?: number[] }
+export interface QueueEntry { text?: string; content?: string; attachments?: MessageAttachment[]; imagePositions?: number[]; requirements?: { constraints?: string[]; acceptance?: string[] } | null }
 export interface QueueResponse { items?: (string | QueueEntry)[]; entries?: QueueEntry[]; revision?: string; held?: boolean; waitingReason?: string }

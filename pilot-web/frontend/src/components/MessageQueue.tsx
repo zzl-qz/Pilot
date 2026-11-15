@@ -75,7 +75,8 @@ function QueueList({ entries, queueEdit, collapsed, header, held }: { entries: Q
                 }}
               >
                 {editAt === index ? (
-                  <QueueEditor target={{ index, key: queueEntryKey(entry) }} text={text} onClose={closeEditor} />
+                  <QueueEditor target={{ index, key: queueEntryKey(entry) }} text={text}
+                    requirements={entry.requirements} onClose={closeEditor} />
                 ) : (
                   <QueueRow entry={entry} index={index} count={entries.length} onDragStart={() => setDragFrom(index)} onDragEnd={() => setDragFrom(null)} />
                 )}
@@ -111,6 +112,12 @@ function QueueRow({ entry, index, count, onDragStart, onDragEnd }: { entry: Queu
   const images = Array.isArray(entry.attachments) ? entry.attachments : [];
   const files = spoken.files || [];
   const label = spoken.body || (images.length ? '图片' : text);
+  const constraints = entry.requirements?.constraints || [];
+  const acceptance = entry.requirements?.acceptance || [];
+  const requirementSummary = constraints.length || acceptance.length
+    ? [constraints.length ? `约束 ${constraints.length}` : '', acceptance.length ? `验收 ${acceptance.length}` : '']
+      .filter(Boolean).join(' · ')
+    : '';
   const edit = () => useStore.getState().setUi({ queueEdit: { index, key: queueEntryKey(entry) } });
   return (
     <>
@@ -133,6 +140,7 @@ function QueueRow({ entry, index, count, onDragStart, onDragEnd }: { entry: Queu
       </button>
       <div className="queue-main">
         <button type="button" className="queue-text" disabled={busy} title={label} onClick={edit}>{label}</button>
+        {requirementSummary && <span className="queue-requirements" title={[...constraints, ...acceptance].join('\n')}>{requirementSummary}</span>}
         {(images.length > 0 || files.length > 0) && (
           <span className="attach-strip">
             {images.map((image) => (
@@ -173,9 +181,12 @@ function QueueRow({ entry, index, count, onDragStart, onDragEnd }: { entry: Queu
 const drafts = new Map<string, string>();
 
 /** 编辑区按内容指纹定位目标；队列刷新不会重建输入，也不会把内容写到别的消息上。 */
-function QueueEditor({ target, text, orphan = false, onClose }: { target: QueueEditTarget; text: string; orphan?: boolean; onClose: () => void }) {
+function QueueEditor({ target, text, requirements, orphan = false, onClose }: {
+  target: QueueEditTarget; text: string; requirements?: QueueEntry['requirements']; orphan?: boolean; onClose: () => void }) {
   const spoken = splitAttachmentMarkers(text);
   const [value, setValue] = useState(() => drafts.get(target.key) ?? spoken.body);
+  const [constraintText, setConstraintText] = useState(() => (requirements?.constraints || []).join('\n'));
+  const [acceptanceText, setAcceptanceText] = useState(() => (requirements?.acceptance || []).join('\n'));
   const [saving, setSaving] = useState(false);
   const finish = () => { drafts.delete(target.key); onClose(); };
   return (
@@ -186,11 +197,25 @@ function QueueEditor({ target, text, orphan = false, onClose }: { target: QueueE
     }}>
       <textarea autoFocus aria-label="编辑排队消息" disabled={saving} value={value} rows={2}
         onChange={(event) => { setValue(event.target.value); drafts.set(target.key, event.target.value); }} />
+      <label className="queue-edit-field">
+        <span>约束（每行一条，可留空）</span>
+        <textarea aria-label="这条排队消息的约束" disabled={saving} value={constraintText} rows={2}
+          onChange={(event) => setConstraintText(event.target.value)} />
+      </label>
+      <label className="queue-edit-field">
+        <span>验收条件（每行一条，可留空）</span>
+        <textarea aria-label="这条排队消息的验收条件" disabled={saving} value={acceptanceText} rows={2}
+          onChange={(event) => setAcceptanceText(event.target.value)} />
+      </label>
       <div className="queue-edit-actions">
         <Button label="保存" size="sm" isLoading={saving} isDisabled={orphan || (!value.trim() && !spoken.files.length)} onClick={async () => {
           setSaving(true);
           try {
-            if (await useStore.getState().saveQueueItem(target, joinAttachmentMarkers(value, spoken.files))) finish();
+            const requirements = {
+              constraints: constraintText.split('\n').map(item => item.trim()).filter(Boolean),
+              acceptance: acceptanceText.split('\n').map(item => item.trim()).filter(Boolean)
+            };
+            if (await useStore.getState().saveQueueItem(target, joinAttachmentMarkers(value, spoken.files), requirements)) finish();
           } finally { setSaving(false); }
         }} />
         <Button label="取消" size="sm" variant="ghost" onClick={finish} />

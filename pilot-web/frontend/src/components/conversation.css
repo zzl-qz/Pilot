@@ -377,3 +377,7 @@ html[data-theme] .conversation-composer .voice-timer { font-family: var(--sans);
 .message-queue .queue-head-row { display: flex; align-items: center; gap: 8px; }
 .message-queue .queue-head-row .queue-head { flex: 1 1 auto; min-width: 0; }
 .message-queue .queue-hold { flex: none; }
+
+.message-queue .queue-requirements { flex: none; font-size: 11px; color: var(--dim); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+.message-queue .queue-edit-field { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--dim); }
+.message-queue .queue-edit-field textarea { resize: vertical; min-height: 34px; }

@@ -68,11 +68,13 @@ class SessionApiTest {
     static class TestRunStarter implements RunStarter {
         private final AtomicBoolean running = new AtomicBoolean();
         private final List<String> queue = new ArrayList<>();
+        private final List<RunStarter.QueueRequirements> requirements = new ArrayList<>();
         private boolean held;
 
         void setRunning(boolean value) {
             running.set(value);
             queue.clear();
+            requirements.clear();
         }
 
         @Override
@@ -140,6 +142,42 @@ class SessionApiTest {
             }
             queue.set(index, text.strip());
             return true;
+        }
+
+        @Override
+        public boolean editQueued(String sessionId, int index, String text, RunStarter.QueueRequirements value,
+            String revision) {
+            if (!editQueued(sessionId, index, text)) {
+                return false;
+            }
+            if (value != null) {
+                while (requirements.size() < queue.size()) {
+                    requirements.add(null);
+                }
+                requirements.set(index, value.empty() ? null : value);
+            }
+            return true;
+        }
+
+        @Override
+        public boolean followup(String sessionId, String text, List<com.pilot.core.message.Attachment> attachments,
+            List<Integer> imagePositions, RunStarter.QueueRequirements value) {
+            while (requirements.size() < queue.size()) {
+                requirements.add(null);
+            }
+            boolean added = followup(sessionId, text, attachments, imagePositions);
+            if (added) {
+                requirements.add(value == null || value.empty() ? null : value);
+            }
+            return added;
+        }
+
+        @Override
+        public List<RunStarter.QueuedMessage> queuedMessages(String sessionId) {
+            return java.util.stream.IntStream.range(0, queue.size())
+                .mapToObj(index -> new RunStarter.QueuedMessage(queue.get(index), List.of(), List.of(),
+                    index < requirements.size() ? requirements.get(index) : null))
+                .toList();
         }
 
         @Override
@@ -299,7 +337,7 @@ class SessionApiTest {
     }
 
     @Test
-    void queuesAttachmentsDuringActiveRunButRejectsStandaloneAcceptance() throws Exception {
+    void queuesAttachmentsAndStandaloneAcceptanceDuringActiveRun() throws Exception {
         String sessionId = createSession();
         Path attachmentRoot = ATTACHMENT_ROOT.resolve(sessionId);
         runStarter.running.set(true);
@@ -308,8 +346,13 @@ class SessionApiTest {
                 Map.of("constraints", List.of("别动 pom"), "acceptance", List.of())));
             mvc.perform(
                 post("/api/sessions/{id}/messages", sessionId).contentType(MediaType.APPLICATION_JSON).content(task))
-                .andExpect(status().isConflict());
-            assertFalse(Files.exists(attachmentRoot), "冲突响应前不应创建附件目录或文件");
+                .andExpect(status().isAccepted());
+            assertFalse(Files.exists(attachmentRoot), "没有附件时不创建附件目录");
+            mvc.perform(get("/api/sessions/{id}/queue", sessionId)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.entries[0].content").value("带验收条件的新任务"))
+                .andExpect(jsonPath("$.entries[0].requirements.constraints[0]").value("别动 pom"));
+            mvc.perform(delete("/api/sessions/{id}/queue/0", sessionId).param("revision",
+                RunStarter.queueRevision(runStarter.queuedMessages(sessionId)))).andExpect(status().isOk());
 
             // 二进制文件落盘后以路径形式进入排队正文，不再因为带附件被拒绝
             String attachment = json.writeValueAsString(Map.of("content", "", "attachments", List
@@ -636,6 +679,40 @@ class SessionApiTest {
             // 缺少 held 字段按恢复处理，不报 500
             mvc.perform(post("/api/sessions/{id}/queue/hold", id).contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.held").value(false));
+        } finally {
+            runStarter.running.set(false);
+        }
+    }
+
+    @Test
+    void queuesIndependentRequirementsAndKeepsThemOnEdit() throws Exception {
+        String id = createSession();
+        runStarter.setRunning(true);
+        try {
+            String body = json.writeValueAsString(Map.of("content", "补一条登录测试", "task",
+                Map.of("constraints", List.of("别动 pom"), "acceptance", List.of(Map.of("text", "覆盖失败路径")))));
+            mvc.perform(post("/api/sessions/{id}/messages", id).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isAccepted());
+            mvc.perform(get("/api/sessions/{id}/queue", id)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.entries[0].content").value("补一条登录测试"))
+                .andExpect(jsonPath("$.entries[0].requirements.constraints[0]").value("别动 pom"))
+                .andExpect(jsonPath("$.entries[0].requirements.acceptance[0]").value("覆盖失败路径"));
+
+            String revision = RunStarter.queueRevision(runStarter.queuedMessages(id));
+            mvc.perform(put("/api/sessions/{id}/queue/0", id).contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(Map.of("content", "补两条登录测试", "revision", revision, "constraints",
+                    List.of("保留 API"), "acceptance", List.of("覆盖成功路径", "覆盖超时")))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.entries[0].content").value("补两条登录测试"))
+                .andExpect(jsonPath("$.entries[0].requirements.constraints[0]").value("保留 API"))
+                .andExpect(jsonPath("$.entries[0].requirements.acceptance[1]").value("覆盖超时"));
+
+            // 只改正文、不传要求时保留原要求
+            revision = RunStarter.queueRevision(runStarter.queuedMessages(id));
+            mvc.perform(put("/api/sessions/{id}/queue/0", id).contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(Map.of("content", "再改一次", "revision", revision))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.entries[0].requirements.constraints[0]").value("保留 API"));
+            assertEquals(List.of("再改一次"), runStarter.queued(id));
         } finally {
             runStarter.running.set(false);
         }

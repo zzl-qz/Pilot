@@ -90,7 +90,7 @@ export interface StoreActions {
   resolveApproval(id: string, approved: boolean): Promise<void>; resolveApprovalWithTrust(id: string, approved: boolean, trust: { action: string; server: string; tool?: string; configHash?: string; toolHash?: string }): Promise<void>; resolveArbitration(id: string, choice: string): Promise<void>;
   loadPlan(options?: StrictOptions): Promise<void>; loadQueue(options?: StrictOptions): Promise<void>;
   mutateQueue(operation: (id: string, revision: string | null) => Promise<unknown>, failure: string): Promise<boolean>;
-  steerQueueItem(index: number): Promise<boolean>; saveQueueItem(target: QueueEditTarget, text: string): Promise<boolean>;
+  steerQueueItem(index: number): Promise<boolean>; saveQueueItem(target: QueueEditTarget, text: string, requirements?: { constraints: string[]; acceptance: string[] }): Promise<boolean>;
   removeQueueItem(index: number): Promise<boolean>; moveQueueItem(from: number, to: number): Promise<boolean>; setQueueHeld(held: boolean): Promise<boolean>; takeBackQueueItem(index: number): Promise<boolean>;
   loadTask(options?: StrictOptions): Promise<void>; saveTask(constraints: string[], acceptance: S.TaskControlServiceAcceptance[]): Promise<void>;
   refreshContext(options?: StrictOptions): Promise<void>; ensureMirror(): void; compactContext(): Promise<void>;

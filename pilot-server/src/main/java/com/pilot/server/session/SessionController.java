@@ -414,7 +414,10 @@ public class SessionController {
         return new QueueResponse(messages.stream().map(RunStarter.QueuedMessage::content).toList(),
             messages.stream()
                 .map(message -> new QueueEntry(message.content(),
-                    attachments.displayAttachments(id, message.attachments()), message.imagePositions()))
+                    attachments.displayAttachments(id, message.attachments()), message.imagePositions(),
+                    message.requirements() == null || message.requirements().empty() ? null
+                        : new QueueRequirementsView(message.requirements().constraints(),
+                            message.requirements().acceptance())))
                 .toList(),
             RunStarter.queueRevision(messages), runStarter.queueHeld(id), runStarter.queueWaitingReason(id));
     }
@@ -492,7 +495,9 @@ public class SessionController {
         if (request == null || request.content() == null || request.content().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "content must not be blank");
         }
-        if (!runStarter.editQueued(id, index, request.content(), request.revision())) {
+        RunStarter.QueueRequirements requirements = request.constraints() == null && request.acceptance() == null ? null
+            : new RunStarter.QueueRequirements(request.constraints(), request.acceptance());
+        if (!runStarter.editQueued(id, index, request.content(), requirements, request.revision())) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "队列已变化或消息不存在，请刷新后重试");
         }
         return queueResponse(id);
@@ -649,8 +654,11 @@ public class SessionController {
         // 运行中的消息进队列，附件随消息保存；独立验收条件只属于一次新任务的启动，技能是启动期行为，都不能排队。
         // 先检查状态，避免被拒绝的请求产生文件副作用。
         String activeRun = runStarter.activeRun(id).orElse(null);
-        if (activeRun != null && (request.task() != null || skill != null)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "排队消息暂不支持独立验收条件和技能，请等本轮结束后再发");
+        RunStarter.QueueRequirements queuedRequirements =
+            request.task() == null ? null : new RunStarter.QueueRequirements(request.task().constraints(),
+                request.task().acceptance().stream().map(TaskControlService.Acceptance::text).toList());
+        if (activeRun != null && skill != null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "排队消息暂不支持技能，请等本轮结束后再发");
         }
         AttachmentService.Prepared prepared;
         try {
@@ -660,7 +668,8 @@ public class SessionController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         }
         if (activeRun != null) {
-            if (runStarter.followup(id, prepared.content(), prepared.attachments(), prepared.imagePositions())) {
+            if (runStarter.followup(id, prepared.content(), prepared.attachments(), prepared.imagePositions(),
+                queuedRequirements)) {
                 sessions.touch(id);
                 return ResponseEntity.accepted().body(new MessageResponse(id, activeRun));
             }
@@ -668,10 +677,11 @@ public class SessionController {
         // 检查与启动之间可能刚好起了一个 run：抢占失败就退化成追加输入
         String runId = runStarter.claimRun(id).orElse(null);
         if (runId == null) {
-            if (request.task() != null || skill != null) {
+            if (skill != null) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "运行状态已变化，请结束当前任务后重试");
             }
-            if (runStarter.followup(id, prepared.content(), prepared.attachments(), prepared.imagePositions())) {
+            if (runStarter.followup(id, prepared.content(), prepared.attachments(), prepared.imagePositions(),
+                queuedRequirements)) {
                 sessions.touch(id);
                 return ResponseEntity.accepted().body(new MessageResponse(id, runStarter.activeRun(id).orElse(null)));
             }
@@ -863,7 +873,10 @@ public class SessionController {
     public record ResendRequest(Long sequence, String content) {
     }
 
-    public record QueueEditRequest(String content, String revision) {
+    public record QueueEditRequest(String content, String revision, List<String> constraints, List<String> acceptance) {
+        public QueueEditRequest(String content, String revision) {
+            this(content, revision, null, null);
+        }
     }
 
     /**
@@ -882,7 +895,15 @@ public class SessionController {
     }
 
     public record QueueEntry(String content, List<AttachmentService.DisplayAttachment> attachments,
-        List<Integer> imagePositions) {
+        List<Integer> imagePositions, QueueRequirementsView requirements) {
+        public QueueEntry(String content, List<AttachmentService.DisplayAttachment> attachments,
+            List<Integer> imagePositions) {
+            this(content, attachments, imagePositions, null);
+        }
+    }
+
+    /** 排队消息自己的约束与验收；null 表示没有额外要求。 */
+    public record QueueRequirementsView(List<String> constraints, List<String> acceptance) {
     }
 
     public record MessageResponse(String sessionId, String runId) {

@@ -50,12 +50,36 @@ public interface RunStarter {
         start(sessionId, runId, input, attachments, imagePositions, task);
     }
 
+    /** 排队消息附带的独立约束与验收条件；为空表示这一条沿用默认的空要求。 */
+    record QueueRequirements(List<String> constraints, List<String> acceptance) {
+        public QueueRequirements {
+            constraints = constraints == null ? List.of()
+                : constraints.stream().filter(item -> item != null && !item.isBlank()).map(String::strip).toList();
+            acceptance = acceptance == null ? List.of()
+                : acceptance.stream().filter(item -> item != null && !item.isBlank()).map(String::strip).toList();
+        }
+
+        public boolean empty() {
+            return constraints.isEmpty() && acceptance.isEmpty();
+        }
+
+        public TaskControlService.Requirements toRequirements() {
+            return new TaskControlService.Requirements(constraints,
+                acceptance.stream().map(text -> new TaskControlService.Acceptance(text, false, "")).toList());
+        }
+    }
+
     /** 排队中的一条消息：正文已经内联了文本文件，这里只额外带需要多模态编码的图片。 */
-    record QueuedMessage(String content, List<Attachment> attachments, List<Integer> imagePositions) {
+    record QueuedMessage(String content, List<Attachment> attachments, List<Integer> imagePositions,
+        QueueRequirements requirements) {
         public QueuedMessage {
             content = content == null ? "" : content;
             attachments = attachments == null ? List.of() : List.copyOf(attachments);
             imagePositions = imagePositions == null ? List.of() : List.copyOf(imagePositions);
+        }
+
+        public QueuedMessage(String content, List<Attachment> attachments, List<Integer> imagePositions) {
+            this(content, attachments, imagePositions, null);
         }
     }
 
@@ -77,6 +101,12 @@ public interface RunStarter {
         List<Integer> imagePositions) {
         boolean plain = attachments == null || attachments.isEmpty();
         return plain && followup(sessionId, text);
+    }
+
+    /** 带独立约束/验收的追加；不支持要求的启动器退化为普通追加。 */
+    default boolean followup(String sessionId, String text, List<Attachment> attachments, List<Integer> imagePositions,
+        QueueRequirements requirements) {
+        return followup(sessionId, text, attachments, imagePositions);
     }
 
     /** 暂停在当前安全步骤结束后生效，保留任务及排队消息。 */
@@ -260,6 +290,12 @@ public interface RunStarter {
     }
 
     default boolean editQueued(String sessionId, int index, String text, String revision) {
+        return editQueued(sessionId, index, text, null, revision);
+    }
+
+    /** 同时更新正文与这一条自己的约束/验收；requirements 为 null 时保留原要求。 */
+    default boolean editQueued(String sessionId, int index, String text, QueueRequirements requirements,
+        String revision) {
         return (revision == null || queueRevision(queuedMessages(sessionId)).equals(revision))
             && editQueued(sessionId, index, text);
     }
