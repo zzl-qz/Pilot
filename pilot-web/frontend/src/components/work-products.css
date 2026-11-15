@@ -15,6 +15,17 @@ html[data-theme] .topbar .product-toggle { width: auto; padding-inline: 8px; gap
 .work-list strong { display: flex; align-items: baseline; gap: 12px; justify-content: space-between; }
 .work-list span, .work-list strong, .work-detail { overflow-wrap: anywhere; min-width: 0; }
 .work-state { font-size: 11px; font-weight: 400; color: var(--muted); flex-shrink: 0; }
+/* 验证结论：三种状态必须有肉眼可分的视觉，不能只靠颜色深浅。 */
+.work-verdict { font-size: 11px; font-weight: 500; line-height: 1.5; padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; flex-shrink: 0; }
+.work-verdict[data-tone='ok'] { color: var(--ok, #4ea672); }
+.work-verdict[data-tone='stale'] { color: var(--warn, #bf853c); }
+.work-verdict[data-tone='muted'] { color: var(--muted); }
+.work-verification { border-inline-start: 3px solid var(--line); padding: 4px 0 4px 12px; margin: 0 0 16px; }
+.work-verification[data-tone='ok'] { border-inline-start-color: var(--ok, #4ea672); }
+.work-verification[data-tone='stale'] { border-inline-start-color: var(--warn, #bf853c); }
+.work-verification[data-tone='muted'] { border-inline-start-color: var(--muted); }
+.work-verification p { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 0 0 4px; }
+.work-verification small { display: block; color: var(--muted); }
 .work-preview { border-block: 1px solid var(--line); padding: 16px 0; }
 .work-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
 .work-evidence { white-space: pre-wrap; }

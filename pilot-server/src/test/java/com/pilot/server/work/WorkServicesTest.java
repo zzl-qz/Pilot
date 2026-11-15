@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -34,6 +35,11 @@ import com.pilot.server.skill.SkillService;
 import com.pilot.server.store.AutomationStore;
 import com.pilot.server.store.SqliteStore;
 import com.pilot.server.tool.WorkspaceToolFactory;
+import com.pilot.server.validation.ValidationEvidence;
+import com.pilot.server.validation.ValidationLedger;
+import com.pilot.server.validation.ValidationSnapshot;
+import com.pilot.server.validation.ValidationStatusService;
+import com.pilot.server.validation.WorkspaceFingerprint;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -50,6 +56,7 @@ class WorkServicesTest {
     private AutomationStore store;
     private SkillService skills;
     private WorkProductService products;
+    private ValidationLedger ledger;
     private SkillDraftService drafts;
 
     @BeforeEach
@@ -68,7 +75,9 @@ class WorkServicesTest {
 
     private void restart() {
         store = new AutomationStore(new SqliteStore(root.resolve("state.db")));
-        products = new WorkProductService(store, mapper, sessions, conversations, workspaces, data);
+        ledger = new ValidationLedger(data, mapper);
+        products = new WorkProductService(store, mapper, sessions, conversations, workspaces,
+            new ValidationStatusService(ledger), data);
         drafts = new SkillDraftService(store, mapper, sessions, workspaces, skills);
     }
 
@@ -283,6 +292,43 @@ class WorkServicesTest {
         Files.createDirectories(skillFile().getParent());
         Files.write(skillFile(), new byte[] {(byte)0xff});
         assertThrows(UncheckedIOException.class, this::propose);
+    }
+
+    @Test
+    void publishedProductReportsVerificationInsteadOfDisclaimingIt() throws Exception {
+        // 没有任何校验证据时，登记本身就如实说明「未验证」，不能伪装成已验证。
+        var unverified = publish("原始报告");
+        assertEquals(ValidationSnapshot.UNVERIFIED, unverified.verification().status());
+        assertFalse(unverified.verification().reason().isBlank());
+
+        // 有通过证据覆盖当前文件后，登记结论变为已验证。
+        recordPassingEvidence("结论.md");
+        var verified = products.publish(session, "run", "结论.md", "调研结论", "已核对原始资料", List.of());
+        assertEquals(ValidationSnapshot.VERIFIED, verified.verification().status());
+        assertFalse(verified.verification().candidateHash().isBlank());
+        assertFalse(verified.verification().evidenceId().isBlank());
+
+        // 文件被改动后，同一份成果读出来是「证据已过期」，而不是继续显示已验证。
+        Files.writeString(workspace.resolve("结论.md"), "原始报告（已修改）");
+        var stale = products.get(session, verified.id());
+        assertEquals(ValidationSnapshot.STALE, stale.verification().status());
+        assertFalse(stale.verification().reason().isBlank());
+    }
+
+    @Test
+    void evidenceForAnotherFileDoesNotVerifyThisProduct() throws Exception {
+        Files.writeString(workspace.resolve("结论.md"), "报告");
+        Files.writeString(workspace.resolve("其它.md"), "别的内容");
+        recordPassingEvidence("其它.md");
+        var product = products.publish(session, "run", "结论.md", "调研结论", "", List.of());
+        assertEquals(ValidationSnapshot.UNVERIFIED, product.verification().status());
+        assertTrue(product.verification().reason().contains("没有覆盖"));
+    }
+
+    private void recordPassingEvidence(String... paths) {
+        String candidate = WorkspaceFingerprint.of(workspace, List.of(paths));
+        ledger.record(new ValidationEvidence("val_test", session, "run", candidate, List.of(paths),
+            List.of("node --test: 通过"), ValidationEvidence.PASSED, "test-env", "run", Instant.now()));
     }
 
     @Test

@@ -43,9 +43,30 @@ public record PublishArtifactTool(WorkProductService products, ObjectMapper mapp
             var product = products.publish(sessionId, runId, ToolSupport.stringArg(args, "path"),
                 ToolSupport.stringArg(args, "title"), ToolSupport.stringArg(args, "summary"), sources);
             return mapper.writeValueAsString(Map.of("id", product.id(), "title", product.title(), "status", "saved",
-                "message", "已保存成果快照，可在成果面板预览和下载；不代表内容已验证。"));
+                "verification", verdict(product)));
         } catch (RuntimeException e) {
             return "ERROR: 保存成果失败：" + e.getMessage();
         }
+    }
+
+    /**
+     * 如实回报验证结论，不写免责句。
+     *
+     * <p>模型需要看到「这份成果有没有证据」才能决定是继续补验证还是如实收尾；
+     * 一律写「不代表内容已验证」等于什么都没告诉它，也就等于没做这件事。
+     */
+    private static Map<String, Object> verdict(WorkProductService.Product product) {
+        var verification = product.verification();
+        return Map.of("status", verification.status(), "reason", verification.reason(), "candidateHash",
+            verification.candidateHash(), "message", message(verification));
+    }
+
+    private static String message(com.pilot.server.validation.ValidationSnapshot verification) {
+        return switch (verification.status()) {
+            case com.pilot.server.validation.ValidationSnapshot.VERIFIED -> "已验证：这条证据仍覆盖当前文件内容。";
+            case com.pilot.server.validation.ValidationSnapshot.STALE ->
+                "证据已过期：" + verification.reason() + "。重新运行校验后再登记。";
+            default -> "未验证：" + verification.reason() + "。";
+        };
     }
 }

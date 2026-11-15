@@ -32,6 +32,8 @@ import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.store.AutomationStore;
 import com.pilot.server.tool.WorkspaceToolFactory;
+import com.pilot.server.validation.ValidationSnapshot;
+import com.pilot.server.validation.ValidationStatusService;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -50,8 +52,18 @@ public class WorkProductService {
     public record Source(String url, boolean observedRead, String callId) {
     }
 
+    /**
+     * 成果快照 + 登记当时的验证结论。
+     *
+     * <p>结论是发布那一刻的即时判断，不是永久徽章：产物后来变化时，重新查询会得到
+     * {@link ValidationSnapshot#STALE}。老记录没有这个字段时按「未验证」处理，不伪装成已验证。
+     */
     public record Product(String id, String sessionId, String runId, String title, String summary, String filename,
-        String sourcePath, String mediaType, long bytes, String sha256, List<Source> sources, Instant createdAt) {
+        String sourcePath, String mediaType, long bytes, String sha256, List<Source> sources, Instant createdAt,
+        ValidationSnapshot verification) {
+        public Product {
+            verification = verification == null ? ValidationSnapshot.unverified("这条成果登记时还没有校验证据") : verification;
+        }
     }
 
     public record Preview(String format, String text, boolean truncated, String notice) {
@@ -62,27 +74,31 @@ public class WorkProductService {
     private final SessionService sessions;
     private final ConversationRepository conversations;
     private final WorkspaceToolFactory workspaces;
+    private final ValidationStatusService validations;
     private final Path root;
 
     public WorkProductService(AutomationStore store, ObjectMapper mapper, SessionService sessions,
-        ConversationRepository conversations, WorkspaceToolFactory workspaces, PilotDataDir dataDir) {
+        ConversationRepository conversations, WorkspaceToolFactory workspaces, ValidationStatusService validations,
+        PilotDataDir dataDir) {
         this.store = store;
         this.mapper = mapper;
         this.sessions = sessions;
         this.conversations = conversations;
         this.workspaces = workspaces;
+        this.validations = validations;
         this.root = dataDir.file("work-products").toAbsolutePath().normalize();
     }
 
     public List<Product> list(String sessionId) {
-        requireSession(sessionId);
+        Session session = requireSession(sessionId);
+        Path workspace = workspaceOf(session);
         return store.list(KIND).stream().map(row -> mapper.readValue(row.payload(), Product.class))
-            .filter(item -> item.sessionId().equals(sessionId))
+            .filter(item -> item.sessionId().equals(sessionId)).map(item -> decorate(item, workspace))
             .sorted(Comparator.comparing(Product::createdAt).reversed()).toList();
     }
 
     public Product get(String sessionId, String id) {
-        requireSession(sessionId);
+        Session session = requireSession(sessionId);
         if (id == null || !id.matches("art_[a-f0-9]{32}")) {
             throw new NoSuchElementException("成果不存在");
         }
@@ -91,7 +107,27 @@ public class WorkProductService {
         if (!product.sessionId().equals(sessionId)) {
             throw new NoSuchElementException("成果不属于当前对话");
         }
-        return product;
+        return decorate(product, workspaceOf(session));
+    }
+
+    /**
+     * 读取时重新计算验证结论，而不是沿用登记那一刻的结论。
+     *
+     * <p>「证据还作不作数」是一个此刻的问题：文件随时可能被别的工具、别的会话或用户本人改动。
+     * 存下来的旧结论只适用于审计，不能让面板一直显示一枚过期的「已验证」徽章。
+     */
+    private Product decorate(Product product, Path workspace) {
+        ValidationSnapshot snapshot = validations.snapshot(product.sessionId(), workspace, product.sourcePath());
+        return new Product(product.id(), product.sessionId(), product.runId(), product.title(), product.summary(),
+            product.filename(), product.sourcePath(), product.mediaType(), product.bytes(), product.sha256(),
+            product.sources(), product.createdAt(), snapshot);
+    }
+
+    private Path workspaceOf(Session session) {
+        String configured = session.workspace();
+        Path base = configured == null || configured.isBlank() ? Path.of(System.getProperty("user.dir", "."))
+            : Path.of(configured);
+        return workspaces.resolve(base.toString());
     }
 
     /** 会话删除时一并移除快照；不碰工作区中的原始成果文件。 */
@@ -132,16 +168,18 @@ public class WorkProductService {
             byte[] bytes = readBounded(source);
             List<Source> sources = sources(sessionId, urls);
             String hash = Sha256.hex(bytes);
-            String identity = mapper.writeValueAsString(List.of(sessionId, Objects.toString(runId, ""),
-                paths.display(source), label, description, hash, sources.stream().map(Source::url).toList()));
+            String relative = paths.display(source);
+            String identity = mapper.writeValueAsString(List.of(sessionId, Objects.toString(runId, ""), relative, label,
+                description, hash, sources.stream().map(Source::url).toList()));
             String id = "art_" + Sha256.hex(identity).substring(0, 32);
             if (store.get(KIND, id).isPresent()) {
                 Product existing = get(sessionId, id);
                 content(existing);
                 return existing;
             }
+            ValidationSnapshot verification = validations.snapshot(sessionId, paths.root(), relative);
             Product product = new Product(id, sessionId, Objects.toString(runId, ""), label, description, filename,
-                paths.display(source), mediaType, bytes.length, hash, sources, Instant.now());
+                relative, mediaType, bytes.length, hash, sources, Instant.now(), verification);
             Files.createDirectories(root);
             Path target = snapshot(id);
             // 同一内容地址下的孤儿副本可来自上次落库前崩溃；只能复用内容相同的副本。

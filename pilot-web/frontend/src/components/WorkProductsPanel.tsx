@@ -1,5 +1,6 @@
 import type * as S from '../types/server.js';
 import { errorInfo } from '../lib/errors.js';
+import { verificationStatusDetail, verificationStatusLabel, verificationStatusTone, shortFingerprint } from '../lib/verification-status.js';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useStore } from '../store.js';
@@ -7,6 +8,9 @@ import { MarkdownBody } from './MarkdownBody.jsx';
 import './work-products.css';
 
 const STATUS: Record<string, string> = { PENDING: '待审核', APPROVED: '已接受', REJECTED: '已拒绝', REVERTED: '已撤回', CONFLICT: '版本冲突', APPROVING: '正在接受', REVERTING: '正在撤回' };
+function VerificationBadge({ status }: { status: string | null | undefined }) {
+  return <span className="work-verdict" data-tone={verificationStatusTone(status)}>{verificationStatusLabel(status)}</span>;
+}
 const dateText = (value: string | null | undefined) => value ? new Date(value).toLocaleString() : '';
 function sourceHref(value: string) {
   try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? url.href : null; }
@@ -67,7 +71,8 @@ function SessionProducts({ session }: { session: string }) {
           <h3>交付文件</h3>
           {!products.length && !loading && !error && <p className="work-empty">还没有交付文件。可以让 Pilot 调研一个问题，或把资料整理成报告、表格，完成后会出现在这里。</p>}
           <ul className="work-list">{products.map(item => <li key={item.id}><button data-work-key={`product:${item.id}`} onClick={() => setSelected({ kind: 'product', id: item.id })}>
-            <strong>{item.title}</strong><span>{item.summary || item.filename}</span><small>{item.filename} · {Math.max(1, Math.round(item.bytes / 1024))} KB · {dateText(item.createdAt)}</small>
+            <strong><span>{item.title}</span><VerificationBadge status={item.verification?.status} /></strong>
+            <span>{item.summary || item.filename}</span><small>{item.filename} · {Math.max(1, Math.round(item.bytes / 1024))} KB · {dateText(item.createdAt)}</small>
           </button></li>)}</ul>
           <h3>可复用的经验</h3>
           <p className="work-hint">先核对步骤与依据，接受后才会加入当前项目的技能。</p>
@@ -107,6 +112,7 @@ function ProductDetail({ session, product }: { session: string; product: S.WorkP
   };
   return <article className="work-detail">
     <h2 tabIndex={-1}>{product.title}</h2><p>{product.summary}</p>
+    <VerificationBlock verification={product.verification} />
     <div className="work-toolbar"><small>{product.filename} · {dateText(product.createdAt)}</small>
       <button className="btn" onClick={openInWorkbench}>审阅工作区文件</button>
       <button className="btn" onClick={download} disabled={downloading}>{downloading ? '正在下载…' : '下载文件'}</button></div>
@@ -120,6 +126,16 @@ function ProductDetail({ session, product }: { session: string; product: S.WorkP
       <small>{source.observedRead ? '有工具读取记录' : '未记录工具读取'}</small>
     </li>)}</ul> : <p className="work-hint">此成果未附外部引用。</p>}
   </article>;
+}
+
+/** 成果详情里的验证结论：先给结论，再给依据，最后才是可核对的指纹。 */
+function VerificationBlock({ verification }: { verification: S.WorkProductServiceValidationSnapshot | null | undefined }) {
+  const fingerprint = shortFingerprint(verification?.candidateHash);
+  return <section className="work-verification" data-tone={verificationStatusTone(verification?.status)} aria-label="验证结论">
+    <p><VerificationBadge status={verification?.status} />{verificationStatusDetail(verification)}</p>
+    {verification?.recordedAt && verification.recordedAt !== '1970-01-01T00:00:00Z' && <small>证据记录于 {dateText(verification.recordedAt)}</small>}
+    {fingerprint && <small>产物指纹 {fingerprint}（与任务详情核对是否同一份）</small>}
+  </section>;
 }
 
 function DraftDetail({ session, draft, onChange, onRefresh }: { session: string; draft: S.SkillDraftServiceDraft; onChange: (updated: S.SkillDraftServiceDraft) => void; onRefresh: () => void }) {

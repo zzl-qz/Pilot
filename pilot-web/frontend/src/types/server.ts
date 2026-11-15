@@ -1495,6 +1495,16 @@ export interface WorkProductServiceProduct {
   sha256: string;
   sources: (WorkProductServiceSource)[];
   createdAt: string;
+  verification: WorkProductServiceValidationSnapshot;
+}
+
+/** ValidationSnapshot.java / 成果此刻的验证结论 */
+export interface WorkProductServiceValidationSnapshot {
+  status: string;
+  reason: string;
+  candidateHash: string;
+  evidenceId: string;
+  recordedAt: string;
 }
 
 /** WorkProductService.java / Source */
