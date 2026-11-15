@@ -131,6 +131,32 @@ class ScheduleApiTest {
     }
 
     @Test
+    void recurringPlanRejectsMissingNullAndUnknownMisfireWithBadRequest() throws Exception {
+        String source = sessions.createSession("错过策略校验").id();
+        var task = Map.of("name", "每天维护", "sourceSessionId", source, "content", "检查既有链路", "runAt",
+            Instant.now().plusSeconds(86400).toString(), "timezone", "Asia/Shanghai", "isolated", false);
+        // 省略字段
+        mvc.perform(post("/api/automation/series").contentType("application/json")
+            .content(mapper.writeValueAsString(Map.of("task", task, "cron", "0 0 9 * * *"))))
+            .andExpect(status().isBadRequest());
+        // 显式 null
+        mvc.perform(post("/api/automation/series").contentType("application/json")
+            .content(mapper.writeValueAsString(Map.of("task", task, "cron", "0 0 9 * * *", "misfire", ""))
+                .replace("\"misfire\":\"\"", "\"misfire\":null")))
+            .andExpect(status().isBadRequest());
+        // 未知值
+        mvc.perform(post("/api/automation/series").contentType("application/json")
+            .content(mapper.writeValueAsString(Map.of("task", task, "cron", "0 0 9 * * *", "misfire", "LATER"))))
+            .andExpect(status().isBadRequest());
+        // 两个合法值都成功
+        for (String misfire : List.of("ONCE", "SKIP")) {
+            mvc.perform(post("/api/automation/series").contentType("application/json")
+                .content(mapper.writeValueAsString(Map.of("task", task, "cron", "0 0 9 * * *", "misfire", misfire))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.misfire").value(misfire));
+        }
+    }
+
+    @Test
     void recurringAndTemplateRoutesValidateAndControlWithoutLaunchingModels() throws Exception {
         String source = sessions.createSession("周期 API 测试").id();
         var task = Map.of("name", "每天维护", "sourceSessionId", source, "content", "检查既有链路", "runAt",
