@@ -1,9 +1,12 @@
 package com.pilot.server.results;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -91,6 +94,52 @@ public class ResultInboxRepository {
         }, row -> new EventEnvelope(row.getLong("sequence"), Instant.parse(row.getString("created_at")),
             row.getString("type"), row.getString("session_id"), row.getString("run_id"),
             codec.decode(row.getString("type"), row.getString("payload"))), "读取任务结果失败");
+    }
+
+    /**
+     * 按运行 ID 读取结束事件，**不受通知渠道启用时间影响**。
+     *
+     * <p>计划结果的版本号要参与投递幂等键；如果用「渠道启用时间之后」的窗口取事件，
+     * 关闭一个渠道就会让同一结果换一个版本号，从而重复投递 Webhook。
+     */
+    public List<EventEnvelope> endingsForRuns(Collection<String> runIds) {
+        List<String> ids = runIds == null ? List.of()
+            : runIds.stream().filter(Objects::nonNull).filter(id -> !id.isBlank()).distinct().toList();
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        if (store == null) {
+            Map<String, EventEnvelope> latest = new LinkedHashMap<>();
+            for (Session session : sessions.list()) {
+                if (session.isSide()) {
+                    continue;
+                }
+                for (EventEnvelope event : sessions.events(session.id())) {
+                    if (ids.contains(event.runId())
+                        && Set.of("run.completed", "run.failed", "run.cancelled").contains(event.type())) {
+                        latest.put(event.runId(), event);
+                    }
+                }
+            }
+            return List.copyOf(latest.values());
+        }
+        List<EventEnvelope> result = new ArrayList<>();
+        for (int from = 0; from < ids.size(); from += 400) {
+            var chunk = ids.subList(from, Math.min(ids.size(), from + 400));
+            result.addAll(JdbcSupport.query(store,
+                "SELECT * FROM events WHERE run_id IN (" + String.join(",", Collections.nCopies(chunk.size(), "?"))
+                    + ") AND type IN ('run.completed','run.failed','run.cancelled') ORDER BY sequence",
+                q -> {
+                    for (int i = 0; i < chunk.size(); i++) {
+                        q.setString(i + 1, chunk.get(i));
+                    }
+                },
+                row -> new EventEnvelope(row.getLong("sequence"), Instant.parse(row.getString("created_at")),
+                    row.getString("type"), row.getString("session_id"), row.getString("run_id"),
+                    codec.decode(row.getString("type"), row.getString("payload"))),
+                "读取计划运行结束事件失败"));
+        }
+        return result;
     }
 
     /** 列表轮询批量读取，避免每条结果打开一次 SQLite 连接。 */

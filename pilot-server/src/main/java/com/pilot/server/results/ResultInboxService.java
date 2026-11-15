@@ -90,6 +90,13 @@ public class ResultInboxService {
         Map<String, EventEnvelope> byRun = new HashMap<>();
         endings.forEach(e -> byRun.put(e.runId(), e));
         var jobs = schedules.list();
+        // 计划结果的版本与摘要不能随通知渠道启用时间漂移：按 runId 单独取结束事件
+        Map<String, EventEnvelope> scheduledEnds = new HashMap<>();
+        if (!jobs.isEmpty()) {
+            for (EventEnvelope event : repository.endingsForRuns(jobs.stream().map(ScheduledTask::runId).toList())) {
+                scheduledEnds.put(event.runId(), event);
+            }
+        }
         Set<String> scheduledSessions = new HashSet<>();
         List<Item> items = new ArrayList<>();
         Map<String, Session> sessionIndex = new HashMap<>();
@@ -105,6 +112,9 @@ public class ResultInboxService {
                 continue;
             }
             EventEnvelope end = byRun.get(job.runId());
+            if (end == null && job.runId() != null) {
+                end = scheduledEnds.get(job.runId());
+            }
             var completed = end != null && end.payload() instanceof RunCompleted c ? c : null;
             String revision =
                 job.state() + ":" + job.runId() + ":" + job.attempts() + ":" + (end == null ? 0 : end.sequence());

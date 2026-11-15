@@ -107,6 +107,27 @@ class ResultInboxTest {
     }
 
     @Test
+    void scheduledResultVersionDoesNotDependOnNotificationChannelWindow() {
+        String id = sessions.createSession("定时任务").id();
+        sessions.publish(id, "run_window", new RunCompleted("结果正文", List.of("a.txt"), List.of("测试通过")));
+        Instant endingAt = Instant.now();
+        Instant sinceAfterEnding = endingAt.plusSeconds(5);
+        var job = new ScheduledTask("schedule_window", "定时结果", id, null, "修复", null, null, endingAt.minusSeconds(60),
+            "UTC", "COMPLETED", "run_window", 1, 1, null, "已完成", List.of(), 1,
+            new ScheduledTask.Workspace("SHARED", "ws", "ws", "", "", null)).ended(sinceAfterEnding);
+        when(schedules.list()).thenReturn(List.of(job));
+
+        var wide = service.deliveryItems(Instant.EPOCH).stream().filter(item -> item.id().equals(job.id())).findFirst()
+            .orElseThrow();
+        var narrow = service.deliveryItems(sinceAfterEnding).stream().filter(item -> item.id().equals(job.id()))
+            .findFirst().orElseThrow();
+
+        assertEquals(wide.revision(), narrow.revision(), "关闭渠道不能让同一结果换版本号");
+        assertEquals("结果正文", narrow.summary(), "窗口外也要能取到运行结束事件的内容");
+        assertEquals(wide.at(), narrow.at());
+    }
+
+    @Test
     void scheduledAttemptsCollapseIntoOneResultAndHandoffDoesNotResetReceipt() {
         String id = sessions.createSession("独立任务").id();
         sessions.publish(id, "attempt1", new RunFailed("MODEL_ERROR", "重试中", false));
