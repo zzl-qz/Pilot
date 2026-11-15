@@ -39,6 +39,12 @@ public final class SqliteStore {
         "CREATE TABLE IF NOT EXISTS result_receipts (id TEXT PRIMARY KEY, revision TEXT NOT NULL, seen INTEGER NOT NULL DEFAULT 0, handled INTEGER NOT NULL DEFAULT 0)",
         "CREATE TABLE IF NOT EXISTS scheduled_tasks (id TEXT PRIMARY KEY, version INTEGER NOT NULL, payload TEXT NOT NULL)",
         """
+            CREATE TABLE IF NOT EXISTS session_note_sources (
+                note_id TEXT PRIMARY KEY,
+                sequence INTEGER,
+                excerpt TEXT NOT NULL,
+                role TEXT
+            )""", """
             CREATE TABLE IF NOT EXISTS queue_holds (
                 session_id TEXT PRIMARY KEY,
                 held INTEGER NOT NULL

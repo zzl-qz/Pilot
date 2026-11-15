@@ -1055,6 +1055,15 @@ export interface SessionNotesNote {
   content: string;
   createdAt: string;
   updatedAt: string;
+  source?: NoteSource | null;
+}
+
+/** 想法引用的来源消息；历史编辑或清理后 available=false。 */
+export interface NoteSource {
+  sequence?: number | null;
+  excerpt?: string;
+  role?: string | null;
+  available?: boolean;
 }
 
 /** SettingsController.java / ModelRequest */

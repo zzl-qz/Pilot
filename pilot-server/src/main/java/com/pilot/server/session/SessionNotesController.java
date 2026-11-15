@@ -46,7 +46,9 @@ public class SessionNotesController {
         if (request == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请求体不能为空");
         }
-        return notes.create(session, request.content());
+        return notes.create(session, request.content(),
+            request.source() == null ? null : new SessionNotes.SourceInput(request.source().sequence(),
+                request.source().excerpt(), request.source().role()));
     }
 
     @PutMapping("/{noteId}")
@@ -71,6 +73,13 @@ public class SessionNotesController {
         return ApiErrors.badRequest(e);
     }
 
-    public record NoteRequest(String content) {
+    public record NoteRequest(String content, SourceRequest source) {
+        public NoteRequest(String content) {
+            this(content, null);
+        }
+    }
+
+    /** 从对话选中文字保存时的来源：消息序号、原文与角色；旧客户端只传 content。 */
+    public record SourceRequest(Integer sequence, String excerpt, String role) {
     }
 }

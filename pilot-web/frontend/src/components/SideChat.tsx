@@ -324,7 +324,7 @@ function visibleSideMessages(thread: SideTranscript) {
  */
 export function SelectionQuote() {
   const embedded = useStore((state) => state.embeddedSessionId);
-  const [menu, setMenu] = useState<{ text: string; left: number; top: number } | null>(null);
+  const [menu, setMenu] = useState<{ text: string; left: number; top: number; sequence: number | null; role: string } | null>(null);
   const toolbar = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -350,8 +350,15 @@ export function SelectionQuote() {
         setMenu(null);
         return;
       }
+      const start = range.startContainer.nodeType === Node.ELEMENT_NODE
+        ? range.startContainer as Element
+        : range.startContainer.parentElement;
+      const row = start?.closest('[data-sequence]');
+      const sequence = Number(row?.getAttribute('data-sequence'));
       setMenu({
         text: text.slice(0, 8000),
+        sequence: row && Number.isFinite(sequence) ? sequence : null,
+        role: row?.classList.contains('msg-user') ? 'user' : 'assistant',
         left: Math.max(8, Math.min(window.innerWidth - 232, rect.left + rect.width / 2 - 112)),
         top: Math.max(8, Math.min(window.innerHeight - 56, rect.top >= 64 ? rect.top - 52 : rect.bottom + 8))
       });
@@ -385,6 +392,13 @@ export function SelectionQuote() {
     useStore.getState().askSideChat(menu.text);
     setMenu(null);
   };
+  const saveAsNote = () => {
+    useStore.getState().openNoteFromSelection({
+      text: menu.text,
+      source: { sequence: menu.sequence, excerpt: menu.text.slice(0, 500), role: menu.role }
+    });
+    setMenu(null);
+  };
 
   return (
     <div
@@ -401,6 +415,7 @@ export function SelectionQuote() {
     >
       <Button label="加到输入框" variant="ghost" onClick={addToComposer} />
       <Button label="在侧边问" variant="ghost" onClick={askInSideChat} />
+      <Button label="保存为想法" variant="ghost" onClick={saveAsNote} />
     </div>
   );
 }

@@ -20,8 +20,10 @@ export function SessionNotes({ onClose }: { onClose: () => void }) {
   const notesState = useStore(state => state.notesState);
   const notesError = useStore(state => state.notesError);
   const saving = useStore(state => state.notesSaving);
-  const [draft, setDraft] = useState('');
+  const noteSeed = useStore(state => state.noteSeed);
+  const [draft, setDraft] = useState(() => noteSeed?.text || '');
   const [localError, setLocalError] = useState('');
+  const [seed, setSeed] = useState(() => noteSeed);
   const [editing, setEditing] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -37,8 +39,10 @@ export function SessionNotes({ onClose }: { onClose: () => void }) {
     const text = draft.trim();
     if (!text || saving) return;
     setLocalError('');
-    if (await useStore.getState().addNote(draft)) {
+    if (await useStore.getState().addNote(draft, seed?.source)) {
       setDraft('');
+      setSeed(null);
+      useStore.getState().openNoteFromSelection(null);
       inputRef.current?.focus({ preventScroll: true });
     }
   }
@@ -84,6 +88,9 @@ export function SessionNotes({ onClose }: { onClose: () => void }) {
       <IconButton className="notes-close" label="关闭想法" icon={<Icon name="close" />} variant="ghost" onClick={onClose} />
     </header>
     {!sessionId && <p className="notes-draft-hint">还没开始任务：想法先存在本机，发出第一条消息后自动并入当前会话。</p>}
+    {seed?.source?.sequence != null && <p className="note-source is-seed" role="status">
+      来自第 {seed.source.sequence} 条消息的选中文字；保存后仍可定位，来源被清理时会保留引用原文。
+    </p>}
     <div className="notes-form">
       <textarea id="notes-input" ref={inputRef} aria-label="新想法" rows={3} maxLength={NOTE_LIMIT}
         placeholder="记下这一刻的想法，稍后可带回输入框…" value={draft}
@@ -122,6 +129,7 @@ export function SessionNotes({ onClose }: { onClose: () => void }) {
             <button type="button" className="note-content" title="添加到输入框" onClick={() => insert(note.content)}>
               {note.content}
             </button>
+            {note.source && <NoteSource source={note.source} />}
             <div className="note-actions">
               <IconButton label="编辑想法" icon={<Icon name="edit" />} variant="ghost"
                 isDisabled={Boolean(saving)} onClick={() => startEdit(note.id, note.content)} />
@@ -133,4 +141,31 @@ export function SessionNotes({ onClose }: { onClose: () => void }) {
       {notesState === 'ready' && !notes.length && <li className="notes-empty">还没有想法。执行任务时可以在这里记下稍后要用的内容。</li>}
     </ul>
   </div>;
+}
+
+/** 想法来源：可用时点击滚到原消息；历史编辑/清理后只保留引用原文并说明不可用。 */
+function NoteSource({ source }: { source: NonNullable<import('../types/server.js').SessionNotesNote['source']> }) {
+  const sequence = source.sequence;
+  if (sequence == null) {
+    return null;
+  }
+  const role = source.role === 'user' ? '我的消息' : 'AI 回复';
+  if (!source.available) {
+    return <span className="note-source is-missing" title={source.excerpt || ''}>
+      来源不可用（第 {sequence} 条已清理）· 已保留引用原文
+    </span>;
+  }
+  return <button type="button" className="note-source" title={'定位到原消息：' + (source.excerpt || '')}
+    onClick={() => {
+      const row = document.querySelector('[data-sequence="' + sequence + '"]');
+      if (!row) {
+        useStore.getState().showNotice('原消息已不在当前窗口，可向上翻页后再试。');
+        return;
+      }
+      row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      row.classList.add('is-note-source');
+      window.setTimeout(() => row.classList.remove('is-note-source'), 1600);
+    }}>
+    {role} · 第 {sequence} 条
+  </button>;
 }

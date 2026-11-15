@@ -92,6 +92,7 @@ function resetSessionState(draft: StoreState) {
   // 想法属于具体会话：切走时先清空，等目标会话加载回来，避免串台
   draft.notes = [];
   draft.notesState = 'idle';
+  draft.noteSeed = null;
   draft.notesError = '';
   draft.notesSaving = '';
   // 能力清单按会话/工作区解析：切走后不能拿上一会话的 MCP 运行状态展示审批按钮
@@ -100,7 +101,7 @@ function resetSessionState(draft: StoreState) {
 }
 
 /** 会话生命周期拥有列表请求和创建请求；连接由调用方提供，避免反向依赖全局 store。 */
-export function createSessionActions({ set, get }: StoreContext, { closeStreams, connectMirror, connectCommandTasks }: SessionConnections): StoreSlice<'loadProjects' | 'loadSessions' | 'loadNotes' | 'addNote' | 'editNote' | 'removeNote' | 'startNewSession' | 'ensureSession' | 'activate' | 'renameSession' | 'updateSessionPreferences' | 'archiveSession' | 'deleteSession'> {
+export function createSessionActions({ set, get }: StoreContext, { closeStreams, connectMirror, connectCommandTasks }: SessionConnections): StoreSlice<'loadProjects' | 'loadSessions' | 'loadNotes' | 'addNote' | 'openNoteFromSelection' | 'editNote' | 'removeNote' | 'startNewSession' | 'ensureSession' | 'activate' | 'renameSession' | 'updateSessionPreferences' | 'archiveSession' | 'deleteSession'> {
   let activationSequence = 0;
   let sessionCreation: { epoch: number; promise: Promise<string> } | null = null;
   let projectLoadSequence = 0;
@@ -179,7 +180,15 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
     },
 
     /** 保存想法：只写想法列表，不发消息、不进队列；还没建会话时先存在本机。 */
-    async addNote(content) {
+    /** 选中文字「保存为想法」：预填内容与来源，打开当前会话的想法面板，不直接落库。 */
+    openNoteFromSelection(selection) {
+      set((draft) => {
+        draft.noteSeed = selection && selection.text ? selection : null;
+        draft.notesError = '';
+      });
+    },
+
+    async addNote(content, source) {
       const sessionId = get().sessionId;
       if (!sessionId) {
         const invalid = noteContentError(content);
@@ -207,7 +216,7 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
       }
       set((draft) => { draft.notesSaving = 'create'; draft.notesError = ''; });
       try {
-        const note = await api.createNote(sessionId, content);
+        const note = await api.createNote(sessionId, content, source);
         if (!note || typeof note.id !== 'string') throw new Error('服务端没有返回想法内容，请重试。');
         if (get().sessionId === sessionId) {
           set((draft) => {

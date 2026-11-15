@@ -63,3 +63,9 @@ export interface RunPhaseInput {
   thread?: { rows: PhaseRow[] };
   lastOutcome?: string;
 }
+
+/** 从对话选中文字保存想法时的预填内容与来源。 */
+export interface NoteSeed {
+  text: string;
+  source: { sequence?: number | null; excerpt?: string; role?: string | null };
+}

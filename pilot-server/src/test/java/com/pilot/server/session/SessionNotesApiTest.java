@@ -8,6 +8,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.Map;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -15,6 +17,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.pilot.core.event.RunStarted;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.run.RunStarter;
 
@@ -54,6 +57,29 @@ class SessionNotesApiTest {
         mvc.perform(delete("/api/sessions/{session}/notes/{note}", session, noteId)).andExpect(status().isNoContent());
         mvc.perform(get("/api/sessions/{session}/notes", session)).andExpect(status().isOk())
             .andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
+    void noteSourceIsStoredAndMarkedAvailableOnlyWhileTheMessageExists() throws Exception {
+        String session = sessions.createSession("想法来源").id();
+        sessions.publish(session, "run_source", new RunStarted("来源消息"));
+        String body = json.writeValueAsString(Map.of("content", "晚点补上并发测试", "source",
+            Map.of("sequence", 1, "excerpt", "建议补一条并发测试", "role", "assistant")));
+        mvc.perform(
+            post("/api/sessions/{session}/notes", session).contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.source.sequence").value(1))
+            .andExpect(jsonPath("$.source.excerpt").value("建议补一条并发测试"))
+            .andExpect(jsonPath("$.source.role").value("assistant"))
+            .andExpect(jsonPath("$.source.available").value(true));
+        mvc.perform(get("/api/sessions/{session}/notes", session)).andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].source.available").value(true));
+
+        String missing = json.writeValueAsString(
+            Map.of("content", "来源已被清理", "source", Map.of("sequence", 999, "excerpt", "旧原文", "role", "user")));
+        mvc.perform(
+            post("/api/sessions/{session}/notes", session).contentType(MediaType.APPLICATION_JSON).content(missing))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.source.available").value(false))
+            .andExpect(jsonPath("$.source.excerpt").value("旧原文"));
     }
 
     @Test

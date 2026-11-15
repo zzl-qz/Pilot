@@ -50,6 +50,25 @@ class SessionNotesTest {
     }
 
     @Test
+    void sourceSurvivesReopenAndKeepsExcerptWhenHistoryIsGone() {
+        SessionNotes first = open("source.db");
+        SessionNotes.Note note = first.create("s1", "补充说明", new SessionNotes.SourceInput(7, "选中的原文", "assistant"));
+        assertEquals(7, note.source().sequence());
+        assertEquals("选中的原文", note.source().excerpt());
+        assertFalse(note.source().available(), "没有事件服务时无法确认来源，标为不可用但不丢原文");
+
+        // 编辑正文不改来源
+        first.update("s1", note.id(), "补充说明（已改）");
+
+        SessionNotes reopened = open("source.db");
+        var saved = reopened.list("s1").get(0);
+        assertEquals("补充说明（已改）", saved.content());
+        assertEquals(7, saved.source().sequence());
+        assertEquals("选中的原文", saved.source().excerpt());
+        assertEquals("assistant", saved.source().role());
+    }
+
+    @Test
     void notesAreIsolatedPerSessionAndSessionDeletionClearsThem() {
         SessionNotes notes = open("isolation.db");
         notes.create("s1", "属于 s1");

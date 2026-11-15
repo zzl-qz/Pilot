@@ -88,6 +88,7 @@ export function Composer() {
   const modelOpen = toolbarPanel === 'model';
   const contextOpen = toolbarPanel === 'context';
   const notesOpen = toolbarPanel === 'notes';
+  const noteSeed = useStore((state) => state.noteSeed);
   const [refMenu, setRefMenu] = useState<ReferenceMenu | null>(null);
   const [slashMenu, setSlashMenu] = useState<{ items: QuickCommand[]; query: string } | null>(null);
   const [menuIndex, setMenuIndex] = useState(0);
@@ -625,6 +626,10 @@ export function Composer() {
       document.removeEventListener('focusin', closeOutside);
     };
   }, [toolbarPanel]);
+
+  useEffect(() => {
+    if (noteSeed) setToolbarPanel('notes');
+  }, [noteSeed]);
 
   function movePermissionFocus(event: React.KeyboardEvent) {
     if (event.nativeEvent.isComposing || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
