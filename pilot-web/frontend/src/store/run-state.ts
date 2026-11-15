@@ -2,7 +2,7 @@ import type { StoreContext, StoreSlice } from './context.js';
 import { planInOpenSegment } from '../thread-reducer.js';
 import { api } from '../api.js';
 import { errorInfo } from '../lib/errors.js';
-import { normalizeQueue } from '../lib/queue.js';
+import { locateQueueTarget, normalizeQueue } from '../lib/queue.js';
 
 /** 运行面板的数据同步：计划、队列、任务契约和上下文各自保留现有响应归属检查。 */
 export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'resolveApproval' | 'resolveApprovalWithTrust' | 'resolveArbitration' | 'loadPlan' | 'loadQueue' | 'mutateQueue' | 'steerQueueItem' | 'saveQueueItem' | 'removeQueueItem' | 'moveQueueItem' | 'loadTask' | 'saveTask' | 'refreshContext' | 'refreshActiveRun'> {
@@ -140,9 +140,20 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
       if (!running || !runId) return false;
       return get().mutateQueue((id, revision) => api.steerQueueItem(id, index, { runId, revision }), '引导未发送：');
     },
-    async saveQueueItem(index, text) {
+    async saveQueueItem(target, text) {
       if (!text?.trim()) { get().showNotice('排队消息不能为空'); return false; }
-      return get().mutateQueue((id, revision) => api.updateQueueItem(id, index, { content: text, revision }), '修改排队消息失败：');
+      const { sessionId, sessionEpoch } = get();
+      if (!sessionId) return false;
+      // 先取最新队列：编辑期间队首可能被自动取走、另一端可能删除或移动
+      await get().loadQueue();
+      if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return false;
+      const index = locateQueueTarget(get().queueEntries, target);
+      if (index < 0) {
+        get().showNotice('原来的排队消息已被发送、删除或修改，本次没有保存。输入仍保留，可复制后重新选择目标。');
+        return false;
+      }
+      return get().mutateQueue((id, revision) => api.updateQueueItem(id, index, { content: text, revision }),
+        '修改排队消息失败：');
     },
     async removeQueueItem(index) {
       return get().mutateQueue((id, revision) => api.deleteQueueItem(id, index, revision), '删除排队消息失败：');

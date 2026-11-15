@@ -10,6 +10,8 @@ import type { DraftSession, RefreshOptions } from './sync.js';
 import type { EventEnvelope } from './events.js';
 
 export interface MirrorState { mode: 'idle' | 'live' | 'closed'; url: string; headless: boolean }
+/** 正在编辑的排队消息：用内容指纹而不是下标定位，刷新/重排后不会改到别的消息。 */
+export interface QueueEditTarget { index: number; key: string }
 export interface ComposerBridge {
   setText(text: string): void; getText(): string; getDraft?(): { text: string; imagePositions: number[] }; attachmentIds?(): string[]; insertAttachments?: ReturnType<typeof import('../lib/composer-input.js').createComposerInput>['insertAttachments']; appendText(text: string): void; focus(): void;
   prepareReload?(): { ok: boolean; reason?: string };
@@ -27,7 +29,7 @@ export interface UiState {
   picker: { title?: string; onPick?: (path: string) => unknown } | null;
   projectEditor: { id: string | null; name?: string; folders?: string[] } | null; skillsInstall: object | null;
   checkpointDialog: CheckpointDialog | null; confirm: ConfirmDialog | null;
-  agentsDockOpen: boolean; queueCollapsed: boolean; queueEdit: number | null; draftFiles: DraftAttachment[];
+  agentsDockOpen: boolean; queueCollapsed: boolean; queueEdit: QueueEditTarget | null; draftFiles: DraftAttachment[];
   connection: { status: string; text: string }; bottomSignal: number; attentionKind: string; browserDot: boolean;
   mirror: MirrorState; changeView: string | null; reviewRunId: string | null; previewPath: string; browserStatus: BrowserStatus | null; usageDays: number;
   mobileConnectionOpen?: boolean; notificationsOpen?: boolean; recurringOpen?: boolean; resultsOpen?: boolean;
@@ -88,7 +90,7 @@ export interface StoreActions {
   resolveApproval(id: string, approved: boolean): Promise<void>; resolveApprovalWithTrust(id: string, approved: boolean, trust: { action: string; server: string; tool?: string; configHash?: string; toolHash?: string }): Promise<void>; resolveArbitration(id: string, choice: string): Promise<void>;
   loadPlan(options?: StrictOptions): Promise<void>; loadQueue(options?: StrictOptions): Promise<void>;
   mutateQueue(operation: (id: string, revision: string | null) => Promise<unknown>, failure: string): Promise<boolean>;
-  steerQueueItem(index: number): Promise<boolean>; saveQueueItem(index: number, text: string): Promise<boolean>;
+  steerQueueItem(index: number): Promise<boolean>; saveQueueItem(target: QueueEditTarget, text: string): Promise<boolean>;
   removeQueueItem(index: number): Promise<boolean>; moveQueueItem(from: number, to: number): Promise<boolean>;
   loadTask(options?: StrictOptions): Promise<void>; saveTask(constraints: string[], acceptance: S.TaskControlServiceAcceptance[]): Promise<void>;
   refreshContext(options?: StrictOptions): Promise<void>; ensureMirror(): void; compactContext(): Promise<void>;
