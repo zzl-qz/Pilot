@@ -1,11 +1,12 @@
 import type { StoreContext, StoreSlice } from './context.js';
 import { planInOpenSegment } from '../thread-reducer.js';
 import { api } from '../api.js';
+import { writeDraft } from '../lib/drafts.js';
 import { errorInfo } from '../lib/errors.js';
-import { locateQueueTarget, normalizeQueue } from '../lib/queue.js';
+import { fetchQueuedDraft, locateQueueTarget, normalizeQueue, queueEntryKey } from '../lib/queue.js';
 
 /** 运行面板的数据同步：计划、队列、任务契约和上下文各自保留现有响应归属检查。 */
-export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'resolveApproval' | 'resolveApprovalWithTrust' | 'resolveArbitration' | 'loadPlan' | 'loadQueue' | 'mutateQueue' | 'setQueueHeld' | 'steerQueueItem' | 'saveQueueItem' | 'removeQueueItem' | 'moveQueueItem' | 'loadTask' | 'saveTask' | 'refreshContext' | 'refreshActiveRun'> {
+export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'resolveApproval' | 'resolveApprovalWithTrust' | 'resolveArbitration' | 'loadPlan' | 'loadQueue' | 'mutateQueue' | 'setQueueHeld' | 'takeBackQueueItem' | 'steerQueueItem' | 'saveQueueItem' | 'removeQueueItem' | 'moveQueueItem' | 'loadTask' | 'saveTask' | 'refreshContext' | 'refreshActiveRun'> {
   let queueLoadSequence = 0;
   let queueHoldSequence = 0;
   let activeRunSequence = 0;
@@ -142,6 +143,57 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
         return false;
       } finally {
         if (get().sessionId === sessionId && get().sessionEpoch === sessionEpoch) set((draft) => { draft.queueHolding = false; });
+      }
+    },
+
+    /**
+     * 取回队列项：先读出正文与附件，再按最新版本移出队列，最后放回输入框。
+     * 任何一步失败都保留队列与原文，不会出现「队列删了、草稿又没拿到」。
+     */
+    async takeBackQueueItem(index) {
+      const { sessionId, sessionEpoch, queueEntries } = get();
+      if (!sessionId || get().queueTakingBack) return false;
+      const entry = queueEntries[index];
+      if (!entry) return false;
+      const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
+      set((draft) => { draft.queueTakingBack = true; });
+      try {
+        let restored;
+        try {
+          restored = await fetchQueuedDraft(sessionId, entry);
+        } catch (error) {
+          if (current()) get().showNotice('取回排队消息失败：' + errorInfo(error).message + '；消息仍在队列中。');
+          return false;
+        }
+        if (!current()) return false;
+        // 队列可能已被另一窗口或运行取走：按内容指纹重新定位，不用旧下标
+        await get().loadQueue();
+        if (!current()) return false;
+        const key = queueEntryKey(entry);
+        const at = get().queueEntries.findIndex(item => queueEntryKey(item) === key);
+        if (at < 0) {
+          get().showNotice('这条排队消息已经开始或已被移除，未取回；请核对队列与运行历史。');
+          return false;
+        }
+        const removed = await get().mutateQueue((id, revision) => api.deleteQueueItem(id, at, revision),
+          '取回排队消息失败：');
+        if (!removed || !current()) return false;
+        const bridge = get().composerApi;
+        if (!bridge) {
+          get().showNotice('输入框暂不可用，排队消息已移除；请检查草稿或历史。');
+          return false;
+        }
+        const existing = bridge.getText();
+        const text = restored.text.trim();
+        if (text) {
+          bridge.setText(existing.trim() ? existing.replace(/\s+$/, '') + '\n' + text : text);
+        }
+        if (restored.files.length) bridge.insertAttachments?.(restored.files);
+        writeDraft(localStorage, sessionId, bridge.getText());
+        get().showNotice('已取回排队消息' + (restored.files.length ? '（含 ' + restored.files.length + ' 个附件）' : '') + '，可继续编辑后发送。');
+        return true;
+      } finally {
+        if (current()) set((draft) => { draft.queueTakingBack = false; });
       }
     },
 

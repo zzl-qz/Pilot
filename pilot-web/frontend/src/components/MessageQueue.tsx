@@ -91,6 +91,7 @@ function QueueList({ entries, queueEdit, collapsed, header, held }: { entries: Q
 function QueueRow({ entry, index, count, onDragStart, onDragEnd }: { entry: QueueEntry; index: number; count: number; onDragStart: () => void; onDragEnd: () => void }) {
   const running = useStore(state => state.running);
   const busy = useStore(state => state.queueBusy || state.cancelling || state.pausing);
+  const takingBack = useStore(state => state.queueTakingBack);
   const [more, setMore] = useState(false);
   const moreRef = useRef<HTMLSpanElement>(null);
   useEffect(() => {
@@ -148,6 +149,9 @@ function QueueRow({ entry, index, count, onDragStart, onDragEnd }: { entry: Queu
           variant="ghost" size="sm" isDisabled={busy} onClick={() => useStore.getState().steerQueueItem(index)}>引导</Button>}
         <IconButton variant="ghost" size="sm" isDisabled={busy} label="编辑这条排队消息" icon={<Icon name="edit" />}
           onClick={edit} />
+        <Button className="queue-takeback" label="取回输入框" variant="ghost" size="sm"
+          isDisabled={busy || takingBack}
+          onClick={() => void useStore.getState().takeBackQueueItem(index)} />
         <IconButton variant="ghost" size="sm" isDisabled={busy} label="删除这条排队" icon={<Icon name="trash" />}
           onClick={() => useStore.getState().removeQueueItem(index)} />
         {count > 1 && <span className="queue-more" ref={moreRef}>

@@ -62,6 +62,7 @@ function resetSessionState(draft: StoreState) {
   draft.queueHeld = false;
   draft.queueWaitingReason = '';
   draft.queueHolding = false;
+  draft.queueTakingBack = false;
   draft.liveOutputTokens = 0;
   draft.contextStatus = null;
   draft.compactingContext = false;

@@ -1,4 +1,6 @@
 import type { QueueEntry, QueueResponse } from '../types/runtime.js';
+import type { DraftAttachment } from '../types/input.js';
+import { attachmentUrl, splitAttachmentMarkers } from './attachments.js';
 import type { QueueEditTarget } from '../types/store.js';
 
 /**
@@ -65,4 +67,56 @@ export function resumeBar({ running = false, needInput = false, resumable = fals
     text: needInput ? '需要你补充。写完发送会继续这一轮。' : '这一轮停住了，可以接着跑。',
     label: needInput ? '继续当前任务' : '继续执行'
   };
+}
+
+/**
+ * 把排队消息还原成可放进输入框的草稿：去掉内联文件标记，图片与文件都按附件芯片带回。
+ * 内容通过会话附件接口读取；任何一条读取失败都抛错，调用方保留原队列。
+ */
+export async function fetchQueuedDraft(
+  sessionId: string,
+  entry: QueueEntry,
+  fetcher: typeof fetch = fetch
+): Promise<{ text: string; files: DraftAttachment[]; imagePositions: number[] }> {
+  const spoken = splitAttachmentMarkers(entry.text ?? entry.content ?? '');
+  const images = (Array.isArray(entry.attachments) ? entry.attachments : [])
+    .map(item => ({ name: item.name || '图片', mimeType: item.mimeType, url: attachmentUrl(sessionId, item) }));
+  const saved = spoken.files.map(file => ({
+    name: file.name,
+    mimeType: file.mimeType,
+    url: attachmentUrl(sessionId, { name: file.name, mimeType: file.mimeType, path: file.path || '' })
+  }));
+  const files: DraftAttachment[] = [];
+  for (const source of [...images, ...saved]) {
+    if (!source.url) continue;
+    const response = await fetcher(source.url);
+    if (!response.ok) {
+      throw new Error('读取附件「' + source.name + '」失败（' + response.status + '）');
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (!bytes.length) {
+      throw new Error('附件「' + source.name + '」内容为空');
+    }
+    const mimeType = source.mimeType || 'application/octet-stream';
+    files.push({
+      id: 'queued-' + files.length + '-' + source.name,
+      name: source.name,
+      mimeType,
+      size: bytes.length,
+      dataBase64: 'data:' + mimeType + ';base64,' + base64Of(bytes)
+    });
+  }
+  return {
+    text: spoken.body,
+    files,
+    imagePositions: images.map(() => Number.POSITIVE_INFINITY)
+  };
+}
+
+function base64Of(bytes: Uint8Array): string {
+  let binary = '';
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  }
+  return btoa(binary);
 }
