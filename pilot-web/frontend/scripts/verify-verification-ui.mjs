@@ -83,7 +83,19 @@ const fixtures = {
     import '/src/styles.css'; import '/src/styles-addendum.css';
     useStore.setState({ init: async () => {}, sessionId: 's1', notesState: 'ready', notes: ${JSON.stringify(NOTES)},
       ui: { ...useStore.getState().ui, besideTab: 'notes', inspectorOpen: true, inspectorTab: 'chat' } });
-    createRoot(document.getElementById('root')).render(React.createElement(BesidePanel));`)
+    createRoot(document.getElementById('root')).render(React.createElement(BesidePanel));`),
+  '/__task': page('task', `
+    import { TaskContract } from '/src/components/Modals.jsx';
+    import '/src/styles.css'; import '/src/styles-addendum.css';
+    useStore.setState({ init: async () => {}, sessionId: 's1', running: false, notes: [],
+      task: {
+        taskId: 'task_1', originalGoal: '修复登录报错并补测试', constraints: [], corrections: [],
+        acceptance: [{ text: '测试通过', checked: false, evidence: '之前跑过' }],
+        status: 'AWAITING_REVIEW',
+        execution: { mode: 'GOAL', phase: 'CHECKS_STALE', requests: 12,
+          reason: '代码在这之后又改过', criteria: [], gap: '缺少当前版本的测试证据' }
+      } });
+    createRoot(document.getElementById('root')).render(React.createElement(TaskContract));`)
 };
 
 const server = await createServer({
@@ -202,7 +214,25 @@ await check('旁边面板两个页签可切换', async () => {
   await context.close();
 });
 
-// 4. 窄屏：状态徽标不能被挤出视口
+// 4. 任务卡：过期的检查证据要与「未验证」分开，并提供重新验证
+await check('任务卡把过期证据单独标出并可重新验证', async () => {
+  const { view, pageErrors, context } = await open('task', '/__task');
+  await view.getByText('任务契约').waitFor();
+  await view.locator('#task-contract-summary').click();
+  const block = view.locator('.task-verification');
+  await block.waitFor();
+  assert.equal(await block.getAttribute('data-tone'), 'stale', 'CHECKS_STALE 应落成 stale 档位');
+  assert.equal(await block.getAttribute('data-verification-phase'), 'CHECKS_STALE');
+  assert.match(await block.innerText(), /验证依据已变化/);
+  assert.equal(await block.getByRole('button', { name: '重新验证' }).count(), 1);
+  // 验收条件仍在，勾选状态没被界面擅自改动
+  assert.equal(await view.getByText('之前跑过').count(), 1, '用户写的证据要保留可见');
+  await view.screenshot({ path: join(output, 'task.png'), fullPage: true });
+  assert.deepEqual(pageErrors, []);
+  await context.close();
+});
+
+// 5. 窄屏：状态徽标不能被挤出视口
 await check('窄屏下成果卡无横向溢出', async () => {
   const { view, context } = await open('products-narrow', '/__products', 390);
   await view.getByText('已验证的报告').waitFor();
