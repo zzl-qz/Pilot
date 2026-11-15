@@ -317,9 +317,9 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
                 }?.take(200) ?: "附件"
                 val remaining = (budget.maxTotalBytes - totalBytes).coerceAtLeast(0)
                 val bytes = resolver.openInputStream(uri)?.use { it.readBounded(minOf(budget.maxFileBytes, remaining) + 1) } ?: error("无法读取 $name")
-                require(bytes.isNotEmpty() && bytes.size <= budget.maxFileBytes) { "$name 需大于 0 且不超过 ${budget.maxFileBytes} 字节" }
+                require(bytes.isNotEmpty() && bytes.size <= budget.maxFileBytes) { "$name 超过单个附件上限 ${AttachmentBudget.describe(budget.maxFileBytes)}" }
                 totalBytes += bytes.size
-                require(totalBytes <= budget.maxTotalBytes) { "一次附件总量最多 ${budget.maxTotalBytes} 字节" }
+                require(totalBytes <= budget.maxTotalBytes) { "一次附件总量最多 ${AttachmentBudget.describe(budget.maxTotalBytes)}" }
                 MobileAttachment(name, resolver.getType(uri) ?: "application/octet-stream", Base64.getEncoder().encodeToString(bytes), bytes.size)
             }
         }

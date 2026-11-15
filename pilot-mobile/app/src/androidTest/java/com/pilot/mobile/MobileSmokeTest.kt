@@ -152,7 +152,10 @@ class MobileSmokeTest {
             compose.runOnIdle { model.attach(listOf(android.net.Uri.fromFile(good))) }
             compose.waitUntil(10000) { !model.state.value.busy && model.state.value.attachments.size == 1 }
             compose.runOnIdle { model.attach(listOf(android.net.Uri.fromFile(large))) }
-            compose.waitUntil(10000) { !model.state.value.busy && model.state.value.error.contains("2 MB") }
+            val budget = com.pilot.mobile.AttachmentBudget.from(model.state.value.capabilities)
+            compose.waitUntil(10000) {
+                !model.state.value.busy && model.state.value.error.contains(budget.maxFileBytes.toString())
+            }
             org.junit.Assert.assertEquals(1, model.state.value.attachments.size)
             compose.runOnIdle { model.attach(listOf(android.net.Uri.fromFile(empty))) }
             compose.waitUntil(10000) { !model.state.value.busy && model.state.value.error.contains("大于 0") }
@@ -167,7 +170,9 @@ class MobileSmokeTest {
             org.junit.Assert.assertEquals(6 * 1024 * 1024, model.state.value.attachments.sumOf { it.bytes })
             // 已满总量时，第一个额外字节就应失败，不能继续读取后面的无效 URI。
             compose.runOnIdle { model.attach(listOf(android.net.Uri.fromFile(good), unreadable)) }
-            compose.waitUntil(10000) { !model.state.value.busy && model.state.value.error.contains("6 MB") }
+            compose.waitUntil(10000) {
+                !model.state.value.busy && model.state.value.error.contains(budget.maxTotalBytes.toString())
+            }
             org.junit.Assert.assertEquals(3, model.state.value.attachments.size)
             compose.runOnIdle { repeat(3) { model.removeAttachment(0) }; model.clearError(); model.attach(List(16) { android.net.Uri.fromFile(good) }) }
             compose.waitUntil(10000) { !model.state.value.busy && model.state.value.attachments.size == 16 }
