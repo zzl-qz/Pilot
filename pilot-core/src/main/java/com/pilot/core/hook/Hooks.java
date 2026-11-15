@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import com.pilot.core.contract.Contracts;
+
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -85,17 +87,29 @@ public final class Hooks {
         public static final Result NONE = new Result("", false);
     }
 
+    /**
+     * 因契约不满足而被跳过的钩子组。
+     *
+     * @param matcher 配置里写的 matcher，便于用户对照配置文件
+     * @param reason  具体缺什么；升级前体检和能力页直接展示这句
+     */
+    public record Skipped(String matcher, String reason) {
+    }
+
     private static final int MAX_OUTPUT_CHARS = 8_000;
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final Map<Event, List<Command>> specs;
+    /** 因契约不满足而没有加载的钩子组；只用于诊断与升级前预览，不参与执行。 */
+    private final List<Skipped> skipped;
 
-    private Hooks(Map<Event, List<Command>> specs) {
+    private Hooks(Map<Event, List<Command>> specs, List<Skipped> skipped) {
         this.specs = Map.copyOf(specs);
+        this.skipped = List.copyOf(skipped);
     }
 
     public static Hooks none() {
-        return new Hooks(Map.of());
+        return new Hooks(Map.of(), List.of());
     }
 
     /** 读取用户级与工作区级配置并合并；任何读取或格式问题都退化为「没有钩子」，不阻断运行。 */
@@ -105,14 +119,16 @@ public final class Hooks {
 
     public static Hooks load(Path workspace, Path userHome) {
         Map<Event, List<Command>> merged = new LinkedHashMap<>();
-        merge(merged, userHome.resolve(".pilot").resolve("settings.json"), workspace, false);
+        List<Skipped> skipped = new ArrayList<>();
+        merge(merged, userHome.resolve(".pilot").resolve("settings.json"), workspace, false, skipped);
         if (workspace != null) {
-            merge(merged, workspace.resolve(".pilot").resolve("settings.json"), workspace, true);
+            merge(merged, workspace.resolve(".pilot").resolve("settings.json"), workspace, true, skipped);
         }
-        return merged.isEmpty() ? none() : new Hooks(merged);
+        return merged.isEmpty() && skipped.isEmpty() ? none() : new Hooks(merged, skipped);
     }
 
-    private static void merge(Map<Event, List<Command>> target, Path file, Path workspace, boolean workspaceConfig) {
+    private static void merge(Map<Event, List<Command>> target, Path file, Path workspace, boolean workspaceConfig,
+        List<Skipped> skipped) {
         if (!Files.isRegularFile(file)) {
             return;
         }
@@ -131,7 +147,7 @@ public final class Hooks {
             if (event == null) {
                 continue;
             }
-            List<Spec> parsed = parseSpecs(entry.getValue());
+            List<Spec> parsed = parseSpecs(entry.getValue(), skipped);
             if (parsed.isEmpty()) {
                 continue;
             }
@@ -152,7 +168,7 @@ public final class Hooks {
         }
     }
 
-    private static List<Spec> parseSpecs(Object value) {
+    private static List<Spec> parseSpecs(Object value, List<Skipped> skipped) {
         List<Spec> specs = new ArrayList<>();
         if (!(value instanceof List<?> items)) {
             return specs;
@@ -164,6 +180,14 @@ public final class Hooks {
             String matcher = text(group.get("matcher"));
             long timeout = number(group.get("timeoutSeconds"));
             boolean block = Boolean.parseBoolean(text(group.get("blockOnFailure")));
+            // 契约声明：这一组钩子依赖哪些能力。缺必需契约时整组不加载，并记下原因，
+            // 而不是让它悄悄不触发——钩子失效本来就不报错，再静默跳过就根本查不出来。
+            List<String> requires = contractRefs(group.get("requires"));
+            Contracts.Check check = Contracts.check(requires);
+            if (!check.satisfied()) {
+                skipped.add(new Skipped(matcher, check.describe()));
+                continue;
+            }
             // 标准格式：hooks 数组里的 command；简化格式：直接给 command
             if (group.get("hooks") instanceof List<?> nested) {
                 for (Object hook : nested) {
@@ -181,6 +205,20 @@ public final class Hooks {
             }
         }
         return specs;
+    }
+
+    /** 契约声明既接受列表也接受逗号分隔文本。 */
+    private static List<String> contractRefs(Object value) {
+        if (value == null) {
+            return List.of();
+        }
+        if (value instanceof List<?> list) {
+            return list.stream().filter(entry -> entry instanceof String).map(entry -> ((String)entry).strip())
+                .filter(entry -> !entry.isBlank()).toList();
+        }
+        String raw = text(value);
+        return raw.isBlank() ? List.of()
+            : Arrays.stream(raw.split("[,，\\s]+")).filter(entry -> !entry.isBlank()).toList();
     }
 
     private static String text(Object value) {
@@ -255,6 +293,11 @@ public final class Hooks {
             all.addAll(specs.getOrDefault(event, List.of()));
         }
         return List.copyOf(all);
+    }
+
+    /** 因契约不满足而没有加载的钩子组；为空表示全部按配置生效。 */
+    public List<Skipped> skipped() {
+        return skipped;
     }
 
     /** 输出过长时截断，避免钩子日志把上下文撑爆。 */

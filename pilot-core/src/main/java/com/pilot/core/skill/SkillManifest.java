@@ -11,14 +11,25 @@ import java.util.List;
  * 要写「何时用」而不只是「是什么」。{@code command} 可选，声明后技能可暴露为输入框快捷指令；
  * {@code allowed-tools} v1 仅作展示（供用户评估该技能的破坏面），没有运行时强制语义。
  *
- * @param name         技能名，与目录名一致
- * @param description  触发条件描述，常驻 system 的目录段
- * @param command      快捷指令名（如 {@code /review}），没有则为 null
- * @param argumentHint 前端展示的参数提示，没有则为 null
- * @param allowedTools 该技能预计使用的工具名清单，仅展示
- * @param directory    技能目录的绝对路径
- * @param source       来源层级
+ * <p>{@code requires} / {@code requiresOptional} 是契约声明（形如 {@code tool.read_file@1}）。
+ * 技能依赖的是契约而不是核心版本号：缺必需契约时不加载并说明原因，缺可选契约时照常加载但标注降级。
+ *
+ * @param name             技能名，与目录名一致
+ * @param description      触发条件描述，常驻 system 的目录段
+ * @param command          快捷指令名（如 {@code /review}），没有则为 null
+ * @param argumentHint     前端展示的参数提示，没有则为 null
+ * @param allowedTools     该技能预计使用的工具名清单，仅展示
+ * @param requires         必需契约；任一不满足则不加载该技能
+ * @param requiresOptional 可选契约；不满足时降级加载并标注
+ * @param directory        技能目录的绝对路径
+ * @param source           来源层级
  */
 public record SkillManifest(String name, String description, String command, String argumentHint,
-    List<String> allowedTools, Path directory, SkillSource source) {
+    List<String> allowedTools, List<String> requires, List<String> requiresOptional, Path directory,
+    SkillSource source) {
+    public SkillManifest {
+        allowedTools = allowedTools == null ? List.of() : List.copyOf(allowedTools);
+        requires = requires == null ? List.of() : List.copyOf(requires);
+        requiresOptional = requiresOptional == null ? List.of() : List.copyOf(requiresOptional);
+    }
 }

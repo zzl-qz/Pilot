@@ -15,6 +15,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
+import com.pilot.core.contract.Contracts;
 import com.pilot.core.util.Texts;
 
 /**
@@ -173,9 +174,18 @@ public final class SkillCatalog {
             problems.add(new SkillProblem(dirName, dir.toString(), "快捷指令 " + parsed.command() + " 与已有技能冲突，本技能不可用"));
             return;
         }
+        // 缺必需契约就不加载，并把原因说出来：静默少一个技能比直接报错更难查。
+        Contracts.Check required = Contracts.check(parsed.requires());
+        if (!required.satisfied()) {
+            problems.add(new SkillProblem(dirName, dir.toString(), "缺少必需契约，未加载：" + required.describe()));
+            return;
+        }
         List<String> files = listFiles(dir);
-        byName.put(dirName, new Skill(new SkillManifest(dirName, parsed.description(), parsed.command(),
-            parsed.argumentHint(), parsed.allowedTools(), dir, source), parsed.body(), files));
+        byName.put(dirName,
+            new Skill(
+                new SkillManifest(dirName, parsed.description(), parsed.command(), parsed.argumentHint(),
+                    parsed.allowedTools(), parsed.requires(), parsed.requiresOptional(), dir, source),
+                parsed.body(), files));
     }
 
     /**

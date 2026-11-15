@@ -22,7 +22,7 @@ final class SkillFrontmatter {
     }
 
     record Parsed(String name, String description, String command, String argumentHint, List<String> allowedTools,
-        String body) {
+        List<String> requires, List<String> requiresOptional, String body) {
     }
 
     static Parsed parse(String text) {
@@ -87,8 +87,29 @@ final class SkillFrontmatter {
         if (tools.stream().distinct().count() != tools.size()) {
             throw new IllegalArgumentException("allowed-tools 存在重复项");
         }
-        return new Parsed(name, description, command, argumentHint, List.copyOf(tools),
+        // 契约声明：插件依赖的是契约，不是核心版本号。缺必需契约不加载，缺可选契约降级加载。
+        List<String> requires = contractList(values.get("requires"));
+        List<String> requiresOptional = contractList(values.get("requires-optional"));
+        for (String reference : requires) {
+            if (requiresOptional.contains(reference)) {
+                throw new IllegalArgumentException("契约 " + reference + " 不能同时出现在 requires 与 requires-optional");
+            }
+        }
+        return new Parsed(name, description, command, argumentHint, List.copyOf(tools), requires, requiresOptional,
             String.join("\n", lines.subList(end + 1, lines.size())).strip());
+    }
+
+    /** 契约清单既接受列表也接受逗号分隔文本，与 allowed-tools 的两种写法保持一致。 */
+    private static List<String> contractList(Object value) {
+        if (value == null) {
+            return List.of();
+        }
+        List<String> items = value instanceof List<?> list ? strings(list)
+            : Arrays.stream(String.valueOf(value).split("[,，\\s]+")).filter(item -> !item.isBlank()).toList();
+        if (items.stream().distinct().count() != items.size()) {
+            throw new IllegalArgumentException("requires 存在重复项");
+        }
+        return List.copyOf(items);
     }
 
     private static String string(Map<?, ?> values, String key, boolean required) {

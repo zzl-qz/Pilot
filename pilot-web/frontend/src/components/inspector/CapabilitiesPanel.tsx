@@ -161,6 +161,9 @@ export function CapabilitiesPanel() {
                   {pluginFor(plugins, 'skill', skill.name)?.status !== 'ok' && (
                     <p className="cap-reason">{pluginStatusDetail(pluginFor(plugins, 'skill', skill.name))}</p>
                   )}
+                  {!!pluginFor(plugins, 'skill', skill.name)?.contracts?.length && (
+                    <p className="cap-desc cap-mono">契约：{pluginFor(plugins, 'skill', skill.name)?.contracts?.join('、')}</p>
+                  )}
                 </li>
               ))}
             </ul>
@@ -179,6 +182,7 @@ export function CapabilitiesPanel() {
                   </div>
                   <p className="cap-desc">{pluginStatusDetail(hook)}</p>
                   {!!hook.details.length && <p className="cap-reason">{hook.details.join('；')}</p>}
+                  {!!hook.contracts?.length && <p className="cap-desc cap-mono">契约：{hook.contracts.join('、')}</p>}
                 </li>
               ))}
             </ul>

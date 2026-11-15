@@ -14,6 +14,7 @@ import java.util.TreeMap;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
+import com.pilot.core.contract.Contracts;
 import com.pilot.core.hook.Hooks;
 import com.pilot.core.mcp.McpManager;
 import com.pilot.core.mcp.McpServerConfig;
@@ -47,10 +48,20 @@ public class PluginCompatService {
     public static final String BROKEN = "broken";
     public static final String UNKNOWN = "unknown";
 
-    /** @param details 供界面展开的具体条目，例如「工具 X 已不在服务器声明的清单里」 */
-    public record Item(String kind, String name, String source, String status, String reason, List<String> details) {
+    /**
+     * @param details   供界面展开的具体条目，例如「工具 X 已不在服务器声明的清单里」
+     * @param contracts 这一项声明的契约（{@code id@major}）；没有声明时为空
+     */
+    public record Item(String kind, String name, String source, String status, String reason, List<String> details,
+        List<String> contracts) {
         public Item {
             details = details == null ? List.of() : List.copyOf(details);
+            contracts = contracts == null ? List.of() : List.copyOf(contracts);
+        }
+
+        /** 只有类型与名字的最小项，供不涉及契约的来源使用。 */
+        public Item(String kind, String name, String source, String status, String reason, List<String> details) {
+            this(kind, name, source, status, reason, details, List.of());
         }
     }
 
@@ -144,22 +155,60 @@ public class PluginCompatService {
         SkillCatalog catalog = skills.catalogFor(workspace.toString());
         List<Item> items = new ArrayList<>();
         for (SkillManifest manifest : catalog.list()) {
-            List<String> missing = manifest.allowedTools() == null ? List.of()
-                : manifest.allowedTools().stream().filter(tool -> !matchesTool(toolNames, tool)).toList();
-            List<String> details = missing.stream().map(tool -> "声明的工具 " + tool + " 当前不可用").toList();
+            List<String> details = new ArrayList<>();
+            boolean broken = false;
+            boolean changed = false;
+
+            // 契约优先：声明了 requires 就以契约为准。缺必需契约的技能不会被加载，这里如实显示为会失效。
+            Contracts.Check required = Contracts.check(manifest.requires());
+            if (!required.satisfied()) {
+                broken = true;
+                details.add("缺少必需契约，不会加载：" + required.describe());
+            }
+            Contracts.Check optional = Contracts.check(manifest.requiresOptional());
+            if (!optional.satisfied()) {
+                changed = true;
+                details.add("可选契约不满足，功能降级：" + optional.describe());
+            }
+
+            // 没声明契约的旧技能，退回按 allowed-tools 做宽松提示：只提示，不阻断。
+            if (manifest.requires().isEmpty() && manifest.requiresOptional().isEmpty()
+                && manifest.allowedTools() != null) {
+                List<String> missing =
+                    manifest.allowedTools().stream().filter(tool -> !matchesTool(toolNames, tool)).toList();
+                if (!missing.isEmpty()) {
+                    changed = true;
+                    missing.forEach(tool -> details.add("声明的工具 " + tool + " 当前不可用"));
+                }
+            }
+
+            String status = broken ? BROKEN : changed ? CHANGED : OK;
+            String reason = broken ? "缺少必需契约，这个技能不会被加载" : changed ? "可加载，但部分依赖当前不满足" : "与当前核心一致";
             items.add(new Item("skill", manifest.name(),
-                manifest.source() == null ? "" : manifest.source().name().toLowerCase(Locale.ROOT),
-                missing.isEmpty() ? OK : CHANGED, missing.isEmpty() ? "无需变更" : "技能声明的部分工具当前不存在；技能本身仍是提示词，不会因此失效",
-                details));
+                manifest.source() == null ? "" : manifest.source().name().toLowerCase(Locale.ROOT), status, reason,
+                details, contractRefs(manifest.requires(), manifest.requiresOptional())));
+        }
+        // 没通过校验的技能不在 list() 里，但它们同样「用户以为有、实际没有」；
+        // 尤其缺必需契约的那类，必须在这里说明原因，否则页面上只会少一项。
+        for (var problem : catalog.invalid()) {
+            items.add(
+                new Item("skill", problem.name(), "", BROKEN, "未加载：" + problem.reason(), List.of(problem.reason())));
         }
         return items;
+    }
+
+    private static List<String> contractRefs(List<String> required, List<String> optional) {
+        List<String> all = new ArrayList<>(required == null ? List.of() : required);
+        all.addAll(optional == null ? List.of() : optional);
+        return List.copyOf(all);
     }
 
     // ————— 钩子 —————
 
     private List<Item> hookItems(Path workspace, Set<String> toolNames) {
+        Hooks hooks = Hooks.load(workspace);
         List<Item> items = new ArrayList<>();
-        for (Hooks.Command command : Hooks.load(workspace).commands()) {
+        for (Hooks.Command command : hooks.commands()) {
             Hooks.Spec spec = command.spec();
             boolean matched = toolNames.stream().anyMatch(spec::matches);
             List<String> details = new ArrayList<>();
@@ -168,6 +217,12 @@ public class PluginCompatService {
             }
             items.add(new Item("hook", label(spec), command.source() == null ? "" : command.source().toString(),
                 matched ? OK : BROKEN, matched ? "钩子仍会触发" : "matcher 指向的工具不存在，这条钩子不会再执行；升级后不会报错，只会静默不生效", details));
+        }
+        // 因契约不满足而没有加载的钩子组：它们根本不在执行清单里，必须单独列出来，
+        // 否则用户在能力页上只会看到「没有这条钩子」，不知道是被跳过了。
+        for (Hooks.Skipped skipped : hooks.skipped()) {
+            items.add(new Item("hook", skipped.matcher() + " → （未加载）", "", BROKEN, "契约不满足，这组钩子没有加载：" + skipped.reason(),
+                List.of(skipped.reason())));
         }
         return items;
     }

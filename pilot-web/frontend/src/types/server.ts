@@ -1454,6 +1454,7 @@ export interface PluginCompatServiceItem {
   status: string;
   reason: string;
   details: (string)[];
+  contracts: (string)[];
 }
 
 /** PluginCompatService.java / Counts */
