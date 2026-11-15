@@ -1443,6 +1443,33 @@ export interface ValidationEvidence {
   recordedAt: string;
 }
 
+/** PluginCompatService.java / Item */
+export interface PluginCompatServiceItem {
+  kind: string;
+  name: string;
+  source: string;
+  status: string;
+  reason: string;
+  details: (string)[];
+}
+
+/** PluginCompatService.java / Counts */
+export interface PluginCompatServiceCounts {
+  ok: number;
+  changed: number;
+  broken: number;
+  unknown: number;
+}
+
+/** PluginCompatService.java / Report */
+export interface PluginCompatServiceReport {
+  generatedAt: string;
+  workspace: string;
+  counts: PluginCompatServiceCounts;
+  items: (PluginCompatServiceItem)[];
+  markdown: string;
+}
+
 /** ValidationLedger.java / Report */
 export interface ValidationLedgerReport {
   current: boolean;

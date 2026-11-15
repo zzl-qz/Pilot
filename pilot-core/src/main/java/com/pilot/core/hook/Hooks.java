@@ -243,6 +243,20 @@ public final class Hooks {
         return new Result(clip(out.toString()), false);
     }
 
+    /**
+     * 已加载的钩子清单，按事件顺序展开。
+     *
+     * <p>只用于诊断与升级前预览：让用户看到「这条 matcher 指向的工具还在不在」，
+     * 不触发任何执行，也不改变加载结果。
+     */
+    public List<Command> commands() {
+        List<Command> all = new ArrayList<>();
+        for (Event event : Event.values()) {
+            all.addAll(specs.getOrDefault(event, List.of()));
+        }
+        return List.copyOf(all);
+    }
+
     /** 输出过长时截断，避免钩子日志把上下文撑爆。 */
     private static String clip(String value) {
         String trimmed = value.strip();

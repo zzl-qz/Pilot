@@ -255,6 +255,7 @@ export const api = {
   validation: (id: string) => apiJson<ApiResults['validation']>(`/api/sessions/${encodeURIComponent(id)}/validation`),
   recovery: () => apiJson<ApiResults['recovery']>('/api/recovery'),
   maintenanceStatus: () => apiJson<ApiResults['maintenanceStatus']>('/api/maintenance/status'),
+  pluginCompat: (sessionId?: string) => apiJson<ApiResults['pluginCompat']>(`/api/maintenance/plugin-compat${sessionId ? `?session=${encodeURIComponent(sessionId)}` : ''}`),
   backupNow: () => apiJson<ApiResults['backupNow']>('/api/maintenance/backup', { method: 'POST' }, 120000),
   verifyBackup: () => apiJson<ApiResults['verifyBackup']>('/api/maintenance/backup/verify', { method: 'POST' }, 120000),
   purgeNow: () => apiJson<ApiResults['purgeNow']>('/api/maintenance/purge', { method: 'POST' }, 120000),

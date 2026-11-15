@@ -12,6 +12,8 @@ import { PERMISSION_MODES, permissionLabel } from '../lib/permission.js';
 import { emptySkillsHint, parseInstallSource, summarizeInstallResults, gitUrlProblem } from '../lib/skills.js';
 import { useStore } from '../store.js';
 import { MCP_TRUST_LABELS, mcpSourceLabel } from '../lib/mcp.js';
+import { writeClipboard } from '../lib/clipboard.js';
+import { statusFromCode, verificationStatusLabel } from '../lib/verification-status.js';
 import { api } from '../api.js';
 import { Icon } from './Icon.jsx';
 import { Modal } from './Modal.jsx';
@@ -1076,13 +1078,87 @@ function DiagnosticsSettings() {
           )}
           {validation?.report && (
             <p className={`chip-hint${validation.report.current ? '' : ' is-error'}`}>
-              校验证据：{validation.report.current ? '已覆盖当前产物' : '未覆盖当前产物'}
+              校验证据：{verificationStatusLabel(statusFromCode(validation.report.code, validation.report.current))}
               {validation.report.reason ? `（${validation.report.reason}）` : ''}
             </p>
           )}
         </section>
+
+        <PluginCompatSection sessionId={sessionId} />
       </>}
     </div>
+  );
+}
+
+/**
+ * 升级前体检：在升级之前先看清哪些插件会变、会坏。
+ *
+ * <p>只读接口：不会启动 MCP 服务器，也不会执行钩子。
+ */
+const COMPAT_LABELS: Record<string, string> = { ok: '正常', changed: '会变', broken: '会失效', unknown: '无法判断' };
+const COMPAT_KIND_LABELS: Record<string, string> = { mcp: 'MCP 服务器', skill: '技能', hook: '钩子' };
+
+function PluginCompatSection({ sessionId }: { sessionId: string | null }) {
+  const [report, setReport] = useState<ApiResults['pluginCompat'] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  const inspect = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      setReport(await api.pluginCompat(sessionId || undefined));
+    } catch (err) {
+      setError(errorInfo(err).message || '无法生成升级前体检报告。');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const copy = async () => {
+    if (!report?.markdown) return;
+    try {
+      await writeClipboard(report.markdown);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      setError(errorInfo(err).message || '复制失败，可以手动选择报告文本。');
+    }
+  };
+
+  return (
+    <section className="settings-group" id="settings-plugin-compat">
+      <h3>升级前体检</h3>
+      <p className="chip-hint">
+        在升级之前检查当前工作区的 MCP 服务器、技能与钩子。只读：不会启动服务器，也不会执行钩子。
+      </p>
+      <div className="diag-actions">
+        <Button label={loading ? '正在检查…' : '检查兼容性'} isDisabled={loading} onClick={() => void inspect()} />
+        {report?.markdown && <Button variant="ghost" label={copied ? '已复制' : '复制报告'} onClick={() => void copy()} />}
+      </div>
+      {error && <p className="settings-status" role="alert">{error}</p>}
+      {report && (
+        <>
+          <p className={`chip-hint${report.counts.broken ? ' is-error' : ''}`}>
+            正常 {report.counts.ok} · 会变 {report.counts.changed} · 会失效 {report.counts.broken} · 无法判断 {report.counts.unknown}
+          </p>
+          {!report.items.length
+            ? <p className="chip-hint">当前工作区没有需要检查的插件。</p>
+            : <ul className="diag-commands">
+                {report.items.map((item) => (
+                  <li key={`${item.kind}:${item.name}`} data-compat-status={item.status}>
+                    <code>{COMPAT_KIND_LABELS[item.kind] || item.kind} · {item.name}</code>
+                    <span>{COMPAT_LABELS[item.status] || item.status} · {item.reason}</span>
+                    {!!item.details.length && (
+                      <span>{item.details.join('；')}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>}
+        </>
+      )}
+    </section>
   );
 }
 

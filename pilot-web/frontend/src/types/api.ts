@@ -143,6 +143,7 @@ export interface ApiResults {
   validation: S.DiagnosticsControllerValidationView;
   recovery: S.RecoveryReportServiceSnapshot;
   maintenanceStatus: S.MaintenanceControllerStatus;
+  pluginCompat: S.PluginCompatServiceReport;
   backupNow: S.BackupServiceBackupReport;
   verifyBackup: S.BackupServiceVerificationReport;
   purgeNow: S.RetentionServicePurgeReport;
