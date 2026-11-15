@@ -140,6 +140,7 @@ export const api = {
   importBookmarks: (session: string, sequences: number[]) => apiJson<ApiResults['importBookmarks']>(`/api/library/${encodeURIComponent(session)}/bookmarks/import`, jsonBody('POST', { sequences })),
   /** 会话想法：只是用户自己的记事，保存与修改都不会发送消息或进入执行队列。 */
   notes: (session: string) => apiJson<ApiResults['notes']>(`/api/sessions/${encodeURIComponent(session)}/notes`),
+  searchNotes: (projectId: string, q: string) => apiJson<ApiResults['searchNotes']>('/api/library/notes/search?' + new URLSearchParams({ projectId, q })),
   createNote: (session: string, content: string, source?: { sequence?: number | null; excerpt?: string; role?: string | null }) => apiJson<ApiResults['createNote']>(`/api/sessions/${encodeURIComponent(session)}/notes`, jsonBody('POST', source ? { content, source } : { content })),
   updateNote: (session: string, noteId: string, content: string) => apiJson<ApiResults['updateNote']>(`/api/sessions/${encodeURIComponent(session)}/notes/${encodeURIComponent(noteId)}`, jsonBody('PUT', { content })),
   deleteNote: (session: string, noteId: string) => apiJson<ApiResults['deleteNote']>(`/api/sessions/${encodeURIComponent(session)}/notes/${encodeURIComponent(noteId)}`, { method: 'DELETE' }),

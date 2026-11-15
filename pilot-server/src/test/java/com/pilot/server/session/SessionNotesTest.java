@@ -69,6 +69,30 @@ class SessionNotesTest {
     }
 
     @Test
+    void searchMatchesOnlyGivenSessionsAndFollowsEditsAndDeletes() {
+        SessionNotes notes = new SessionNotes((SqliteStore)null);
+        var first = notes.create("s1", "补一条登录测试，覆盖失败路径");
+        notes.create("s2", "登录页面文案检查");
+        notes.create("s3", "别的项目的登录记录");
+        var refs = List.of(new SessionNotes.SessionRef("s1", "会话一"), new SessionNotes.SessionRef("s2", "会话二"));
+
+        List<SessionNotes.NoteHit> hits = notes.search(refs, "登录");
+        assertEquals(2, hits.size());
+        assertEquals("s1", hits.get(0).sessionId());
+        assertEquals("会话一", hits.get(0).sessionTitle());
+        assertTrue(hits.get(0).snippet().contains("登录"), hits.get(0).snippet());
+        assertTrue(notes.search(refs, "  ").isEmpty(), "空关键词不搜索");
+        assertTrue(notes.search(refs, "不存在的词").isEmpty());
+
+        notes.update("s1", first.id(), "改成并发测试");
+        assertTrue(notes.search(refs, "登录").stream().noneMatch(hit -> hit.sessionId().equals("s1")));
+        assertEquals(1, notes.search(refs, "并发").size());
+
+        notes.delete("s1", first.id());
+        assertTrue(notes.search(refs, "并发").isEmpty(), "删除后不再出现在结果里");
+    }
+
+    @Test
     void notesAreIsolatedPerSessionAndSessionDeletionClearsThem() {
         SessionNotes notes = open("isolation.db");
         notes.create("s1", "属于 s1");

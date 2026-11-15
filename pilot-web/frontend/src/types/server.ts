@@ -1562,3 +1562,20 @@ export interface WorktreeControllerOpened {
   branch: string;
   commit: string;
 }
+
+/** ProjectNotesController.java / NoteHit */
+export interface ProjectNotesControllerNoteHit {
+  sessionId: string;
+  sessionTitle: string;
+  noteId: string;
+  content: string;
+  snippet: string;
+  createdAt: string;
+  source?: NoteSource | null;
+}
+
+/** ProjectNotesController.java / Result */
+export interface ProjectNotesControllerResult {
+  items: ProjectNotesControllerNoteHit[];
+  hasMore: boolean;
+}

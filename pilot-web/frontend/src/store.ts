@@ -129,6 +129,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   currentProjectId: null,
   notes: [],
   noteSeed: null,
+  noteFocus: null,
   notesState: 'idle',
   notesError: '',
   notesSaving: '',

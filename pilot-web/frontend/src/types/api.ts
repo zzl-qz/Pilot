@@ -49,6 +49,7 @@ export interface ApiResults {
   deleteBookmark: null;
   importBookmarks: S.MessageLibraryImportResult;
   notes: S.SessionNotesNote[];
+  searchNotes: S.ProjectNotesControllerResult;
   createNote: S.SessionNotesNote;
   updateNote: S.SessionNotesNote;
   deleteNote: null;

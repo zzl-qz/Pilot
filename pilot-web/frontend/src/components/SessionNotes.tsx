@@ -4,6 +4,8 @@ import { IconButton } from '@astryxdesign/core/IconButton';
 import { Icon } from './Icon.jsx';
 import { useStore } from '../store.js';
 import { noteInsertion } from '../lib/notes.js';
+import { api } from '../api.js';
+import { errorInfo } from '../lib/errors.js';
 import './notes.css';
 
 const NOTE_LIMIT = 4000;
@@ -21,10 +23,17 @@ export function SessionNotes({ onClose }: { onClose: () => void }) {
   const notesError = useStore(state => state.notesError);
   const saving = useStore(state => state.notesSaving);
   const noteSeed = useStore(state => state.noteSeed);
+  const noteFocus = useStore(state => state.noteFocus);
+  const projectId = useStore(state => state.currentProjectId);
   const [draft, setDraft] = useState(() => noteSeed?.text || '');
   const [localError, setLocalError] = useState('');
   const [seed, setSeed] = useState(() => noteSeed);
   const [editing, setEditing] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const [hits, setHits] = useState<import('../types/server.js').ProjectNotesControllerNoteHit[] | null>(null);
+  const searchSeq = useRef(0);
   const [editText, setEditText] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const editRef = useRef<HTMLTextAreaElement>(null);
@@ -34,6 +43,16 @@ export function SessionNotes({ onClose }: { onClose: () => void }) {
     if (notesState === 'idle') void useStore.getState().loadNotes();
   }, [sessionId, notesState]);
   useEffect(() => { if (editing) editRef.current?.focus({ preventScroll: true }); }, [editing]);
+  useEffect(() => {
+    if (!noteFocus) return;
+    const row = document.querySelector('[data-note-id="' + noteFocus + '"]');
+    if (row) {
+      row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      row.classList.add('is-note-focus');
+      window.setTimeout(() => row.classList.remove('is-note-focus'), 1600);
+      useStore.getState().focusNote(null);
+    }
+  }, [noteFocus, notes]);
 
   async function save() {
     const text = draft.trim();
@@ -44,6 +63,29 @@ export function SessionNotes({ onClose }: { onClose: () => void }) {
       setSeed(null);
       useStore.getState().openNoteFromSelection(null);
       inputRef.current?.focus({ preventScroll: true });
+    }
+  }
+
+  async function searchProject() {
+    const term = query.trim();
+    if (!term || !projectId || searching) return;
+    const token = ++searchSeq.current;
+    setSearching(true);
+    setSearchError('');
+    try {
+      const data = await api.searchNotes(projectId, term);
+      if (token !== searchSeq.current) return;
+      setHits(Array.isArray(data?.items) ? data.items : []);
+    } catch (error) {
+      if (token === searchSeq.current) setSearchError(errorInfo(error).message || '搜索想法失败，请重试。');
+    } finally {
+      if (token === searchSeq.current) setSearching(false);
+    }
+  }
+
+  async function openHit(hit: import('../types/server.js').ProjectNotesControllerNoteHit) {
+    if (await useStore.getState().activate(hit.sessionId)) {
+      useStore.getState().focusNote(hit.noteId);
     }
   }
 
@@ -91,6 +133,27 @@ export function SessionNotes({ onClose }: { onClose: () => void }) {
     {seed?.source?.sequence != null && <p className="note-source is-seed" role="status">
       来自第 {seed.source.sequence} 条消息的选中文字；保存后仍可定位，来源被清理时会保留引用原文。
     </p>}
+    <div className="notes-search">
+      <label htmlFor="notes-search-input">在项目中搜索想法</label>
+      {projectId ? <div className="notes-search-row">
+        <input id="notes-search-input" type="search" value={query} maxLength={200}
+          placeholder="输入关键词，回车搜索" aria-label="在项目中搜索想法"
+          onChange={event => setQuery(event.target.value)}
+          onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void searchProject(); } }} />
+        <Button size="sm" label={searching ? '搜索中…' : '搜索'} isDisabled={!query.trim() || searching}
+          onClick={() => void searchProject()} />
+      </div> : <p className="notes-draft-hint">当前会话还没有所属项目；打开项目里的会话后可以跨会话搜索想法。</p>}
+      {searchError && <p className="notes-status is-error" role="alert">{searchError}</p>}
+      {hits && <ul className="notes-search-hits" aria-label="项目想法搜索结果">
+        {hits.map(hit => <li key={hit.sessionId + ':' + hit.noteId}>
+          <button type="button" onClick={() => void openHit(hit)}>
+            <span className="notes-hit-session">{hit.sessionTitle}</span>
+            <span className="notes-hit-snippet">{hit.snippet}</span>
+          </button>
+        </li>)}
+        {!hits.length && <li className="notes-empty">没有匹配的想法。</li>}
+      </ul>}
+    </div>
     <div className="notes-form">
       <textarea id="notes-input" ref={inputRef} aria-label="新想法" rows={3} maxLength={NOTE_LIMIT}
         placeholder="记下这一刻的想法，稍后可带回输入框…" value={draft}
@@ -110,7 +173,7 @@ export function SessionNotes({ onClose }: { onClose: () => void }) {
       {!localError && <Button label="重试" size="sm" variant="ghost" onClick={() => void useStore.getState().loadNotes()} />}
     </p>}
     <ul className="notes-list" aria-label="已保存的想法">
-      {notes.map(note => <li key={note.id} className="note-row">
+      {notes.map(note => <li key={note.id} className="note-row" data-note-id={note.id}>
         {editing === note.id
           ? <div className="note-edit">
             <textarea ref={editRef} aria-label="编辑想法" rows={3} maxLength={NOTE_LIMIT} value={editText}

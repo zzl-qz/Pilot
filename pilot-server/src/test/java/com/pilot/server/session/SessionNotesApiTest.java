@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.util.Map;
 
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -80,6 +81,28 @@ class SessionNotesApiTest {
             post("/api/sessions/{session}/notes", session).contentType(MediaType.APPLICATION_JSON).content(missing))
             .andExpect(status().isOk()).andExpect(jsonPath("$.source.available").value(false))
             .andExpect(jsonPath("$.source.excerpt").value("旧原文"));
+    }
+
+    @Test
+    void projectNotesSearchOnlyReturnsCurrentProjectSessions() throws Exception {
+        String p1 = sessions.createSession("项目一的一号会话", null, "project-a").id();
+        String p1b = sessions.createSession("项目一的二号会话", null, "project-a").id();
+        String p2 = sessions.createSession("项目二的会话", null, "project-b").id();
+        for (String[] item : new String[][] {{p1, "登录失败路径要覆盖"}, {p1b, "登录成功路径也覆盖"}, {p2, "登录属于另一个项目"}}) {
+            mvc.perform(post("/api/sessions/{session}/notes", item[0]).contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(Map.of("content", item[1])))).andExpect(status().isOk());
+        }
+        mvc.perform(get("/api/library/notes/search").param("q", "登录").param("projectId", "project-a"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(2))
+            .andExpect(jsonPath("$.items[0].sessionTitle").exists())
+            .andExpect(jsonPath("$.items[0].snippet").value(Matchers.containsString("登录")));
+        mvc.perform(get("/api/library/notes/search").param("q", "登录").param("projectId", "project-b"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(1))
+            .andExpect(jsonPath("$.items[0].sessionId").value(p2));
+        mvc.perform(get("/api/library/notes/search").param("q", "不存在的词").param("projectId", "project-a"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(0));
+        mvc.perform(get("/api/library/notes/search").param("q", "登录")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.items.length()").value(0));
     }
 
     @Test

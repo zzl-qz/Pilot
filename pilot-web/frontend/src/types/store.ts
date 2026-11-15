@@ -47,7 +47,7 @@ export interface StoreData extends Omit<ReducerState, 'ui'> {
   embeddedSessionId: string | null; sessionTitle: string; workspace: string; sessions: SessionSummary[];
   projects: ProjectSummary[]; currentProjectId: string | null; inputHistory: string[]; inputHistoryIndex: number; inputHistoryDraft: string;
   /** 当前会话的想法：只属于这个会话，保存与回填都不发送消息。 */
-  notes: S.SessionNotesNote[]; noteSeed: NoteSeed | null; notesState: 'idle' | 'loading' | 'ready' | 'error'; notesError: string; notesSaving: string;
+  notes: S.SessionNotesNote[]; noteSeed: NoteSeed | null; noteFocus: string | null; notesState: 'idle' | 'loading' | 'ready' | 'error'; notesError: string; notesSaving: string;
   sideChats: SideChatsState; sideQuote: { id: string; text: string; nonce: number } | null; sideDrafts?: Record<string, string>;
   runId: string | null; lastRunId: string | null; running: boolean; cancelling: boolean; pausing: boolean; steering: boolean;
   queueBusy: boolean; queueRevision: string | null; runStartedAt: number; lastEventAt: number; modelRetryUntil: number;
@@ -76,7 +76,7 @@ export interface StoreActions {
   toggleNotify(): Promise<void>; setUi(patch: Partial<UiState> | ((ui: UiState) => Partial<UiState>)): void; setFilters(value: string): void;
   init(embeddedSessionId?: string | null): Promise<void>;
   loadProjects(options?: StrictOptions): Promise<void>; loadSessions(options?: StrictOptions): Promise<SessionSummary[]>;
-  loadNotes(): Promise<void>; addNote(content: string, source?: NoteSeed['source']): Promise<boolean>; openNoteFromSelection(selection: NoteSeed | null): void;
+  loadNotes(): Promise<void>; addNote(content: string, source?: NoteSeed['source']): Promise<boolean>; openNoteFromSelection(selection: NoteSeed | null): void; focusNote(noteId: string | null): void;
   editNote(id: string, content: string): Promise<boolean>; removeNote(id: string): Promise<boolean>;
   startNewSession(options?: Partial<DraftSession>): null; ensureSession(): Promise<string | null>; activate(id: string): Promise<boolean>;
   loadHistory(): Promise<boolean>; prefetchEarlier(): Promise<boolean>; applyEarlierPage(): boolean; loadEarlier(): Promise<boolean>;

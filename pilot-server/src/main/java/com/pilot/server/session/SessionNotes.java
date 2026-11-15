@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -42,6 +43,16 @@ public class SessionNotes {
     /** 创建时提交的来源：消息序号、选中原文与角色（user / assistant）。 */
     public record SourceInput(Integer sequence, String excerpt, String role) {
     }
+
+    /** 项目内搜索时用到的会话引用；标题用于结果展示。 */
+    public record SessionRef(String id, String title) {
+    }
+
+    public record NoteHit(String sessionId, String sessionTitle, String noteId, String content, String snippet,
+        Instant createdAt, Source source) {
+    }
+
+    static final int SEARCH_LIMIT = 50;
 
     private final SqliteStore store;
     private final SessionService sessions;
@@ -87,6 +98,34 @@ public class SessionNotes {
                         : new Source((Integer)rows.getObject("sequence"), rows.getString("excerpt"),
                             rows.getString("role"), eventExists(session, (Integer)rows.getObject("sequence")))),
                 "读取想法失败");
+    }
+
+    /** 在指定的会话集合里按关键词匹配想法正文；结果按会话内新到旧，最多 {@value #SEARCH_LIMIT} 条。 */
+    public synchronized List<NoteHit> search(List<SessionRef> sessionRefs, String query) {
+        String term = query == null ? "" : query.strip();
+        if (term.isEmpty() || sessionRefs == null || sessionRefs.isEmpty()) {
+            return List.of();
+        }
+        String needle = term.toLowerCase(Locale.ROOT);
+        List<NoteHit> hits = new ArrayList<>();
+        for (SessionRef ref : sessionRefs) {
+            for (Note note : list(ref.id())) {
+                if (hits.size() >= SEARCH_LIMIT) {
+                    return List.copyOf(hits);
+                }
+                int at = note.content().toLowerCase(Locale.ROOT).indexOf(needle);
+                if (at < 0) {
+                    continue;
+                }
+                int start = Math.max(0, at - 30);
+                int end = Math.min(note.content().length(), at + term.length() + 30);
+                String snippet = (start > 0 ? "…" : "") + note.content().substring(start, end)
+                    + (end < note.content().length() ? "…" : "");
+                hits.add(new NoteHit(ref.id(), ref.title(), note.id(), note.content(), snippet, note.createdAt(),
+                    note.source()));
+            }
+        }
+        return List.copyOf(hits);
     }
 
     public synchronized Note create(String session, String content) {

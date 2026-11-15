@@ -93,6 +93,7 @@ function resetSessionState(draft: StoreState) {
   draft.notes = [];
   draft.notesState = 'idle';
   draft.noteSeed = null;
+  draft.noteFocus = null;
   draft.notesError = '';
   draft.notesSaving = '';
   // 能力清单按会话/工作区解析：切走后不能拿上一会话的 MCP 运行状态展示审批按钮
@@ -101,7 +102,7 @@ function resetSessionState(draft: StoreState) {
 }
 
 /** 会话生命周期拥有列表请求和创建请求；连接由调用方提供，避免反向依赖全局 store。 */
-export function createSessionActions({ set, get }: StoreContext, { closeStreams, connectMirror, connectCommandTasks }: SessionConnections): StoreSlice<'loadProjects' | 'loadSessions' | 'loadNotes' | 'addNote' | 'openNoteFromSelection' | 'editNote' | 'removeNote' | 'startNewSession' | 'ensureSession' | 'activate' | 'renameSession' | 'updateSessionPreferences' | 'archiveSession' | 'deleteSession'> {
+export function createSessionActions({ set, get }: StoreContext, { closeStreams, connectMirror, connectCommandTasks }: SessionConnections): StoreSlice<'loadProjects' | 'loadSessions' | 'loadNotes' | 'addNote' | 'openNoteFromSelection' | 'focusNote' | 'editNote' | 'removeNote' | 'startNewSession' | 'ensureSession' | 'activate' | 'renameSession' | 'updateSessionPreferences' | 'archiveSession' | 'deleteSession'> {
   let activationSequence = 0;
   let sessionCreation: { epoch: number; promise: Promise<string> } | null = null;
   let projectLoadSequence = 0;
@@ -186,6 +187,11 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
         draft.noteSeed = selection && selection.text ? selection : null;
         draft.notesError = '';
       });
+    },
+
+    /** 搜索结果点击后定位到某条想法：切换会话由调用方负责，这里只记目标。 */
+    focusNote(noteId) {
+      set((draft) => { draft.noteFocus = noteId; });
     },
 
     async addNote(content, source) {
