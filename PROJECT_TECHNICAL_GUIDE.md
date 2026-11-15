@@ -69,7 +69,7 @@ sequenceDiagram
 
 | 步骤 | 发生了什么 | 解决的问题 | 主要参与者 |
 | --- | --- | --- | --- |
-| 1 | 页面提交内容和任务要求 | 把自然语言输入与结构化约束一起交给后端 | `app.js`、`SessionController` |
+| 1 | 页面提交内容和任务要求 | 把自然语言输入与结构化约束一起交给后端 | 前端 `store/input.ts`、`SessionController` |
 | 2 | 判断当前会话是否正在运行 | 连续点击发送时，避免并发启动两次执行 | `RunRegistry`、`AgentRunService` |
 | 3 | 保存目标、准备历史、加载项目规则和工具 | 模型需要知道真实任务、可用能力和项目约定 | `TaskControlService`、`PromptLibrary`、`WorkspaceToolFactory` |
 | 4 | 将消息及工具定义发送到模型 | 让模型选择下一步，而不是在 Java 中写死整个业务流程 | `AgentLoop`、`ModelClient` |
@@ -102,7 +102,7 @@ flowchart TD
 | --- | --- | --- | --- |
 | `pilot-core` | 执行循环、消息和模型协议、工具、权限、压缩、多智能体领域结构 | 核心行为可以脱离 Web 服务独立测试和复用 | 纯 Java；使用 Jackson、SLF4J；不依赖 Spring |
 | `pilot-server` | HTTP 接口、对象装配、会话调度、持久化、审批入口、工作区和运行时管理 | 把核心机制接入实际应用和操作环境 | Spring Boot、Spring Web MVC、JDBC、本地文件 |
-| `pilot-web` | 项目导航、聊天、进度、审批、变更、任务和命令面板 | 用户需要看见执行过程并随时介入 | HTML、CSS、原生 JavaScript、浏览器 Fetch 和 EventSource |
+| `pilot-web` | 项目导航、聊天、进度、审批、变更、任务和命令面板 | 用户需要看见执行过程并随时介入 | React、TypeScript、Vite、Zustand（状态）、浏览器 Fetch 和 EventSource |
 
 模块边界与最终发布方式需要分别理解。`pilot-web` 保存网页资源，但这些资源会被 `pilot-server/pom.xml` 收入服务端包，所以普通启动只需要一个服务端进程，浏览器从该服务获取页面，无需另开前端开发服务器。
 
@@ -139,7 +139,7 @@ flowchart TD
 | 工具定义和 JSON Schema | 告诉模型工具名字、参数与用途 | `Tool.parameters`、`ToolDefinition` | 不能代替工具内部的参数和权限验证 |
 | SQLite 与 JDBC | 单机保存项目、会话、事件、消息、计划和配置 | `store` 包 | 本地数据库不能自动恢复已经失去所有权的系统进程 |
 | WAL 与事务 | 缓解读写竞争，并一起保存有关联的数据库变更 | `SqliteStore`、JDBC 仓储 | 不能把数据库与磁盘上多个文件变成同一个原子事务 |
-| SSE 与 EventSource | 后端向浏览器持续推送状态、文字、工具和审批事件 | SessionController、app.js | 浏览器断线恢复仍需事件存储、游标和去重 |
+| SSE 与 EventSource | 后端向浏览器持续推送状态、文字、工具和审批事件 | SessionController、前端 `store/run-state.ts` | 浏览器断线恢复仍需事件存储、游标和去重 |
 | 线程池与 CompletableFuture | HTTP 接口及时返回，后台执行任务，等待异步审批或子任务 | AgentRunService、ApprovalBroker、MultiAgentService | 并发不等于工作区隔离 |
 | 虚拟线程 | 以较低线程管理开销处理命令输出和监控等待 | CommandTaskManager | 不限制子进程的文件、网络或 CPU 权限 |
 | ProcessBuilder 与 ProcessHandle | 启动工具命令、读取输出、追踪和停止相关进程 | RunCommandTool、CommandTaskManager | 指定工作目录不能阻止进程访问其他目录 |
@@ -307,7 +307,7 @@ RUNNING 和 STOPPING 不能算验证成功；检查摘要需要匹配实际任�
 
 恢复记录不代表恢复进程所有权。重启时，旧 RUNNING 或 STOPPING 命令会标记为 INTERRUPTED，不会按旧 PID 操作进程。当前基于 ProcessHandle 的追踪也无法可靠兜住所有已经脱离父进程的后台程序，这正是原生进程管理和隔离后端后续要加强的部分。
 
-源码：[CommandTaskManager](pilot-core/src/main/java/com/pilot/core/tool/command/CommandTaskManager.java)、[RunCommandTool](pilot-core/src/main/java/com/pilot/core/tool/command/RunCommandTool.java)、[CommandToolSupport](pilot-core/src/main/java/com/pilot/core/tool/command/CommandToolSupport.java)、[CommandTaskController](pilot-server/src/main/java/com/pilot/server/tool/CommandTaskController.java)、[前端命令逻辑](pilot-web/src/main/resources/static/lib/command-tasks.js)。
+源码：[CommandTaskManager](pilot-core/src/main/java/com/pilot/core/tool/command/CommandTaskManager.java)、[RunCommandTool](pilot-core/src/main/java/com/pilot/core/tool/command/RunCommandTool.java)、[CommandToolSupport](pilot-core/src/main/java/com/pilot/core/tool/command/CommandToolSupport.java)、[CommandTaskController](pilot-server/src/main/java/com/pilot/server/tool/CommandTaskController.java)、[前端命令逻辑](pilot-web/frontend/src/lib/command-tasks.ts)、[命令面板](pilot-web/frontend/src/components/inspector/CommandsPanel.tsx)。
 
 ## 8 记忆 历史和本地存储各保存什么
 
@@ -357,9 +357,9 @@ SSE 是服务端向浏览器推送的通道；提交消息、批准工具和停�
 
 模型服务向 Pilot 的文字流与 Pilot 向浏览器的会话事件流属于两条链路。前者是模型协议，后者还要传工具、审批、计划和状态，不能简单转发模型原始数据代替。
 
-界面用原生 JavaScript 管理状态和 DOM，部分纯逻辑放在 `static/lib/` 中，便于用 Node 测试。当前没有 React、Vue 或前端打包构建链；UI 资源随后端发布。
+界面是 React + TypeScript 单页应用，入口 `pilot-web/frontend/src/main.tsx`；状态集中在 `src/store/` 的 Zustand store，纯逻辑放在 `src/lib/`（如事件合并、附件、草稿、队列），组件在 `src/components/`。构建用 Vite（`pilot-web/frontend/package.json` 的 `build` 脚本），产物由 Maven 打进服务端静态资源，运行时只启动一个后端进程。开发期可用 `pnpm --dir pilot-web/frontend dev` 起前端开发服务器并代理到后端。
 
-源码：[EventEnvelope](pilot-core/src/main/java/com/pilot/core/event/EventEnvelope.java)、[SessionService](pilot-core/src/main/java/com/pilot/core/session/SessionService.java)、[事件类型](pilot-core/src/main/java/com/pilot/core/event/EventType.java)、[SessionController](pilot-server/src/main/java/com/pilot/server/session/SessionController.java)、[app.js](pilot-web/src/main/resources/static/app.js)、[前端事件处理](pilot-web/src/main/resources/static/lib/events.js)。
+源码：[EventEnvelope](pilot-core/src/main/java/com/pilot/core/event/EventEnvelope.java)、[SessionService](pilot-core/src/main/java/com/pilot/core/session/SessionService.java)、[事件类型](pilot-core/src/main/java/com/pilot/core/event/EventType.java)、[SessionController](pilot-server/src/main/java/com/pilot/server/session/SessionController.java)、[前端入口](pilot-web/frontend/src/main.tsx)、[状态与事件流](pilot-web/frontend/src/store/run-state.ts)、[前端事件处理](pilot-web/frontend/src/lib/workbench-sync.ts)。
 
 ## 10 变更 检查点和 Git 分支分别解决什么
 
@@ -483,7 +483,7 @@ Windows 原生方案可评估受限令牌、文件 ACL、Job Objects 和 AppCont
 | 文件读错或改错 | PathValidator、ReadFileTool、EditFileTool | 工作区绑定、链接、唯一匹配和并发外部修改 |
 | 运行中消息去向不对 | SessionController、AgentRunService、QueuedMessageRepository | Queue 与 Steer、runId 是否过期、队列交接 |
 | 后台服务停不干净 | CommandTaskManager、RunCommandTool | 进程归属、后代追踪、包装进程、脱离进程和平台差异 |
-| 页面重复消息或断线后状态不对 | SessionService、events API、app.js、lib/events.js | 持久序号、游标、去重和活跃运行校准 |
+| 页面重复消息或断线后状态不对 | SessionService、events API、前端 `store/run-state.ts`、`lib/workbench-sync.ts` | 持久序号、游标、去重和活跃运行校准 |
 | 长会话忘记要求 | ContextBudget、ContextCompactor、TaskControlService | 摘要保留内容、原始目标注入、重要文件是否复读 |
 | 回退覆盖了人工修改或不可用 | RunSnapshotService、CheckpointController | 内容指纹、快照范围、保留策略和工作区互斥 |
 | 多 Agent 看不到上游修改 | MultiAgentService、DiffSandbox、工作区工具装配 | 当前没有完整的依赖产物与独立工作区协议 |
@@ -495,11 +495,11 @@ Windows 原生方案可评估受限令牌、文件 ACL、Job Objects 和 AppCont
 | --- | --- | --- |
 | 核心单元测试 | `pilot-core/src/test/java/` | 工具、权限、循环、压缩和领域规则在给定输入下的行为 |
 | 服务与 API 测试 | `pilot-server/src/test/java/` | 请求、持久化、队列、恢复、检查点和服务装配的协作 |
-| 前端纯逻辑测试 | `pilot-web/src/test/js/` | 事件去重、diff、请求参数、项目和命令状态等纯逻辑 |
+| 前端纯逻辑测试 | `pilot-web/frontend/scripts/*.test.mjs` | 事件去重、diff、请求参数、项目、命令、队列与附件等纯逻辑 |
 | 浏览器流程验证 | 按具体流程执行并记录 | 输入、审批、暂停、重连和变更等可见交互是否正确 |
 | 真实模型任务评估 | `evaluation/` 中的规格与结果 | 在冻结项目上能否完成真实开发任务及其成本和失败方式 |
 
-运行 Java 测试用根目录 `bash mvnw test`，Windows 用 `mvnw.cmd test`。前端纯逻辑可在 pilot-web 下执行 `node --test src/test/js/*.test.js`。测试需要的本机端口、进程和运行时环境应与产品需求一起准备。
+运行 Java 测试用根目录 `bash mvnw test`，Windows 用 `mvnw.cmd test`。前端纯逻辑测试在 `pilot-web/frontend` 下执行 `node --import ./scripts/register-typescript.mjs --test scripts/*.test.mjs`（或 `node scripts/verify-migration.mjs --unit-only`）。测试需要的本机端口、进程和运行时环境应与产品需求一起准备。
 
 当前 evaluation 目录包含测试映射和评估记录，它明确区分自动化测试与尚待开展的真实模型评估。开发时应把新增机制对应到失败用例和实际任务，不把单测全绿写成已经达到生产级任务成功率。
 
