@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 
 import com.pilot.core.tool.office.DocumentRenderer;
 import com.pilot.core.util.FileNames;
+import com.pilot.core.util.FileTrees;
 import com.pilot.core.util.Sha256;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.common.data.PilotDataDir;
@@ -249,6 +250,52 @@ public class DocumentService {
             blocks.stream().map(line -> Map.<String, Object>of("type", "paragraph", "text", line)).toList());
         payload.put("imported_text_only", true);
         return create(sessionId, title, "blocks", json.writeValueAsString(payload), "import");
+    }
+
+    /** 删除会话的文档工作台数据；工作区里的源文件不在此列。 */
+    public void deleteBySession(String sessionId) {
+        for (Document document : list(sessionId)) {
+            deleteDocument(document);
+        }
+    }
+
+    /**
+     * 先删版本/导出记录和导出目录，最后删文档主记录。
+     *
+     * <p>任何一步失败都抛出，让调用方保留会话并允许重试；已完成的步骤在下次重试时会被跳过，
+     * 因此部分失败不会变成无法收拾的半删除状态。导出目录整体递归删除，避免遗留 DOCX/PDF。
+     */
+    private void deleteDocument(Document document) {
+        for (AutomationStore.Document row : store.list(VERSION_KIND, document.id() + ":")) {
+            deleteRow(VERSION_KIND, row.id());
+        }
+        for (AutomationStore.Document row : store.list(ARTIFACT_KIND)) {
+            Artifact artifact = json.readValue(row.payload(), Artifact.class);
+            if (artifact.documentId().equals(document.id())) {
+                deleteRow(ARTIFACT_KIND, row.id());
+            }
+        }
+        deleteDirectory(documentDir(document.id()));
+        deleteRow(KIND, document.id());
+    }
+
+    private void deleteRow(String kind, String id) {
+        store.get(kind, id).ifPresent(row -> {
+            if (!store.delete(kind, id, row.version())) {
+                throw new IllegalStateException("清理文档记录失败：" + kind + "/" + id);
+            }
+        });
+    }
+
+    private void deleteDirectory(Path directory) {
+        if (!Files.exists(directory)) {
+            return;
+        }
+        List<String> failures = new ArrayList<>();
+        FileTrees.deleteBestEffort(directory, (path, error) -> failures.add(path + "：" + error.getMessage()));
+        if (!failures.isEmpty()) {
+            throw new IllegalStateException("清理文档导出目录失败：" + String.join("；", failures));
+        }
     }
 
     private Document require(String sessionId, String id) {

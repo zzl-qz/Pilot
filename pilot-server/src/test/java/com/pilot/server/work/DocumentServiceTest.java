@@ -114,6 +114,32 @@ class DocumentServiceTest {
     }
 
     @Test
+    void deletesOnlyTargetSessionDocumentsVersionsArtifactsAndExports() throws Exception {
+        var service = service();
+        var keep = service.create("ses_keep", "Keep", "blocks", SPEC, "human");
+        var drop = service.create("ses_drop", "Drop", "blocks", SPEC, "human");
+        service.update("ses_drop", drop.id(), 1, "Drop v2", SPEC.replace("Conclusion", "Changed"), "human");
+        var keepArtifact =
+            service.render("ses_keep", keep.id(), JSON.readTree("{\"formats\":[\"docx\"]}")).artifacts().getFirst();
+        var dropArtifact =
+            service.render("ses_drop", drop.id(), JSON.readTree("{\"formats\":[\"docx\"]}")).artifacts().getFirst();
+        Path keepDir = temp.resolve("studio").resolve(keep.id());
+        Path dropDir = temp.resolve("studio").resolve(drop.id());
+        assertTrue(Files.isRegularFile(keepDir.resolve(keepArtifact.filename())));
+        assertTrue(Files.isRegularFile(dropDir.resolve(dropArtifact.filename())));
+
+        service.deleteBySession("ses_drop");
+
+        assertTrue(service.list("ses_drop").isEmpty());
+        assertEquals(1, service.list("ses_keep").size());
+        assertFalse(Files.exists(dropDir), "被删会话的导出目录必须清理");
+        assertTrue(Files.isRegularFile(keepDir.resolve(keepArtifact.filename())), "其他会话导出必须保留");
+        assertTrue(Files.isRegularFile(service.download("ses_keep", keep.id(), keepArtifact.id()).file()));
+        // 重试必须幂等：记录和目录都清掉后再调一次不报错
+        service.deleteBySession("ses_drop");
+    }
+
+    @Test
     void mergesPreviouslyExportedPdfByFilename() throws Exception {
         var service = service();
         var document = service.create(SESSION, "Report", "blocks", SPEC, "human");

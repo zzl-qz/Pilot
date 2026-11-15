@@ -151,7 +151,7 @@ public class AttachmentService {
             }
             throw e;
         }
-        if (text.toString().isBlank() && imagePositions.isEmpty()) {
+        if (text.toString().isBlank()) {
             text.append("请看随消息附上的文件：")
                 .append(attachments.stream().map(Attachment::name).collect(Collectors.joining("、")));
         }

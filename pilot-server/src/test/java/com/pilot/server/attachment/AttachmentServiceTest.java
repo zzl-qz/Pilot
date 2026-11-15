@@ -119,6 +119,18 @@ class AttachmentServiceTest {
     }
 
     @Test
+    void inventsPromptWhenOnlyImageHasTextPositions() {
+        AttachmentService service = new AttachmentService(root);
+
+        AttachmentService.Prepared prepared = service.prepare("ses_1", "",
+            List.of(new AttachmentService.Inbound("shot.png", "image/png", base64("png"))), List.of(0));
+
+        assertTrue(prepared.content().contains("请看随消息附上的文件"));
+        assertTrue(prepared.content().contains("shot.png"));
+        assertEquals(List.of(0), prepared.imagePositions());
+    }
+
+    @Test
     void rejectsTooManyAttachments() {
         AttachmentService service = new AttachmentService(root);
         List<AttachmentService.Inbound> many = new ArrayList<>();

@@ -23,6 +23,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -50,6 +51,7 @@ import com.pilot.core.skill.SkillProblem;
 import com.pilot.core.tool.office.DocumentRenderer;
 import com.pilot.server.attachment.AttachmentReferences;
 import com.pilot.server.attachment.AttachmentService;
+import com.pilot.server.common.web.ApiErrors;
 import com.pilot.server.common.web.AsyncEventStream;
 import com.pilot.server.common.web.SessionLookup;
 import com.pilot.server.config.AgentProperties;
@@ -313,6 +315,12 @@ public class SessionController {
             throw SessionLookup.notFound(id);
         }
         return ResponseEntity.noContent().build();
+    }
+
+    /** 清理失败时会话仍保留，返回 409 让客户端原样重试删除。 */
+    @ExceptionHandler(SessionCleanupService.CleanupException.class)
+    public ResponseEntity<?> cleanupFailed(SessionCleanupService.CleanupException failure) {
+        return ApiErrors.conflict(failure);
     }
 
     /** 断线重连后校准界面：告诉前端该会话是否仍有运行在进行。 */
