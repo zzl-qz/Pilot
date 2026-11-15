@@ -1,5 +1,6 @@
 package com.pilot.server.work;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -208,6 +209,48 @@ class FileWorkbenchServiceTest {
         assertFalse(service.asset(session, id).changedExternally());
         assertEquals(original.length, Files.size(pdf));
         assertEquals(3, service.versions(session, id).size(), "回退前的状态也要另存为快照");
+    }
+
+    @Test
+    void failedRevertRegistrationKeepsWorkspaceAndIndexConsistent() throws Exception {
+        String id = service.list(session).get(0).id();
+        byte[] original = Files.readAllBytes(pdf);
+        service.snapshot(session, id, "初版");
+        Files.writeString(pdf, "externally edited", StandardCharsets.UTF_8);
+        byte[] edited = Files.readAllBytes(pdf);
+        Path versionDir = temp.resolve("data/file-versions").resolve(session).resolve(id);
+        assertEquals(1, service.versions(session, id).size());
+
+        // 第一次登记（回退前现场 v2）失败：工作区与索引都不能变
+        Mockito
+            .doAnswer(
+                invocation -> invocation.getArgument(1).toString().endsWith(":2") ? false : invocation.callRealMethod())
+            .when(store).put(eq("file-version"), anyString(), eq(0L), anyString());
+        assertThrows(IOException.class, () -> service.revert(session, id, 1));
+        assertEquals(1, service.versions(session, id).size());
+        assertArrayEquals(edited, Files.readAllBytes(pdf), "登记失败时不能覆盖工作区");
+        assertFalse(Files.exists(versionDir.resolve("v2.pdf")));
+
+        // 第二次登记（回退结果 v3）失败：要撤销 v2，工作区保持回退前内容
+        Mockito.reset(store);
+        Mockito
+            .doAnswer(
+                invocation -> invocation.getArgument(1).toString().endsWith(":3") ? false : invocation.callRealMethod())
+            .when(store).put(eq("file-version"), anyString(), eq(0L), anyString());
+        assertThrows(IOException.class, () -> service.revert(session, id, 1));
+        assertEquals(1, service.versions(session, id).size());
+        assertArrayEquals(edited, Files.readAllBytes(pdf));
+        assertFalse(Files.exists(versionDir.resolve("v2.pdf")), "失败后不能留下已登记的快照文件");
+        assertFalse(Files.exists(versionDir.resolve("v3.pdf")));
+
+        // 解除故障后可原样重试，结果与一次成功一致
+        Mockito.reset(store);
+        service.revert(session, id, 1);
+        assertArrayEquals(original, Files.readAllBytes(pdf));
+        assertEquals(3, service.versions(session, id).size());
+        try (var files = Files.list(versionDir)) {
+            assertTrue(files.noneMatch(path -> path.getFileName().toString().startsWith(".revert-")), "临时文件必须清理");
+        }
     }
 
     @Test

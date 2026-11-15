@@ -226,7 +226,12 @@ public class FileWorkbenchService {
         return versions.isEmpty() ? 1L : versions.getLast().version() + 1;
     }
 
-    /** 回退先把当前状态另存为新快照，再覆盖工作区文件，不丢失任何历史。 */
+    /**
+     * 回退先把当前状态另存为新快照，再覆盖工作区文件，不丢失任何历史。
+     *
+     * <p>两次登记都在覆盖文件之前完成；任一次失败都会撤销本次已登记的快照，工作区保持原样。
+     * 覆盖本身用临时文件 + 原子替换，替换失败时同样撤销登记，避免「索引说有回退记录、文件却没变」。
+     */
     public Version revert(String sessionId, String id, long version) throws IOException {
         synchronized (versionLock(sessionId, id)) {
             Path file = resolve(sessionId, id);
@@ -237,9 +242,47 @@ public class FileWorkbenchService {
                 throw new IllegalArgumentException("快照 v" + version + " 不存在，无法回退");
             }
             long next = nextVersion(existing);
-            snapshotFile(sessionId, id, file, "回退前的当前版本", next);
-            Files.copy(saved, file, StandardCopyOption.REPLACE_EXISTING);
-            return snapshotFile(sessionId, id, file, "回退到 v" + version, next + 1);
+            // 1) 回退前的现场另存一份，回退失败时这条记录也能保住原内容
+            Version backup = snapshotFile(sessionId, id, file, "回退前的当前版本", next);
+            Version target;
+            try {
+                // 2) 直接从目标版本快照登记回退结果，不依赖已经覆盖的工作区文件
+                target = snapshotFile(sessionId, id, saved, "回退到 v" + version, next + 1);
+            } catch (IOException | RuntimeException failure) {
+                discardVersion(sessionId, id, backup, file);
+                throw failure;
+            }
+            try {
+                replaceFile(saved, file);
+            } catch (IOException failure) {
+                discardVersion(sessionId, id, target, file);
+                discardVersion(sessionId, id, backup, file);
+                throw failure;
+            }
+            return target;
+        }
+    }
+
+    /** 原子替换：同目录临时文件写完再 move，避免覆盖到一半留下半截文件。 */
+    private static void replaceFile(Path source, Path target) throws IOException {
+        Path temp = Files.createTempFile(target.getParent(), ".revert-", ".tmp");
+        try {
+            Files.copy(source, temp, StandardCopyOption.REPLACE_EXISTING);
+            Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            Files.deleteIfExists(temp);
+        }
+    }
+
+    /** 撤销一次已登记但未能兑现的快照（记录 + 快照文件），用于回退失败时恢复原状。 */
+    private void discardVersion(String sessionId, String id, Version version, Path file) {
+        String key = key(sessionId, id, String.valueOf(version.version()));
+        store.get(VERSION_KIND, key).ifPresent(row -> store.delete(VERSION_KIND, key, row.version()));
+        try {
+            Files.deleteIfExists(
+                dataDir.file("file-versions", sessionId, id).resolve("v" + version.version() + extension(file)));
+        } catch (IOException ignored) {
+            // 快照文件删不掉不影响索引一致性，下次回退会因 CREATE_NEW 冲突而明确失败
         }
     }
 
