@@ -137,11 +137,17 @@
   }
 
   function markDone(button, text) {
+    clearFailure(button);
     var original = button.innerHTML;
     button.classList.add("done");
     button.innerHTML = copiedSvg;
     button.setAttribute("aria-label", "已复制");
     button.title = "已复制：" + text.split("\n")[0];
+    var status = statusFor(button);
+    if (status) {
+      status.textContent = "已复制到剪贴板。";
+      status.hidden = false;
+    }
     setTimeout(function () {
       button.classList.remove("done");
       button.innerHTML = original;
@@ -149,18 +155,99 @@
     }, 1600);
   }
 
+  /** 复制按钮所在容器：安装命令或代码块头部。 */
+  function containerFor(button) {
+    return button.closest(".install") || button.closest(".code-head") || button.parentElement;
+  }
+
+  function statusFor(button) {
+    var container = containerFor(button);
+    if (!container) return null;
+    var status = container.parentElement && container.parentElement.querySelector(".copy-status");
+    if (!status) {
+      status = document.createElement("p");
+      status.className = "copy-status";
+      status.setAttribute("role", "status");
+      status.setAttribute("aria-live", "polite");
+      container.insertAdjacentElement("afterend", status);
+    }
+    return status;
+  }
+
+  function clearFailure(button) {
+    var container = containerFor(button);
+    if (!container) return;
+    button.classList.remove("failed");
+    var parent = container.parentElement;
+    if (!parent) return;
+    var fallback = parent.querySelector(".copy-fallback");
+    if (fallback) fallback.remove();
+    var status = parent.querySelector(".copy-status");
+    if (status) {
+      status.textContent = "";
+      status.hidden = true;
+    }
+  }
+
+  /**
+   * 两种复制方式都失败：给出可读状态，并把命令放进可选中的文本块，
+   * 用户用键盘（Tab 聚焦后 Ctrl/Cmd+A、Ctrl/Cmd+C）也能完成复制。
+   */
+  function markFailed(button, text) {
+    var original = button.innerHTML;
+    button.classList.add("failed");
+    button.setAttribute("aria-label", "复制失败，请手动选择命令复制");
+    button.title = "复制失败：请手动选择命令后复制";
+    var status = statusFor(button);
+    if (status) {
+      status.hidden = false;
+      status.textContent = "复制失败：浏览器拒绝了剪贴板访问。请在下方选中命令，按 Ctrl+C（macOS 为 Command+C）复制。";
+    }
+    var container = containerFor(button);
+    var parent = container && container.parentElement;
+    if (parent) {
+      var existing = parent.querySelector(".copy-fallback");
+      if (existing) existing.remove();
+      var fallback = document.createElement("pre");
+      fallback.className = "copy-fallback";
+      fallback.tabIndex = 0;
+      fallback.setAttribute("aria-label", "安装命令，可手动复制");
+      fallback.textContent = text;
+      status ? status.insertAdjacentElement("afterend", fallback) : parent.appendChild(fallback);
+      fallback.focus();
+      var range = document.createRange();
+      range.selectNodeContents(fallback);
+      var selection = window.getSelection();
+      if (selection) {
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+    }
+    setTimeout(function () {
+      button.classList.remove("failed");
+      button.innerHTML = original;
+      button.setAttribute("aria-label", button.dataset.label || "复制");
+    }, 4000);
+  }
+
+  function copyText(button, text) {
+    function fallback() {
+      if (legacyCopy(text)) markDone(button, text);
+      else markFailed(button, text);
+    }
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(function () { markDone(button, text); }, fallback);
+      return;
+    }
+    fallback();
+  }
+
   document.querySelectorAll(".copy").forEach(function (button) {
     button.dataset.label = button.getAttribute("aria-label") || "复制";
     button.addEventListener("click", function () {
       var text = button.dataset.copy || "";
       if (!text) return;
-      if (navigator.clipboard && window.isSecureContext) {
-        navigator.clipboard.writeText(text)
-          .then(function () { markDone(button, text); })
-          .catch(function () { if (legacyCopy(text)) markDone(button, text); });
-      } else if (legacyCopy(text)) {
-        markDone(button, text);
-      }
+      copyText(button, text);
     });
   });
 

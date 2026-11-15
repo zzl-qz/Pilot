@@ -1212,3 +1212,23 @@ svg { display: block; }
   .marquee-track, .dot, .live i { animation: none; }
   .spot::before { display: none; }
 }
+
+
+/* 复制失败：可读状态 + 可手动选中的命令 */
+.copy.failed { color: var(--warn, #d49a3a); border-color: var(--warn, #d49a3a); }
+.copy-status { margin: 8px 0 0; font-size: 13px; line-height: 1.5; color: var(--warn, #d49a3a); }
+.copy-status[hidden] { display: none; }
+.copy-fallback {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--line, #3a3a3a);
+  border-radius: var(--r-sm, 8px);
+  background: var(--panel-2, #161616);
+  color: var(--ink, #eee);
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.copy-fallback:focus-visible { outline: 2px solid var(--accent, #6ea8ff); outline-offset: 2px; }
