@@ -1,6 +1,8 @@
 package com.pilot.server.mcp;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.lenient;
@@ -243,6 +245,87 @@ class McpConfigControllerTest {
             .importServers(sessionId, new McpConfigController.ImportRequest("{\"bare\": {\"args\": [\"-y\"]}}")));
         assertEquals(HttpStatus.BAD_REQUEST, noCommand.getStatusCode());
         assertTrue(noCommand.getReason().contains("缺少 command"), noCommand.getReason());
+    }
+
+    @Test
+    void probeReportsFailuresAsOkFalseWithReason() throws IOException {
+        ResponseStatusException missing = assertThrows(ResponseStatusException.class,
+            () -> controller.probe(sessionId, "unknown"));
+        assertEquals(HttpStatus.NOT_FOUND, missing.getStatusCode());
+
+        // 启动失败的 command 与 url-only 条目都按 ok=false 返回原因（每个测试方法有独立的 @TempDir）
+        writeUserConfig(Map.of(
+            "bad", Map.of("command", "/definitely/not/here"),
+            "remote", Map.of("url", "https://example.com")));
+        McpConfigController.ProbeResponse broken = controller.probe(sessionId, "bad");
+        assertFalse(broken.ok());
+        assertTrue(broken.error().contains("无法启动"), broken.error());
+        assertFalse(broken.running());
+        assertTrue(broken.tools().isEmpty());
+
+        McpConfigController.ProbeResponse urlOnlyServer = controller.probe(sessionId, "remote");
+        assertFalse(urlOnlyServer.ok());
+        assertTrue(urlOnlyServer.error().contains("只配置了 url"), urlOnlyServer.error());
+    }
+
+    @Test
+    void probeStartsServerAndListsTools() throws IOException {
+        Path node = findNode();
+        org.junit.jupiter.api.Assumptions.assumeTrue(node != null, "没有找到 Node.js");
+        writeUserConfig(Map.of("fake", Map.of("command", node.toString(),
+            "args", List.of(fakeServerScript().toString()))));
+
+        McpConfigController.ProbeResponse response = controller.probe(sessionId, "fake");
+
+        assertTrue(response.ok(), response.error());
+        assertTrue(response.running());
+        assertEquals(2, response.tools().size());
+        assertEquals("echo", response.tools().getFirst().name());
+        assertTrue(response.tools().getFirst().readOnly());
+        assertTrue(response.tools().stream().anyMatch(tool -> tool.name().equals("write") && !tool.readOnly()));
+    }
+
+    /** 写一个最小的 stdio JSON-RPC 服务器脚本（core 的测试资源对 server 模块不可见，内联自包含）。 */
+    private Path fakeServerScript() throws IOException {
+        Path script = dataRoot.resolve("fake-mcp-server.mjs");
+        Files.writeString(script, """
+            import { createInterface } from 'node:readline';
+            const reply = (id, result) => console.log(JSON.stringify({ jsonrpc: '2.0', id, result }));
+            createInterface({ input: process.stdin }).on('line', line => {
+              const m = JSON.parse(line);
+              if (m.method === 'initialize')
+                return reply(m.id, { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'fake', version: '1' } });
+              if (m.method === 'tools/list')
+                return reply(m.id, { tools: [
+                  { name: 'echo', description: 'Echo back', annotations: { readOnlyHint: true }, inputSchema: { type: 'object' } },
+                  { name: 'write', description: 'Write data', inputSchema: { type: 'object' } }
+                ]});
+              if (m.id !== undefined) reply(m.id, { content: [] });
+            });
+            """);
+        return script;
+    }
+
+    /** 直接写用户级配置（绕过 AddRequest 的字段校验，用于构造 url-only 等特殊条目）。 */
+    private void writeUserConfig(Map<String, Object> servers) throws IOException {
+        Files.writeString(dataRoot.resolve("mcp.json"),
+            mapper.writeValueAsString(Map.of("mcpServers", servers)));
+    }
+
+    private static Path findNode() {
+        String path = System.getenv("PATH") == null ? "" : System.getenv("PATH");
+        for (String dir : path.split(java.io.File.pathSeparator)) {
+            if (dir.isBlank()) {
+                continue;
+            }
+            for (String name : List.of("node", "node.exe")) {
+                Path candidate = Path.of(dir, name);
+                if (java.nio.file.Files.isRegularFile(candidate)) {
+                    return candidate;
+                }
+            }
+        }
+        return null;
     }
 
     @Test
