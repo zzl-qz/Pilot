@@ -24,7 +24,7 @@ const NOTE_STATUS_LABELS: Record<string, string> = {
  * <p>保存、修改、删除都只动想法本身，不发送消息、也不进入执行队列；
  * 点某条想法只把原文追加到输入框，之后发不发仍由用户决定。
  */
-export function SessionNotes({ onClose }: { onClose: () => void }) {
+export function SessionNotes({ onClose, embedded = false, onAsk }: { onClose?: () => void; embedded?: boolean; onAsk?: (text: string) => void }) {
   const sessionId = useStore(state => state.sessionId);
   const notes = useStore(state => state.notes);
   const notesState = useStore(state => state.notesState);
@@ -158,11 +158,12 @@ export function SessionNotes({ onClose }: { onClose: () => void }) {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const visible = statusFilter === 'all' ? notes : notes.filter(note => (note.status || 'inbox') === statusFilter);
   const inboxCount = notes.filter(note => (note.status || 'inbox') === 'inbox').length;
-  return <div id="notes-menu" className="composer-flyout notes-flyout" role="dialog" aria-label="想法">
+  return <div id="notes-menu" className={embedded ? 'notes-embedded' : 'composer-flyout notes-flyout'}
+    role={embedded ? 'region' : 'dialog'} aria-label="想法">
     <header className="notes-head">
       <strong>想法</strong>
       <span className="notes-count" aria-label={`${notes.length} 条想法`}>{notes.length}</span>
-      <IconButton className="notes-close" label="关闭想法" icon={<Icon name="close" />} variant="ghost" onClick={onClose} />
+      {!embedded && onClose && <IconButton className="notes-close" label="关闭想法" icon={<Icon name="close" />} variant="ghost" onClick={onClose} />}
     </header>
     {!sessionId && <p className="notes-draft-hint">还没开始任务：想法先存在本机，发出第一条消息后自动并入当前会话。</p>}
     {seed?.source?.sequence != null && <p className="note-source is-seed" role="status">
@@ -235,6 +236,10 @@ export function SessionNotes({ onClose }: { onClose: () => void }) {
             {note.source && <NoteSource source={note.source} />}
             <div className="note-actions">
               <span className="note-status" data-status={note.status || 'inbox'}>{NOTE_STATUS_LABELS[note.status || 'inbox'] || note.status}</span>
+              {onAsk && (
+                <Button size="sm" variant="ghost" label="就这条问一下" isDisabled={Boolean(saving)}
+                  onClick={() => { setLocalError(''); onAsk(note.content); }} />
+              )}
               {note.status !== 'planned' && note.status !== 'done' && (
                 <Button size="sm" variant="ghost" label="转为任务" isDisabled={Boolean(saving)}
                   onClick={() => void promote(note.id)} />

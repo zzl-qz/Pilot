@@ -1173,6 +1173,24 @@ html[data-theme] .tool-status.is-interrupted {
   background: var(--panel-2);
 }
 .side-chat-line.is-assistant { color: var(--ink); }
+/* 侧边对话关掉即丢：值得留下的那句要能一键捞进想法，入口放在这一句下面而不是工具栏。 */
+.side-chat-keep {
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.side-chat-line.is-assistant:hover .side-chat-keep,
+.side-chat-line.is-assistant:focus-within .side-chat-keep { opacity: 1; }
+.side-chat-keep:hover { color: var(--ink); }
+.side-chat-keep:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; opacity: 1; }
+@media (pointer: coarse) { .side-chat-keep { opacity: 1; min-height: 32px; } }
 .side-chat-line.is-assistant .bubble {
   max-width: 100%;
   padding: 0;

@@ -262,6 +262,14 @@ function SimpleSideChat({ sessionId }: { sessionId: string }) {
             : (
               <div key={`${item.role}-${index}`} className="side-chat-line is-assistant">
                 <div className="bubble"><MarkdownBody text={item.text} /></div>
+                {/* 侧边对话关掉即丢：值得留下的那句要能捞进想法，否则只能靠人再抄一遍。 */}
+                {item.text?.trim() && (
+                  <button type="button" className="side-chat-keep" onClick={async () => {
+                    if (await useStore.getState().addNote(item.text)) {
+                      useStore.getState().setUi({ besideTab: 'notes' });
+                    }
+                  }}>存为想法</button>
+                )}
               </div>
             )
         ))}
