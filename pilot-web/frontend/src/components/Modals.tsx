@@ -16,7 +16,8 @@ import { Icon, FileIcon } from './Icon.jsx';
 import { writeClipboard } from '../lib/clipboard.js';
 import { filterPaletteActions } from '../lib/commands.js';
 import { MobileConnectionContent } from './MobileConnection.jsx';
-import { verificationLabel, verificationHint } from '../lib/verification.js';
+import { verificationLabel, verificationHint, verificationTone, verificationNeedsRerun } from '../lib/verification.js';
+import { reverifyPrompt } from '../lib/verification-status.js';
 import { splitAttachmentMarkers } from '../lib/attachments.js';
 
 export { Modal };
@@ -36,6 +37,7 @@ export function TaskContract() {
   const task = useStore((state) => state.task);
   const dirty = useStore(state => state.taskDirty);
   const busy = useStore(state => state.taskBusy);
+  const running = useStore(state => state.running);
   const [constraints, setConstraints] = useState('');
   const [criteria, setCriteria] = useState('');
   const [open, setOpen] = useState(false);
@@ -82,7 +84,14 @@ export function TaskContract() {
               {execution.requests != null ? ` · 已调用模型 ${execution.requests} 次` : ''}
             </p>
             {execution.reason && <p className="task-help">{execution.reason}</p>}
-            {verificationHint(execution.phase) && <p className="task-help">{verificationHint(execution.phase)}</p>}
+            <div className="task-verification" data-tone={verificationTone(execution.phase)} data-verification-phase={execution.phase}>
+              <p><span className="task-verification-badge">{verificationLabel(execution.phase)}</span>
+                {verificationHint(execution.phase)}</p>
+              {verificationNeedsRerun(execution.phase) && <button className="btn" disabled={running} onClick={() => {
+                // 让会话按当前文件重新跑一次验证；不做「重放上次命令」，因为历史证据只存了结果摘要。
+                void useStore.getState().submitInput(reverifyPrompt(verificationHint(execution.phase)));
+              }}>重新验证</button>}
+            </div>
             {(execution.criteria || []).length > 0 && (
               <ul className="task-criteria">
                 {execution.criteria.map((criterion, index) => (

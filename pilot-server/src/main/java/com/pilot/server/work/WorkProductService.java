@@ -32,6 +32,7 @@ import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.store.AutomationStore;
 import com.pilot.server.tool.WorkspaceToolFactory;
+import com.pilot.server.validation.ValidationReason;
 import com.pilot.server.validation.ValidationSnapshot;
 import com.pilot.server.validation.ValidationStatusService;
 
@@ -62,7 +63,8 @@ public class WorkProductService {
         String sourcePath, String mediaType, long bytes, String sha256, List<Source> sources, Instant createdAt,
         ValidationSnapshot verification) {
         public Product {
-            verification = verification == null ? ValidationSnapshot.unverified("这条成果登记时还没有校验证据") : verification;
+            verification = verification == null
+                ? ValidationSnapshot.unverified("这条成果登记时还没有校验证据", ValidationReason.NO_EVIDENCE) : verification;
         }
     }
 

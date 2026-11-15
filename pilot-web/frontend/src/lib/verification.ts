@@ -23,3 +23,21 @@ export function verificationHint(phase: string | null | undefined) {
   if (phase === 'UNVERIFIED' || phase === 'UNKNOWN' || phase === 'COMPLETE' || phase === 'COMPLETED' || !PHASES[phase ?? '']) return '没有足够的验证记录，不能据此认定结果已通过检查。';
   return '';
 }
+
+/**
+ * 阶段 → 视觉档位。
+ *
+ * <p>「过期」必须和「从未验证」「校验失败」分开：前者的意思是曾经有证据但作废了，
+ * 用户最容易在这里误以为自己已经核过。三者共用一套标签就等于没表达。
+ */
+export function verificationTone(phase: string | null | undefined) {
+  if (phase === 'CHECKS_PASSED' || phase === 'VERIFIED') return 'ok';
+  if (phase === 'CHECKS_STALE') return 'stale';
+  if (phase === 'CHECKS_FAILED' || phase === 'VERIFICATION_FAILED' || phase === 'REVIEW_UNAVAILABLE') return 'error';
+  return 'muted';
+}
+
+/** 需要用户重新跑一次验证的阶段。 */
+export function verificationNeedsRerun(phase: string | null | undefined) {
+  return phase === 'CHECKS_STALE' || phase === 'CHECKS_FAILED' || phase === 'UNVERIFIED' || phase === 'VERIFICATION_FAILED';
+}

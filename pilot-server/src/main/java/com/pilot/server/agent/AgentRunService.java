@@ -159,6 +159,8 @@ public class AgentRunService implements RunStarter {
     private final RunStateTracker runStates;
     private final com.pilot.server.store.ToolCallJournalFactory journals;
     private final com.pilot.server.validation.ValidationLedger validations;
+    /** 证据过期判断：运行结束时用它决定要不要撤销人工验收勾选。 */
+    private final com.pilot.server.validation.ValidationStatusService validationStatus;
     /** 自定义子代理目录；测试轻量装配不注入时，spawn/dispatch 的 agent 引用只能拿到空目录。 */
     private volatile AgentProfileService agentProfiles;
     @org.springframework.beans.factory.annotation.Autowired
@@ -233,6 +235,9 @@ public class AgentRunService implements RunStarter {
         this.runStates = runStates;
         this.journals = journals;
         this.validations = validations;
+        // 结论计算本身无状态，只是账本的一层判断，不必再进构造器参数表。
+        this.validationStatus =
+            validations == null ? null : new com.pilot.server.validation.ValidationStatusService(validations);
         this.taskControls = taskControls;
         this.commandTasks = commandTasks;
         this.conversations = conversations;
@@ -1625,6 +1630,26 @@ public class AgentRunService implements RunStarter {
     }
 
     /**
+     * 这次运行让旧证据失效时，撤销人工验收勾选。
+     *
+     * <p>验收勾选代表「我认可这份结果」。这一轮又改了文件，之前的认可就不再指向当前内容；
+     * 保留勾选等于替用户担保，所以撤下来并要求重新核对。原验收文字与证据照旧保留。
+     */
+    private void revokeAcceptanceIfEvidenceStale(String sessionId, String workspace) {
+        if (validationStatus == null || taskControls == null) {
+            return;
+        }
+        var snapshot = validationStatus.snapshot(sessionId, toolFactory.resolve(workspace), null);
+        if (!snapshot.stale()) {
+            return;
+        }
+        int revoked = taskControls.revokeAcceptanceForStaleEvidence(sessionId);
+        if (revoked > 0) {
+            log.info("校验证据过期，已撤销 {} 条验收勾选：session={}", revoked, sessionId);
+        }
+    }
+
+    /**
      * 把「本轮成功」绑定到当前产物指纹、实际检查命令和环境。
      *
      * <p>没有产物变化（只回答问题）时不写证据：那不构成对代码的完成声明。
@@ -1656,6 +1681,7 @@ public class AgentRunService implements RunStarter {
             validations.record(new ValidationEvidence("val_" + java.util.UUID.randomUUID(), sessionId, runId, candidate,
                 files, checks, status, com.pilot.server.multi.SandboxStore.environmentFingerprint(), "run",
                 java.time.Instant.now()));
+            revokeAcceptanceIfEvidenceStale(sessionId, workspace);
         } catch (RuntimeException e) {
             log.debug("记录校验证据失败：session={}, run={}", sessionId, runId, e);
         }

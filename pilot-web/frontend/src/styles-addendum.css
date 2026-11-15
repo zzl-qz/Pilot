@@ -1485,6 +1485,23 @@ html .app:has(#panel-changes) { --activity-w: clamp(440px, 40vw, 680px); }
 .task-execution .task-help { margin: 0; }
 .task-criteria { margin: 4px 0; padding-left: 20px; color: var(--muted); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
 
+/* ---------- 验证结论的三档视觉 ----------
+   「证据过期」和「从未验证」必须肉眼可分：前者是曾经有证据但作废了，
+   用户最容易在这一档误以为自己已经核过。 */
+.task-verification { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 6px 0; padding: 6px 0 6px 10px; border-inline-start: 3px solid var(--line); }
+.task-verification p { margin: 0; font-size: 11px; line-height: 1.6; color: var(--muted); }
+.task-verification[data-tone='ok'] { border-inline-start-color: var(--ok, #4ea672); }
+.task-verification[data-tone='stale'] { border-inline-start-color: var(--warn, #bf853c); }
+.task-verification[data-tone='error'] { border-inline-start-color: var(--err, #b73535); }
+.task-verification[data-tone='muted'] { border-inline-start-color: var(--muted); }
+.task-verification-badge { display: inline-block; margin-inline-end: 6px; padding: 1px 8px; border: 1px solid currentColor; border-radius: 999px; font-size: 11px; white-space: nowrap; }
+.task-verification[data-tone='ok'] .task-verification-badge { color: var(--ok, #4ea672); }
+.task-verification[data-tone='stale'] .task-verification-badge { color: var(--warn, #bf853c); }
+.task-verification[data-tone='error'] .task-verification-badge { color: var(--err, #b73535); }
+.task-verification[data-tone='muted'] .task-verification-badge { color: var(--muted); }
+.task-verification .btn { flex-shrink: 0; }
+@media (max-width: 960px) { html[data-theme] .task-verification .btn { min-height: 44px; } }
+
 /* ---------- 命令面板：键盘选中态与快捷键副标题 ---------- */
 .picker-hint { flex: none; color: var(--dim); font-family: var(--mono); font-size: 11px; }
 

@@ -1366,6 +1366,7 @@ export interface TaskDiagnosticsServiceRecoveryView {
 export interface TaskDiagnosticsServiceValidationView {
   covered: boolean;
   reason: string;
+  code: string;
   candidateHash: string;
   status: string;
   checks: (string)[];
@@ -1446,6 +1447,7 @@ export interface ValidationEvidence {
 export interface ValidationLedgerReport {
   current: boolean;
   reason: string;
+  code: string;
   currentCandidateHash: string;
   latest: ValidationEvidence;
   recent: (ValidationEvidence)[];
@@ -1502,6 +1504,7 @@ export interface WorkProductServiceProduct {
 export interface WorkProductServiceValidationSnapshot {
   status: string;
   reason: string;
+  code: string;
   candidateHash: string;
   evidenceId: string;
   recordedAt: string;

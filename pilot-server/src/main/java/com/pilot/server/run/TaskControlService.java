@@ -288,6 +288,30 @@ public class TaskControlService {
         return task == null ? null : status(sessionId, reviewedStatus(task.acceptance()));
     }
 
+    /**
+     * 校验证据过期后撤销人工验收勾选。
+     *
+     * <p>勾选记录的是「我看过并认可这份结果」。产物随后被改动，那份认可就不再指向当前内容；
+     * 如果还显示成已验收，界面等于在替模型担保。这里与 {@link #correct} 保持一致：
+     * 保留原验收文字和证据供回看，只把勾选撤下，需要用户重新核对。
+     *
+     * @return 实际被撤销的勾选数；没有勾选或没有任务时返回 0，且不写盘
+     */
+    public synchronized int revokeAcceptanceForStaleEvidence(String sessionId) {
+        TaskContract task = load(sessionId);
+        if (task == null || task.acceptance().stream().noneMatch(item -> Boolean.TRUE.equals(item.checked()))) {
+            return 0;
+        }
+        List<Acceptance> acceptance =
+            task.acceptance().stream().map(item -> new Acceptance(item.text(), false, item.evidence())).toList();
+        // 只有原先已达成的任务需要退回待验收；执行中的任务保持原状态，否则会把运行中的任务标成等待用户。
+        String status =
+            TaskControlStatus.COMPLETED.is(task.status()) ? TaskControlStatus.AWAITING_REVIEW.name() : task.status();
+        save(sessionId, new TaskContract(task.taskId(), task.originalGoal(), task.constraints(), acceptance,
+            task.corrections(), status, task.execution(), task.automation()));
+        return (int)task.acceptance().stream().filter(item -> Boolean.TRUE.equals(item.checked())).count();
+    }
+
     public synchronized TaskContract correct(String sessionId, String text) {
         TaskContract task = requireTask(sessionId);
         List<String> corrections = new ArrayList<>(task.corrections());

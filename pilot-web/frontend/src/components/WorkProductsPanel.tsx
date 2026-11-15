@@ -1,6 +1,6 @@
 import type * as S from '../types/server.js';
 import { errorInfo } from '../lib/errors.js';
-import { verificationStatusDetail, verificationStatusLabel, verificationStatusTone, shortFingerprint } from '../lib/verification-status.js';
+import { verificationNeedsAttention, verificationStatusDetail, verificationStatusLabel, verificationStatusTone, reverifyPrompt, shortFingerprint } from '../lib/verification-status.js';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useStore } from '../store.js';
@@ -131,10 +131,15 @@ function ProductDetail({ session, product }: { session: string; product: S.WorkP
 /** 成果详情里的验证结论：先给结论，再给依据，最后才是可核对的指纹。 */
 function VerificationBlock({ verification }: { verification: S.WorkProductServiceValidationSnapshot | null | undefined }) {
   const fingerprint = shortFingerprint(verification?.candidateHash);
+  const stale = verificationNeedsAttention(verification?.status);
   return <section className="work-verification" data-tone={verificationStatusTone(verification?.status)} aria-label="验证结论">
     <p><VerificationBadge status={verification?.status} />{verificationStatusDetail(verification)}</p>
     {verification?.recordedAt && verification.recordedAt !== '1970-01-01T00:00:00Z' && <small>证据记录于 {dateText(verification.recordedAt)}</small>}
     {fingerprint && <small>产物指纹 {fingerprint}（与任务详情核对是否同一份）</small>}
+    {stale && <button className="btn work-reverify" onClick={() => {
+      // 让会话重新跑一次验证，产生新证据；这里不重置任何状态，等新证据回来自然覆盖结论。
+      void useStore.getState().submitInput(reverifyPrompt(verification?.reason));
+    }}>重新验证</button>}
   </section>;
 }
 

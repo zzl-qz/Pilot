@@ -47,3 +47,40 @@ export function shortFingerprint(value: string | null | undefined) {
 export function verificationNeedsAttention(status: string | null | undefined) {
   return status === 'stale' || status === 'unverified';
 }
+
+/**
+ * 后端原因码 → 展示状态。
+ *
+ * <p>界面靠代号判断，不去匹配中文句子：文案一改，匹配就会静默失效。
+ * 兼容只有 covered 布尔值的旧接口：true 视为已验证，false 视为未验证。
+ */
+const CODE_TO_STATUS: Record<string, string> = {
+  ok: 'verified',
+  stale_candidate: 'stale',
+  no_evidence: 'unverified',
+  no_changes: 'unverified',
+  failed: 'unverified',
+  not_covered: 'unverified',
+  no_workspace: 'unverified',
+  storage_degraded: 'unverified'
+};
+
+export function statusFromCode(code: string | null | undefined, covered?: boolean | null) {
+  const mapped = CODE_TO_STATUS[code ?? ''];
+  if (mapped) return mapped;
+  if (covered === true) return 'verified';
+  return 'unverified';
+}
+
+/**
+ * 「重新验证」发出的话。
+ *
+ * <p>不伪造一个「重跑上次命令」的假动作：历史证据里只有结果摘要，没有可重放的命令参数，
+ * 直接重放等于凭空造证据。这里改为让会话真正再验一次，产出新的证据。
+ */
+export const REVERIFY_PROMPT = '重新运行验证：针对当前文件内容执行相关的测试或构建，说明实际执行的命令、退出码和覆盖范围；不要把之前的结论当作这次的结果。';
+
+export function reverifyPrompt(reason: string | null | undefined) {
+  const detail = (reason ?? '').trim();
+  return detail ? `${REVERIFY_PROMPT}（上次结论失效原因：${detail}）` : REVERIFY_PROMPT;
+}

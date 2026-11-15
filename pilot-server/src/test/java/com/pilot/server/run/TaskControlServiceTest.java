@@ -48,6 +48,27 @@ class TaskControlServiceTest {
     }
 
     @Test
+    void staleEvidenceRevokesAcceptanceButKeepsWhatTheUserWrote() {
+        tasks.start("session", "修复重连", List.of(), List.of(new TaskControlService.Acceptance("重连测试通过", false, "")));
+        tasks.finish("session");
+        tasks.update("session", List.of(),
+            List.of(new TaskControlService.Acceptance("重连测试通过", true, "ReconnectTest.testRetry 通过")));
+        assertEquals("COMPLETED", tasks.load("session").status());
+
+        // 产物又变了：认可不再指向当前内容，必须撤下勾选，但不能抹掉用户写的验收文字与证据。
+        assertEquals(1, tasks.revokeAcceptanceForStaleEvidence("session"));
+        TaskControlService.TaskContract reopened = tasks.load("session");
+        assertFalse(reopened.acceptance().getFirst().checked());
+        assertEquals("重连测试通过", reopened.acceptance().getFirst().text());
+        assertEquals("ReconnectTest.testRetry 通过", reopened.acceptance().getFirst().evidence());
+        assertEquals("AWAITING_REVIEW", reopened.status());
+
+        // 幂等：已经没有勾选时不再写盘，也不会重复计数。
+        assertEquals(0, tasks.revokeAcceptanceForStaleEvidence("session"));
+        assertEquals(0, tasks.revokeAcceptanceForStaleEvidence("no-such-session"));
+    }
+
+    @Test
     void runningCompletionWaitsForEvidenceAndCorrectionReopensVerification() {
         tasks.start("session", "修复重连", List.of(), List.of(new TaskControlService.Acceptance("重连测试通过", false, "")));
         assertEquals("AWAITING_REVIEW", tasks.finish("session").status());

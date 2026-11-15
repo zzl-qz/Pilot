@@ -14,6 +14,13 @@
 .results-count, .results-note { color: var(--color-text-secondary); font-size: 13px; }
 .results-count { margin: 12px 0; font-variant-numeric: tabular-nums; }
 .results-error { margin-bottom: 16px; }
+/* 结果详情里的验证档位：过期与未验证不能共用一种颜色。 */
+.result-detail [data-verification-tone] { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 4px 0 8px; }
+.result-verification-badge { display: inline-block; padding: 1px 8px; border: 1px solid currentColor; border-radius: 999px; font-size: 12px; white-space: nowrap; }
+.result-detail [data-verification-tone='ok'] .result-verification-badge { color: var(--ok, #4ea672); }
+.result-detail [data-verification-tone='stale'] .result-verification-badge { color: var(--warn, #bf853c); }
+.result-detail [data-verification-tone='error'] .result-verification-badge { color: var(--err, #b73535); }
+.result-detail [data-verification-tone='muted'] .result-verification-badge { color: var(--color-text-secondary); }
 /* 宽屏为列表与详情分栏，900px 以下切换为单栏阅读。 */
 .results-layout { min-width: 0; }
 .results-layout.has-detail, .results-layout.has-results { display: grid; grid-template-columns: minmax(240px, .8fr) minmax(0, 1.2fr); gap: 24px; }

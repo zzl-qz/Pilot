@@ -47,6 +47,18 @@ class ValidationLedgerTest {
         ValidationLedger.Report stale = ledger.report("ses_1", "hash-b");
         assertFalse(stale.current());
         assertTrue(stale.reason().contains("旧产物"), stale.reason());
+        assertEquals(ValidationReason.STALE_CANDIDATE, stale.code(), "过期要有独立代号，界面不能靠匹配中文判断");
+    }
+
+    @Test
+    void everyReportCarriesAMachineReadableReasonCode() {
+        ValidationLedger ledger = ledger();
+        assertEquals(ValidationReason.NO_EVIDENCE, ledger.report("ses_1", "hash-a").code());
+        ledger.record(evidence("hash-a", "failed"));
+        assertEquals(ValidationReason.FAILED, ledger.report("ses_1", "hash-a").code());
+        ledger.record(evidence("hash-a", "passed"));
+        assertEquals(ValidationReason.OK, ledger.report("ses_1", "hash-a").code());
+        assertEquals(ValidationReason.NO_CHANGES, ledger.report("ses_1", "").code());
     }
 
     @Test

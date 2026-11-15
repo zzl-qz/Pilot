@@ -17,11 +17,12 @@ import java.time.Instant;
  *
  * @param status        {@link #VERIFIED}、{@link #STALE}、{@link #UNVERIFIED} 之一
  * @param reason        不可用或不新鲜的原因；可用时为空串
+ * @param code          {@link ValidationReason} 里的分类代号，界面据此选视觉，不匹配中文
  * @param candidateHash 计算本结论时使用的产物指纹
  * @param evidenceId    被引用的证据 ID；没有证据时为空串
  * @param recordedAt    被引用证据的记录时间；没有证据时为 {@link Instant#EPOCH}
  */
-public record ValidationSnapshot(String status, String reason, String candidateHash, String evidenceId,
+public record ValidationSnapshot(String status, String reason, String code, String candidateHash, String evidenceId,
     Instant recordedAt) {
     public static final String VERIFIED = "verified";
     public static final String STALE = "stale";
@@ -30,20 +31,26 @@ public record ValidationSnapshot(String status, String reason, String candidateH
     public ValidationSnapshot {
         status = status == null || status.isBlank() ? UNVERIFIED : status.strip();
         reason = reason == null ? "" : reason;
+        code = code == null || code.isBlank() ? ValidationReason.NO_EVIDENCE : code;
         candidateHash = candidateHash == null ? "" : candidateHash;
         evidenceId = evidenceId == null ? "" : evidenceId;
         recordedAt = recordedAt == null ? Instant.EPOCH : recordedAt;
     }
 
-    public static ValidationSnapshot unverified(String reason) {
-        return new ValidationSnapshot(UNVERIFIED, reason, "", "", Instant.EPOCH);
+    public static ValidationSnapshot unverified(String reason, String code) {
+        return new ValidationSnapshot(UNVERIFIED, reason, code, "", "", Instant.EPOCH);
     }
 
-    public static ValidationSnapshot unverified(String reason, String candidateHash) {
-        return new ValidationSnapshot(UNVERIFIED, reason, candidateHash, "", Instant.EPOCH);
+    public static ValidationSnapshot unverified(String reason, String code, String candidateHash) {
+        return new ValidationSnapshot(UNVERIFIED, reason, code, candidateHash, "", Instant.EPOCH);
     }
 
     public boolean verified() {
         return VERIFIED.equals(status);
+    }
+
+    /** 曾经有证据，但已经不能证明当前产物。这个状态比「没验证过」更需要提醒用户。 */
+    public boolean stale() {
+        return STALE.equals(status);
     }
 }

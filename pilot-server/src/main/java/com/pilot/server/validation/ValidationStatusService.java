@@ -27,27 +27,29 @@ public class ValidationStatusService {
     public ValidationSnapshot snapshot(String sessionId, Path workspace, String artifactPath) {
         List<ValidationEvidence> recent = ledger.recent(sessionId);
         if (recent.isEmpty()) {
-            return ValidationSnapshot.unverified("还没有任何校验证据");
+            return ValidationSnapshot.unverified("还没有任何校验证据", ValidationReason.NO_EVIDENCE);
         }
         ValidationEvidence latest = recent.getLast();
         if (workspace == null) {
-            return ValidationSnapshot.unverified("没有可校验的工作区");
+            return ValidationSnapshot.unverified("没有可校验的工作区", ValidationReason.NO_WORKSPACE);
         }
         String current = WorkspaceFingerprint.of(workspace.toAbsolutePath().normalize(), latest.files());
         if (current.isBlank()) {
-            return ValidationSnapshot.unverified("这次运行没有记录到产物变化，无需校验");
+            return ValidationSnapshot.unverified("这次运行没有记录到产物变化，无需校验", ValidationReason.NO_CHANGES);
         }
         if (!current.equals(latest.candidateHash())) {
-            return new ValidationSnapshot(ValidationSnapshot.STALE, "证据针对的是旧产物，文件已经变化", current, latest.id(),
-                latest.recordedAt());
+            return new ValidationSnapshot(ValidationSnapshot.STALE, "证据针对的是旧产物，文件已经变化",
+                ValidationReason.STALE_CANDIDATE, current, latest.id(), latest.recordedAt());
         }
         if (!latest.passed()) {
-            return ValidationSnapshot.unverified("最近一次校验没有通过（" + latest.status() + "）", current);
+            return ValidationSnapshot.unverified("最近一次校验没有通过（" + latest.status() + "）", ValidationReason.FAILED,
+                current);
         }
         if (artifactPath != null && !artifactPath.isBlank() && !covers(latest.files(), artifactPath)) {
-            return ValidationSnapshot.unverified("最近一次校验没有覆盖这个文件", current);
+            return ValidationSnapshot.unverified("最近一次校验没有覆盖这个文件", ValidationReason.NOT_COVERED, current);
         }
-        return new ValidationSnapshot(ValidationSnapshot.VERIFIED, "", current, latest.id(), latest.recordedAt());
+        return new ValidationSnapshot(ValidationSnapshot.VERIFIED, "", ValidationReason.OK, current, latest.id(),
+            latest.recordedAt());
     }
 
     /** 比较路径时忽略分隔符差异：账本里存的是工具写过的相对路径，调用方可能传入平台风格的写法。 */

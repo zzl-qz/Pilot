@@ -12,7 +12,8 @@ import { supportsAnchoredLayers } from '../lib/theme.js';
 import { api } from '../api.js';
 import { useStore } from '../store.js';
 import { ResearchRecords } from './ResearchPanel.jsx';
-import { verificationLabel, verificationHint } from '../lib/verification.js';
+import { verificationLabel, verificationHint, verificationTone, verificationNeedsRerun } from '../lib/verification.js';
+import { reverifyPrompt } from '../lib/verification-status.js';
 import { updateResultUnread } from '../lib/result-unread.js';
 import { Icon } from './Icon.jsx';
 import './results.css';
@@ -124,8 +125,8 @@ function InboxDialog({ target }: { target?: string | null }) {
         {detailLoading && <p role="status">正在读取详情…</p>}
         {item && detail && <><h2>{item.title || '未命名任务'}</h2><p>{labels[item.state] || item.state} · {item.handled ? '已处理' : '待处理'}</p><p className="result-summary">{item.summary || '暂无摘要，请打开执行对话查看。'}</p>
           <nav className="result-sections" aria-label="结果内容导航">{[['verification', '验收'], ['changes', '改动'], ...(item.workspace ? [['workspace', '工作区']] : []), ['research', '开源参考']].map(([key, text]) => <Button key={key} label={text} variant="ghost" onClick={() => ref.current?.querySelector(`#result-${key}`)?.scrollIntoView({ block: 'start' })} />)}</nav>
-          <h3 id="result-verification">验收与验证</h3><p data-verification-phase={detail.verification}>{verificationLabel(detail.verification)}</p>
-          {verificationHint(detail.verification) && <p className="results-note">{verificationHint(detail.verification)}</p>}
+          <h3 id="result-verification">验收与验证</h3><p data-verification-phase={detail.verification} data-verification-tone={verificationTone(detail.verification)}><span className="result-verification-badge">{verificationLabel(detail.verification)}</span>{verificationHint(detail.verification) && <span className="results-note">{verificationHint(detail.verification)}</span>}</p>
+          {verificationNeedsRerun(detail.verification) && <Button label="重新验证" isDisabled={busy} onClick={() => act(async () => { await useStore.getState().activate(item.sessionId); await useStore.getState().submitInput(reverifyPrompt(verificationHint(detail.verification))); close(); })} />}
           {detail.verificationDetail && <p className="results-note">{detail.verificationDetail}</p>}
           {!!detail.acceptance?.length && <ul>{detail.acceptance.map((a, i) => <li key={i}>{a.checked ? '已满足' : '待核对'} · {a.text}{a.evidence && <small>{a.evidence}</small>}</li>)}</ul>}
           <ResultList title="记录的验证项" rows={item.checks} empty="没有记录验证项。" />

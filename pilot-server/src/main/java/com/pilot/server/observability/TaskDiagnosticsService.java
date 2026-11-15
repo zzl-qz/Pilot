@@ -60,7 +60,7 @@ public class TaskDiagnosticsService {
     public record CommandView(String taskId, String command, String status, Integer exitCode, Long runningSeconds) {
     }
 
-    public record ValidationView(boolean covered, String reason, String candidateHash, String status,
+    public record ValidationView(boolean covered, String reason, String code, String candidateHash, String status,
         List<String> checks, Instant recordedAt, String runId) {
     }
 
@@ -117,8 +117,8 @@ public class TaskDiagnosticsService {
             usage == null ? 0 : usage.modelRequests(), usage == null ? 0 : usage.inputTokens(),
             usage == null ? 0 : usage.outputTokens(), usage == null ? 0 : usage.cachedInputTokens(),
             usage != null && usage.exact(), lastTool == null ? "" : Redaction.text(lastTool.resultSummary()), commands,
-            new ValidationView(report.current(), report.reason(), Redaction.text(report.currentCandidateHash()),
-                latestEvidence == null ? "" : latestEvidence.status(),
+            new ValidationView(report.current(), report.reason(), report.code(),
+                Redaction.text(report.currentCandidateHash()), latestEvidence == null ? "" : latestEvidence.status(),
                 latestEvidence == null ? List.of() : latestEvidence.checks().stream().map(Redaction::text).toList(),
                 latestEvidence == null ? null : latestEvidence.recordedAt(),
                 latestEvidence == null ? "" : latestEvidence.runId()),
