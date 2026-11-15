@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import { initialThread } from '../thread-reducer.js';
 import { errorInfo } from '../lib/errors.js';
 import { loadInputHistory } from '../lib/input-history.js';
-import { readDraft, writeDraft, dropDraft } from '../lib/drafts.js';
+import { readDraft, writeDraft, dropDraft, dropDraftSnapshot } from '../lib/drafts.js';
 import { normalizePermission } from '../lib/permission.js';
 import { sortSessions } from '../lib/projects.js';
 import { NOTE_COUNT_LIMIT, createDraftNote, noteContentError, readDraftNotes, uploadDraftNotes, writeDraftNotes } from '../lib/notes.js';
@@ -491,6 +491,9 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
     async deleteSession(id) {
       try {
         await api.deleteSession(id);
+        // 会话没了，它的草稿正文与附件副本也不再需要
+        dropDraft(localStorage, id);
+        dropDraftSnapshot(localStorage, id);
         // 先本地摘掉这一行：后端的清理是异步的，紧接着的列表可能还带着它
         set((draft) => { draft.sessions = (draft.sessions || []).filter((session) => session.id !== id); });
         // 主任务没了，挂在它下面的侧边对话也一起清掉（它们不会出现在列表里，留着就成了孤儿）
@@ -503,7 +506,7 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
             }).activeId;
           });
           writeSideChats(get().sideChats);
-          orphans.forEach((item) => { api.deleteSession(item.id).catch(() => {}); });
+          orphans.forEach((item) => { dropDraft(localStorage, item.id); dropDraftSnapshot(localStorage, item.id); api.deleteSession(item.id).catch(() => {}); });
         }
         get().showNotice('已删除对话');
         const list = await get().loadSessions();

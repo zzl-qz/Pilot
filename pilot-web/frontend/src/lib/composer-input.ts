@@ -306,6 +306,39 @@ export function createComposerInput(root: HTMLElement, { onChange = () => {}, on
       onChange();
     },
 
+    /**
+     * 恢复草稿：文字、图片芯片按原插入位置、文件芯片按原顺序。
+     * 用于刷新/重开工作台后还原未发送的附件。
+     */
+    restoreDraft(text: unknown, files: readonly DraftAttachment[], imagePositions: readonly number[]) {
+      const value = String(text || '');
+      const list = Array.from(files || []);
+      const images = list.filter(item => isImageAttachment(item) && item.dataBase64);
+      const others = list.filter(item => !images.includes(item));
+      const nodes: Node[] = [];
+      let cursor = 0;
+      images.forEach((item, index) => {
+        const raw = Number(imagePositions[index]);
+        const at = Number.isFinite(raw) ? Math.max(cursor, Math.min(value.length, raw)) : value.length;
+        if (at > cursor) {
+          nodes.push(document.createTextNode(value.slice(cursor, at)));
+        }
+        nodes.push(attachmentChip(item));
+        cursor = at;
+      });
+      if (cursor < value.length) {
+        nodes.push(document.createTextNode(value.slice(cursor)));
+      } else if (!nodes.length && value) {
+        nodes.push(document.createTextNode(value));
+      }
+      others.forEach((item) => {
+        nodes.push(attachmentChip(item), document.createTextNode(' '));
+      });
+      root.replaceChildren(...nodes);
+      refresh();
+      onChange();
+    },
+
     /** 在草稿末尾追加文字，已有的芯片保持不动。 */
     appendText(text: unknown) {
       if (!text) {

@@ -24,7 +24,7 @@ import { stepHistory } from '../lib/input-history.js';
 import { readTransferFiles, hasFileTransferHint, readTransferFilePaths, transferDirectoryNames } from '../lib/clipboard.js';
 import { readAttachmentFile, readDesktopClipboardFiles } from '../lib/attachment-input.js';
 import { checkIncomingFile, requireAttachmentLimits } from '../lib/attachments.js';
-import { writeDraft, readDraft, dropDraft } from '../lib/drafts.js';
+import { writeDraft, readDraft, dropDraft, readDraftSnapshot, writeDraftSnapshot, dropDraftSnapshot } from '../lib/drafts.js';
 import { resumeBar } from '../lib/queue.js';
 import { PERMISSION_MODES, normalizePermission, permissionLabel } from '../lib/permission.js';
 import { ModelPicker } from './ModelPicker.jsx';
@@ -104,6 +104,36 @@ export function Composer() {
   const [dragging, setDragging] = useState(false);
   const sessionDraftsRef = useRef(new Map<string | null, { html: string; files: Map<string, DraftAttachment> }>());
   const previousSessionRef = useRef(sessionId);
+  const snapshotTimer = useRef<number | null>(null);
+  const snapshotWarnedRef = useRef(false);
+
+  /** 把当前正文、附件与图片位置写成草稿副本；附件为空时清掉旧副本。 */
+  function persistSnapshot(sessionKey: string | null = useStore.getState().sessionId) {
+    const input = inputRef.current;
+    if (!input) return;
+    const files = input.attachmentIds()
+      .map((id) => draftFilesRef.current.get(id)).filter((item): item is DraftAttachment => Boolean(item));
+    if (!files.length) {
+      dropDraftSnapshot(localStorage, sessionKey);
+      return;
+    }
+    const result = writeDraftSnapshot(localStorage, sessionKey, {
+      text: input.getText(), files, imagePositions: input.getDraft().imagePositions
+    });
+    if (!result.ok && !snapshotWarnedRef.current) {
+      snapshotWarnedRef.current = true;
+      useStore.getState().showNotice(result.reason || '未发送附件无法保存为草稿，刷新后可能丢失。');
+    }
+  }
+
+  /** 附件副本体积可能不小，输入时合并写入，避免每个按键都序列化图片。 */
+  function scheduleSnapshot() {
+    if (snapshotTimer.current) window.clearTimeout(snapshotTimer.current);
+    snapshotTimer.current = window.setTimeout(() => {
+      snapshotTimer.current = null;
+      persistSnapshot();
+    }, 400);
+  }
 
   /*
    * contenteditable 桥接：只在挂载时创建一次。
@@ -118,6 +148,7 @@ export function Composer() {
       onRemove: (id) => draftFilesRef.current.delete(id),
       onChange: () => {
         writeDraft(localStorage, useStore.getState().sessionId, input.getText());
+        scheduleSnapshot();
         setSendAction(sendState());
       }
     });
@@ -149,6 +180,11 @@ export function Composer() {
       focus: () => input.focus()
     } });
     return () => {
+      if (snapshotTimer.current) {
+        window.clearTimeout(snapshotTimer.current);
+        snapshotTimer.current = null;
+      }
+      persistSnapshot();
       input.root.removeEventListener('compositionstart', startComposition);
       input.root.removeEventListener('compositionend', endComposition);
       input.destroy();
@@ -167,15 +203,30 @@ export function Composer() {
       return;
     }
     if (previous !== sessionId && input) {
+      // 先把上一个会话的附件副本落盘，再切换编辑区
+      if (snapshotTimer.current) {
+        window.clearTimeout(snapshotTimer.current);
+        snapshotTimer.current = null;
+        persistSnapshot(previous);
+      }
       sessionDraftsRef.current.set(previous, {
         html: input.root.innerHTML, files: new Map(draftFilesRef.current)
       });
     }
     const saved = sessionDraftsRef.current.get(sessionId);
+    const stored = readDraftSnapshot(localStorage, sessionId);
+    if (stored.error === 'corrupt') {
+      useStore.getState().showNotice('未发送的附件草稿已损坏并清除，请重新添加需要保留的附件。');
+    }
     if (saved && input) {
       input.root.innerHTML = saved.html;
       draftFilesRef.current = new Map(saved.files);
       input.notifyChange();
+    } else if (stored.snapshot && input) {
+      // 刷新/重开工作台：正文、文件、图片和图片位置一起恢复
+      draftFilesRef.current = new Map(stored.snapshot.files.map((item) => [item.id, item]));
+      input.restoreDraft(stored.snapshot.text || readDraft(localStorage, sessionId), stored.snapshot.files,
+        stored.snapshot.imagePositions);
     } else {
       draftFilesRef.current.clear();
       input?.setText(readDraft(localStorage, sessionId));
@@ -404,6 +455,7 @@ export function Composer() {
         draftFilesRef.current.clear();
         sessionDraftsRef.current.delete(state.sessionId);
         dropDraft(localStorage, useStore.getState().sessionId);
+        dropDraftSnapshot(localStorage, useStore.getState().sessionId);
       } else {
         sessionDraftsRef.current.delete(state.sessionId);
       }
