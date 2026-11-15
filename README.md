@@ -71,6 +71,8 @@ Pilot 可以读取和修改你选定的工作区，也能执行本机命令。�
 | --- | --- |
 | 安全地完成首次启动与模型配置 | [首次启动指南](docs-public/getting-started.md) |
 | 查找功能、设置项、限制与运行方式 | [功能与配置参考](docs-public/user-guide.md) |
+| 确认 Pilot 不做什么、面向谁 | [范围与边界](docs-public/scope.md) |
+| 了解「完成」如何被验证，与外部验证工具的差异 | [与验证类工具的差异](docs-public/verification-approach.md) |
 | 浏览公开文档与开发入口 | [文档索引](docs-public/README.md) |
 | 理解系统模块与关键数据流 | [技术导览](PROJECT_TECHNICAL_GUIDE.md) |
 | 配置源码运行时自动准备 | [源码环境自动准备](SOURCE_ENVIRONMENT.md) |

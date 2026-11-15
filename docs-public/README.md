@@ -9,6 +9,8 @@
 | 首次启动、选择工作区、配置模型 | [首次启动指南](getting-started.md) |
 | 工作台流程、任务控制、成果与常用配置 | [功能与配置参考](user-guide.md) |
 | 权限、模型数据流、本机存储与远程访问 | [安全与隐私](security.md) |
+| 我们不做什么：用户范围、不承诺项与不覆盖项 | [范围与边界](scope.md) |
+| 与验证类工具的差异，以及证据在运行时里的位置 | [与验证类工具的差异](verification-approach.md) |
 | 桌面端与 Electron 验收 | [桌面端指南](../pilot-desktop/README.md) |
 | Android 客户端与移动连接 | [Android 指南](../pilot-mobile/README.md) |
 
