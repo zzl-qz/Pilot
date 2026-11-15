@@ -22,4 +22,6 @@ data class MobileState(
     val attachments: List<MobileAttachment> = emptyList(), val pins: Set<String> = emptySet(),
     val viewingHistory: Boolean = false, val limitedHistory: Boolean = false, val pending: Request? = null, val blankProject: JsonObject? = null,
     val detailTitle: String = "", val detail: JsonObject? = null, val browse: JsonObject? = null,
+    /** 与电脑同一本账的验证结论；空对象表示还没读到。 */
+    val validation: JsonObject? = null,
 )

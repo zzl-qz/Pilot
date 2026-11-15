@@ -216,14 +216,21 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
         conversation = Conversation(6000); historyEvents.clear(); historyChars = 0
         val draft = loadDraft(session.text("id"))
         mutable.update { it.copy(selected = session, rows = emptyList(), runId = "", phase = "读取历史…", queued = emptyList(), viewingHistory = false, limitedHistory = false,
-            draft = draft.text, attachments = draft.attachments, detail = null) }
+            draft = draft.text, attachments = draft.attachments, detail = null, validation = null) }
         try {
             coroutineScope {
                 val run = async { readRunState(session.text("id")) }
                 loadHistory(false)
                 applyRunState(session.text("id"), run.await())
             }
+            refreshValidation(session.text("id"))
         } finally { restartMonitor() }
+    }
+
+    /** 验证结论按会话单独读取：它回答的是「现在还能不能信」，会随文件变化而变，不能只靠事件流缓存。 */
+    private suspend fun refreshValidation(id: String) {
+        val value = runCatching { api(Request(path = "/api/mobile/sessions/$id/validation")).jsonObject }.getOrNull()
+        mutable.update { if (it.selected?.text("id") == id) it.copy(validation = value) else it }
     }
 
     fun older() = action { mutable.update { it.copy(viewingHistory = true) }; monitor?.cancelAndJoin(); try { loadHistory(true) } finally { restartMonitor() } }

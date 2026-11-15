@@ -59,6 +59,7 @@ fun TaskDetail(state: MobileState, model: PilotViewModel) {
             }
         }
         HorizontalDivider(Modifier.padding(horizontal = 20.dp), color = MaterialTheme.colorScheme.outlineVariant)
+        VerdictBadge(state.validation, Modifier.padding(horizontal = 20.dp, vertical = 8.dp).fillMaxWidth())
         LazyColumn(state = list, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
             items(approvals, key = { "approval-${it.text("callId")}" }) { ApprovalCard(it, state.busy || state.pending != null, model, false) }
             if (state.rows.any { it.role == "activity" }) item {

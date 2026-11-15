@@ -50,6 +50,9 @@ class RoutePolicyTest {
         assertTrue(RoutePolicy.allowed(Request("DELETE", "/api/sessions/ses_1/queue/0?revision=abc")))
         assertTrue(RoutePolicy.allowed(Request(path = "/api/workspaces/browse?path=C%3A%5CUsers%5Ctest")))
         assertTrue(RoutePolicy.allowed(Request(path = "/api/sessions/ses_1/products/p_1/download")))
+        assertTrue(RoutePolicy.allowed(Request(path = "/api/mobile/sessions/ses_1/validation")), "手机要能读到与电脑同一份验证结论")
+        assertFalse(RoutePolicy.allowed(Request(path = "/api/mobile/sessions/ses_1/validation?path=/etc/passwd")), "验证结论不接受任何查询参数")
+        assertFalse(RoutePolicy.allowed(Request("POST", "/api/mobile/sessions/ses_1/validation", "{}")), "该端点只读")
         for (path in listOf("/api/mobile/connection", "/api/mobile/connection/pair", "/api/workspaces/browse?path=a&path=b", "/api/sessions/ses_1/history?after=1&after=2")) {
             assertFalse(RoutePolicy.allowed(Request(path = path)), path)
         }

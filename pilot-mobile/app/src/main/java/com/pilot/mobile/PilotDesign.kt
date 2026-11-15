@@ -28,6 +28,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
+import kotlinx.serialization.json.JsonObject
+import com.pilot.mobile.transport.text
 
 /** 与桌面共用中性色、指南针标记和状态语义；尺寸按手机触控与系统字体缩放设计。 */
 private val DarkPalette = darkColorScheme(
@@ -155,6 +157,39 @@ fun InfoNote(text: String, modifier: Modifier = Modifier) {
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Icon(Icons.Outlined.Info, null, Modifier.padding(top = 2.dp).size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** 验证结论的三种颜色；过期和未验证不能同色，否则用户分不清「验过但作废」和「没验过」。 */
+private fun verdictColor(status: String): Color = when (status) {
+    "verified" -> Color(0xFF4EA672)
+    "stale" -> Color(0xFFBF853C)
+    else -> Color(0xFF8A8A8A)
+}
+
+fun verdictLabel(status: String): String = when (status) {
+    "verified" -> "已验证"
+    "stale" -> "证据已过期"
+    "unverified" -> "未验证"
+    else -> "验证状态未知"
+}
+
+/** 手机上的验证结论：结论 + 一句依据 + 与电脑核对用的指纹前缀。 */
+@Composable
+fun VerdictBadge(validation: JsonObject?, modifier: Modifier = Modifier) {
+    if (validation == null) return
+    val status = validation.text("status")
+    val reason = validation.text("reason")
+    val fingerprint = validation.text("candidateHash").take(8)
+    Surface(modifier, color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.medium) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.size(8.dp).background(verdictColor(status), RoundedCornerShape(4.dp)))
+                Text(verdictLabel(status), style = MaterialTheme.typography.labelLarge, color = verdictColor(status))
+            }
+            if (reason.isNotBlank()) Text(reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (fingerprint.isNotBlank()) Text("产物指纹 $fingerprint", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
