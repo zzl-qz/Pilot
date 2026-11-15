@@ -23,7 +23,10 @@ export function attachmentBatchError(files: readonly { name?: string; size?: num
   let total = 0;
   for (const file of files) {
     if (!Number.isSafeInteger(file.size) || Number(file.size) <= 0) return `「${file.name || '附件'}」是空文件或大小无效。`;
-    if (Number(file.size) > limits.maxFileBytes) return `「${file.name || '附件'}」超过单个 ${formatBytes(limits.maxFileBytes)} 的上限。`;
+    if (Number(file.size) > limits.maxFileBytes) {
+      return `「${file.name || '附件'}」超过单个 ${formatBytes(limits.maxFileBytes)} 的上限；可以把文件放进工作区后用 @ 引用，`
+        + '或调大 pilot.attachments.max-file-bytes 后重启服务。';
+    }
     total += Number(file.size);
   }
   return total > limits.maxTotalBytes ? `附件总量超过单条 ${formatBytes(limits.maxTotalBytes)} 的预算。` : '';

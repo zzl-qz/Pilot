@@ -60,8 +60,8 @@ class SettingsApiTest {
     void exposesAttachmentBudgetFromServerConfiguration() throws Exception {
         mvc.perform(get("/api/settings")).andExpect(status().isOk())
             .andExpect(jsonPath("$.attachmentLimits.maxFiles").value(64))
-            .andExpect(jsonPath("$.attachmentLimits.maxFileBytes").value(2 * 1024 * 1024))
-            .andExpect(jsonPath("$.attachmentLimits.maxTotalBytes").value(25 * 1024 * 1024))
+            .andExpect(jsonPath("$.attachmentLimits.maxFileBytes").value(32 * 1024 * 1024))
+            .andExpect(jsonPath("$.attachmentLimits.maxTotalBytes").value(64 * 1024 * 1024))
             .andExpect(jsonPath("$.attachmentLimits.maxRequestBytes").isNumber());
     }
 

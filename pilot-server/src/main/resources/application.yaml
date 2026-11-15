@@ -54,7 +54,8 @@ pilot:
     dir: ${PILOT_DATA_DIR:${user.dir}/.pilot}
   # 附件请求边界：单条消息的文件数、单文件大小与解码后总量。
   # 移动端能力值由此派生，默认最多 16 个文件、单文件 2MB、总量 6MB。
-  # 限额可通过 pilot.attachments.* 或 PILOT_ATTACHMENTS_* 配置，默认值由 AttachmentLimits 提供。
+  # 限额可通过 pilot.attachments.* 或 PILOT_ATTACHMENTS_* 配置，默认值由 AttachmentLimits 提供
+  # （单文件 32MB、单条总量 64MB）。
   attachments:
     dir: ${PILOT_ATTACHMENTS_DIR:}                    # 留空用数据目录下的 attachments
   # 浏览器（browser 工具 + 右侧「浏览器」面板）：内置 Chromium，默认无头。

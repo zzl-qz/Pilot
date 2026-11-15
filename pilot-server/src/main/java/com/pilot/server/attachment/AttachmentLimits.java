@@ -7,15 +7,16 @@ import org.springframework.stereotype.Component;
  * 附件请求的边界，作为单一事实源供服务层、HTTP 过滤器与移动端能力一起消费，
  * 避免不同入口出现互相矛盾的限额。
  *
- * <p>默认：单条消息最多 64 个文件、单文件 2MB、解码后总量 25MB；
+ * <p>默认：单条消息最多 64 个文件、单文件 32MB、解码后总量 64MB；
+ * 带图片的 Word/PPT/PDF 很容易超过个位数 MB，2MB 的旧默认值会把正常文档挡在门外。
  * 文本附件内联超过 20000 字符时降采样压缩（保留头尾）。
- * 移动端受传输与请求回执上限约束，最多 16 个文件、总量 6MB。
+ * 移动端受传输与请求回执上限约束，最多 16 个文件、单文件 2MB、总量 6MB。
  */
 @Component
 public class AttachmentLimits {
     private static final int DEFAULT_MAX_FILES = 64;
-    private static final int DEFAULT_MAX_FILE_BYTES = 2 * 1024 * 1024;
-    private static final int DEFAULT_MAX_TOTAL_BYTES = 25 * 1024 * 1024;
+    private static final int DEFAULT_MAX_FILE_BYTES = 32 * 1024 * 1024;
+    private static final int DEFAULT_MAX_TOTAL_BYTES = 64 * 1024 * 1024;
     private static final int DEFAULT_INLINE_MAX_CHARS = 20_000;
 
     private final int maxFiles;

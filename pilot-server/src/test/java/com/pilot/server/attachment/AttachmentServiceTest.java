@@ -237,6 +237,45 @@ class AttachmentServiceTest {
     }
 
     @Test
+    void acceptsMultimegabyteOfficeDocumentWithDefaultLimits() throws IOException {
+        // 带图片的 docx 动辄数 MB；默认限额不能把正常文档挡在门外（历史上是 2MB）
+        AttachmentService service = new AttachmentService(root);
+        byte[] docx = new byte[5 * 1024 * 1024];
+        docx[0] = 'P';
+        docx[1] = 'K';
+
+        AttachmentService.Prepared prepared = service.prepare("ses_big", "",
+            List.of(new AttachmentService.Inbound("材料.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                Base64.getEncoder().encodeToString(docx))));
+
+        assertTrue(prepared.content().contains("材料.docx"));
+        assertTrue(prepared.content().contains("read_attachment"));
+        Path saved = Path.of(prepared.content().split("已保存到 ")[1].split("，")[0].trim());
+        assertEquals(docx.length, Files.size(saved));
+    }
+
+    @Test
+    void keepsChineseFilenameOnDiskAndStripsPathSeparators() throws IOException {
+        AttachmentService service = new AttachmentService(root);
+        AttachmentService.Prepared prepared =
+            service.prepare("ses_name", "", List.of(new AttachmentService.Inbound("材料.docx", "application/octet-stream",
+                Base64.getEncoder().encodeToString(new byte[] {'P', 'K', 3, 4, 0, 1}))));
+
+        String saved = prepared.content().split("已保存到 ")[1].split("，")[0].trim();
+        assertTrue(saved.endsWith("-材料.docx"), saved);
+        assertTrue(Files.isRegularFile(Path.of(saved)));
+
+        // 路径分隔符不能逃出会话目录
+        AttachmentService.Prepared escaped =
+            service.prepare("ses_name", "", List.of(new AttachmentService.Inbound("../../evil.bin",
+                "application/octet-stream", Base64.getEncoder().encodeToString(new byte[] {1, 2, 3}))));
+        String escapedPath = escaped.content().split("已保存到 ")[1].split("，")[0].trim();
+        assertEquals(service.sessionDir("ses_name").toAbsolutePath().normalize(),
+            Path.of(escapedPath).getParent().toAbsolutePath().normalize());
+    }
+
+    @Test
     void acceptsBinaryOnlyAndRejectsInvalidOrEmptyInput() {
         AttachmentService service = new AttachmentService(root);
         var prepared = service.prepare("ses_1", "", List.of(new AttachmentService.Inbound("doc.pdf", "application/pdf",

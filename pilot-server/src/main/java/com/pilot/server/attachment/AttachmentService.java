@@ -407,11 +407,19 @@ public class AttachmentService {
         }
     }
 
+    /**
+     * 落盘文件名：保留中文等 Unicode 字母数字，只替换路径分隔符、控制字符和 Windows 保留字符。
+     *
+     * <p>文件名前面还有 UUID，目录也按会话隔离并在读取时用 normalize 校验，所以这里不需要把
+     * 非 ASCII 一律打成下划线——那会让「材料.docx」在磁盘和工具结果里都变成「__.docx」。
+     */
     private static String safeName(String value, int limit) {
-        String sanitized = (value == null ? "file" : value).replaceAll("[^A-Za-z0-9._-]", "_");
-        if (sanitized.isBlank()) {
+        String sanitized = (value == null ? "file" : value).replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "_")
+            .replaceAll("^[.\\s]+|[.\\s]+$", "");
+        if (sanitized.isBlank() || sanitized.matches("\\.+")) {
             sanitized = "file";
         }
-        return sanitized.length() <= limit ? sanitized : sanitized.substring(0, limit);
+        return sanitized.codePointCount(0, sanitized.length()) <= limit ? sanitized
+            : sanitized.substring(0, sanitized.offsetByCodePoints(0, limit));
     }
 }

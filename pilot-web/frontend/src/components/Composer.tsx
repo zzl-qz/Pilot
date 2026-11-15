@@ -91,7 +91,6 @@ export function Composer() {
   const [voiceBusy, setVoiceBusy] = useState(false);
   const voiceBusyRef = useRef(false);
   const [dragging, setDragging] = useState(false);
-  const dragDepthRef = useRef(0);
   const sessionDraftsRef = useRef(new Map<string | null, { html: string; files: Map<string, DraftAttachment> }>());
   const previousSessionRef = useRef(sessionId);
 
@@ -194,16 +193,49 @@ export function Composer() {
     setSendAction(sendState());
   }, [running, queueHeld, lastOutcome, pendingInputs.length, steering, pausing, cancelling, editTarget, modelSaving, composerEnabled]);
 
-  /* 文件拖到输入框外时也不能让浏览器直接打开它；输入框内由 form 的 drop 处理。 */
+  /*
+   * 文件拖到窗口任意位置都算「拖进输入框」：浏览器默认会用文件替换整页，
+   * 只绑在输入框上则拖到侧栏或空白处会静默失败，用户看到的就是「拖了没反应」。
+   * 落点在输入框内时按鼠标位置插入，落在别处则追加到草稿末尾。
+   */
   useEffect(() => {
-    const prevent = (event: DragEvent) => {
-      if (hasFileTransferHint(event.dataTransfer)) event.preventDefault();
+    const fileDrag = (event: DragEvent) => hasFileTransferHint(event.dataTransfer);
+    const enter = (event: DragEvent) => {
+      if (!fileDrag(event)) return;
+      event.preventDefault();
+      setDragging(true);
     };
-    window.addEventListener('dragover', prevent);
-    window.addEventListener('drop', prevent);
+    const over = (event: DragEvent) => {
+      if (!fileDrag(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+    };
+    const leave = (event: DragEvent) => {
+      // relatedTarget 为 null 表示真正离开窗口；在元素间移动不算
+      if (!event.relatedTarget && !fileDrag(event)) return;
+      if (!event.relatedTarget) setDragging(false);
+    };
+    const drop = (event: DragEvent) => {
+      setDragging(false);
+      if (!fileDrag(event)) return;
+      event.preventDefault();
+      const target = event.target;
+      if (flowRef.current && target instanceof Node && flowRef.current.contains(target)) {
+        inputRef.current?.placeCaretAtPoint(event.clientX, event.clientY);
+      } else {
+        inputRef.current?.focusEnd();
+      }
+      void receiveFiles(event, event.dataTransfer!, 'drop');
+    };
+    window.addEventListener('dragenter', enter);
+    window.addEventListener('dragover', over);
+    window.addEventListener('dragleave', leave);
+    window.addEventListener('drop', drop);
     return () => {
-      window.removeEventListener('dragover', prevent);
-      window.removeEventListener('drop', prevent);
+      window.removeEventListener('dragenter', enter);
+      window.removeEventListener('dragover', over);
+      window.removeEventListener('dragleave', leave);
+      window.removeEventListener('drop', drop);
     };
   }, []);
 
@@ -292,7 +324,7 @@ export function Composer() {
     }
   }
 
-  async function receiveFiles(event: React.SyntheticEvent, transfer: DataTransfer, source: 'paste' | 'drop') {
+  async function receiveFiles(event: { preventDefault: () => void }, transfer: DataTransfer, source: 'paste' | 'drop') {
     const files = readTransferFiles(transfer);
     if (files.length) {
       event.preventDefault();
@@ -589,28 +621,6 @@ export function Composer() {
         id="composer"
         className={`composer${dragging ? ' is-dragging' : ''}`}
         onSubmit={(event) => { event.preventDefault(); submit(); }}
-        onDragEnter={(event) => {
-          if (!hasFileTransferHint(event.dataTransfer)) return;
-          event.preventDefault();
-          dragDepthRef.current += 1;
-          setDragging(true);
-        }}
-        onDragLeave={() => {
-          dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
-          if (!dragDepthRef.current) setDragging(false);
-        }}
-        onDragOver={(event) => {
-          if (!hasFileTransferHint(event.dataTransfer)) return;
-          event.preventDefault();
-          event.dataTransfer.dropEffect = 'copy';
-        }}
-        onDrop={(event) => {
-          dragDepthRef.current = 0;
-          setDragging(false);
-          if (!hasFileTransferHint(event.dataTransfer)) return;
-          inputRef.current?.placeCaretAtPoint(event.clientX, event.clientY);
-          void receiveFiles(event, event.dataTransfer, 'drop');
-        }}
         onPaste={(event) => void receiveFiles(event, event.clipboardData, 'paste')}
       >
         {dragging && <div className="attachment-drop-overlay" aria-hidden="true">松开以添加文件</div>}
