@@ -126,6 +126,16 @@ async function run(page, name) {
   await transfer('paste','screen.png','image','image/png');
   assert.equal(await page.locator('.chip-thumb').count(),1);
   await page.locator('.chip-remove').click(); assert.equal(await chips.count(),0);
+  // 非图片、非文本的任意文件类型也必须能直接粘贴/拖入并生成文件芯片
+  await transfer('paste','archive.bin','\u0000\u0001','application/octet-stream');
+  assert.equal(await chips.count(),1,'任意二进制类型可粘贴');
+  assert.equal(await page.locator('.chip-badge').innerText(),'BIN');
+  await page.locator('.chip-remove').click();
+  await input.evaluate(el => el.blur());
+  await transfer('drop','archive.zip','PK','application/zip');
+  assert.equal(await chips.count(),1,'任意二进制类型可拖入');
+  assert.equal(await page.evaluate(() => document.activeElement?.id),'input-flow','拖入后焦点回到输入框');
+  await page.locator('.chip-remove').click();
   const originalLimits = await page.evaluate(() => store.getState().settingsData.attachmentLimits);
   await page.evaluate(() => store.setState({settingsData:{attachmentLimits:{maxFiles:1,maxFileBytes:3,maxTotalBytes:3,maxRequestBytes:300}}}));
   await transfer('paste','rejected.txt','four'); assert.equal(await chips.count(),0,'下发单文件限制在读取前生效');

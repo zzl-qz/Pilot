@@ -1,4 +1,5 @@
 import type { DraftAttachment } from '../types/input.js';
+import type { AttachmentLimitsBudget } from '../types/server.js';
 let localId = 0;
 
 /** 仅用于草稿内去重，不是鉴权令牌；普通 HTTP 下 randomUUID 可能不可用。 */
@@ -26,4 +27,26 @@ export function readAttachmentFile(file: File): Promise<DraftAttachment> {
     });
     reader.readAsDataURL(file);
   });
+}
+
+/**
+ * 桌面端系统剪贴板只给文件路径时，转由主进程读取。
+ * 浏览器没有这个桥，必须让用户拖入或使用文件选择器。
+ */
+export async function readDesktopClipboardFiles(limits: AttachmentLimitsBudget): Promise<DraftAttachment[]> {
+  const bridge = window.pilotDesktop;
+  if (!bridge?.readClipboardFiles) {
+    throw new Error('当前环境不支持从系统剪贴板读取文件，请拖入文件或使用「添加文件或图片」。');
+  }
+  const result = await bridge.readClipboardFiles(limits);
+  if (!result?.ok || !Array.isArray(result.files)) {
+    throw new Error(result?.error || '系统剪贴板中没有可读取的文件。');
+  }
+  return result.files.map(file => ({
+    id: attachmentId(),
+    name: file.name || '剪贴板文件',
+    mimeType: file.mimeType || 'application/octet-stream',
+    size: file.size,
+    dataBase64: file.dataBase64
+  }));
 }

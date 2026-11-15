@@ -62,9 +62,32 @@ export function readTransferFiles(data: TransferData | null | undefined): File[]
     .map((item) => { try { return item.getAsFile?.(); } catch { return null; } }).filter((file): file is File => Boolean(file));
 }
 
+/** 部分系统拖拽/粘贴只给 file:// URI，不给可读 File；交给桌面桥读取。 */
+export function readTransferFilePaths(data: TransferData | null | undefined): string[] {
+  if (!data) return [];
+  const found: string[] = [];
+  const visits = new Set<string>();
+  for (const type of ['text/uri-list', 'x-special/gnome-copied-files', 'text/plain']) {
+    if (visits.has(type)) continue;
+    visits.add(type);
+    try {
+      const value = data.getData?.(type) || '';
+      for (const line of value.split(/\r?\n/)) {
+        const text = line.trim();
+        if (!text || text === 'copy' || text.startsWith('#')) continue;
+        if (/^file:/i.test(text)) found.push(text);
+      }
+    } catch { /* 受限 WebView 不暴露 URI 内容 */ }
+  }
+  return [...new Set(found)];
+}
+
 /** File 不可读时识别传输标记和 URI；部分 Linux 文件管理器只提供这些。普通路径文本仍可粘贴。 */
 export function hasFileTransferHint(data: TransferData | null | undefined) {
-  const types = Array.from(data?.types || []);
+  if (!data) return false;
+  if (Array.from(data.files || []).length) return true;
+  if (Array.from(data.items || []).some(item => item.kind === 'file')) return true;
+  const types = Array.from(data.types || []);
   if (types.includes('Files')) return true;
   return ['text/uri-list', 'x-special/gnome-copied-files'].some(type => {
     try {

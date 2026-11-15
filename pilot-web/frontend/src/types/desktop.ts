@@ -9,6 +9,10 @@ export interface DesktopBrowserState {
   tabs: DesktopBrowserTab[]; activeId: string | null; url: string; canGoBack: boolean; canGoForward: boolean;
   loading: boolean; cover: string | null; emulated: BrowserEmulation | null; error: string; recents: BrowserRecent[];
 }
+/** 桌面桥从系统剪贴板读出的文件；内容已经是 data URL，不需要再经过 FileReader。 */
+export interface DesktopClipboardFile { name: string; mimeType: string; size: number; dataBase64: string }
+export interface DesktopClipboardFilesResult { ok: boolean; files?: DesktopClipboardFile[]; error?: string }
+export interface DesktopFileLimits { maxFiles: number; maxFileBytes: number; maxTotalBytes: number }
 export interface DesktopBridge {
   onBrowserOpen(callback: (url: string) => void): () => void;
   onNavigationNotice(callback: (message: string) => void): () => void;
@@ -17,6 +21,8 @@ export interface DesktopBridge {
   copyPairingCode(code: string): Promise<DesktopAction>;
   /** 旧版桌面桥没有此方法，调用前需可选判断；远程服务下返回 code=REMOTE_WORKBENCH。 */
   selectDirectories?(): Promise<SelectDirectoriesResult>;
+  /** 系统文件管理器 Ctrl+V 只给文件路径时，由主进程读取剪贴板中的文件。 */
+  readClipboardFiles?(limits: DesktopFileLimits): Promise<DesktopClipboardFilesResult>;
   onMobileConnection(callback: () => void): () => void;
   openMobileConnection(): Promise<DesktopAction>;
   ensureTab(sessionId: string | null): Promise<DesktopBrowserState>;

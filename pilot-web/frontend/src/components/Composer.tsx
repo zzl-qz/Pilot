@@ -21,8 +21,8 @@ import { resolveComposerAction } from '../lib/composer-state.js';
 import { rankFileMatches } from '../lib/mention.js';
 import { filterQuickCommands, expandQuickCommand } from '../lib/commands.js';
 import { stepHistory } from '../lib/input-history.js';
-import { readTransferFiles, hasFileTransferHint } from '../lib/clipboard.js';
-import { readAttachmentFile } from '../lib/attachment-input.js';
+import { readTransferFiles, hasFileTransferHint, readTransferFilePaths } from '../lib/clipboard.js';
+import { readAttachmentFile, readDesktopClipboardFiles } from '../lib/attachment-input.js';
 import { checkIncomingFile, requireAttachmentLimits } from '../lib/attachments.js';
 import { writeDraft, readDraft, dropDraft } from '../lib/drafts.js';
 import { resumeBar } from '../lib/queue.js';
@@ -194,35 +194,53 @@ export function Composer() {
     setSendAction(sendState());
   }, [running, queueHeld, lastOutcome, pendingInputs.length, steering, pausing, cancelling, editTarget, modelSaving, composerEnabled]);
 
+  /* 文件拖到输入框外时也不能让浏览器直接打开它；输入框内由 form 的 drop 处理。 */
+  useEffect(() => {
+    const prevent = (event: DragEvent) => {
+      if (hasFileTransferHint(event.dataTransfer)) event.preventDefault();
+    };
+    window.addEventListener('dragover', prevent);
+    window.addEventListener('drop', prevent);
+    return () => {
+      window.removeEventListener('dragover', prevent);
+      window.removeEventListener('drop', prevent);
+    };
+  }, []);
+
   /* 附件上传：选择 / 拖放 / 粘贴共用 */
-  function addFiles(fileList: ArrayLike<File> | null) {
-    if (submittingRef.current) return;
-    const files = Array.from(fileList || []);
+  async function attachmentLimits() {
+    const settings = useStore.getState().settingsData || await api.settings();
+    return requireAttachmentLimits(settings?.attachmentLimits);
+  }
+
+  /** 所有入口（选择器、拖放、粘贴、桌面剪贴板路径）都经过同一条队列，保证预算和顺序一致。 */
+  function queueAttachments(sources: Array<{ name: string; size: number; mimeType?: string; load: () => Promise<DraftAttachment> }>) {
+    if (submittingRef.current || !sources.length) return;
     const owner = useStore.getState();
     const ownsDraft = () => {
       const { sessionId, sessionEpoch } = useStore.getState();
       return sessionId === owner.sessionId && sessionEpoch === owner.sessionEpoch;
     };
-    pendingFilesRef.current += files.length;
+    pendingFilesRef.current += sources.length;
     setPendingFiles(pendingFilesRef.current);
     fileQueueRef.current = fileQueueRef.current.then(async () => {
-      for (const file of files) {
+      for (const source of sources) {
         try {
           if (!ownsDraft()) continue;
           const existing = (inputRef.current?.attachmentIds() || [])
             .map((id) => draftFilesRef.current.get(id)).filter((item): item is DraftAttachment => Boolean(item));
-          const settings = useStore.getState().settingsData || await api.settings();
-          const limits = requireAttachmentLimits(settings?.attachmentLimits);
+          const limits = await attachmentLimits();
           if (!ownsDraft()) continue;
-          const result = checkIncomingFile(existing, file, limits);
+          const result = checkIncomingFile(existing, source, limits);
           if (!result.ok) {
             if (!result.silent) useStore.getState().showNotice(result.reason);
             continue;
           }
-          const item = await readAttachmentFile(file);
+          const item = await source.load();
           if (!ownsDraft() || !inputRef.current) continue;
           draftFilesRef.current.set(item.id, item);
           inputRef.current.insertAttachments([item]);
+          inputRef.current.focus();
         } catch (error) {
           useStore.getState().showNotice('读取附件失败：' + errorInfo(error).message);
         } finally {
@@ -233,12 +251,65 @@ export function Composer() {
     });
   }
 
-  function receiveFiles(event: React.SyntheticEvent, transfer: DataTransfer) {
+  function addFiles(fileList: ArrayLike<File> | null) {
+    const files = Array.from(fileList || []);
+    queueAttachments(files.map(file => ({
+      name: file.name || '未命名文件', size: file.size, mimeType: file.type,
+      load: () => readAttachmentFile(file)
+    })));
+  }
+
+  function addDesktopAttachments(items: DraftAttachment[]) {
+    queueAttachments(items.map(item => ({
+      name: item.name, size: item.size, mimeType: item.mimeType,
+      load: async () => item
+    })));
+  }
+
+  /**
+   * 系统文件管理器只把文件路径放进剪贴板时（尤其桌面端 Cmd/Ctrl+V），
+   * 浏览器剪贴板事件里没有 File，需要主进程按路径读取内容。
+   */
+  async function addClipboardAttachments() {
+    if (submittingRef.current) return;
+    const owner = useStore.getState();
+    const ownsDraft = () => {
+      const { sessionId, sessionEpoch } = useStore.getState();
+      return sessionId === owner.sessionId && sessionEpoch === owner.sessionEpoch;
+    };
+    pendingFilesRef.current += 1;
+    setPendingFiles(pendingFilesRef.current);
+    try {
+      const items = await readDesktopClipboardFiles(await attachmentLimits());
+      if (!ownsDraft()) return;
+      if (!items.length) throw new Error('系统剪贴板中没有可读取的文件。');
+      addDesktopAttachments(items);
+    } catch (error) {
+      useStore.getState().showNotice('读取剪贴板文件失败：' + errorInfo(error).message);
+    } finally {
+      pendingFilesRef.current -= 1;
+      setPendingFiles(pendingFilesRef.current);
+    }
+  }
+
+  async function receiveFiles(event: React.SyntheticEvent, transfer: DataTransfer, source: 'paste' | 'drop') {
     const files = readTransferFiles(transfer);
-    if (!files.length && !hasFileTransferHint(transfer)) return;
+    if (files.length) {
+      event.preventDefault();
+      addFiles(files);
+      return;
+    }
+    if (!hasFileTransferHint(transfer)) return;
     event.preventDefault();
-    if (files.length) addFiles(files);
-    else useStore.getState().showNotice('当前环境未提供文件内容，请拖入文件或使用“添加文件或图片”。');
+    if (source === 'paste' && window.pilotDesktop?.readClipboardFiles) {
+      await addClipboardAttachments();
+      return;
+    }
+    if (readTransferFilePaths(transfer).length) {
+      useStore.getState().showNotice('当前环境未提供文件内容，只能拿到文件路径；请使用桌面版，或把文件直接拖入输入框。');
+      return;
+    }
+    useStore.getState().showNotice('当前环境未提供文件内容，请拖入文件或使用“添加文件或图片”。');
   }
 
   async function submit() {
@@ -519,7 +590,7 @@ export function Composer() {
         className={`composer${dragging ? ' is-dragging' : ''}`}
         onSubmit={(event) => { event.preventDefault(); submit(); }}
         onDragEnter={(event) => {
-          if (!Array.from(event.dataTransfer?.types || []).some(type => ['Files', 'text/uri-list', 'x-special/gnome-copied-files'].includes(type))) return;
+          if (!hasFileTransferHint(event.dataTransfer)) return;
           event.preventDefault();
           dragDepthRef.current += 1;
           setDragging(true);
@@ -529,19 +600,22 @@ export function Composer() {
           if (!dragDepthRef.current) setDragging(false);
         }}
         onDragOver={(event) => {
-          if (!Array.from(event.dataTransfer?.types || []).some(type => ['Files', 'text/uri-list', 'x-special/gnome-copied-files'].includes(type))) return;
+          if (!hasFileTransferHint(event.dataTransfer)) return;
           event.preventDefault();
           event.dataTransfer.dropEffect = 'copy';
         }}
         onDrop={(event) => {
           dragDepthRef.current = 0;
           setDragging(false);
-          receiveFiles(event, event.dataTransfer);
+          if (!hasFileTransferHint(event.dataTransfer)) return;
+          inputRef.current?.placeCaretAtPoint(event.clientX, event.clientY);
+          void receiveFiles(event, event.dataTransfer, 'drop');
         }}
-        onPaste={(event) => receiveFiles(event, event.clipboardData)}
+        onPaste={(event) => void receiveFiles(event, event.clipboardData, 'paste')}
       >
-        {(pendingFiles > 0 || dragging) && <div className="attachment-status" role="status">
-          {dragging ? '松开以添加文件' : `正在读取 ${pendingFiles} 个附件…`}
+        {dragging && <div className="attachment-drop-overlay" aria-hidden="true">松开以添加文件</div>}
+        {pendingFiles > 0 && <div className="attachment-status" role="status">
+          正在读取 {pendingFiles} 个附件…
         </div>}
         <div id="input-flow" className="input-flow" contentEditable={!submitting}
           role="textbox" aria-label="消息输入框" aria-multiline="true" aria-busy={pendingFiles > 0 || submitting}

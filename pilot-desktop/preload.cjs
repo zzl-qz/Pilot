@@ -22,6 +22,7 @@ if (window === window.top && ['http:', 'https:'].includes(location.protocol) && 
       return () => ipcRenderer.removeListener('pilot-workbench-command', listener);
     },
     copyPairingCode: code => ipcRenderer.invoke('pilot-mobile-copy', code),
+    readClipboardFiles: limits => ipcRenderer.invoke('pilot:read-clipboard-files', limits),
     selectDirectories: () => ipcRenderer.invoke('pilot:select-directories'),
     onMobileConnection: callback => {
       const listener = () => callback();

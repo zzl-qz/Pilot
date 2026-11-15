@@ -304,6 +304,41 @@ export function createComposerInput(root: HTMLElement, { onChange = () => {}, on
       root.focus();
     },
 
+    /** 拖放到输入框时把光标放到鼠标落点；落点不在输入框内则放到末尾。 */
+    placeCaretAtPoint(x: number, y: number) {
+      const doc = root.ownerDocument as Document & {
+        caretRangeFromPoint?: (x: number, y: number) => Range | null;
+        caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+      };
+      let range: Range | null = null;
+      try {
+        range = doc.caretRangeFromPoint?.(x, y) || null;
+        if (!range && doc.caretPositionFromPoint) {
+          const position = doc.caretPositionFromPoint(x, y);
+          if (position) {
+            range = doc.createRange();
+            range.setStart(position.offsetNode, position.offset);
+            range.collapse(true);
+          }
+        }
+      } catch { /* 旧 WebView 没有 caret API，退回末尾 */ }
+      if (range && root.contains(range.startContainer)) {
+        // 落点如果在附件芯片内部，插到芯片后面，不能 deleteContents 把缩略图/名称删掉。
+        const start = range.startContainer instanceof Element ? range.startContainer : range.startContainer.parentElement;
+        const chip = start?.closest?.('[data-chip]');
+        if (chip && root.contains(chip)) {
+          range.setStartAfter(chip);
+          range.collapse(true);
+        }
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        root.focus();
+        return;
+      }
+      focusEnd();
+    },
+
     focusEnd,
 
     /** 光标之前的文字，引用芯片折成占位符。输入框没有焦点时按「光标在末尾」算。 */

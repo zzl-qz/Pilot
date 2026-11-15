@@ -5,7 +5,8 @@ import { app, BrowserWindow, WebContentsView, ipcMain, session, Menu, nativeImag
 import { startBrowserControl } from './browser-control.mjs';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { readFile, stat } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hostname } from 'node:os';
 import { formatPageLogs, markerPath, partitionName, snapBounds, userPageUrl } from './protocol.mjs';
@@ -674,7 +675,108 @@ workbench.handle('pilot-mobile-copy', async (event, code) => {
 });
 
 // workbench.handle 在打开弹框前和返回后都检查主窗口、主框架与 origin。
+
+// 系统文件管理器复制文件后，浏览器剪贴板事件通常只有路径；按用户主动 Ctrl+V 读取一次。
+const CLIPBOARD_IMAGE_MIME = new Map([
+  ['.png', 'image/png'], ['.jpg', 'image/jpeg'], ['.jpeg', 'image/jpeg'],
+  ['.webp', 'image/webp'], ['.gif', 'image/gif']
+]);
+
+function clipboardLimits(raw) {
+  const value = raw && typeof raw === 'object' ? raw : {};
+  const limit = (item, fallback, max) => {
+    const number = Number(item);
+    return Number.isSafeInteger(number) && number > 0 ? Math.min(number, max) : fallback;
+  };
+  return {
+    maxFiles: limit(value.maxFiles, 64, 64),
+    maxFileBytes: limit(value.maxFileBytes, 2 * 1024 * 1024, 64 * 1024 * 1024),
+    maxTotalBytes: limit(value.maxTotalBytes, 25 * 1024 * 1024, 128 * 1024 * 1024)
+  };
+}
+
+function clipboardPath(value) {
+  let text = String(value || '').replace(/^\uFEFF/, '').trim();
+  if (!text || text === 'copy' || text.startsWith('#')) return '';
+  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+    text = text.slice(1, -1);
+  }
+  if (/^file:/i.test(text)) {
+    try { return fileURLToPath(new URL(text)); } catch { return ''; }
+  }
+  if (process.platform === 'win32') return /^[A-Za-z]:[\\/]/.test(text) ? text : '';
+  return text.startsWith('/') ? text : '';
+}
+
+function clipboardFilePaths() {
+  const found = new Set();
+  const addLines = value => {
+    for (const line of String(value || '').split(/\r?\n/)) {
+      const path = clipboardPath(line);
+      if (path) found.add(path);
+    }
+  };
+  let formats = [];
+  try { formats = clipboard.availableFormats() || []; } catch { /* 无系统剪贴板 */ }
+  for (const format of formats) {
+    try {
+      if (format === 'FileNameW') {
+        const text = clipboard.readBuffer(format).toString('utf16le');
+        for (const item of text.split('\0')) addLines(item);
+      } else if (format === 'FileName') {
+        addLines(clipboard.read(format));
+      } else if (/uri-list|file-url|gnome-copied-files/i.test(format)) {
+        addLines(clipboard.read(format));
+      }
+    } catch { /* 该格式不可读，继续看其他格式 */ }
+  }
+  if (!found.size) {
+    try { addLines(clipboard.readText()); } catch { /* 忽略 */ }
+  }
+  return [...found];
+}
+
+async function readClipboardFiles(rawLimits) {
+  const limits = clipboardLimits(rawLimits);
+  const paths = clipboardFilePaths();
+  if (!paths.length) {
+    return { ok: false, error: '系统剪贴板中没有文件。复制文件后再按 Ctrl+V，或直接拖入文件。' };
+  }
+  if (paths.length > limits.maxFiles) {
+    return { ok: false, error: `一次最多附加 ${limits.maxFiles} 个文件。` };
+  }
+  const files = [];
+  let total = 0;
+  for (const path of paths) {
+    const name = basename(path) || '附件';
+    let info;
+    try { info = await stat(path); } catch { return { ok: false, error: `无法读取「${name}」，文件可能已移动或没有权限。` }; }
+    if (!info.isFile()) {
+      return { ok: false, error: `「${name}」不是普通文件；文件夹请压缩后再拖入。` };
+    }
+    if (info.size <= 0) {
+      return { ok: false, error: `「${name}」是空文件，无法添加。` };
+    }
+    if (info.size > limits.maxFileBytes) {
+      return { ok: false, error: `「${name}」超过单文件大小上限。` };
+    }
+    total += info.size;
+    if (total > limits.maxTotalBytes) {
+      return { ok: false, error: '附件总量超过当前消息的预算。' };
+    }
+    let bytes;
+    try { bytes = await readFile(path); } catch { return { ok: false, error: `无法读取「${name}」的内容。` }; }
+    const mimeType = CLIPBOARD_IMAGE_MIME.get(name.slice(name.lastIndexOf('.')).toLowerCase()) || 'application/octet-stream';
+    files.push({
+      name, mimeType, size: bytes.length,
+      dataBase64: `data:${mimeType};base64,${bytes.toString('base64')}`
+    });
+  }
+  return { ok: true, files };
+}
+
 workbench.handle('pilot:select-directories', () => selectProjectDirectories({ origin, parent: shell, dialog }));
+workbench.handle('pilot:read-clipboard-files', (_event, limits) => readClipboardFiles(limits));
 
 function installMenu() {
   if (smoke) return;

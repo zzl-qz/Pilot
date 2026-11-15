@@ -910,6 +910,7 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  position: relative;
   padding: 10px 10px 8px 14px;
   border-radius: var(--r-lg);
   background: var(--panel);

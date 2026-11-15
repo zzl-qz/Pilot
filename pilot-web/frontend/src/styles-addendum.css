@@ -1869,6 +1869,22 @@ html[data-theme="light"] .cap-tag { background: #fff; }
 html[data-theme="light"] .cap-tag.is-readonly { background: var(--accent-soft); }
 
 .composer.is-dragging { outline: 2px solid var(--text, #b5b5b5); outline-offset: 3px; }
+.attachment-drop-overlay {
+  position: absolute;
+  inset: 6px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--accent-line, var(--accent, #8ab4f8));
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.55);
+  background: color-mix(in srgb, var(--bg, #111) 78%, transparent);
+  color: var(--text, #ddd);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
 .attachment-status { padding: 8px 14px; color: var(--text, #b5b5b5); font-size: 13px; }
 /* 事件序号和时间沿用主题文字色，避免旧深蓝色在深色面板上不可读。 */
 html[data-theme="dark"] .event-seq,
