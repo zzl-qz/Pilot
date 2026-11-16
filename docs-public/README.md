@@ -14,6 +14,8 @@
 | 与验证类工具的差异，以及证据在运行时里的位置 | [与验证类工具的差异](verification-approach.md) |
 | 桌面端与 Electron 验收 | [桌面端指南](../pilot-desktop/README.md) |
 | Android 客户端与移动连接 | [Android 指南](../pilot-mobile/README.md) |
+| 手机连电脑的延迟怎么测、三组数字怎么比 | [手机延迟测量](mobile-latency-measurement.md) |
+| 手机审批端到端（含断网重连）怎么演示 | [手机审批演示](mobile-approval-demo.md) |
 
 ## 系统与开发
 

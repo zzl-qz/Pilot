@@ -41,6 +41,14 @@ fun main(args: Array<String>) = runBlocking {
     }
     if ("--probe-relay-server" in args) { relayProbeServer(configuredRelays()); return@runBlocking }
     if (args.firstOrNull() == "--probe-relay-client") { relayProbeClient(args[1], configuredRelays()); return@runBlocking }
+    // 延迟测量：--measure <ticket> [--samples 10] [--relay ...] [--label 同局域网直连]
+    if (args.firstOrNull() == "--measure") {
+        require(args.size >= 2) { "--measure 需要配对票据" }
+        val samples = (option("--samples") ?: "10").toInt()
+        val label = option("--label") ?: "未命名场景"
+        measure(args[1], configuredRelays(), samples, label).printJson()
+        return@runBlocking
+    }
     val port = (option("--pilot-port") ?: "9999").toInt()
     require(port in 1..65535) { "Pilot 端口无效" }
     val parent = option("--parent-pid")?.let { ProcessHandle.of(it.toLong()).orElseThrow { IllegalArgumentException("Pilot 后台已经退出") } }
