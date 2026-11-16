@@ -161,6 +161,8 @@ public class AgentRunService implements RunStarter {
     private final com.pilot.server.validation.ValidationLedger validations;
     /** 证据过期判断：运行结束时用它决定要不要撤销人工验收勾选。 */
     private final com.pilot.server.validation.ValidationStatusService validationStatus;
+    /** 验证策略门禁；测试轻量装配不注入时，保持现有行为。 */
+    private volatile com.pilot.server.validation.VerificationPolicyService verificationPolicies;
     /** 自定义子代理目录；测试轻量装配不注入时，spawn/dispatch 的 agent 引用只能拿到空目录。 */
     private volatile AgentProfileService agentProfiles;
     @org.springframework.beans.factory.annotation.Autowired
@@ -190,6 +192,11 @@ public class AgentRunService implements RunStarter {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setViewportReset(com.pilot.server.desktop.DesktopViewportReset viewportReset) {
         this.viewportReset = viewportReset;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setVerificationPolicies(com.pilot.server.validation.VerificationPolicyService verificationPolicies) {
+        this.verificationPolicies = verificationPolicies;
     }
 
     /** 兼容旧调用：不启用检查点与幂等账本。 */
@@ -709,7 +716,12 @@ public class AgentRunService implements RunStarter {
                 snapshots.saveConversation(runId, conversations.load(sessionId), plans.load(sessionId));
                 taskControls.snapshot(sessionId, runId);
                 TaskControlService.TaskContract previous = taskControls.load(sessionId);
-                if (!continuation && !regenerate) {
+                if (!continuation && !regenerate && previous != null && TaskControlStatus.WAITING.is(previous.status())
+                    && (requirements == null
+                        || requirements.constraints().isEmpty() && requirements.acceptance().isEmpty())) {
+                    // 交接/等待用户的任务：新消息是对同一任务的继续，不能覆盖原始目标与验收。
+                    taskControls.correct(sessionId, input);
+                } else if (!continuation && !regenerate) {
                     if (previous != null) {
                         plans.delete(sessionId);
                     }
@@ -1682,8 +1694,32 @@ public class AgentRunService implements RunStarter {
                 files, checks, status, com.pilot.server.multi.SandboxStore.environmentFingerprint(), "run",
                 java.time.Instant.now()));
             revokeAcceptanceIfEvidenceStale(sessionId, workspace);
+            enforceVerificationPolicy(sessionId, workspace, files, checks);
         } catch (RuntimeException e) {
             log.debug("记录校验证据失败：session={}, run={}", sessionId, runId, e);
+        }
+    }
+
+    /**
+     * 策略门禁在证据落账后执行：缺检查就把任务落到验证失败，而不是让“模型说完成”直接通过。
+     * 策略文件不存在时保持原有行为；解析错误 fail-closed，避免静默放行。
+     */
+    private void enforceVerificationPolicy(String sessionId, String workspace, List<String> files,
+        List<String> checks) {
+        var policies = verificationPolicies;
+        if (policies == null) {
+            return;
+        }
+        try {
+            var report = policies.evaluate(toolFactory.resolve(workspace), files, checks);
+            if (report.configured() && !report.passed()) {
+                taskControls.status(sessionId, TaskControlStatus.VERIFICATION_FAILED);
+                log.info("验证策略未通过：session={}, missing={}", sessionId, report.missing());
+            }
+        } catch (RuntimeException e) {
+            // 策略评估自身异常时 fail-closed：不能让异常把门禁变成放行。
+            taskControls.status(sessionId, TaskControlStatus.VERIFICATION_FAILED);
+            log.warn("验证策略评估失败，任务标记为验证失败：session={}", sessionId, e);
         }
     }
 

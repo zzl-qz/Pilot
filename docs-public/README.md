@@ -12,6 +12,7 @@
 | 我们不做什么：用户范围、不承诺项与不覆盖项 | [范围与边界](scope.md) |
 | 插件如何声明依赖、为什么升级不会打掉整个生态 | [插件契约](plugin-contracts.md) |
 | 与验证类工具的差异，以及证据在运行时里的位置 | [与验证类工具的差异](verification-approach.md) |
+| 完成凭证、验证策略即代码与任务交接 | [完成凭证与交接](completion-capsule.md) |
 | 桌面端与 Electron 验收 | [桌面端指南](../pilot-desktop/README.md) |
 | Android 客户端与移动连接 | [Android 指南](../pilot-mobile/README.md) |
 | 手机连电脑的延迟怎么测、三组数字怎么比 | [手机延迟测量](mobile-latency-measurement.md) |

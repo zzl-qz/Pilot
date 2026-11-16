@@ -61,6 +61,8 @@ function SessionProducts({ session }: { session: string }) {
   return <section ref={panel} className="work-products" aria-label="任务成果">
     <div className="work-toolbar">
       {selected ? <button className="btn" onClick={() => setSelected(null)}>返回成果列表</button> : <span>{products.length} 份成果 · {drafts.filter(d => d.status === 'PENDING').length} 项待审核</span>}
+      <a className="btn" href={`/api/sessions/${encodeURIComponent(session)}/completion/markdown`} target="_blank" rel="noreferrer">完成凭证</a>
+      <a className="btn" href={`/api/sessions/${encodeURIComponent(session)}/capsule`} target="_blank" rel="noreferrer" download={`capsule-${session}.json`}>导出胶囊</a>
       <button className="btn" onClick={refresh} disabled={loading} aria-label="刷新成果">刷新</button>
     </div>
     {error && <p className="work-error" role="alert">加载失败：{error}。可刷新重试。</p>}
