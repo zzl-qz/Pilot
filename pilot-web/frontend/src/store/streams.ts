@@ -416,6 +416,11 @@ export function createSessionStreams({ get, set }: StoreContext, resetHistory: (
         set(draft => { draft.promoteBlank = null; });
         get().loadSessions();
       }
+      // 结论条跟着运行走：开跑时清掉上一轮结论，跑完立刻拉新结论。
+      if (runChanged) {
+        set((draft) => { draft.hasRun = true; if (event.type === 'run.started') draft.validation = null; });
+        void get().loadValidation();
+      }
       // 任务契约面板刷新
       if (sessionChanged || event.type === 'run.continued' || event.type === 'tool.completed' || event.type === 'execution.updated') {
         get().loadTask();

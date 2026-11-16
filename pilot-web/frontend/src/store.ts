@@ -194,6 +194,9 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   /** 能力清单（工具 / MCP / 模型 / 权限档位），「能力」页签直接读它。 */
   capabilities: null,
   capabilitiesState: '',
+  /** 验证结论：输入框上方的结论条读它；null 表示还没加载。 */
+  validation: null,
+  hasRun: false,
   changeReport: null,
   changesState: '',
   runChanges: null,
@@ -599,6 +602,29 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       set((draft) => { draft.capabilitiesState = 'error'; });
       get().showNotice('读取能力清单失败：' + errorInfo(error).message);
       return null;
+    }
+  },
+  /**
+   * 拉取当前会话的验证结论。
+   *
+   * <p>不抛错、不弹通知：这条带子只是常驻提示，网络抖动时保持上一次结论比刷一条错误更有用。
+   */
+  async loadValidation() {
+    const { sessionId } = get();
+    if (!sessionId) {
+      set((draft) => { draft.validation = null; draft.hasRun = false; });
+      return;
+    }
+    try {
+      const data = await api.validation(sessionId);
+      // 请求期间可能已经切了会话：晚到的结果不能写到别的会话上。
+      if (get().sessionId !== sessionId) return;
+      set((draft) => {
+        draft.validation = data ?? null;
+        draft.hasRun = draft.hasRun || Boolean(draft.runId || draft.lastRunId || draft.lastOutcome);
+      });
+    } catch {
+      // 保留上一次结论
     }
   },
   /** 浏览器运行时状态：只有 capable 时镜像和置前按钮才有意义。 */

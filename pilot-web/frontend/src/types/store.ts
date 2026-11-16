@@ -64,6 +64,10 @@ export interface StoreData extends Omit<ReducerState, 'ui'> {
   fileIndex: { key?: string; items: string[]; sessionId: string | null; loading: boolean };
   commandTasks: CommandTask[]; commandDetail: CommandTask | null; commandLog: CommandLog | null; commandLogTaskId: string | null;
   capabilities: S.CapabilitiesControllerCapabilitiesResponse | null; capabilitiesState: string;
+  /** 当前会话的验证结论；输入框上方的结论条读它。null 表示还没加载。 */
+  validation: S.DiagnosticsControllerValidationView | null;
+  /** 本会话是否已经跑过至少一轮：没跑过时不显示「未验证」，避免把空状态说成没有证据。 */
+  hasRun: boolean;
   changeReport: S.ChangeServiceChangeReport | null; changesState: string; runChanges: S.ChangeServiceRunChangeReport | null;
   composerApi: ComposerBridge | null; ui: UiState;
   _previewRequest?: number; _previewData?: S.SessionFilesControllerFileResponse | null; _previewLoading?: boolean;
@@ -115,6 +119,7 @@ export interface StoreActions {
   saveModel(body: Parameters<ApiClient['saveModel']>[0], options?: { clearKey?: boolean }): Promise<boolean>;
   probeModels(body: Parameters<ApiClient['probeModels']>[0]): ReturnType<ApiClient['probeModels']>;
   loadSkills(): Promise<void>; loadCapabilities(): Promise<ApiResults['capabilities'] | null>;
+  loadValidation(): Promise<void>;
   loadBrowserStatus(): Promise<BrowserStatus | null>; loadUsage(days: number): Promise<void>; refreshActiveRun(): Promise<void>;
 }
 export type StoreState = StoreData & StoreActions;

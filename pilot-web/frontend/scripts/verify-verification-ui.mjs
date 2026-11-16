@@ -55,6 +55,21 @@ const NOTES = [
     updatedAt: '2026-11-15T10:00:00Z', status: 'inbox', link: null, source: null }
 ];
 
+/** 结论条要展示的是「证据过期」这一档——它最能说明产品在做什么。 */
+const STRIP_REPORT = {
+  current: false,
+  code: 'stale_candidate',
+  reason: '最近一次校验针对的是旧产物，代码已变化',
+  currentCandidateHash: 'deadbeefcafe1234',
+  latest: {
+    id: 'val_2', sessionId: 's1', runId: 'r1', candidateHash: 'deadbeefcafe1234',
+    files: ['src/login.js', 'src/messages.js'], checks: ['node --test → 通过'],
+    status: 'passed', environmentFingerprint: 'win|amd64|jdk25', source: 'run',
+    recordedAt: '2026-11-16T02:00:00Z'
+  },
+  recent: []
+};
+
 function page(title, script) {
   return `<!doctype html><html lang="zh-CN" data-theme="dark"><head><meta charset="utf-8">
 <title>${title}</title><link rel="icon" href="data:,"></head>
@@ -84,6 +99,13 @@ const fixtures = {
     useStore.setState({ init: async () => {}, sessionId: 's1', notesState: 'ready', notes: ${JSON.stringify(NOTES)},
       ui: { ...useStore.getState().ui, besideTab: 'notes', inspectorOpen: true, inspectorTab: 'chat' } });
     createRoot(document.getElementById('root')).render(React.createElement(BesidePanel));`),
+  '/__strip': page('strip', `
+    import { VerificationStrip } from '/src/components/VerificationStrip.jsx';
+    import '/src/styles.css'; import '/src/styles-addendum.css';
+    const report = ${JSON.stringify(STRIP_REPORT)};
+    useStore.setState({ init: async () => {}, sessionId: 's1', hasRun: true, notes: [],
+      submitInput: async () => true, validation: { report, recent: report.latest ? [report.latest] : [] } });
+    createRoot(document.getElementById('root')).render(React.createElement(VerificationStrip));`),
   '/__task': page('task', `
     import { TaskContract } from '/src/components/Modals.jsx';
     import '/src/styles.css'; import '/src/styles-addendum.css';
@@ -232,7 +254,30 @@ await check('任务卡把过期证据单独标出并可重新验证', async () =
   await context.close();
 });
 
-// 5. 窄屏：状态徽标不能被挤出视口
+// 5. 输入框上方的结论条：主界面上能直接看到「证据已过期」与下一步动作
+await check('主界面结论条显示过期状态并可展开依据', async () => {
+  const { view, pageErrors, context } = await open('strip', '/__strip');
+  const strip = view.locator('#verification-strip');
+  try {
+    await strip.waitFor();
+  } catch (error) {
+    // 页面是空的还是报错了，比「等不到元素」有用得多
+    console.log('[debug] pageErrors:', pageErrors);
+    console.log('[debug] body:', (await view.locator('body').innerText()).slice(0, 300));
+    throw error;
+  }
+  assert.equal(await strip.getAttribute('data-tone'), 'stale');
+  assert.match(await strip.innerText(), /证据已过期/);
+  assert.match(await strip.innerText(), /旧产物/);
+  assert.equal(await strip.getByRole('button', { name: '重新验证' }).count(), 1);
+  await strip.getByRole('button', { name: '看依据' }).click();
+  await strip.getByText(/node --test/).waitFor();
+  await view.screenshot({ path: join(output, 'strip.png'), fullPage: true });
+  assert.deepEqual(pageErrors, []);
+  await context.close();
+});
+
+// 6. 窄屏：状态徽标不能被挤出视口
 await check('窄屏下成果卡无横向溢出', async () => {
   const { view, context } = await open('products-narrow', '/__products', 390);
   await view.getByText('已验证的报告').waitFor();

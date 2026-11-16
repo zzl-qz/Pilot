@@ -2818,6 +2818,16 @@ body {
 }
 .empty .empty-title { color: var(--ink); font-size: 22px; letter-spacing: -0.015em; }
 .empty-sub { color: var(--muted); font-size: 13px; line-height: 1.7; }
+/* 第一屏的定位说明：只在空状态出现，比标题弱一档，比示例强一档。 */
+.empty-thesis {
+  max-width: 52ch;
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  border-inline-start: 2px solid var(--accent-line, var(--line));
+  color: var(--ink-2, var(--muted));
+  font-size: 12.5px;
+  line-height: 1.7;
+}
 .prompts { gap: 9px; }
 .prompts button {
   padding: 12px 13px;

@@ -33,6 +33,9 @@ export function resetFilePreview(draft: StoreState) {
 
 function resetSessionState(draft: StoreState) {
   draft.historyRevision = null;
+  // 结论条属于单个会话：切走时清空，避免把上一个会话的结论显示成这一个的。
+  draft.validation = null;
+  draft.hasRun = false;
   draft._reconnectAttempt = 0;
   resetFilePreview(draft);
   draft.sessionEpoch = (draft.sessionEpoch || 0) + 1;
@@ -499,7 +502,9 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
       await Promise.all([
         get().loadPlan(), get().loadQueue(), get().loadTask(), get().loadNotes(), get().refreshContext(),
         // 技能按工作区解析（项目级技能随仓库走），换会话后 / 菜单必须跟着换
-        get().loadSkills()
+        get().loadSkills(),
+        // 切会话就要看到这个会话自己的结论，不能沿用上一个会话的
+        get().loadValidation()
       ]);
       if (!current()) return false;
       const draftText = readDraft(localStorage, sessionId);

@@ -221,6 +221,11 @@ function EmptyState() {
           <section className="conversation-empty" id="empty-state" aria-labelledby="conversation-empty-title">
             <h2 id="conversation-empty-title" className="empty-title">从一个任务开始</h2>
             <p className="empty-sub">描述你想完成的工作。Pilot 会在所选工作区执行任务，执行记录和改动可随时审阅。</p>
+            {/* 第一屏就把产品在做什么说清楚：否则用户只能看到又一个聊天框。 */}
+            <p className="empty-thesis">
+              它不替你下结论：每次运行留下改动、执行过的检查和验证结论；文件再被改动时，旧结论会自动作废，
+              输入框上方那条就是当前状态。
+            </p>
             <div className="conversation-scope">
               <Icon name="folder" />
               <div>

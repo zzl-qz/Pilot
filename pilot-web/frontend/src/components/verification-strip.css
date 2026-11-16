@@ -1,0 +1,60 @@
+/* 输入框上方的验证结论条：结论 + 一句依据 + 动作，一条带子说完。 */
+.verification-strip {
+  flex: none;
+  margin: 0 16px 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-inline-start-width: 3px;
+  border-radius: 8px;
+  background: var(--panel-2, transparent);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.verification-strip[data-tone='ok'] { border-inline-start-color: var(--ok, #4ea672); }
+.verification-strip[data-tone='stale'] { border-inline-start-color: var(--warn, #bf853c); }
+.verification-strip[data-tone='error'] { border-inline-start-color: var(--err, #b73535); }
+.verification-strip[data-tone='muted'] { border-inline-start-color: var(--muted, #8a8a8a); }
+
+.verification-strip-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.verification-strip-badge {
+  flex: none;
+  padding: 0 7px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.verification-strip[data-tone='ok'] .verification-strip-badge { color: var(--ok, #4ea672); }
+.verification-strip[data-tone='stale'] .verification-strip-badge { color: var(--warn, #bf853c); }
+.verification-strip[data-tone='error'] .verification-strip-badge { color: var(--err, #b73535); }
+.verification-strip[data-tone='muted'] .verification-strip-badge { color: var(--muted, #8a8a8a); }
+
+.verification-strip-detail { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.verification-strip-actions { flex: none; display: flex; align-items: center; gap: 6px; }
+.verification-strip-link,
+.verification-strip-button {
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.verification-strip-link { color: var(--muted); }
+.verification-strip-button:hover { border-color: var(--accent-line, var(--line)); }
+.verification-strip-link:focus-visible,
+.verification-strip-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.verification-strip-facts { margin: 6px 0 0; padding-inline-start: 18px; color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; }
+.verification-strip-facts li { margin: 2px 0; }
+
+@media (max-width: 960px) {
+  .verification-strip { margin-inline: 10px; }
+  .verification-strip-detail { white-space: normal; }
+  .verification-strip-row { flex-wrap: wrap; }
+  .verification-strip-actions { margin-inline-start: auto; }
+  .verification-strip-link, .verification-strip-button { min-height: 32px; }
+}
