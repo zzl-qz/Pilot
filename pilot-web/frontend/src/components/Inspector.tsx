@@ -19,7 +19,7 @@ import { BrowserPanel } from './inspector/BrowserPanel.js';
 
 const TABS = [
   { id: 'products', label: '成果', title: '交付文件、来源与技能审核' },
-  { id: 'chat', label: '旁边', title: '旁边：记下想法，或从当前任务分叉问一句' },
+  { id: 'chat', label: '旁白', title: '旁白：记下想法，或从当前任务分叉问一句' },
   { id: 'changes', label: '变更', title: '工作区改动：逐个文件看差异、撤销' },
   { id: 'preview', label: '预览', title: '只读预览文件内容' },
   { id: 'commands', label: '命令', title: '命令任务、实时输出与停止' },

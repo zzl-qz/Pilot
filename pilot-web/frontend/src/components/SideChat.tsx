@@ -110,7 +110,7 @@ export function SideChatPanel() {
             <div className="side-chat-empty">
               <p>
                 {sessionId
-                  ? '这条任务还没有侧边对话。在旁边问一句，主线照常跑。'
+                  ? '这条任务还没有侧边对话。在旁白问一句，主线照常跑。'
                   : '先发一条消息开始任务，再开侧边对话。'}
               </p>
               {sessionId && (
@@ -185,7 +185,15 @@ function SimpleSideChat({ sessionId }: { sessionId: string }) {
       source.onerror = () => { if (!cancelled) setError('侧边对话连接中断，正在重连…'); };
       source.onopen = () => { if (!cancelled) setError(current => current === '侧边对话连接中断，正在重连…' ? '' : current); };
     }).catch((failure) => {
-      if (!cancelled) { setLoading(false); setError(errorInfo(failure).message || '读不到这条侧边对话'); }
+      if (!cancelled) {
+        setLoading(false);
+        // 侧边对话是临时分支，主任务被删或历史被清理后会话可能已经不在。
+        // 这时直接摊出「Not Found」等于把服务端状态码丢给用户，得说清还能做什么。
+        const info = errorInfo(failure);
+        setError(info.status === 404
+          ? '这条侧边对话已经不在了（原来的任务被删除或清理过）。点上方「＋ 新开」重建一条。'
+          : info.message || '读不到这条侧边对话，可以点上方「＋ 新开」重试。');
+      }
     });
     return () => {
       cancelled = true;

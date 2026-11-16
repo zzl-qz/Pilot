@@ -15,6 +15,7 @@ import { Icon } from './Icon.jsx';
 import { VoiceInput } from './VoiceInput.jsx';
 import { SubmissionNotice } from './SubmissionNotice.jsx';
 import { MessageQueue } from './MessageQueue.jsx';
+import { VerificationStrip } from './VerificationStrip.jsx';
 import { createComposerInput } from '../lib/composer-input.js';
 import { resolveComposerAction, resolveSteerEntry } from '../lib/composer-state.js';
 import { rankFileMatches } from '../lib/mention.js';
@@ -86,7 +87,7 @@ export function Composer() {
   const permOpen = toolbarPanel === 'perm';
   const modelOpen = toolbarPanel === 'model';
   const contextOpen = toolbarPanel === 'context';
-  // 「想法」不再自带浮层：它和侧边对话共用右侧「旁边」面板，这里只反映那个面板是否停在「记」页签。
+  // 「想法」不再自带浮层：它和侧边对话共用右侧「旁白」面板，这里只反映那个面板是否停在「记」页签。
   const besideTab = useStore((state) => state.ui.besideTab) || 'notes';
   const inspectorOpen = useStore((state) => state.ui.inspectorOpen);
   const inspectorTab = useStore((state) => state.ui.inspectorTab);
@@ -632,7 +633,7 @@ export function Composer() {
   }, [toolbarPanel]);
 
   useEffect(() => {
-    // 从对话选中文字、或在项目里定位到某条想法时，直接打开「旁边」面板的「记」页签。
+    // 从对话选中文字、或在项目里定位到某条想法时，直接打开「旁白」面板的「记」页签。
     if (noteSeed || noteFocus) {
       useStore.getState().setUi({ besideTab: 'notes', inspectorTab: 'chat', inspectorOpen: true });
     }
@@ -758,6 +759,8 @@ export function Composer() {
         <ResumeBar />
         <MessageQueue />
         <AgentDock />
+        {/* 验证结论放在输入框容器内侧：和输入框同宽，不会比它更靠外。 */}
+        <VerificationStrip />
       </div>
       <form
         id="composer"
@@ -809,12 +812,12 @@ export function Composer() {
                 icon={<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.2 7.4 8.1 12.5a3.1 3.1 0 0 1-4.4-4.4l5.3-5.3a2.1 2.1 0 0 1 3 3L6.9 11a1.1 1.1 0 0 1-1.6-1.6l4.8-4.8" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>} />
             </span>
             <div className="perm-picker composer-notes-picker">
-              <span title="想法：记在「旁边」面板里，需要时再转成任务">
+              <span title="想法：记在「旁白」面板里，需要时再转成任务">
                 <Button id="notes-chip" className="composer-choice" size="sm" variant="ghost"
                   label={noteCount > 0 ? `想法 ${noteCount}` : '想法'} icon={<Icon name="note" />}
                   aria-haspopup="dialog" aria-expanded={notesOpen}
                   onClick={() => {
-                    // 与右侧面板是同一个入口：不再各开一个浮层，避免两处「旁边」互相分心。
+                    // 与右侧面板是同一个入口：不再各开一个浮层，避免两处「旁白」互相分心。
                     setToolbarPanel(null);
                     useStore.getState().setUi({ besideTab: 'notes', inspectorTab: 'chat', inspectorOpen: true });
                   }} />

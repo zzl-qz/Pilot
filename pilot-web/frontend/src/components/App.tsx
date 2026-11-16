@@ -12,7 +12,6 @@ import { Icon } from './Icon.jsx';
 import { Sidebar } from './Sidebar.jsx';
 import { Thread } from './Thread.jsx';
 import { Composer } from './Composer.jsx';
-import { VerificationStrip } from './VerificationStrip.jsx';
 import { TaskContract, Modals } from './Modals.jsx';
 import { SelectionQuote } from './SideChat.jsx';
 import { ErrorBoundary } from './ErrorBoundary.jsx';
@@ -402,7 +401,6 @@ function Workbench() {
           <section id="thread-pane" className="thread-pane">
             <ErrorBoundary name="任务契约"><TaskContract /></ErrorBoundary>
             <ErrorBoundary name="消息流"><Thread /></ErrorBoundary>
-            <ErrorBoundary name="验证结论"><VerificationStrip /></ErrorBoundary>
             <ErrorBoundary name="输入框"><Composer /></ErrorBoundary>
           </section>
           <div

@@ -25,7 +25,7 @@ export interface UiState {
   notice: { text: string; at: number } | null; noticeTimer: number | null;
   refreshing: boolean; syncError: string; lastSyncedAt: number; filesRevision: number;
   themeMode: string; accent: string; sidebarOpen: boolean; inspectorOpen: boolean; inspectorTab: string;
-  /** 「旁边」面板的两个页签：记（想法）/ 问（侧边对话）。两处入口共用它，避免各开各的。 */
+  /** 「旁白」面板的两个页签：记（想法）/ 问（侧边对话）。两处入口共用它，避免各开各的。 */
   besideTab?: string;
   reviewExpanded: boolean; filters: string; settingsSection: string; settingsOpen: boolean; paletteOpen: boolean;
   picker: { title?: string; onPick?: (path: string) => unknown } | null;

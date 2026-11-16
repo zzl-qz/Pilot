@@ -4,10 +4,10 @@ import { SideChatPanel } from './SideChat.jsx';
 import './beside.css';
 
 /**
- * 「旁边」：执行主任务时的一切旁路操作只在这一个面板里。
+ * 「旁白」：执行主任务时的一切旁路操作只在这一个面板里。
  *
  * <p>以前是两处入口各开各的——想法是输入框的浮层，侧边对话是右侧面板的一个页签。
- * 两个都叫「旁边」，用户不知道该用哪个，功能也互相不知道对方存在。
+ * 两个都叫「旁白」，用户不知道该用哪个，功能也互相不知道对方存在。
  * 现在合成一个面板两个页签：记（随笔，不发出去）与问（分叉出去问，关掉即丢）。
  */
 const TABS = [
@@ -25,7 +25,7 @@ export function BesidePanel() {
   };
   return (
     <div id="panel-beside" className="panel beside-panel">
-      <div className="beside-tabs" role="tablist" aria-label="旁边">
+      <div className="beside-tabs" role="tablist" aria-label="旁白">
         {TABS.map(item => (
           <button key={item.id} type="button" role="tab" id={`beside-tab-${item.id}`}
             aria-selected={tab === item.id} aria-controls={`beside-panel-${item.id}`}

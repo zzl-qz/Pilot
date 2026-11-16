@@ -1,7 +1,8 @@
-/* 输入框上方的验证结论条：结论 + 一句依据 + 动作，一条带子说完。 */
+/* 输入框上方的验证结论条：结论 + 一句依据 + 动作，一条带子说完。
+   放在 .composer-wrap 内侧，宽度和输入框一致，不再比它更靠外。 */
 .verification-strip {
   flex: none;
-  margin: 0 16px 6px;
+  margin: 0 0 6px;
   padding: 6px 10px;
   border: 1px solid var(--line);
   border-inline-start-width: 3px;
@@ -9,6 +10,10 @@
   background: var(--panel-2, transparent);
   font-size: 12px;
   line-height: 1.5;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 .verification-strip[data-tone='ok'] { border-inline-start-color: var(--ok, #4ea672); }
 .verification-strip[data-tone='stale'] { border-inline-start-color: var(--warn, #bf853c); }
@@ -30,7 +35,7 @@
 .verification-strip[data-tone='muted'] .verification-strip-badge { color: var(--muted, #8a8a8a); }
 
 .verification-strip-detail { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.verification-strip-actions { flex: none; display: flex; align-items: center; gap: 6px; }
+.verification-strip-actions { flex: none; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .verification-strip-link,
 .verification-strip-button {
   padding: 1px 8px;

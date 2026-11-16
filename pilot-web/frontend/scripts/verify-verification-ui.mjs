@@ -205,14 +205,20 @@ await check('能力页显示插件总览与钩子状态', async () => {
   await context.close();
 });
 
-// 3. 「旁边」面板：两个页签在，默认停在「记」，点击可切到「问」
-await check('旁边面板两个页签可切换', async () => {
+// 3. 「旁白」面板：两个页签在，默认停在「记」，点击可切到「问」
+await check('旁白面板两个页签可切换', async () => {
   const { view, pageErrors, context } = await open('beside', '/__beside');
   const notesTab = view.getByRole('tab', { name: '记' });
   const chatTab = view.getByRole('tab', { name: '问' });
   await notesTab.waitFor();
   assert.equal(await notesTab.getAttribute('aria-selected'), 'true', '默认应停在「记」');
   assert.equal(await chatTab.getAttribute('aria-selected'), 'false');
+  // 内嵌后内容要有自己的左右留白：以前这段留白来自浮层外壳，内嵌后没有外壳了。
+  const search = view.locator('#notes-menu .notes-search');
+  await search.waitFor();
+  const box = await search.boundingBox();
+  const panel = await view.locator('#panel-beside').boundingBox();
+  assert.ok(box.x - panel.x >= 8, `搜索区离面板左边至少 8px，实测 ${Math.round(box.x - panel.x)}px`);
   await chatTab.click();
   assert.equal(await chatTab.getAttribute('aria-selected'), 'true');
   assert.equal(await notesTab.getAttribute('aria-selected'), 'false');
