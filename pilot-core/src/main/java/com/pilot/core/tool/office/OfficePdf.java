@@ -89,13 +89,7 @@ final class OfficePdf {
                             case "paragraph" -> writer.line(block.text(), 11f);
                             case "bullet" -> writer.line("• " + block.text(), 11f);
                             case "page_break" -> writer.newPage();
-                            case "table" -> {
-                                writer.line("-------------------- table --------------------", 9f);
-                                for (List<String> row : block.rows()) {
-                                    writer.line(String.join(" | ", row), 10f);
-                                }
-                                writer.line("----------------------------------------------", 9f);
-                            }
+                            case "table" -> writer.table(block.rows());
                             default -> throw new IllegalArgumentException("不支持的块类型：" + block.type());
                         }
                     }
@@ -207,34 +201,96 @@ final class OfficePdf {
             newPage();
         }
 
+        private void line(String text, float size) throws IOException {
+            float step = Math.max(LEADING, size * 1.45f);
+            for (String part : wrap(text, size, PDRectangle.A4.getWidth() - LEFT - RIGHT)) {
+                if (y - step < BOTTOM) {
+                    newPage();
+                }
+                stream.beginText();
+                stream.setFont(font, size);
+                stream.setNonStrokingColor(0.08f, 0.1f, 0.14f);
+                stream.newLineAtOffset(LEFT, y);
+                stream.showText(part);
+                stream.endText();
+                y -= step;
+            }
+        }
+
+        private void table(List<List<String>> rows) throws IOException {
+            if (rows == null || rows.isEmpty()) {
+                return;
+            }
+            int cols = Math.min(8, rows.stream().mapToInt(List::size).max().orElse(1));
+            float tableW = PDRectangle.A4.getWidth() - LEFT - RIGHT;
+            float colW = tableW / cols;
+            float fontSize = 9.5f;
+            float lineStep = 13.5f;
+            float padX = 6f;
+            float padY = 5f;
+            y -= 4f;
+
+            for (int r = 0; r < rows.size(); r++) {
+                List<String> row = rows.get(r);
+                boolean header = r == 0;
+                List<List<String>> wrappedCells = new ArrayList<>(cols);
+                int maxLines = 1;
+                for (int c = 0; c < cols; c++) {
+                    String val = c < row.size() ? row.get(c) : "";
+                    List<String> wrapped = wrap(val, fontSize, Math.max(24f, colW - padX * 2));
+                    wrappedCells.add(wrapped);
+                    maxLines = Math.max(maxLines, wrapped.size());
+                }
+                float rowH = padY * 2 + maxLines * lineStep;
+                if (y - rowH < BOTTOM) {
+                    newPage();
+                }
+                float topY = y + 9f;
+                float bottomY = topY - rowH;
+                if (header) {
+                    stream.setNonStrokingColor(0.95f, 0.96f, 0.97f);
+                    stream.addRect(LEFT, bottomY, tableW, rowH);
+                    stream.fill();
+                }
+                stream.setStrokingColor(header ? 0.78f : 0.86f, header ? 0.80f : 0.88f, header ? 0.84f : 0.90f);
+                stream.setLineWidth(0.6f);
+                stream.addRect(LEFT, bottomY, tableW, rowH);
+                stream.stroke();
+                for (int c = 1; c < cols; c++) {
+                    float cx = LEFT + c * colW;
+                    stream.moveTo(cx, bottomY);
+                    stream.lineTo(cx, topY);
+                    stream.stroke();
+                }
+                for (int c = 0; c < cols; c++) {
+                    float cellLeft = LEFT + c * colW;
+                    List<String> cellLines = wrappedCells.get(c);
+                    for (int li = 0; li < cellLines.size(); li++) {
+                        String txt = cellLines.get(li);
+                        stream.beginText();
+                        stream.setFont(font, fontSize);
+                        stream.setNonStrokingColor(header ? 0.07f : 0.20f, header ? 0.09f : 0.24f,
+                            header ? 0.15f : 0.30f);
+                        stream.newLineAtOffset(cellLeft + padX, topY - padY - 8.5f - li * lineStep);
+                        stream.showText(txt);
+                        stream.endText();
+                    }
+                }
+                y -= rowH;
+            }
+            y -= 8f;
+        }
+
         private void newPage() throws IOException {
             if (stream != null) {
-                stream.endText();
                 stream.close();
             }
             document.addPage(new PDPage(PDRectangle.A4));
             stream = new PDPageContentStream(document, document.getPage(document.getNumberOfPages() - 1));
-            stream.beginText();
-            stream.setLeading(LEADING);
-            stream.newLineAtOffset(LEFT, TOP);
             y = TOP;
         }
 
-        private void line(String text, float size) throws IOException {
-            stream.setFont(font, size);
-            for (String part : wrap(text, size)) {
-                if (y - LEADING < BOTTOM) {
-                    newPage();
-                    stream.setFont(font, size);
-                }
-                stream.showText(part);
-                stream.newLine();
-                y -= LEADING;
-            }
-        }
-
-        private List<String> wrap(String text, float size) throws IOException {
-            float maxWidth = PDRectangle.A4.getWidth() - LEFT - RIGHT;
+        private List<String> wrap(String text, float size, float maxWidth) throws IOException {
             List<String> lines = new ArrayList<>();
             StringBuilder current = new StringBuilder();
             for (int i = 0; i < text.length(); i++) {
@@ -257,7 +313,6 @@ final class OfficePdf {
 
         private void finish() throws IOException {
             if (stream != null) {
-                stream.endText();
                 stream.close();
                 stream = null;
             }

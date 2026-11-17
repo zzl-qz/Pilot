@@ -5,6 +5,7 @@ import { useStore } from '../../store.js';
 import { writeClipboard } from '../../lib/clipboard.js';
 import { sortChangeFiles, splitPath, statusKind } from '../../lib/changes.js';
 import { MarkdownBody } from '../MarkdownBody.jsx';
+import { StructuredDocumentView } from '../StructuredDocumentView.jsx';
 
 /* ---------- 预览面板 ---------- */
 
@@ -17,6 +18,7 @@ export function PreviewPanel() {
 
   const changed = useMemo(() => sortChangeFiles<ChangeFile>(Array.isArray(report?.files) ? report.files : []).slice(0, 12), [report]);
   const isMarkdown = /\.(md|markdown|mdx)$/i.test(path || '');
+  const isTabular = /\.(csv|tsv)$/i.test(path || '');
   const content = data?.content || '';
   const lineCount = content ? content.split('\n').length : 0;
 
@@ -79,11 +81,13 @@ export function PreviewPanel() {
                 <MarkdownBody text={data.truncated ? `${content}\n\n…（内容过长，已截断）` : (content || '（空文件）')} />
               </div>
             )
-            : (
-              <pre id="preview-body" className={`preview-body${wrap ? '' : ' is-nowrap'}`}>
-                {data.truncated ? `${content}\n…（内容过长，已截断）` : (content || '（空文件）')}
-              </pre>
-            ))
+            : isTabular
+              ? <StructuredDocumentView text={content} filename={data.path || path} />
+              : (
+                <pre id="preview-body" className={`preview-body${wrap ? '' : ' is-nowrap'}`}>
+                  {data.truncated ? `${content}\n…（内容过长，已截断）` : (content || '（空文件）')}
+                </pre>
+              ))
       )}
       {!loading && !data && (
         <div className="preview-empty">

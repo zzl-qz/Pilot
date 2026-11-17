@@ -75,19 +75,36 @@ final class OfficeDocx {
 
     private static void paragraph(XWPFDocument document, String text, boolean bold, int size) {
         XWPFParagraph paragraph = document.createParagraph();
+        paragraph.setSpacingAfter(size >= 16 ? 160 : 100);
+        paragraph.setSpacingBetween(1.25);
         XWPFRun run = paragraph.createRun();
         run.setText(text);
         run.setBold(bold);
         run.setFontSize(size);
+        run.setColor(bold ? "111827" : "1F2937");
     }
 
     private static void table(XWPFDocument document, List<List<String>> rows) {
         int columns = rows.stream().mapToInt(List::size).max().orElse(1);
         var table = document.createTable(rows.size(), columns);
+        table.setWidth("100%");
+        table.setCellMargins(100, 140, 100, 140);
         for (int r = 0; r < rows.size(); r++) {
             List<String> values = rows.get(r);
+            boolean header = r == 0;
             for (int c = 0; c < columns; c++) {
-                table.getRow(r).getCell(c).setText(c < values.size() ? values.get(c) : "");
+                var cell = table.getRow(r).getCell(c);
+                if (header) {
+                    cell.setColor("F3F4F6");
+                }
+                String value = c < values.size() ? values.get(c) : "";
+                var p = cell.getParagraphs().isEmpty() ? cell.addParagraph() : cell.getParagraphs().getFirst();
+                p.setSpacingAfter(40);
+                var run = p.createRun();
+                run.setText(value);
+                run.setBold(header);
+                run.setFontSize(10);
+                run.setColor(header ? "111827" : "374151");
             }
         }
     }

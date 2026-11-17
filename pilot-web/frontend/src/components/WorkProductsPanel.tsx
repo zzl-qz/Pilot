@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useStore } from '../store.js';
 import { MarkdownBody } from './MarkdownBody.jsx';
+import { StructuredDocumentView, isStructuredDocumentFormat } from './StructuredDocumentView.jsx';
 import './work-products.css';
 
 const STATUS: Record<string, string> = { PENDING: '待审核', APPROVED: '已接受', REJECTED: '已拒绝', REVERTED: '已撤回', CONFLICT: '版本冲突', APPROVING: '正在接受', REVERTING: '正在撤回' };
@@ -121,7 +122,10 @@ function ProductDetail({ session, product }: { session: string; product: S.WorkP
     {error && <div role="alert" className="work-error">{error}<button className="btn" onClick={() => setRetry(v => v + 1)}>重试预览</button></div>}
     {!preview && !error && <p role="status">正在读取预览…</p>}
     {preview && <><p className="work-hint">{preview.notice}{preview.truncated ? ' 预览已截断，完整内容请下载。' : ''}</p>
-      <div className="work-preview">{preview.format === 'markdown' ? <MarkdownBody text={preview.text} /> : preview.text ? <pre>{preview.text}</pre> : null}</div></>}
+      <div className="work-preview">{preview.format === 'markdown' ? <MarkdownBody text={preview.text} />
+        : preview.text ? (isStructuredDocumentFormat(product.filename)
+          ? <StructuredDocumentView text={preview.text} filename={product.filename} />
+          : <pre>{preview.text}</pre>) : null}</div></>}
     <h3>引用来源</h3>
     {product.sources?.length ? <ul className="work-sources">{product.sources.map(source => <li key={source.url}>
       {sourceHref(source.url) ? <a href={sourceHref(source.url) || undefined} target="_blank" rel="noreferrer">{source.url}</a> : <span>{source.url}</span>}

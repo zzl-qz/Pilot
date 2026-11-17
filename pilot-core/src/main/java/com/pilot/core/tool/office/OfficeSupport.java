@@ -161,16 +161,17 @@ public final class OfficeSupport {
     private static String documentText(Path file) throws IOException {
         StringBuilder out = new StringBuilder();
         try (InputStream in = Files.newInputStream(file); XWPFDocument document = new XWPFDocument(in)) {
-            for (XWPFParagraph paragraph : document.getParagraphs()) {
-                out.append(paragraph.getText()).append('\n');
-            }
-            for (XWPFTable table : document.getTables()) {
-                for (XWPFTableRow row : table.getRows()) {
-                    List<String> cells = new ArrayList<>();
-                    for (XWPFTableCell cell : row.getTableCells()) {
-                        cells.add(cell.getText());
+            for (var element : document.getBodyElements()) {
+                if (element instanceof XWPFParagraph paragraph) {
+                    out.append(paragraph.getText()).append('\n');
+                } else if (element instanceof XWPFTable table) {
+                    for (XWPFTableRow row : table.getRows()) {
+                        List<String> cells = new ArrayList<>();
+                        for (XWPFTableCell cell : row.getTableCells()) {
+                            cells.add(cell.getText());
+                        }
+                        out.append(String.join(" | ", cells)).append('\n');
                     }
-                    out.append(String.join(" | ", cells)).append('\n');
                 }
             }
         }
