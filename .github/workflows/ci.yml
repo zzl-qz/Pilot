@@ -19,7 +19,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
+      # 质量门禁要拿改动文件的基线版本做对比，浅克隆拿不到 base 提交，所以这里取全量历史。
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 25
         uses: actions/setup-java@v4
@@ -34,7 +37,11 @@ jobs:
           node-version: "22"
 
       - name: Source bootstrap boundary tests
-        run: node --test scripts/bootstrap.test.mjs scripts/frontend-deps.test.mjs
+        run: node --test scripts/bootstrap.test.mjs scripts/frontend-deps.test.mjs scripts/quality-rules.test.mjs
+
+      # 规则目录是唯一事实源，生成的配置必须与它一致；不一致说明有人只改了一边。
+      - name: Quality rules catalog in sync
+        run: node scripts/quality-sync.mjs
 
       - name: Install desktop dependencies
         working-directory: pilot-desktop
@@ -44,6 +51,12 @@ jobs:
       - name: Maven verify
         shell: bash
         run: sh mvnw -B -ntp verify
+
+      # 只拦本次改动新引入的坏味道；存量债务在基线版本里已存在，不会阻塞。放在 Maven 之后是因为
+      # 门禁直接复用本地仓库里的 Checkstyle，不额外下载。
+      - name: Code quality gate (changed lines only)
+        shell: bash
+        run: node scripts/quality-gate.mjs --base "${{ github.event.pull_request.base.sha || 'HEAD~1' }}"
 
       - name: Event stream replay and transport measurements
         shell: bash

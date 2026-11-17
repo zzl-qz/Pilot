@@ -30,6 +30,37 @@ Windows PowerShell 使用 `.\mvnw.cmd` 替换 `./mvnw`。配置使用 Maven 仓�
 
 两个检查均绑定 `verify`，三平台 CI 和可靠性脚本会调用。只运行 `test` 不执行 `verify` 阶段，提交前应额外执行上述只检查命令或完整验证。
 
+## 存量坏味道门禁
+
+`checkstyle.xml` 只管形式规范，判不了「方法太长、参数太多、代码在重复」。这部分由 [checkstyle-strict.xml](checkstyle-strict.xml) 和 [quality-gate.mjs](../../scripts/quality-gate.mjs) 负责。
+
+**`checkstyle-strict.xml` 是生成文件，不要手改。** 规则的 id、阈值、文案都在 [config/quality/rules.json](../quality/rules.json)，改完执行 `node scripts/quality-sync.mjs --write` 重新生成；CI 会拒绝两边不一致的提交。规则的增删流程见 [质量规则目录](../quality/README.md)。
+
+```sh
+# 只检查本次改动新引入的坏味道（默认，基线是 HEAD）
+node scripts/quality-gate.mjs
+
+# 指定对比基线，例如 PR 里对比目标分支
+node scripts/quality-gate.mjs --base origin/master
+
+# 全量盘点存量（诊断用，存量问题也会报出来）
+node scripts/quality-gate.mjs --all
+```
+
+判定方式是**做差集，不是维护快照**：把改动文件在基线版本上的检查结果也跑一遍，只报「改动行上、且基线版本没有」的违例。这样存量债务不会卡住提交，行号漂移和文件改名也不需要维护基线文件。
+
+规则分五组：结构臃肿、边界与资源、冗余写法、依赖与架构、工具链自检。其中后两组和前端语言规则由门禁自己实现，不依赖第三方检查器：
+
+- 依赖方向：`com.pilot.core` 不允许 import `com.pilot.server`。
+- 压制后门：新增 `@SuppressWarnings("all")`、`NOSONAR`、`// noinspection`、整段 `eslint-disable` 会被拦下；只抑制具体规则的写法不受影响。
+- 静默失效防护：检查器没返回结果的文件、带 UTF-8 BOM 的文件都会直接报错。Checkstyle 遇到 BOM 会把文件解析成空结果且不报错，表现是「门禁通过但什么都没查」，这一条专门堵它。
+
+阈值口径（包括圈复杂度为什么取 20 而不是 10）记录在 `rules.json` 对应规则的 `note` 字段里，和实现放在一起，避免文档和配置各说一套。
+
+门禁直接调用本地 Maven 仓库里的 Checkstyle，不启动 Maven，所以**首次使用前需要跑过一次 `./mvnw verify`** 把依赖填进缓存；缓存位置不是默认的 `~/.m2/repository` 时用 `MAVEN_REPO` 指定。
+
+门禁直接调用本地 Maven 仓库里的 Checkstyle，不启动 Maven，所以**首次使用前需要跑过一次 `./mvnw verify`** 把依赖填进缓存；缓存位置不是默认的 `~/.m2/repository` 时用 `MAVEN_REPO` 指定。
+
 ## 审阅要求
 
 1. 方法按职责组织；主流程展示顺序，细节交给有业务含义的私有方法。不要为了满足行数机械拆成许多没有意义的方法。

@@ -23,6 +23,10 @@ if (flags.has('--containers')) {
 }
 // cmd 路径和参数均为固定脚本常量，不把用户输入拼接为 shell 代码。
 await run(windows ? (process.env.ComSpec || 'cmd.exe') : 'sh', windows ? ['/d', '/s', '/c', 'mvnw.cmd', ...javaArgs] : ['./mvnw', ...javaArgs]);
+// 质量门禁复用 Maven 仓库里的 Checkstyle，必须排在构建之后；默认只比对工作区改动，可用 PILOT_QUALITY_BASE 指定基线。
+// 先确认 rules.json 与生成的配置没有漂移，否则门禁跑的可能是过期的规则集。
+await run(process.execPath, ['scripts/quality-sync.mjs']);
+await run(process.execPath, ['scripts/quality-gate.mjs', '--base', process.env.PILOT_QUALITY_BASE || 'HEAD']);
 async function tests(folder) {
   const files = (await readdir(resolve(root, folder))).filter(name => /\.test\.(m?js)$/.test(name)).sort().map(name => `${folder}/${name}`);
   await run(process.execPath, ['--import', new URL('../pilot-web/frontend/scripts/register-typescript.mjs', import.meta.url).href, '--test', ...files]);

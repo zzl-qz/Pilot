@@ -1,0 +1,279 @@
+{
+  "version": 1,
+  "note": "代码质量规则的唯一事实源。加规则、改阈值、改提示文案都改这里，再由 scripts/quality-sync.mjs 生成各引擎配置；不要直接改生成的 checkstyle-strict.xml。",
+  "languages": ["java", "ts", "python", "go", "rust", "any"],
+  "engines": ["checkstyle", "quality-gate", "semgrep", "jscpd"],
+  "rules": [
+    {
+      "id": "long-method",
+      "title": "方法过长",
+      "kind": "structure",
+      "languages": ["java"],
+      "unit": "行",
+      "limit": 80,
+      "hint": "按职责拆成有业务含义的私有方法，不要为凑行数机械拆分",
+      "engines": [{ "engine": "checkstyle", "module": "MethodLength", "property": "max" }]
+    },
+    {
+      "id": "too-many-parameters",
+      "title": "参数过多",
+      "kind": "structure",
+      "languages": ["java"],
+      "unit": "个",
+      "limit": 7,
+      "hint": "把相关参数收成有含义的参数对象或 record",
+      "engines": [{ "engine": "checkstyle", "module": "ParameterNumber", "property": "max" }]
+    },
+    {
+      "id": "deep-if-nesting",
+      "title": "if 嵌套过深",
+      "kind": "structure",
+      "languages": ["java"],
+      "unit": "层",
+      "limit": 5,
+      "hint": "用卫语句早返回，或把分支抽成方法 / 表驱动",
+      "engines": [{ "engine": "checkstyle", "module": "NestedIfDepth", "property": "max" }]
+    },
+    {
+      "id": "deep-loop-nesting",
+      "title": "循环嵌套过深",
+      "kind": "structure",
+      "languages": ["java"],
+      "unit": "层",
+      "limit": 3,
+      "hint": "提取内层循环，或改为一次遍历",
+      "engines": [{ "engine": "checkstyle", "module": "NestedForDepth", "property": "max" }]
+    },
+    {
+      "id": "deep-try-nesting",
+      "title": "try 嵌套过深",
+      "kind": "structure",
+      "languages": ["java"],
+      "unit": "层",
+      "limit": 3,
+      "hint": "把会失败的步骤收敛到一个边界方法",
+      "engines": [{ "engine": "checkstyle", "module": "NestedTryDepth", "property": "max" }]
+    },
+    {
+      "id": "high-cyclomatic-complexity",
+      "title": "圈复杂度过高",
+      "kind": "structure",
+      "languages": ["java"],
+      "unit": "",
+      "limit": 20,
+      "note": "阈值取 20 而不是 10：解析器和状态机天然分支多，10 会把正常代码全部标红，门禁就没人看了。",
+      "hint": "按分支职责拆方法，不要靠合并条件硬压",
+      "engines": [{ "engine": "checkstyle", "module": "CyclomaticComplexity", "property": "max" }]
+    },
+    {
+      "id": "too-many-statements",
+      "title": "单方法语句过多",
+      "kind": "structure",
+      "languages": ["java"],
+      "unit": "条",
+      "limit": 60,
+      "hint": "拆分职责",
+      "engines": [{ "engine": "checkstyle", "module": "ExecutableStatementCount", "property": "max" }]
+    },
+    {
+      "id": "deep-nesting",
+      "title": "控制流嵌套过深",
+      "kind": "structure",
+      "languages": ["java"],
+      "unit": "层",
+      "limit": 5,
+      "note": "运行时审计的口径：if / 循环 / try 一起计层，比 Checkstyle 的 NestedIfDepth 更宽。两者并存是因为一个管提交门禁，一个管 agent 自查。",
+      "hint": "用卫语句早返回，或把分支抽成方法",
+      "engines": [{ "engine": "codebase-audit", "impl": "control-nesting" }]
+    },
+    {
+      "id": "duplicate-block",
+      "title": "成段重复代码",
+      "kind": "redundancy",
+      "languages": ["java"],
+      "unit": "行",
+      "limit": 7,
+      "hint": "合并成一个有业务含义的方法；只有成段且至少两处职责相同才抽，不为两三行加抽象层",
+      "engines": [{ "engine": "codebase-audit", "impl": "clone-detector" }]
+    },
+    {
+      "id": "else-if-chain",
+      "title": "else-if 链过长",
+      "kind": "structure",
+      "languages": ["java"],
+      "unit": "层",
+      "limit": 6,
+      "hint": "改用表驱动（映射表 / 策略对象），不要靠合并条件硬压",
+      "engines": [{ "engine": "codebase-audit", "impl": "else-if-chain" }]
+    },
+    {
+      "id": "repeated-literal",
+      "title": "同一字面量重复出现",
+      "kind": "redundancy",
+      "languages": ["java"],
+      "unit": "次",
+      "limit": 3,
+      "hint": "提取成有名字的常量；先确认它和已有常量属于同一业务域，不要跨领域复用",
+      "engines": [{ "engine": "codebase-audit", "impl": "repeated-literal" }]
+    },
+    {
+      "id": "empty-catch",
+      "title": "空 catch 静默吞异常",
+      "kind": "boundary",
+      "languages": ["java", "ts"],
+      "hint": "保留原始失败原因，或写明可降级的原因",
+      "engines": [
+        {
+          "engine": "checkstyle",
+          "module": "EmptyCatchBlock",
+          "properties": { "exceptionVariableName": "expected|ignored" }
+        },
+        { "engine": "quality-gate", "impl": "ts-catch" }
+      ]
+    },
+    {
+      "id": "switch-without-default",
+      "title": "switch 缺少 default",
+      "kind": "boundary",
+      "languages": ["java"],
+      "hint": "补 default 分支",
+      "engines": [{ "engine": "checkstyle", "module": "MissingSwitchDefault" }]
+    },
+    {
+      "id": "switch-fall-through",
+      "title": "switch 分支贯穿",
+      "kind": "boundary",
+      "languages": ["java"],
+      "hint": "补 break，或加注释说明是有意贯穿",
+      "engines": [{ "engine": "checkstyle", "module": "FallThrough" }]
+    },
+    {
+      "id": "redundant-boolean-expression",
+      "title": "冗余布尔表达式",
+      "kind": "redundancy",
+      "languages": ["java"],
+      "hint": "直接返回条件本身",
+      "engines": [{ "engine": "checkstyle", "module": "SimplifyBooleanExpression" }]
+    },
+    {
+      "id": "redundant-boolean-return",
+      "title": "冗余布尔返回",
+      "kind": "redundancy",
+      "languages": ["java"],
+      "hint": "直接 return 条件",
+      "engines": [{ "engine": "checkstyle", "module": "SimplifyBooleanReturn" }]
+    },
+    {
+      "id": "string-equality",
+      "title": "字符串用 == 比较",
+      "kind": "redundancy",
+      "languages": ["java"],
+      "hint": "改为 equals",
+      "engines": [{ "engine": "checkstyle", "module": "StringLiteralEquality" }]
+    },
+    {
+      "id": "multiple-top-level-types",
+      "title": "一个文件多个顶层类",
+      "kind": "structure",
+      "languages": ["java"],
+      "hint": "一个文件只保留一个顶层类",
+      "engines": [{ "engine": "checkstyle", "module": "OneTopLevelClass" }]
+    },
+    {
+      "id": "type-filename-mismatch",
+      "title": "顶层类名与文件名不一致",
+      "kind": "structure",
+      "languages": ["java"],
+      "hint": "顶层类名必须与文件名一致",
+      "engines": [{ "engine": "checkstyle", "module": "OuterTypeFilename" }]
+    },
+    {
+      "id": "nested-ternary",
+      "title": "嵌套三元表达式",
+      "kind": "redundancy",
+      "languages": ["ts"],
+      "hint": "改用卫语句或 if/else",
+      "engines": [{ "engine": "quality-gate", "impl": "ts-conditional" }]
+    },
+    {
+      "id": "explicit-any",
+      "title": "显式 any 放弃类型检查",
+      "kind": "boundary",
+      "languages": ["ts"],
+      "hint": "用具体类型、泛型或 unknown 收窄",
+      "engines": [{ "engine": "quality-gate", "impl": "ts-any" }]
+    },
+    {
+      "id": "layer-direction",
+      "title": "模块依赖方向错误",
+      "kind": "architecture",
+      "languages": ["java"],
+      "hint": "下层模块不能反向依赖上层",
+      "engines": [{ "engine": "quality-gate", "impl": "import-direction" }]
+    },
+    {
+      "id": "broad-suppression",
+      "title": "整段关闭检查",
+      "kind": "hygiene",
+      "languages": ["java", "ts"],
+      "note": "只拦把整片检查关掉的写法，不拦 @SuppressWarnings(\"unchecked\") 这类正当的单规则抑制。",
+      "hint": "改为只抑制具体规则，或直接修好",
+      "engines": [{ "engine": "quality-gate", "impl": "suppression-scan" }]
+    },
+    {
+      "id": "bom-encoding",
+      "title": "文件带 UTF-8 BOM",
+      "kind": "hygiene",
+      "languages": ["any"],
+      "note": "Checkstyle 遇到 BOM 会把文件解析成空结果且不报错，表现是「门禁通过但什么都没查」，只能读字节识别。",
+      "hint": "会让检查器静默跳过全部规则；请另存为无 BOM 的 UTF-8",
+      "engines": [{ "engine": "quality-gate", "impl": "encoding-probe" }]
+    },
+    {
+      "id": "unparsed-file",
+      "title": "检查器未返回该文件结果",
+      "kind": "hygiene",
+      "languages": ["any"],
+      "hint": "等于没检查；确认文件编码和语法能被检查器解析",
+      "engines": [{ "engine": "quality-gate", "impl": "report-coverage" }]
+    },
+    {
+      "id": "parse-error",
+      "title": "语法解析失败",
+      "kind": "hygiene",
+      "languages": ["ts"],
+      "hint": "这一处以下的检查都不成立，先修语法",
+      "engines": [{ "engine": "quality-gate", "impl": "ts-parse" }]
+    },
+    {
+      "id": "no-useeffect-in-features",
+      "title": "产品代码使用 useEffect",
+      "kind": "architecture",
+      "languages": ["ts"],
+      "status": "planned",
+      "hint": "改用显式同步接口；需要分寸才能用好的 API，最终都会被用坏",
+      "engines": [],
+      "blockedBy": "需要 Semgrep 才能可靠表达（类型别名与 hook 重导出会让 AST 匹配漏报）"
+    },
+    {
+      "id": "bare-except",
+      "title": "裸 except 吞掉所有异常",
+      "kind": "boundary",
+      "languages": ["python"],
+      "status": "planned",
+      "hint": "捕获具体异常类型，并保留原始失败原因",
+      "engines": [],
+      "blockedBy": "Python 支持尚未接入任何引擎"
+    },
+    {
+      "id": "discarded-error",
+      "title": "丢弃 error 返回值",
+      "kind": "boundary",
+      "languages": ["go"],
+      "status": "planned",
+      "hint": "返回或显式记录错误，不要用 _ 丢弃",
+      "engines": [],
+      "blockedBy": "Go 支持尚未接入任何引擎"
+    }
+  ]
+}

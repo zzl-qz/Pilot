@@ -21,12 +21,13 @@ import com.pilot.core.util.FileNames;
  * 同构克隆、超长方法、深层嵌套、过长参数列表、瀑布分支以及静默吞异常。
  */
 public final class CodeQualityCheck {
-    public static final int LONG_METHOD_LINES = 80;
-    public static final int DUPLICATE_BLOCK_LINES = 7;
-    private static final int DEEP_NESTING_LEVEL = 5;
-    private static final int MAX_METHOD_PARAMS = 7;
-    private static final int ELSE_IF_CHAIN_LIMIT = 6;
-    private static final int REPEATED_STRING_THRESHOLD = 3;
+    // 阈值全部来自 config/quality/rules.json 生成的规则目录，这里只起命名作用，不再写死数字。
+    public static final int LONG_METHOD_LINES = QualityCatalog.limit("long-method");
+    public static final int DUPLICATE_BLOCK_LINES = QualityCatalog.limit("duplicate-block");
+    private static final int DEEP_NESTING_LEVEL = QualityCatalog.limit("deep-nesting");
+    private static final int MAX_METHOD_PARAMS = QualityCatalog.limit("too-many-parameters");
+    private static final int ELSE_IF_CHAIN_LIMIT = QualityCatalog.limit("else-if-chain");
+    private static final int REPEATED_STRING_THRESHOLD = QualityCatalog.limit("repeated-literal");
     private static final int MAX_FINDINGS = 8;
 
     private static final Set<String> CODE_EXTS = Set.of("java", "kt", "kts", "js", "jsx", "ts", "tsx", "mjs", "cjs",
