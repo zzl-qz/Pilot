@@ -38,7 +38,9 @@ fun TaskDetail(state: MobileState, model: PilotViewModel) {
     var editingRevision by remember { mutableStateOf("") }
     var showTools by remember { mutableStateOf(false) }
     val approvals = state.approvals.filter { it.text("sessionId") == state.selected?.text("id") }
-    val rows = state.rows.filter { it.role != "activity" || expandedActivity }
+    val activityKeys = state.rows.filter { it.role == "activity" }.map { it.key }
+    val visibleActivity = if (expandedActivity) activityKeys.toSet() else activityKeys.takeLast(6).toSet()
+    val rows = state.rows.filter { it.role != "activity" || it.key in visibleActivity }
     val nearBottom by remember { derivedStateOf { !list.canScrollForward || (list.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= list.layoutInfo.totalItemsCount - 3 } }
     LaunchedEffect(rows.size, rows.lastOrNull()?.text?.length) {
         if (nearBottom && rows.isNotEmpty() && !state.viewingHistory) list.animateScrollToItem((list.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
@@ -62,10 +64,10 @@ fun TaskDetail(state: MobileState, model: PilotViewModel) {
         VerdictBadge(state.validation, Modifier.padding(horizontal = 20.dp, vertical = 8.dp).fillMaxWidth())
         LazyColumn(state = list, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
             items(approvals, key = { "approval-${it.text("callId")}" }) { ApprovalCard(it, state.busy || state.pending != null, model, false) }
-            if (state.rows.any { it.role == "activity" }) item {
+            if (activityKeys.size > visibleActivity.size || expandedActivity) item {
                 TextButton(onClick = { expandedActivity = !expandedActivity }) {
                     Icon(if (expandedActivity) Icons.Outlined.ExpandLess else Icons.Outlined.ChevronRight, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp)); Text(if (expandedActivity) "收起执行过程" else "执行过程 · ${state.rows.count { it.role == "activity" }}")
+                    Spacer(Modifier.width(6.dp)); Text(if (expandedActivity) "收起更早的执行过程" else "更早的执行过程 · ${activityKeys.size - visibleActivity.size}")
                 }
             }
             if (state.viewingHistory) item { Row { Text("正在查看历史", Modifier.weight(1f).padding(top = 12.dp), fontSize = 13.sp); TextButton(onClick = model::latest, enabled = !state.busy) { Text("返回最新记录") } } }
@@ -75,7 +77,8 @@ fun TaskDetail(state: MobileState, model: PilotViewModel) {
                     Surface(Modifier.padding(start = 24.dp), shape = RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
                         SelectionContainer { Text(row.text, Modifier.padding(horizontal = 16.dp, vertical = 12.dp), style = MaterialTheme.typography.bodyLarge) }
                     }
-                } else if (row.role == "activity") Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                } else if (row.role == "thinking") ThinkingRow(row.text)
+                else if (row.role == "activity") Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Icon(Icons.Outlined.Terminal, null, Modifier.padding(top = 2.dp).size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     SelectionContainer { Text(row.text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 } else Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -98,7 +101,7 @@ fun TaskDetail(state: MobileState, model: PilotViewModel) {
                 }
             }
             if (rows.isEmpty()) item {
-                if (state.runId.isNotBlank()) EmptyState("正在处理任务", "新的回复会显示在这里，也可以展开执行过程查看进度。")
+                if (state.runId.isNotBlank()) EmptyState("正在处理任务", "思考和最近的工具调用会直接出现在这里。")
                 else EmptyState("准备开始", "描述希望完成的任务，执行进度和回复会显示在这里。")
             }
         }
@@ -107,6 +110,20 @@ fun TaskDetail(state: MobileState, model: PilotViewModel) {
         confirmButton = { TextButton(onClick = { model.queue(editQueue, "edit", queueText, editingRevision); editQueue = -1 }, enabled = queueText.isNotBlank()) { Text("保存") } }, dismissButton = { TextButton(onClick = { editQueue = -1 }) { Text("取消") } })
     if (removeQueue >= 0) AlertDialog(onDismissRequest = { removeQueue = -1 }, title = { Text("删除这条待发送内容？") }, text = { Text(state.queued.getOrNull(removeQueue).orEmpty(), maxLines = 5) },
         confirmButton = { TextButton(onClick = { model.queue(removeQueue, "remove", expectedRevision = editingRevision); removeQueue = -1 }) { Text("删除") } }, dismissButton = { TextButton(onClick = { removeQueue = -1 }) { Text("取消") } })
+}
+
+@Composable
+private fun ThinkingRow(text: String) {
+    var open by rememberSaveable { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        TextButton(onClick = { open = !open }, contentPadding = PaddingValues(0.dp)) {
+            Text(if (open) "收起思考" else "正在思考")
+        }
+        SelectionContainer {
+            Text(text, maxLines = if (open) 12 else 3, overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)

@@ -92,10 +92,26 @@ class ProtocolTest {
         accept("""{"type":"stream.preview","payload":{"historyRevision":0,"baseSequence":1,"runId":"r","previewId":"p","previewOffset":2,"text":"头","reasoning":"思考","complete":true}}""")
         val live = """{"sequence":1,"type":"assistant.preview","runId":"r","previewId":"p","previewOffset":3,"payload":{"text":"尾"}}"""
         accept(live); accept(live)
-        assertEquals("头尾", transcript.snapshot().last().text); assertEquals(1, transcript.cursor)
+        assertEquals("头尾", transcript.snapshot().last().text)
+        assertEquals("思考", transcript.snapshot().first { it.role == "thinking" }.text)
+        assertEquals(1, transcript.cursor)
         accept("""{"sequence":2,"type":"assistant.delta","runId":"r","payload":{"text":"头尾"}}""")
         assertEquals(2, transcript.snapshot().size)
         assertFailsWith<IllegalArgumentException> { accept("""{"type":"stream.preview","payload":{"historyRevision":0,"baseSequence":1}}""") }
+    }
+
+    @Test fun `思考和工具结果留在手机上，正文出来后思考收起`() {
+        val transcript = Conversation()
+        fun accept(value: String) = transcript.accept(Protocol.json.parseToJsonElement(value).jsonObject)
+        accept("""{"sequence":1,"type":"run.started","runId":"r","payload":{"input":"改文件"}}""")
+        accept("""{"type":"assistant.reasoning","payload":{"text":"先看入口"}}""")
+        assertEquals("先看入口", transcript.snapshot().last { it.role == "thinking" }.text)
+        accept("""{"sequence":2,"type":"tool.started","payload":{"name":"read_file","summary":"src/App.java"}}""")
+        accept("""{"sequence":3,"type":"tool.completed","payload":{"resultSummary":"读到 main 方法"}}""")
+        assertTrue(transcript.snapshot().any { it.role == "activity" && it.text.contains("read_file") })
+        assertTrue(transcript.snapshot().any { it.role == "activity" && it.text.contains("读到 main 方法") })
+        accept("""{"sequence":4,"type":"assistant.delta","payload":{"text":"已经看过入口。"}}""")
+        assertTrue(transcript.snapshot().none { it.role == "thinking" })
     }
 
 }
