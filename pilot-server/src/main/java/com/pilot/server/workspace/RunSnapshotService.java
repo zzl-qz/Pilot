@@ -2,6 +2,7 @@ package com.pilot.server.workspace;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.FileVisitResult;
@@ -30,6 +31,7 @@ import com.pilot.core.tool.SnapshotSink;
 import com.pilot.core.tool.command.CommandChangeTracker;
 import com.pilot.core.util.FileTrees;
 import com.pilot.core.util.Sha256;
+import com.pilot.core.util.Texts;
 import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.workspace.ChangeService.RunChangeReport;
 
@@ -352,6 +354,46 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
     }
 
     private record CommandFile(String hash, boolean backedUp) {
+    }
+
+    /**
+     * 返回本轮首次写入前的文本。新建文件返回 {@code null}；快照缺失或内容不是可检查文本时抛异常。
+     */
+    public synchronized String originalText(String relativePath) {
+        Context context = current.get();
+        if (context == null || relativePath == null || relativePath.isBlank()) {
+            throw new IllegalStateException("当前运行没有可用的写前快照");
+        }
+        String key = relativePath.replace('\\', '/');
+        SnapshotEntry entry = null;
+        for (SnapshotEntry candidate : context.entries) {
+            if (candidate.path().equals(key)) {
+                entry = candidate;
+                break;
+            }
+        }
+        if (entry == null) {
+            throw new IllegalStateException("缺少写前快照: " + key);
+        }
+        if (!entry.existed()) {
+            return null;
+        }
+        Path backup = context.directory().resolve("files").resolve(key).normalize();
+        if (!backup.startsWith(context.directory().resolve("files").normalize()) || !Files.isRegularFile(backup)) {
+            throw new IllegalStateException("写前快照不可读: " + key);
+        }
+        try {
+            if (Files.size(backup) > MAX_SNAPSHOT_BYTES) {
+                throw new IllegalStateException("写前快照超过文本检查上限: " + key);
+            }
+            byte[] bytes = Files.readAllBytes(backup);
+            if (Texts.isBinary(bytes)) {
+                throw new IllegalStateException("写前快照不是文本: " + key);
+            }
+            return new String(bytes, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new UncheckedIOException("读取写前快照失败: " + key, e);
+        }
     }
 
     @Override

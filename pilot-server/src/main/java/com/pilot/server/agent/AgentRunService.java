@@ -61,6 +61,9 @@ import com.pilot.core.permission.PermissionGate;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.plan.PlanSink;
 import com.pilot.core.prompt.PromptLibrary;
+import com.pilot.core.quality.CodeAssetIndex;
+import com.pilot.core.quality.IndependentCodeReviewer;
+import com.pilot.core.quality.WorkspaceTexts;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
@@ -1208,11 +1211,20 @@ public class AgentRunService implements RunStarter {
             return "";
         }
         try {
-            return PROMPTS.render("context/repository",
-                Map.of("tree", workspaceTree(root), "git", gitState(root), "build", buildHint(root))).strip();
+            return PROMPTS.render("context/repository", Map.of("tree", workspaceTree(root), "git", gitState(root),
+                "build", buildHint(root), "assets", codeAssets(root))).strip();
         } catch (RuntimeException e) {
             log.debug("生成仓库摘要失败", e);
             return "";
+        }
+    }
+
+    private static String codeAssets(Path root) {
+        try {
+            String assets = CodeAssetIndex.summarize(root);
+            return assets.isBlank() ? "（未发现可复用的公共代码；新增前仍须 search_text 确认）" : assets;
+        } catch (RuntimeException e) {
+            return "（公共代码索引不可用；新增前用 search_text 确认）";
         }
     }
 
@@ -1455,6 +1467,7 @@ public class AgentRunService implements RunStarter {
         // 与会话数据库、快照保持一致，统一落在数据目录（默认项目下的 .pilot）
         JsonlTraceRecorder traceRecorder =
             new JsonlTraceRecorder(dataDir.file("traces", sessionId + ".jsonl"), objectMapper);
+        Path resolvedWorkspace = toolFactory.resolve(workspace);
         AgentLoop loop = new AgentLoop(executionClient, tools, sessionGate, approvals, config, handle.cancelled::get,
             () -> null, traceRecorder, delta -> sessions.preview(sessionId, runId, new AssistantPreview(delta)))
             .withPendingMessages(() -> pollSteering(sessionId))
@@ -1462,6 +1475,10 @@ public class AgentRunService implements RunStarter {
                 delta -> sessions.preview(sessionId, runId, new com.pilot.core.event.AssistantReasoning(delta)))
             .withTaskContext(() -> currentTaskContext(sessionId))
             .withCompletionClaim(() -> claimCompletion(sessionId, handle)).withRestoredPaths(snapshots::restoredPaths)
+            .withQualityWorkspace(resolvedWorkspace)
+            .withQualityTexts(snapshots::originalText, path -> WorkspaceTexts.read(resolvedWorkspace, path))
+            .withIndependentCodeReviewer(review.active() ? null
+                : new IndependentCodeReviewer(measuredMain, resolvedWorkspace, handle.cancelled::get))
             // 编辑后自动格式化/lint 之类交给 .pilot/settings.json，不再占用模型注意力
             .withHooks(com.pilot.core.hook.Hooks.load(toolFactory.resolve(workspace)))
             .withHookExecution(toolFactory.executionSelection())

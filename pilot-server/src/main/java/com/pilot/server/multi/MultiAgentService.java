@@ -69,6 +69,7 @@ import com.pilot.core.multi.TaskStatus;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PolicyPermissionGate;
 import com.pilot.core.prompt.PromptLibrary;
+import com.pilot.core.quality.WorkspaceTexts;
 import com.pilot.core.tool.SandboxSink;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.trace.JsonlTraceRecorder;
@@ -640,8 +641,11 @@ public class MultiAgentService {
                 return cancellationReason.get();
             }
         };
+        Path workspaceRoot = toolFactory.resolve(dispatch.workspace());
         AgentLoop loop = new AgentLoop(budgeted, tools, new PolicyPermissionGate(mode), ApprovalBroker.denyAll(),
-            config, cancellation, () -> null, trace);
+            config, cancellation, () -> null, trace).withQualityWorkspace(workspaceRoot)
+            .withQualityTexts(path -> WorkspaceTexts.read(workspaceRoot, path),
+                path -> sink.currentText(path, WorkspaceTexts.read(workspaceRoot, path)));
 
         publish(dispatch.events(), new SubagentStarted(agentId, Texts.oneLine(spec.title() + "：" + spec.goal(), 200),
             Texts.oneLine(spec.id() + " " + spec.title(), 40)));
