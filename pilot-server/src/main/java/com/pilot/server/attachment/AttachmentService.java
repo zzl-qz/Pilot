@@ -24,6 +24,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.message.Attachment;
+import com.pilot.core.tool.file.DocumentIntake;
 import com.pilot.core.util.FileTrees;
 import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.common.data.StorageHealth;
@@ -136,7 +137,7 @@ public class AttachmentService {
                     text.append("\n\n").append(inline(item.name(), item.mime(), item.bytes(), saved.path()));
                     text.append("\n\n[附件 ").append(item.name()).append(" (").append(item.mime()).append(") 已保存到 ")
                         .append(saved.path()).append("，可用 read_attachment 读取]");
-                } else {
+                } else if (!inlineDocument(text, attachments, imagePositions, item, saved)) {
                     text.append("\n\n[附件 ").append(item.name()).append(" (").append(item.mime()).append(") 已保存到 ")
                         .append(saved.path()).append("，可用 read_attachment 读取]");
                 }
@@ -329,21 +330,44 @@ public class AttachmentService {
     }
 
     /**
-     * 文本附件的内联片段：不超过预算时完整内联；超过时保留头尾（约 70%/30%）、
-     * 省略中段，并在省略标记里写明全文长度与原件路径，模型可随时用工具读取全文。
+     * PDF / Office 在这一轮就把抽出的正文放进消息。扫描件没有文字层时，附上前几页图片。
+     *
+     * @return 已写入正文时为 true；抽不到则让调用方保留路径提示
      */
-    private String inline(String name, String mime, byte[] bytes, String savedPath) {
-        String text = new String(bytes, StandardCharsets.UTF_8);
+    private boolean inlineDocument(StringBuilder text, List<Attachment> attachments, List<Integer> imagePositions,
+        PendingAttachment item, Attachment saved) {
+        DocumentIntake.Extract extract = DocumentIntake.read(Path.of(saved.path()));
+        if (extract == null || extract.text() == null || extract.text().isBlank()
+            || extract.text().startsWith("ERROR:")) {
+            return false;
+        }
+        text.append("\n\n").append(clip(item.name(), item.mime(), extract.text(), saved.path()));
+        text.append("\n\n[附件 ").append(item.name()).append(" (").append(item.mime()).append(") 已保存到 ")
+            .append(saved.path()).append("，可用 read_attachment 读取]");
+        if (imagePositions.isEmpty()) {
+            attachments.addAll(extract.images());
+        }
+        return true;
+    }
+
+    private String clip(String name, String mime, String text, String savedPath) {
         int inlineMaxChars = limits.inlineMaxChars();
         if (text.length() <= inlineMaxChars) {
             return "[附件 " + name + " (" + mime + ")]\n" + text + "\n[附件结束 " + name + "]";
         }
         int headChars = Math.max(1, (int)(inlineMaxChars * 0.7));
         int tailChars = Math.max(1, inlineMaxChars - headChars);
-        String head = text.substring(0, headChars);
-        String tail = text.substring(text.length() - tailChars);
-        return "[附件 " + name + " (" + mime + ")]\n" + head + "\n…（正文过长：共 " + text.length() + " 字符，保留头尾、省略中段。原文件已保存到 "
-            + savedPath + "，可用 read_attachment 读取全文）\n" + tail + "\n[附件结束 " + name + "]";
+        return "[附件 " + name + " (" + mime + ")]\n" + text.substring(0, headChars) + "\n…（正文过长：共 " + text.length()
+            + " 字符，保留头尾、省略中段。原文件已保存到 " + savedPath + "，可用 read_attachment 读取全文）\n"
+            + text.substring(text.length() - tailChars) + "\n[附件结束 " + name + "]";
+    }
+
+    /**
+     * 文本附件的内联片段：不超过预算时完整内联；超过时保留头尾（约 70%/30%）、
+     * 省略中段，并在省略标记里写明全文长度与原件路径，模型可随时用工具读取全文。
+     */
+    private String inline(String name, String mime, byte[] bytes, String savedPath) {
+        return clip(name, mime, new String(bytes, StandardCharsets.UTF_8), savedPath);
     }
 
     private static String resolveMime(String mime, String name) {

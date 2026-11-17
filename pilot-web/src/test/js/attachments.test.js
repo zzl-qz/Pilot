@@ -118,6 +118,9 @@ test('新文案（read_attachment）与旧文案的落盘块都能拆出', () =>
   ]);
   const legacy = splitAttachmentMarkers(`[附件 report.pdf (application/pdf) 已保存到 ${path}，需要时用工具读取]`);
   assert.equal(legacy.files[0].kind, 'saved', '旧消息仍可解析');
+  const extra = splitAttachmentMarkers(`[附件 report.pdf (application/pdf) 已保存到 ${path}，可用 read_attachment 继续读取后续页]`);
+  assert.equal(extra.files[0].kind, 'saved', '多写的后续页提示也要收进文件卡');
+  assert.equal(extra.body, '');
 });
 
 test('文件内容里出现方括号也不会误拆', () => {
