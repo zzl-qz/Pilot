@@ -437,7 +437,7 @@ html[data-theme] .conversation-thread .changed-card {
   flex-direction: column;
   min-width: 0;
   margin-top: 8px;
-  overflow: visible;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--bg);
@@ -577,24 +577,32 @@ html[data-theme] .conversation-thread .changed-foot {
   padding: 4px 8px 6px;
   border-top: 1px solid var(--line);
 }
-html[data-theme] .conversation-thread .changed-preview {
-  position: absolute;
-  z-index: 30;
-  left: 24px;
-  right: 24px;
-  top: calc(100% + 6px);
-  max-height: 420px;
-  overflow: auto;
-  border: 1px solid var(--line);
+/* 悬停预览挂到 body：比文件卡左右各收 24px，贴着当前行上方或下方，不推进对话。 */
+html[data-theme] .changed-hover-card {
+  position: fixed;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
   border-radius: 12px;
-  background: var(--panel);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
-  animation: changed-preview-in 100ms ease;
+  background: var(--bg);
+  color: var(--ink);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.38);
+  opacity: 1;
+  transition: opacity 100ms linear;
 }
-@keyframes changed-preview-in { from { opacity: 0; } to { opacity: 1; } }
-html[data-theme] .conversation-thread .changed-preview-path {
+html[data-theme] .changed-hover-card[data-closing] { opacity: 0; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme] .changed-hover-card { transition: none; }
+}
+html[data-theme] .changed-hover { display: flex; flex-direction: column; min-height: 0; max-height: inherit; }
+html[data-theme] .changed-hover-path {
+  flex: none;
+  height: 38px;
   padding: 8px 12px;
   overflow-x: auto;
+  box-sizing: border-box;
   color: var(--dim);
   font-family: var(--mono);
   font-size: 12px;
@@ -602,22 +610,39 @@ html[data-theme] .conversation-thread .changed-preview-path {
   white-space: nowrap;
   border-bottom: 1px solid var(--line);
 }
-html[data-theme] .conversation-thread .changed-preview-diff {
-  margin: 0;
-  padding: 8px 0;
+html[data-theme] .changed-hover-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 0 12px;
   font-family: var(--mono);
   font-size: 12px;
-  line-height: 18px;
 }
-html[data-theme] .conversation-thread .changed-line {
-  padding: 0 12px;
+html[data-theme] .changed-hover-line {
+  display: grid;
+  grid-template-columns: 3.5em 3.5em 1.2em minmax(0, 1fr);
+  align-items: center;
+  min-height: 22px;
+  line-height: 22px;
   white-space: pre;
 }
-html[data-theme] .conversation-thread .changed-line.is-add { color: var(--ok); background: rgba(62, 207, 142, 0.12); }
-html[data-theme] .conversation-thread .changed-line.is-del { color: var(--err); background: rgba(255, 111, 111, 0.12); }
-html[data-theme] .conversation-thread .changed-preview-empty {
+html[data-theme] .changed-hover-no {
+  padding-right: 8px;
+  color: var(--dim);
+  text-align: right;
+  user-select: none;
+}
+html[data-theme] .changed-hover-sign { text-align: center; user-select: none; }
+html[data-theme] .changed-hover-text { padding-right: 16px; }
+html[data-theme] .changed-hover-line.is-add { background: rgba(62, 207, 142, 0.14); }
+html[data-theme] .changed-hover-line.is-del { background: rgba(255, 111, 111, 0.14); }
+html[data-theme] .changed-hover-line.is-add .changed-hover-no,
+html[data-theme] .changed-hover-line.is-add .changed-hover-sign { color: var(--ok); }
+html[data-theme] .changed-hover-line.is-del .changed-hover-no,
+html[data-theme] .changed-hover-line.is-del .changed-hover-sign { color: var(--err); }
+html[data-theme] .changed-hover-line.is-ctx .changed-hover-text { color: var(--muted); }
+html[data-theme] .changed-hover-empty {
   margin: 0;
-  padding: 12px;
+  padding: 16px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
 }
