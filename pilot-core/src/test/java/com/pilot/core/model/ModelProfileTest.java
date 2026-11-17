@@ -32,6 +32,10 @@ class ModelProfileTest {
         assertEquals("anthropic", auto("https://api.anthropic.com/v1/messages").provider());
         assertEquals("generic", auto("https://llm.example.com/v1/chat/completions").provider());
         assertEquals("generic", ModelProfile.generic().provider());
+        assertEquals("prefix", ModelProfile.resolve(URI.create("https://api.deepseek.com/chat/completions"), "m",
+            "auto", "auto", "", null, null, null, null).compactionMode());
+        assertEquals("short", ModelProfile.resolve(URI.create("https://api.openai.com/v1/chat/completions"), "m",
+            "auto", "auto", "", null, null, null, null).compactionMode());
     }
 
     @Test

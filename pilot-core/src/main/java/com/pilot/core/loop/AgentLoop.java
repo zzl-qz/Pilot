@@ -945,12 +945,19 @@ public final class AgentLoop {
 
     /**
      * 发送前把历史收进安全输入预算。
-     * 先收掉已经看过的长工具输出，再按组丢掉最早的对话，直到估算能发出去，或者已经没有可丢的旧组。
+     * 先收掉已经看过的长工具输出。系统提示和工具定义还放得下时，先做一次交接摘要，
+     * 再按组丢掉最早的对话。摘要也腾不出位置，才整组丢弃。
      */
     private void fitHistoryToInputBudget(List<Message> messages, Consumer<SessionEvent> events, String guidance) {
         int before = ContextCompactor.totalChars(messages);
         recordToolObservationBoundary(messages);
         ContextCompactor.truncateLongToolOutputs(messages, messages.size());
+        if (!requestFits(messages, guidance) && historyCanShrink(messages)) {
+            int wireLimit = (int)Math.min(Integer.MAX_VALUE, RequestBudget
+                .assessRequest(requestMessages(messages, guidance), tools.definitions(), contextLimit()).inputLimit());
+            budget.apply(messages, Math.max(1, wireLimit), events, observedThroughIndex);
+            observedThroughIndex = Math.min(observedThroughIndex, messages.size());
+        }
         int guard = messages.size() + 1;
         while (guard-- > 0 && !requestFits(messages, guidance)) {
             int chars = ContextCompactor.totalChars(messages);
@@ -963,6 +970,14 @@ public final class AgentLoop {
         if (ContextCompactor.totalChars(messages) < before) {
             events.accept(new RunContinued(1, 1, "上下文超过安全输入预算，已折叠更早的记录并继续"));
         }
+    }
+
+    /** 系统提示和工具定义本身已经超窗时，折叠历史没有用。 */
+    private boolean historyCanShrink(List<Message> messages) {
+        if (messages.isEmpty()) {
+            return false;
+        }
+        return RequestBudget.assessRequest(List.of(messages.get(0)), tools.definitions(), contextLimit()).fits();
     }
 
     private boolean requestFits(List<Message> messages, String guidance) {

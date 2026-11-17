@@ -68,7 +68,8 @@ public record ModelProfile(String provider, String model, String cacheMode, Stri
         if (!lifetime.isBlank() && !mode.equals(CACHE_EXPLICIT)) {
             throw new IllegalArgumentException("当前端点不支持显式缓存有效期");
         }
-        String compact = compactionMode == null ? COMPACTION_SHORT : compactionMode;
+        String compact = compactionMode == null
+            ? (PROVIDER_DEEPSEEK.equals(actual) ? COMPACTION_PREFIX : COMPACTION_SHORT) : compactionMode;
         if (!Set.of(COMPACTION_SHORT, COMPACTION_PREFIX).contains(compact)) {
             throw new IllegalArgumentException("不支持的压缩策略");
         }

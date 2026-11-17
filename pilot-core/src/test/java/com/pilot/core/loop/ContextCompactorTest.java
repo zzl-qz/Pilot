@@ -165,7 +165,7 @@ class ContextCompactorTest {
 
         assertEquals(1, changed);
         String content = messages.get(2).content();
-        assertTrue(content.length() < 5_000, "截断后应远小于原文，实际 " + content.length());
+        assertTrue(content.length() < 6_000, "截断后应远小于原文，实际 " + content.length());
         assertTrue(content.startsWith("x".repeat(100)), "保留开头");
         assertTrue(content.contains("中间已省略"));
         assertTrue(content.endsWith("x".repeat(100)), "保留结尾");

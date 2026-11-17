@@ -125,13 +125,13 @@ class AgentLoopTest {
 
     @Test
     void foldsEarlierHistoryWhenTheWireBudgetIsExceeded() {
-        ScriptedModelClient client = new ScriptedModelClient(new ModelResponse("继续做", List.of()));
+        ScriptedModelClient client =
+            new ScriptedModelClient(new ModelResponse("交接摘要", List.of()), new ModelResponse("继续做", List.of()));
         List<Message> history = new ArrayList<>();
-        String page = "a".repeat(20_000);
-        for (int i = 0; i < 30; i++) {
-            String callId = "call_" + i;
-            history.add(Message.assistant("", List.of(new ToolCall(callId, "read_file", Map.of("path", "f" + i)))));
-            history.add(Message.tool(callId, page));
+        history.add(Message.user("继续把任务做完"));
+        String page = "字".repeat(8_000);
+        for (int i = 0; i < 20; i++) {
+            history.add(Message.assistant("第" + i + "段 " + page, List.of()));
         }
         AgentLoop.Config wide = new AgentLoop.Config(2, 0, 3, "系统", List::of, 0, 2_000_000, false);
 
@@ -140,9 +140,8 @@ class AgentLoopTest {
 
         assertFalse(result.failed(), result.finalText());
         assertEquals("继续做", result.finalText());
-        assertEquals(1, client.requests.size());
-        assertTrue(result.conversation().stream().anyMatch(message -> message.content().contains("旧工具输出已清理")
-            || message.content().contains("中间已省略") || message.content().contains("已因上下文超限丢弃")));
+        assertTrue(result.conversation().stream().anyMatch(message -> message.content().contains("交接摘要")),
+            "超窗后应先留下交接摘要，而不是只丢历史");
         assertTrue(events.stream()
             .anyMatch(event -> event instanceof RunContinued continued && continued.reason().contains("折叠更早的记录")));
     }

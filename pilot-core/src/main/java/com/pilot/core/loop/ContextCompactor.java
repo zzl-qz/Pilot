@@ -1,6 +1,5 @@
 package com.pilot.core.loop;
 
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -81,10 +80,13 @@ public final class ContextCompactor {
     private static final int PRUNE_MIN_CHARS = 4_000;
     private static final String PRUNED_PREFIX = "[旧工具输出已清理";
 
-    /** 首尾截断的参数。 */
-    private static final int TRUNCATE_TRIGGER_CHARS = 8_000;
-    private static final int TRUNCATE_HEAD_CHARS = 3_000;
-    private static final int TRUNCATE_TAIL_CHARS = 1_000;
+    /**
+     * 首尾截断的参数，对齐 dsh 的工具结果裁剪：超过 8192 字才动，
+     * 头部多留一些，文件开头和报错栈才不会被切掉。
+     */
+    private static final int TRUNCATE_TRIGGER_CHARS = 8_192;
+    private static final int TRUNCATE_HEAD_CHARS = 4_096;
+    private static final int TRUNCATE_TAIL_CHARS = 1_024;
     private static final String TRUNCATE_MARK = "…（中间已省略，需要时重新读取）…";
 
     private static final int TOOL_SNIPPET_CHARS = 800;
@@ -432,16 +434,14 @@ public final class ContextCompactor {
         List<ToolDefinition> definitions = tools.get();
         String instruction = "请只生成当前对话的交接摘要，不调用工具。保留目标、约束、已完成工作、验证证据和剩余事项。\n" + SUMMARY_PROMPT;
         int input = estimateTokens(history) + estimateTokens(String.valueOf(definitions));
-        var price = profile.pricing();
-        // 实验策略仅在有余量且已配置单价显示潜在节省时启用；默认仍走短输入。
-        boolean candidate = ModelProfile.COMPACTION_PREFIX.equals(profile.compactionMode()) && !history.isEmpty()
+        // dsh 的摘要请求复用本轮系统提示、工具和历史前缀，后面只追加整理指令，
+        // 这样 DeepSeek 一类的前缀缓存还能命中。本地或未开 prefix 的端点仍走短摘录，
+        // 避免把整段历史再送一遍。
+        boolean prefix = (ModelProfile.COMPACTION_PREFIX.equals(profile.compactionMode())
+            || ModelProfile.PROVIDER_DEEPSEEK.equals(profile.provider())) && !history.isEmpty()
             && contextLimit.getAsInt() > 0 && input + estimateTokens(instruction) + 2_000 < contextLimit.getAsInt()
-            && totalChars(history) + instruction.length() + 8_000 < contextLimit.getAsInt() && price.input() != null
-            && price.cachedInput() != null && price.cacheWrite() != null
-            && price.cachedInput().multiply(BigDecimal.valueOf(input))
-                .add(price.cacheWrite().multiply(BigDecimal.valueOf(estimateTokens(instruction))))
-                .compareTo(price.input().multiply(BigDecimal.valueOf(estimateTokens(SUMMARY_PROMPT + transcript)))) < 0;
-        if (candidate) {
+            && totalChars(history) + instruction.length() + 8_000 < contextLimit.getAsInt();
+        if (prefix) {
             List<Message> request = new ArrayList<>(history);
             request.add(Message.user(instruction));
             try {
