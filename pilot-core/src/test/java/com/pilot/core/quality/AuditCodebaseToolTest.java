@@ -1,4 +1,4 @@
-package com.pilot.core.tool;
+package com.pilot.core.quality;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;

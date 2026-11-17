@@ -1,4 +1,4 @@
-package com.pilot.core.tool;
+package com.pilot.core.quality;
 
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -10,8 +10,12 @@ import java.util.Objects;
 import java.util.Set;
 
 import com.pilot.core.message.ToolNames;
-import com.pilot.core.quality.CodebaseAuditor;
 import com.pilot.core.quality.CodebaseAuditor.AuditSnapshot;
+import com.pilot.core.tool.PromptedTool;
+import com.pilot.core.tool.Tool;
+import com.pilot.core.tool.ToolResults;
+import com.pilot.core.tool.ToolSchemas;
+import com.pilot.core.tool.ToolSupport;
 import com.pilot.core.workspace.PathValidator;
 
 /**

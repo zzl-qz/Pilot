@@ -21,7 +21,7 @@ import com.pilot.core.mcp.McpManager;
 import com.pilot.core.mcp.McpToolsTool;
 import com.pilot.core.message.ToolNames;
 import com.pilot.core.plan.PlanSink;
-import com.pilot.core.tool.AuditCodebaseTool;
+import com.pilot.core.quality.AuditCodebaseTool;
 import com.pilot.core.tool.ReadTracker;
 import com.pilot.core.tool.RememberTool;
 import com.pilot.core.tool.SandboxSink;
