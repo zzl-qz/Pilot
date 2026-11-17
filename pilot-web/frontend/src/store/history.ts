@@ -1,6 +1,8 @@
 import type { StoreContext, StoreSlice } from './context.js';
 import type { EventEnvelope } from '../types/events.js';
+import type { ResultRow } from '../types/thread.js';
 import { api } from '../api.js';
+import { sortChangeFiles } from '../lib/changes.js';
 import { errorInfo } from '../lib/errors.js';
 import { canLoadEarlier, isValidEarlierHistoryPage } from '../lib/history.js';
 import { applyEvent, initialThread, prependHistoryPage, appendHistoryPage } from '../thread-reducer.js';
@@ -22,6 +24,42 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
   let earlierPage: { sessionId: string; before: number; events: EventEnvelope[]; hasMore: boolean } | null = null;
   let earlierInflight: { sessionId: string; before: number; promise: Promise<boolean> } | null = null;
   let earlierRequest: Promise<boolean> | null = null;   // 同一次边界触发的并发去重
+  // 已经问过差异的结果卡。空快照也记在这里，避免上翻时反复打同一轮。
+  let attachedDiffs = new Set<string>();
+
+  /**
+   * 把每一轮结束时存下的文件差异挂回对应的结果卡。
+   * 实时跑完会拉一次；刷新、重连、上翻历史是回放，不走那条路，卡片会空着。
+   */
+  function attachRunDiffs() {
+    const { sessionId, sessionEpoch } = get();
+    if (!sessionId) return;
+    const jobs: { key: string; runId: string; token: string }[] = [];
+    for (const row of get().thread.rows) {
+      if (row.type !== 'result' || (row.changedFiles || []).length) continue;
+      const runId = row.key.startsWith('result:run_') ? row.key.slice('result:'.length) : '';
+      if (!runId) continue;
+      const token = `${sessionEpoch}:${row.key}`;
+      if (attachedDiffs.has(token)) continue;
+      attachedDiffs.add(token);
+      jobs.push({ key: row.key, runId, token });
+    }
+    for (const job of jobs) {
+      void api.runChanges(job.runId).then((report) => {
+        if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
+        const files = sortChangeFiles(report?.files || []);
+        if (!files.length) return;
+        set((draft) => {
+          const row = draft.thread.rows.find((item): item is ResultRow => item.type === 'result' && item.key === job.key);
+          if (!row || (row.changedFiles || []).length) return;
+          row.changedFiles = files;
+          row.changedSummary = report?.summary || null;
+        });
+      }).catch(() => {
+        attachedDiffs.delete(job.token);
+      });
+    }
+  }
 
   function currentHistoryPage(sessionId: string, generation: number, revision?: number) {
     const state = get();
@@ -42,6 +80,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
       }
       const generation = ++historyGeneration;
       // 换会话 / 重建窗口：旧的预取页对不上新窗口的游标，直接丢弃
+      attachedDiffs = new Set();
       earlierPage = null;
       earlierInflight = null;
       earlierRequest = null;
@@ -75,6 +114,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
           // 窗口整体重建（切会话 / 重连）后落在最新一条，而不是停在上次的滚动位置。
           draft.ui.bottomSignal += 1;
         });
+        attachRunDiffs();
         return true;
       } catch (error) {
         if (get().sessionId === sessionId && historyGeneration === generation) get().showNotice('读取历史失败：' + errorInfo(error).message);
@@ -148,6 +188,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
       });
       // 用掉一页就顺手补下一页：连续上滑时第二屏开始也不必等网络。
       get().prefetchEarlier();
+      attachRunDiffs();
       return true;
     },
 
@@ -188,6 +229,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
           prependHistoryPage(draft, fresh);
           draft.thread.history.hasMore = data.hasMore === true;
         });
+        attachRunDiffs();
         return true;
       } catch (error) {
         if (historyGeneration !== generation || get().sessionId !== sessionId) return false;
@@ -266,6 +308,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
           appendHistoryPage(draft, newer);
           draft.thread.history.hasNewer = data.hasMore === true;
         });
+        attachRunDiffs();
         return true;
       } catch (error) {
         if (historyGeneration !== generation || get().sessionId !== sessionId) return false;
@@ -295,6 +338,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
     actions,
     reset() {
       historyGeneration++;
+      attachedDiffs = new Set();
       earlierPage = null;
       earlierInflight = null;
       earlierRequest = null;
