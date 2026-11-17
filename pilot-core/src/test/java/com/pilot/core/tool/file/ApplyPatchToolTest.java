@@ -288,6 +288,22 @@ class ApplyPatchToolTest {
     }
 
     @Test
+    void addedCodeCarriesQualityHintAfterAtomicApply() throws IOException {
+        ToolResult result = apply("""
+            *** Begin Patch
+            *** Add File: src/main/Order.java
+            +class Order {
+            +    int timeout = 86400;
+            +}
+            *** End Patch
+            """);
+
+        assertTrue(result.text().contains("已应用补丁"), result.text());
+        assertTrue(result.text().contains("[代码质量提醒]"), result.text());
+        assertTrue(Files.readString(workspace.resolve("src/main/Order.java")).contains("86400"));
+    }
+
+    @Test
     void isNotReadOnlyAndExposesNoSinglePath() {
         assertFalse(tool.readOnly());
         assertEquals(null, tool.changedPath(new ToolCall("1", "apply_patch", Map.of())));

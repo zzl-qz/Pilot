@@ -9,6 +9,7 @@ import java.util.Map;
 
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.message.ToolNames;
+import com.pilot.core.quality.CodeQualityCheck;
 import com.pilot.core.tool.PromptedTool;
 import com.pilot.core.tool.ReadGuard;
 import com.pilot.core.tool.SnapshotSink;
@@ -90,9 +91,10 @@ public final class EditFileTool extends PromptedTool implements WritesFiles {
         }
 
         try {
+            String content;
             ExactEditBatch.Applied applied;
             try {
-                String content = EditableText.readForReplacement(file, rawPath);
+                content = EditableText.readForReplacement(file, rawPath);
                 applied = ExactEditBatch.apply(content, edits);
             } catch (IllegalArgumentException e) {
                 return "ERROR: " + e.getMessage();
@@ -101,8 +103,10 @@ public final class EditFileTool extends PromptedTool implements WritesFiles {
             Files.writeString(file, applied.content(), StandardCharsets.UTF_8);
             snapshots.afterWrite(file);
             reads.observed(file);
-            return "已修改 " + paths.display(file) + "：替换 " + applied.count() + " 处（" + applied.oldLines() + " 行 → "
-                + applied.newLines() + " 行）";
+            String written = "已修改 " + paths.display(file) + "：替换 " + applied.count() + " 处（" + applied.oldLines()
+                + " 行 → " + applied.newLines() + " 行）";
+            String quality = CodeQualityCheck.summary(paths.root(), paths.display(file), content, applied.content());
+            return quality.isEmpty() ? written : written + "\n\n" + quality;
         } catch (IOException e) {
             return "ERROR: 写入失败: " + e.getMessage();
         }

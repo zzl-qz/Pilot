@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.pilot.core.message.ToolNames;
+import com.pilot.core.quality.CodeQualityCheck;
 import com.pilot.core.tool.PromptedTool;
 import com.pilot.core.tool.ReadGuard;
 import com.pilot.core.tool.SandboxSink;
@@ -89,8 +90,10 @@ public final class SandboxEditFileTool extends PromptedTool {
             }
             sandbox.record(shown, content, applied.content());
             reads.observed(file);
-            return "已提交到沙箱 " + shown + "：替换 " + applied.count() + " 处（" + applied.oldLines() + " 行 → "
+            String written = "已提交到沙箱 " + shown + "：替换 " + applied.count() + " 处（" + applied.oldLines() + " 行 → "
                 + applied.newLines() + " 行）";
+            String quality = CodeQualityCheck.summary(paths.root(), shown, content, applied.content());
+            return quality.isEmpty() ? written : written + "\n\n" + quality;
         } catch (RuntimeException e) {
             return "ERROR: 提交沙箱失败: " + e.getMessage();
         }

@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 
 import com.pilot.core.message.ToolCall;
+import com.pilot.core.quality.CodeQualityCheck;
 import com.pilot.core.tool.ReadGuard;
 import com.pilot.core.tool.SnapshotSink;
 import com.pilot.core.tool.ToolSupport;
@@ -45,7 +46,9 @@ public final class CreateFileTool extends CreateFileOperation implements WritesF
             // 刚创建的文件视为已读：后续 edit_file 不会被「先读后改」拦截
             reads.observed(file);
             int bytes = content.getBytes(StandardCharsets.UTF_8).length;
-            return "已创建 " + paths.display(file) + "（" + bytes + " 字节，" + (int)content.lines().count() + " 行）";
+            String written = "已创建 " + paths.display(file) + "（" + bytes + " 字节，" + (int)content.lines().count() + " 行）";
+            String quality = CodeQualityCheck.summary(paths.root(), paths.display(file), null, content);
+            return quality.isEmpty() ? written : written + "\n\n" + quality;
         } catch (IOException e) {
             return "ERROR: 创建失败: " + e.getMessage();
         }

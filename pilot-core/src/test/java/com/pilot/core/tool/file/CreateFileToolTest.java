@@ -30,6 +30,19 @@ class CreateFileToolTest {
     }
 
     @Test
+    void newCodeFileIncludesQualityHintWithoutChangingFile() throws IOException {
+        CreateFileTool tool = new CreateFileTool(new PathValidator(workspace));
+        String content = "class Order {\n    int timeout = 86400;\n}\n";
+
+        String result = tool.execute(Map.of("path", "src/main/Order.java", "content", content));
+
+        assertTrue(result.contains("已创建"), result);
+        assertTrue(result.contains("[代码质量提醒]"), result);
+        assertTrue(result.contains("86400"), result);
+        assertEquals(content, Files.readString(workspace.resolve("src/main/Order.java")));
+    }
+
+    @Test
     void refusesDanglingSymlinkWithoutCreatingItsTarget() throws IOException {
         Path outside = workspace.getParent().resolve(workspace.getFileName() + "-outside.txt");
         try {
