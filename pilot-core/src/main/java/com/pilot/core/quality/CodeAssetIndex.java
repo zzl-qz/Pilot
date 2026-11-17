@@ -39,9 +39,6 @@ public final class CodeAssetIndex {
         Set.of("java", "kt", "ts", "tsx", "js", "jsx", "mjs", "py", "go", "rs");
     private static final Set<String> SHARED_DIRS = Set.of("common", "commons", "shared", "util", "utils", "helper",
         "helpers", "constant", "constants", "enum", "enums", "support", "hooks", "lib");
-    private static final Set<String> SKIPPED_DIRS = Set.of(".git", ".idea", ".vscode", ".gradle", ".pilot", ".venv",
-        "venv", "__pycache__", "target", "build", "node_modules", "out", "dist", "coverage", "test", "tests",
-        "__tests__", "fixtures", "evaluation", "docs", "docs-public");
     private static final Pattern SHARED_STEM = Pattern.compile(
         "(?:.*(?:Util|Utils|Helper|Helpers|Constant|Constants|Enum|Enums|Support|Texts|FileNames|Sha256|Paths|Codec)"
             + "|use[A-Z][A-Za-z0-9_]+)$");
@@ -220,7 +217,7 @@ public final class CodeAssetIndex {
                     }
                     String name =
                         dir.getFileName() == null ? "" : dir.getFileName().toString().toLowerCase(Locale.ROOT);
-                    return !dir.equals(root) && SKIPPED_DIRS.contains(name) ? FileVisitResult.SKIP_SUBTREE
+                    return !dir.equals(root) && QualityScanDirs.SKIPPED.contains(name) ? FileVisitResult.SKIP_SUBTREE
                         : FileVisitResult.CONTINUE;
                 }
 
@@ -265,7 +262,7 @@ public final class CodeAssetIndex {
         Path rel = root.relativize(file);
         for (int i = 0; i < rel.getNameCount() - 1; i++) {
             String dir = rel.getName(i).toString().toLowerCase(Locale.ROOT);
-            if (SKIPPED_DIRS.contains(dir)) {
+            if (QualityScanDirs.SKIPPED.contains(dir)) {
                 return -1;
             }
             if (SHARED_DIRS.contains(dir)) {

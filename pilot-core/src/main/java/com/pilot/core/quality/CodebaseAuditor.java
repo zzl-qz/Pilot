@@ -35,10 +35,6 @@ public final class CodebaseAuditor {
     private static final int MAX_HOTSPOTS = 10;
     private static final int MAX_EXTERNAL_PEERS = 32;
 
-    private static final Set<String> SKIPPED_DIRS = Set.of(".git", ".pilot", ".idea", ".vscode", ".gradle", ".venv",
-        "venv", "__pycache__", "node_modules", "target", "build", "dist", "out", "coverage", "test", "tests",
-        "__tests__", "spec", "specs", "fixture", "fixtures");
-
     private CodebaseAuditor() {
     }
 
@@ -301,8 +297,9 @@ public final class CodebaseAuditor {
                     }
                     String name =
                         dir.getFileName() == null ? "" : dir.getFileName().toString().toLowerCase(Locale.ROOT);
-                    return !dir.equals(base) && (SKIPPED_DIRS.contains(name) || !validator.allowsDirectory(dir))
-                        ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
+                    return !dir.equals(base)
+                        && (QualityScanDirs.SKIPPED.contains(name) || !validator.allowsDirectory(dir))
+                            ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
                 }
 
                 @Override

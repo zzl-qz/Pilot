@@ -11,7 +11,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.function.BiFunction;
 
 import com.pilot.core.quality.CodeQualityCheck.Finding;
@@ -26,8 +25,6 @@ final class CloneDetector {
     private static final int EXACT_LINES = 6;
     private static final int MAX_SIBLING_FILES = 32;
     private static final int MAX_SIBLING_BYTES = 192 * 1024;
-    private static final Set<String> SKIPPED_DIRS = Set.of(".git", ".pilot", ".idea", ".gradle", "node_modules",
-        "target", "build", "dist", "out", "test", "tests", "__tests__");
 
     private CloneDetector() {
     }
@@ -126,7 +123,8 @@ final class CloneDetector {
                         return attrs.isSymbolicLink() ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.TERMINATE;
                     }
                     String name = d.getFileName() == null ? "" : d.getFileName().toString().toLowerCase(Locale.ROOT);
-                    return SKIPPED_DIRS.contains(name) ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
+                    return QualityScanDirs.SKIPPED.contains(name) ? FileVisitResult.SKIP_SUBTREE
+                        : FileVisitResult.CONTINUE;
                 }
 
                 @Override

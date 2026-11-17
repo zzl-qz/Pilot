@@ -23,9 +23,11 @@ class CodebaseAuditorTest {
         Path serviceB = workspace.resolve("src/main/java/legacy/RefundService.java");
         Path testFile = workspace.resolve("src/test/java/legacy/OrderServiceTest.java");
         Path nodeMod = workspace.resolve("node_modules/pkg/index.js");
+        Path evalFixture = workspace.resolve(".pilot-eval/run-1/src/fixture.js");
         Files.createDirectories(serviceA.getParent());
         Files.createDirectories(testFile.getParent());
         Files.createDirectories(nodeMod.getParent());
+        Files.createDirectories(evalFixture.getParent());
 
         Files.writeString(serviceA, """
             package legacy;
@@ -83,9 +85,11 @@ class CodebaseAuditorTest {
         // 测试文件与 node_modules 中的魔法值不得混入生产代码审计账本
         Files.writeString(testFile, "class OrderServiceTest { int x = 99999; }\n");
         Files.writeString(nodeMod, "const magic = 77777;\n");
+        Files.writeString(evalFixture, "const magic = 88888;\n");
 
         AuditSnapshot baseline = CodebaseAuditor.audit(workspace);
         assertEquals(2, baseline.scannedFiles());
+        assertFalse(baseline.items().stream().anyMatch(item -> item.path().startsWith(".pilot-eval/")));
         assertTrue(baseline.duplicateBlocks() >= 1, "Expected cross-file structural clone: " + baseline.items());
         assertTrue(baseline.magicLiterals() >= 2, "Expected magic literals: " + baseline.items());
         assertTrue(baseline.perfHazards() >= 1, "Expected loop N+1 hazard: " + baseline.items());
@@ -175,7 +179,7 @@ class CodebaseAuditorTest {
         for (String selfFile : List.of("src/main/java/com/pilot/core/quality/PerformanceBoundaryScanner.java",
             "src/main/java/com/pilot/core/quality/CodebaseAuditor.java",
             "src/main/java/com/pilot/core/quality/RefactorEvidenceGate.java",
-            "src/main/java/com/pilot/core/tool/AuditCodebaseTool.java")) {
+            "src/main/java/com/pilot/core/quality/AuditCodebaseTool.java")) {
             if (Files.isRegularFile(moduleRoot.resolve(selfFile))) {
                 AuditSnapshot selfSnap = CodebaseAuditor.audit(moduleRoot, selfFile);
                 assertEquals(0, selfSnap.totalIssues(), selfFile + " has self-smells: " + selfSnap.items());
