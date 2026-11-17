@@ -363,4 +363,34 @@ class CompletionGateTest {
         assertTrue(nudge.prompt().contains("1/2"), nudge.prompt());
         assertTrue(nudge.prompt().contains("第二步"), nudge.prompt());
     }
+
+    @Test
+    void boundaryHardeningGoalRequiresBoundaryTestsAndReverificationBoundedToOnce() {
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "完善字符串解析器的边界情况与鲁棒性");
+        Map<String, CodeQualityCheck.TextChange> cleanChanges = Map.of("src/main/Parser.java",
+            new CodeQualityCheck.TextChange("class Parser {}\n", "class Parser { int parse() { return 0; } }\n"));
+
+        gate.recordOutcome(List.of("src/main/Parser.java"), List.of());
+        gate.recordOutcome(List.of(), List.of("mvnw test → exit 0"));
+
+        // 只改了生产代码没补单测 -> 证据门拦截一次
+        CompletionGate.Nudge evidenceNudge = gate.evaluate(Set.of("src/main/Parser.java"),
+            List.of("mvnw test → exit 0"), List.of(), List.of(), true, cleanChanges, null, null, "边界情况已全部处理完毕！");
+        assertNotNull(evidenceNudge);
+        assertTrue(evidenceNudge.reason().contains("硬证据不足"), evidenceNudge.reason());
+        assertTrue(evidenceNudge.prompt().contains("边界单元测试"), evidenceNudge.prompt());
+
+        // 模型补了单测文件但漏跑测试 -> dirty check 拦住要求跑通新单测
+        Set<String> withTest = Set.of("src/main/Parser.java", "src/test/ParserTest.java");
+        gate.recordOutcome(List.of("src/test/ParserTest.java"), List.of());
+        CompletionGate.Nudge reverify = gate.evaluate(withTest, List.of("mvnw test → exit 0"), List.of(), List.of(),
+            true, cleanChanges, null, null, "已补齐边界单测。");
+        assertNotNull(reverify);
+        assertTrue(reverify.reason().contains("尚未重新验证"), reverify.reason());
+
+        // 跑通测试后放行，绝不无限循环
+        gate.recordOutcome(List.of(), List.of("mvnw test → exit 0"));
+        assertNull(gate.evaluate(withTest, List.of("mvnw test → exit 0"), List.of(), List.of(), true, cleanChanges,
+            null, null, "已补齐边界单测并验证通过。"));
+    }
 }

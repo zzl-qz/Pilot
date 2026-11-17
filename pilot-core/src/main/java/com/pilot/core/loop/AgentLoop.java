@@ -703,7 +703,7 @@ public final class AgentLoop {
         // 通用验证先于模式级 reviewer；有独立审查时跳过重复的模型自审。
         CompletionGate.Nudge nudge = completionGate.evaluate(changedFiles, checks, plan, openSteps,
             executionPolicy != null && executionPolicy.independentCompletionReview(changedFiles),
-            qualityChanges(changedFiles), qualityWorkspace, independentCodeReviewer);
+            qualityChanges(changedFiles), qualityWorkspace, independentCodeReviewer, content);
         if (nudge != null) {
             runtimeGuidance.add(nudge.prompt());
             events.accept(new RunContinued(nudge.attempt(), nudge.max(), nudge.reason()));

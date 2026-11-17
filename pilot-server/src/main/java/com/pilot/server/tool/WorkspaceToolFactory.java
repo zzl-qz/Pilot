@@ -21,6 +21,7 @@ import com.pilot.core.mcp.McpManager;
 import com.pilot.core.mcp.McpToolsTool;
 import com.pilot.core.message.ToolNames;
 import com.pilot.core.plan.PlanSink;
+import com.pilot.core.tool.AuditCodebaseTool;
 import com.pilot.core.tool.ReadTracker;
 import com.pilot.core.tool.RememberTool;
 import com.pilot.core.tool.SandboxSink;
@@ -193,6 +194,9 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
         if (view.allowsTool(ToolNames.SEARCH_TEXT)) {
             registry.register(new SearchTool(validator));
         }
+        if (view.allowsTool(ToolNames.AUDIT_CODEBASE)) {
+            registry.register(new AuditCodebaseTool(validator));
+        }
         if (view.allowsTool(ToolNames.WEB_SEARCH)) {
             registry.register(searchTool());
         }
@@ -228,6 +232,7 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
         registry.register(new ListDirTool(validator));
         registry.register(new GlobFilesTool(validator));
         registry.register(new SearchTool(validator));
+        registry.register(new AuditCodebaseTool(validator));
         registry.register(searchTool());
         registry.register(new WebFetchTool(webClient));
         registry.register(new EditFileTool(validator, snapshots, reads));

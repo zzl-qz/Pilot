@@ -1135,8 +1135,9 @@ public class AgentRunService implements RunStarter {
      * 命令保留：git 只读子命令在内置白名单里，写命令照旧走权限门。
      */
     private ToolRegistry reviewTools(String workspace) {
-        AgentScope scope = AgentScope.readOnly(List.of(), List.of()).withTools(List.of("read_*", "list_*", "glob_*",
-            "search_*", ToolNames.RUN_COMMAND, ToolNames.WEB_SEARCH, ToolNames.WEB_FETCH), List.of());
+        AgentScope scope =
+            AgentScope.readOnly(List.of(), List.of()).withTools(List.of("read_*", "list_*", "glob_*", "search_*",
+                ToolNames.AUDIT_CODEBASE, ToolNames.RUN_COMMAND, ToolNames.WEB_SEARCH, ToolNames.WEB_FETCH), List.of());
         return toolFactory.registryForScope(workspace, scope, com.pilot.core.tool.SandboxSink.rejectAll());
     }
 
@@ -1431,7 +1432,8 @@ public class AgentRunService implements RunStarter {
                 properties.goalMaxInputTokens(), properties.goalMaxOutputTokens(), properties.goalMaxActiveMillis())
             : null;
         if (goalPolicy != null) {
-            goalPolicy.withCommandLookup(id -> commandTasks.get(sessionId, id));
+            goalPolicy.withCommandLookup(id -> commandTasks.get(sessionId, id))
+                .withOriginalTexts(snapshots::originalText);
             goalPolicy.withAvailableTools(availableTools)
                 .withUpdates(state -> sink.accept(new com.pilot.core.event.ExecutionUpdated(state.mode(), state.phase(),
                     state.requests(), state.reason(), state.gap())));

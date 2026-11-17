@@ -34,23 +34,29 @@ final class CloneDetector {
 
     static List<Finding> detect(String currentPath, List<ParsedLine> lines, boolean[] added,
         Map<String, List<ParsedLine>> peers) {
+        return detect(currentPath, lines, added, peers, 2);
+    }
+
+    static List<Finding> detect(String currentPath, List<ParsedLine> lines, boolean[] added,
+        Map<String, List<ParsedLine>> peers, int maxFindings) {
         List<IndexedLine> meaningful = extractMeaningful(lines, added);
-        if (meaningful.size() < EXACT_LINES) {
+        if (meaningful.size() < EXACT_LINES || maxFindings <= 0) {
             return List.of();
         }
         List<Finding> findings = new ArrayList<>();
         findings.addAll(scanWindow(currentPath, meaningful, peers, EXACT_LINES, CloneDetector::exactKey,
-            "duplicate-block", "重复代码块；确认无现成公共方法后再抽离复用", List.of()));
-        if (findings.size() < 2 && meaningful.size() >= CodeQualityCheck.DUPLICATE_BLOCK_LINES) {
+            "duplicate-block", "重复代码块；确认无现成公共方法后再抽离复用", List.of(), maxFindings));
+        if (findings.size() < maxFindings && meaningful.size() >= CodeQualityCheck.DUPLICATE_BLOCK_LINES) {
             findings.addAll(scanWindow(currentPath, meaningful, peers, CodeQualityCheck.DUPLICATE_BLOCK_LINES,
-                CloneDetector::structuralKey, "structural-clone", "同构代码（仅变量名或字面量不同）；若职责相同请合并抽离", findings));
+                CloneDetector::structuralKey, "structural-clone", "同构代码（仅变量名或字面量不同）；若职责相同请合并抽离", findings,
+                maxFindings));
         }
         return findings;
     }
 
     private static List<Finding> scanWindow(String currentPath, List<IndexedLine> meaningful,
         Map<String, List<ParsedLine>> peers, int windowSize, BiFunction<List<IndexedLine>, Integer, String> keyFn,
-        String kind, String suffix, List<Finding> prior) {
+        String kind, String suffix, List<Finding> prior, int maxFindings) {
         String normCurrent = currentPath == null ? "" : currentPath.replace('\\', '/');
         Map<String, BlockRef> index = new LinkedHashMap<>();
 
@@ -70,7 +76,7 @@ final class CloneDetector {
 
         List<Finding> out = new ArrayList<>();
         int nextAllowed = 0;
-        for (int i = 0; i + windowSize <= meaningful.size() && out.size() + prior.size() < 2; i++) {
+        for (int i = 0; i + windowSize <= meaningful.size() && out.size() + prior.size() < maxFindings; i++) {
             String key = keyFn.apply(meaningful, i);
             if (key.isEmpty()) {
                 continue;
@@ -191,7 +197,7 @@ final class CloneDetector {
         List<IndexedLine> out = new ArrayList<>();
         for (int i = 0; i < lines.size(); i++) {
             if (lines.get(i).meaningfulForClone()) {
-                out.add(new IndexedLine(lines.get(i), added != null && added[i]));
+                out.add(new IndexedLine(lines.get(i), added == null || added[i]));
             }
         }
         return out;

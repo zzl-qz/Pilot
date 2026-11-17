@@ -12,10 +12,12 @@ import java.util.stream.Collectors;
 
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
+import com.pilot.core.message.ToolNames;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.quality.CodeQualityCheck;
 import com.pilot.core.quality.IndependentCodeReviewer;
+import com.pilot.core.quality.RefactorEvidenceGate;
 import com.pilot.core.tool.ToolResults;
 import com.pilot.core.tool.VerificationCheck;
 import com.pilot.core.util.Texts;
@@ -62,6 +64,8 @@ final class CompletionGate {
             "do not modify any files", "do not change any files", "do not edit any files", "this task is read-only");
     /** 新增代码质量问题只打回一次；模型可以修正，也可以说明保留原因。 */
     private static final int MAX_QUALITY_PROMPTS = 1;
+    /** 存量重构、性能优化与边界测试硬证据门最多打回一次，杜绝死循环。 */
+    private static final int MAX_EVIDENCE_PROMPTS = 1;
     /** 只改这些后缀的文档不算「改了代码」，不强制跑构建。 */
     private static final Set<String> DOC_SUFFIXES = Set.of(".md", ".txt", ".rst", ".adoc");
     /** 目标像「调研 / 解释 / 定位」时，只读任务也要核对覆盖范围，不能读两个文件就下结论。 */
@@ -77,11 +81,13 @@ final class CompletionGate {
     private final PromptLibrary prompts;
     private final boolean enabled;
     private final String goal;
+    private final RefactorEvidenceGate evidenceGate;
     private int planPrompts;
     private int verifyPrompts;
     private int reviewPrompts;
     private int actionPrompts;
     private int qualityPrompts;
+    private int evidencePrompts;
     private boolean independentCodeReviewed;
     /** 记录最近一次通过的构建/测试之后是否又改了代码，防止收尾重构改坏原有功能却漏跑验证。 */
     private boolean codeDirtySincePassingCheck;
@@ -96,6 +102,7 @@ final class CompletionGate {
         this.prompts = prompts;
         this.enabled = enabled;
         this.goal = goal;
+        this.evidenceGate = new RefactorEvidenceGate(goal);
     }
 
     void countToolCall() {
@@ -116,6 +123,9 @@ final class CompletionGate {
 
     /** 记下这次调用碰过的路径，只读任务自审时说明「已经看过哪些」。 */
     void recordTarget(ToolCall call) {
+        if (ToolNames.AUDIT_CODEBASE.equals(call.name())) {
+            evidenceGate.recordAuditToolCall();
+        }
         Object path = call.args() == null ? null : call.args().get("path");
         if (path == null) {
             return;
@@ -186,6 +196,13 @@ final class CompletionGate {
     Nudge evaluate(Set<String> changedFiles, List<String> checks, List<PlanItem> plan, List<String> openSteps,
         boolean independentReview, Map<String, CodeQualityCheck.TextChange> qualityChanges, Path workspaceRoot,
         IndependentCodeReviewer codeReviewer) {
+        return evaluate(changedFiles, checks, plan, openSteps, independentReview, qualityChanges, workspaceRoot,
+            codeReviewer, "");
+    }
+
+    Nudge evaluate(Set<String> changedFiles, List<String> checks, List<PlanItem> plan, List<String> openSteps,
+        boolean independentReview, Map<String, CodeQualityCheck.TextChange> qualityChanges, Path workspaceRoot,
+        IndependentCodeReviewer codeReviewer, String candidateAnswer) {
         if (!enabled) {
             return null;
         }
@@ -235,6 +252,16 @@ final class CompletionGate {
             String reason =
                 codeDirtySincePassingCheck && hasPassingCheck(checks) ? "最近一次代码整理后尚未重新验证，已要求重跑测试" : "改动未验证，已要求先跑构建或测试";
             return new Nudge(prompt, reason, verifyPrompts, MAX_VERIFY_PROMPTS);
+        }
+        if (!readOnlyTask && evidencePrompts < MAX_EVIDENCE_PROMPTS) {
+            Path root =
+                workspaceRoot != null ? workspaceRoot : codeReviewer == null ? null : codeReviewer.workspaceRoot();
+            String evidenceIssue =
+                evidenceGate.evaluate(root, changedFiles, qualityChanges, !needsVerify, candidateAnswer);
+            if (evidenceIssue != null && !evidenceIssue.isBlank()) {
+                evidencePrompts++;
+                return new Nudge(evidenceIssue, "重构/性能/边界硬证据不足，已要求补齐可核验证据", evidencePrompts, MAX_EVIDENCE_PROMPTS);
+            }
         }
         if (!independentReview && changed && codeReviewer != null && !independentCodeReviewed) {
             independentCodeReviewed = true;

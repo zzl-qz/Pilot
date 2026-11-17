@@ -90,9 +90,11 @@ public final class IndependentCodeReviewer {
             if (assets.length() > MAX_ASSET_CHARS) {
                 assets = assets.substring(0, MAX_ASSET_CHARS) + "\n…（其余省略）";
             }
-            String userPayload = "原始用户目标：\n"
-                + (goal == null || goal.isBlank() ? "（按当前代码变更上下文判断）" : Texts.oneLine(goal, 600)) + "\n\n工作区可复用公共代码清单：\n"
-                + (assets.isBlank() ? "（无已索引的公共工具清单）" : assets) + "\n\n本次生产代码变更 Diff（待审数据）：\n" + diff;
+            String auditDelta = RefactorEvidenceGate.delta(workspaceRoot, changes).renderSummary();
+            String userPayload =
+                "原始用户目标：\n" + (goal == null || goal.isBlank() ? "（按当前代码变更上下文判断）" : Texts.oneLine(goal, 600))
+                    + "\n\n工作区可复用公共代码清单：\n" + (assets.isBlank() ? "（无已索引的公共工具清单）" : assets) + "\n\n变更前后静态审计账本对比：\n"
+                    + auditDelta + "\n\n本次生产代码变更 Diff（待审数据）：\n" + diff;
 
             List<Message> messages = List.of(Message.system(prompts.render("completion/code-review", Map.of()).strip()),
                 Message.user(userPayload));

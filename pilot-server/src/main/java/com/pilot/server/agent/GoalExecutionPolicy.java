@@ -30,6 +30,9 @@ import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.quality.CodeAssetIndex;
 import com.pilot.core.quality.CodeQualityCheck;
+import com.pilot.core.quality.CodebaseAuditor;
+import com.pilot.core.quality.RefactorEvidenceGate;
+import com.pilot.core.quality.WorkspaceTexts;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolSchemas;
 import com.pilot.core.tool.ToolSupport;
@@ -68,12 +71,12 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     /** 命令的发起与查询：两者的证据按同一条命令归并。 */
     private static final Set<String> COMMAND_TOOLS = Set.of(ToolNames.RUN_COMMAND, ToolNames.COMMAND_STATUS);
     /** 只看不改的工具：连续用太多次说明一直在观察、没有推进。 */
-    private static final Set<String> OBSERVATION_TOOLS =
-        Set.of(ToolNames.READ_FILE, ToolNames.SEARCH_TEXT, ToolNames.LIST_DIR, ToolNames.GLOB_FILES);
+    private static final Set<String> OBSERVATION_TOOLS = Set.of(ToolNames.READ_FILE, ToolNames.SEARCH_TEXT,
+        ToolNames.LIST_DIR, ToolNames.GLOB_FILES, ToolNames.AUDIT_CODEBASE);
     /** 还欠调研结论时允许用的工具：只能查资料、读文件、记结论。 */
     private static final Set<String> RESEARCH_PHASE_TOOLS = Set.of(ToolNames.WEB_SEARCH, ToolNames.WEB_FETCH,
-        ToolNames.READ_FILE, ToolNames.LIST_DIR, ToolNames.SEARCH_TEXT, ToolNames.GLOB_FILES, ToolNames.RECORD_RESEARCH,
-        ToolNames.USE_SKILL, ToolNames.UPDATE_PLAN, ToolNames.PROMOTE_GOAL);
+        ToolNames.READ_FILE, ToolNames.LIST_DIR, ToolNames.SEARCH_TEXT, ToolNames.GLOB_FILES, ToolNames.AUDIT_CODEBASE,
+        ToolNames.RECORD_RESEARCH, ToolNames.USE_SKILL, ToolNames.UPDATE_PLAN, ToolNames.PROMOTE_GOAL);
     /** 旧记录里的伪工具名，只用来识别执行前已有的改动，现在不再写入。 */
     private static final String LEGACY_WORKSPACE_BASELINE = "workspace_baseline";
 
@@ -100,6 +103,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private final Map<String, TaskControlService.TaskContract> toolStartRequirements = new LinkedHashMap<>();
     private java.util.function.Function<String, com.pilot.core.tool.command.CommandTaskManager.Task> commandLookup =
         ignored -> null;
+    private java.util.function.Function<String, String> originalTexts = ignored -> null;
     private java.util.function.Consumer<TaskControlService.Execution> updates = ignored -> {
     };
     private List<Attachment> attachments = List.of();
@@ -163,6 +167,11 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     GoalExecutionPolicy withCommandLookup(
         java.util.function.Function<String, com.pilot.core.tool.command.CommandTaskManager.Task> lookup) {
         this.commandLookup = lookup == null ? ignored -> null : lookup;
+        return this;
+    }
+
+    GoalExecutionPolicy withOriginalTexts(java.util.function.Function<String, String> reader) {
+        this.originalTexts = reader == null ? ignored -> null : reader;
         return this;
     }
 
@@ -1036,14 +1045,40 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
             + reviewToolContext();
     }
 
-    /** 仅当 Goal 改动了生产代码时，向独立核验器补充仓库可复用资产线索，避免盲目放过重复造轮子。 */
+    /** 仅当 Goal 改动了生产代码时，向独立核验器补充仓库可复用资产线索与前后静态审计对比账本，防口头糊弄。 */
     private String codeReviewDigest() {
         if (root == null || changedPaths.stream().noneMatch(CodeQualityCheck::applies)) {
             return "";
         }
         try {
+            StringBuilder digest = new StringBuilder();
             String assets = CodeAssetIndex.summarize(root);
-            return assets.isBlank() ? "" : "\n\n工作区可复用公共代码清单（供核对是否重复造轮子）：\n" + clip(assets, 1_800);
+            if (!assets.isBlank()) {
+                digest.append("\n\n工作区可复用公共代码清单（供核对是否重复造轮子）：\n").append(clip(assets, 1_800));
+            }
+            Map<String, CodeQualityCheck.TextChange> changes = new LinkedHashMap<>();
+            for (String path : changedPaths) {
+                if (!CodeQualityCheck.applies(path)) {
+                    continue;
+                }
+                String after = WorkspaceTexts.read(root, path);
+                if (after != null) {
+                    changes.put(path, new CodeQualityCheck.TextChange(originalTexts.apply(path), after));
+                }
+            }
+            if (!changes.isEmpty()) {
+                CodebaseAuditor.DeltaReport delta = RefactorEvidenceGate.delta(root, changes);
+                boolean touchedTests = changedPaths.stream().anyMatch(RefactorEvidenceGate::isTestCodePath);
+                digest.append("\n\n触达代码静态审计前后对比：").append(delta.renderSummary()).append(" | 本轮是否变更测试文件：")
+                    .append(touchedTests ? "是" : "否");
+                List<CodebaseAuditor.AuditItem> remaining = delta.after().items();
+                for (int i = 0; i < Math.min(4, remaining.size()); i++) {
+                    var item = remaining.get(i);
+                    digest.append("\n- 仍存 ").append(item.path()).append(':').append(item.line()).append(" [")
+                        .append(item.kind()).append("] ").append(item.message());
+                }
+            }
+            return digest.toString();
         } catch (RuntimeException ignored) {
             return "";
         }

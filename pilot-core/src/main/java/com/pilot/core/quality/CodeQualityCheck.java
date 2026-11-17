@@ -40,8 +40,8 @@ public final class CodeQualityCheck {
         "closed", "created", "deleted", "running", "stopped", "cancelled", "canceled", "completed", "todo", "doing",
         "done", "timeout", "expired", "processing", "ready", "waiting");
     private static final Set<String> IGNORED_REPEATED_STRINGS = Set.of("type", "string", "object", "array", "number",
-        "boolean", "integer", "description", "properties", "items", "required", "value", "result", "error", "message",
-        "status", "utf-8", "UTF-8", "application/json", "text/plain", "localhost");
+        "boolean", "integer", "description", "properties", "items", "required", "value", "result", "error", "ERROR:",
+        "SKIPPED:", "message", "status", "utf-8", "UTF-8", "application/json", "text/plain", "localhost");
 
     private static final Set<String> NON_METHOD_NAMES = Set.of("if", "for", "while", "switch", "catch", "try",
         "synchronized", "return", "throw", "new", "super", "this", "when", "match");
@@ -104,15 +104,33 @@ public final class CodeQualityCheck {
             Set<String> impPaths = ConstantAffinityMatcher.extractImportedPaths(after);
 
             List<Finding> out = new ArrayList<>();
-            out.addAll(bypassAndRobustnessFindings(path, ext, afterLines, added, assets));
-            out.addAll(literalFindings(path, afterLines, added, assets, impWords, impPaths));
-            out.addAll(repeatedStringFindings(path, afterLines, added, assets));
+            out.addAll(bypassAndRobustnessFindings(path, ext, afterLines, added, assets, 2));
+            out.addAll(PerformanceBoundaryScanner.scan(ext, afterLines, added));
+            out.addAll(literalFindings(path, afterLines, added, assets, impWords, impPaths, MAX_FINDINGS));
+            out.addAll(repeatedStringFindings(path, afterLines, added, assets, 2));
             out.addAll(CloneDetector.detect(path, afterLines, added, peers));
             out.addAll(structureFindings(afterLines, added));
             return out.size() <= MAX_FINDINGS ? List.copyOf(out) : List.copyOf(out.subList(0, MAX_FINDINGS));
         } catch (RuntimeException ignored) {
             return List.of();
         }
+    }
+
+    static List<Finding> inspectFullFile(CodeAssetIndex.Snapshot assets, Map<String, List<ParsedLine>> peers,
+        String path, String ext, List<ParsedLine> lines, String rawText, int categoryLimit) {
+        if (lines == null || lines.isEmpty() || categoryLimit <= 0) {
+            return List.of();
+        }
+        Set<String> impWords = ConstantAffinityMatcher.extractImportedWords(rawText);
+        Set<String> impPaths = ConstantAffinityMatcher.extractImportedPaths(rawText);
+        List<Finding> out = new ArrayList<>();
+        out.addAll(CloneDetector.detect(path, lines, null, peers, categoryLimit));
+        out.addAll(PerformanceBoundaryScanner.scan(ext, lines, null));
+        out.addAll(bypassAndRobustnessFindings(path, ext, lines, null, assets, categoryLimit));
+        out.addAll(literalFindings(path, lines, null, assets, impWords, impPaths, categoryLimit));
+        out.addAll(repeatedStringFindings(path, lines, null, assets, categoryLimit));
+        out.addAll(structureFindings(lines, null));
+        return List.copyOf(out);
     }
 
     public static String summary(String path, String before, String after) {
@@ -204,11 +222,11 @@ public final class CodeQualityCheck {
     }
 
     private static List<Finding> bypassAndRobustnessFindings(String path, String ext, List<ParsedLine> lines,
-        boolean[] added, CodeAssetIndex.Snapshot assets) {
+        boolean[] added, CodeAssetIndex.Snapshot assets, int limit) {
         List<Finding> out = new ArrayList<>();
         String lowerPath = path.toLowerCase(Locale.ROOT);
-        for (int i = 0; i < lines.size() && out.size() < 2; i++) {
-            if (!added[i]) {
+        for (int i = 0; i < lines.size() && out.size() < limit; i++) {
+            if (!included(added, i)) {
                 continue;
             }
             ParsedLine line = lines.get(i);
@@ -265,10 +283,10 @@ public final class CodeQualityCheck {
     }
 
     private static List<Finding> literalFindings(String path, List<ParsedLine> lines, boolean[] added,
-        CodeAssetIndex.Snapshot assets, Set<String> impWords, Set<String> impPaths) {
+        CodeAssetIndex.Snapshot assets, Set<String> impWords, Set<String> impPaths, int limit) {
         List<Finding> out = new ArrayList<>();
-        for (int i = 0; i < lines.size() && out.size() < MAX_FINDINGS; i++) {
-            if (!added[i] || lines.get(i).declarationOrConstant()) {
+        for (int i = 0; i < lines.size() && out.size() < limit; i++) {
+            if (!included(added, i) || lines.get(i).declarationOrConstant()) {
                 continue;
             }
             ParsedLine line = lines.get(i);
@@ -295,12 +313,12 @@ public final class CodeQualityCheck {
     }
 
     private static List<Finding> repeatedStringFindings(String path, List<ParsedLine> lines, boolean[] added,
-        CodeAssetIndex.Snapshot assets) {
+        CodeAssetIndex.Snapshot assets, int limit) {
         Map<String, List<Integer>> hits = new LinkedHashMap<>();
         Map<String, String> sampleLine = new LinkedHashMap<>();
         for (int i = 0; i < lines.size(); i++) {
             ParsedLine l = lines.get(i);
-            if (!added[i] || l.declarationOrConstant() || l.diagnosticOrLog()) {
+            if (!included(added, i) || l.declarationOrConstant() || l.diagnosticOrLog()) {
                 continue;
             }
             for (String s : l.stringLiterals()) {
@@ -314,13 +332,14 @@ public final class CodeQualityCheck {
         }
         List<Finding> out = new ArrayList<>();
         for (var e : hits.entrySet()) {
-            if (e.getValue().size() >= REPEATED_STRING_THRESHOLD && out.size() < 2) {
+            if (e.getValue().size() >= REPEATED_STRING_THRESHOLD && out.size() < limit) {
                 ConstantRef ref = assets.recommendConstant(e.getKey(), path, sampleLine.getOrDefault(e.getKey(), ""));
                 String advice =
                     ref != null ? "同链路已有 " + ref.symbol() + "（" + ref.path() + "），核对一致后可引用" : "若属同一概念请在本模块提炼具名常量避免失步";
                 String shown = e.getKey().length() <= 36 ? e.getKey() : e.getKey().substring(0, 36) + "…";
+                String scopeWord = added == null ? "文件中" : "新增代码中";
                 out.add(new Finding(e.getValue().getFirst(), "repeated-literal",
-                    "字符串 \"" + shown + "\" 在新增代码中重复出现 " + e.getValue().size() + " 次；" + advice));
+                    "字符串 \"" + shown + "\" 在" + scopeWord + "重复出现 " + e.getValue().size() + " 次；" + advice));
             }
         }
         return out;
@@ -335,22 +354,23 @@ public final class CodeQualityCheck {
 
         for (int i = 0; i < lines.size(); i++) {
             ParsedLine line = lines.get(i);
-            if (braceDepth <= 1 && elseIfChain > 0) {
+            if (braceDepth <= 1 && elseIfChain != 0) {
                 elseIfChain = 0;
             }
-            if (added[i] && !reportedNesting && line.controlNestingDepth() >= DEEP_NESTING_LEVEL) {
+            if (included(added, i) && !reportedNesting && line.controlNestingDepth() >= DEEP_NESTING_LEVEL) {
                 out.add(new Finding(line.lineNumber(), "deep-nesting",
-                    "新增控制流嵌套已达 " + line.controlNestingDepth() + " 层；建议用卫语句（提前 return / continue）拍平分支"));
+                    "控制流嵌套已达 " + line.controlNestingDepth() + " 层；建议用卫语句（提前 return / continue）拍平分支"));
                 reportedNesting = true;
             }
             boolean isRecordHeader =
                 line.raw().stripLeading().startsWith("record ") || line.codeOnly().contains(" record ");
             Matcher m = isRecordHeader ? null : METHOD_START.matcher(line.codeOnly());
             if (m != null && m.find() && !NON_METHOD_NAMES.contains(m.group(1))) {
-                if (elseIfChain > 0) {
-                    elseIfChain = 0;
+                elseIfChain = 0;
+                if (added == null) {
+                    reportedNesting = false;
                 }
-                if (added[i]) {
+                if (included(added, i)) {
                     int params = countParameters(m.group(2));
                     if (params >= MAX_METHOD_PARAMS) {
                         out.add(new Finding(line.lineNumber(), "long-params",
@@ -358,27 +378,28 @@ public final class CodeQualityCheck {
                     }
                 }
                 int end = methodEnd(lines, i);
-                int addedInMethod = countAdded(added, i, end);
-                if (addedInMethod >= LONG_METHOD_LINES) {
-                    out.add(new Finding(line.lineNumber(), "long-method",
-                        "本次在单个方法内新增约 " + addedInMethod + " 行代码；请把职责独立的子步骤拆为小而精的私有方法"));
+                int linesInMethod = added == null ? countNonEmpty(lines, i, end) : countAdded(added, i, end);
+                if (linesInMethod >= LONG_METHOD_LINES) {
+                    String msg = added == null ? "单个方法有效代码达 " + linesInMethod + " 行；请把职责独立的子步骤拆为小而精的私有方法"
+                        : "本次在单个方法内新增约 " + linesInMethod + " 行代码；请把职责独立的子步骤拆为小而精的私有方法";
+                    out.add(new Finding(line.lineNumber(), "long-method", msg));
                 }
             }
             if (line.codeOnly().contains("else if") || line.codeOnly().startsWith("elif ")) {
                 if (elseIfChain == 0) {
                     chainStartLine = line.lineNumber();
                 }
-                if (added[i]) {
+                if (included(added, i)) {
                     elseIfChain++;
                 }
             } else if (line.codeOnly().startsWith("if ") || line.codeOnly().startsWith("if(")) {
-                if (elseIfChain > 0) {
+                if (elseIfChain != 0) {
                     elseIfChain = 0;
                 }
             }
             if (elseIfChain >= ELSE_IF_CHAIN_LIMIT) {
                 out.add(new Finding(chainStartLine, "sprawling-branch",
-                    "同一条件链连续新增 else-if 达 " + elseIfChain + " 处；若属同类规则分派，优先考虑 Map/Enum 表驱动"));
+                    "同一条件链连续 else-if 达 " + elseIfChain + " 处；若属同类规则分派，优先考虑 Map/Enum 表驱动"));
                 elseIfChain = -100;
             }
             braceDepth = Math.max(0, braceDepth + line.braceDelta());
@@ -441,6 +462,18 @@ public final class CodeQualityCheck {
             }
         }
         return added;
+    }
+
+    private static boolean included(boolean[] added, int idx) {
+        return added == null || (idx < added.length && added[idx]);
+    }
+
+    private static int countNonEmpty(List<ParsedLine> lines, int start, int end) {
+        int n = 0;
+        for (int i = Math.max(0, start); i <= end && i < lines.size(); i++) {
+            n += lines.get(i).isEmptyCode() ? 0 : 1;
+        }
+        return n;
     }
 
     private static int countAdded(boolean[] added, int start, int end) {

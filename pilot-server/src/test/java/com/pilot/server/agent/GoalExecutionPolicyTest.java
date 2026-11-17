@@ -1018,4 +1018,43 @@ class GoalExecutionPolicyTest {
         assertEquals(0, calls.get());
         assertEquals(7, tasks.load("s").execution().requests());
     }
+
+    @Test
+    void goalReviewerReceivesBeforeAfterStaticAuditDelta() throws Exception {
+        Path service = root.resolve("src/main/OrderService.java");
+        Files.createDirectories(service.getParent());
+        String beforeCode = """
+            class OrderService {
+                int calc() {
+                    int ttl = 86400;
+                    return ttl;
+                }
+            }
+            """;
+        String afterCode = """
+            class OrderService {
+                private static final int TTL = 86400;
+
+                int calc() {
+                    return TTL;
+                }
+            }
+            """;
+        Files.writeString(service, afterCode);
+
+        AtomicReference<String> reviewerInput = new AtomicReference<>("");
+        GoalExecutionPolicy policy = policy((messages, tools) -> {
+            reviewerInput.set(messages.getLast().content());
+            return continueDecision("继续检查");
+        }, 20).withOriginalTexts(path -> "src/main/OrderService.java".equals(path) ? beforeCode : null);
+
+        policy.beforeRequest(history);
+        policy.promotionTool().execute(Map.of("reason", "重构老项目清理魔法值", "completion_conditions", List.of("清理魔法值")));
+        policy.review(history, Set.of("src/main/OrderService.java"), List.of("mvnw test → exit 0"));
+
+        String captured = reviewerInput.get();
+        assertTrue(captured.contains("触达代码静态审计前后对比"), captured);
+        assertTrue(captured.contains("总问题数 1 -> 0 (-1)"), captured);
+        assertTrue(captured.contains("本轮是否变更测试文件：否"), captured);
+    }
 }
