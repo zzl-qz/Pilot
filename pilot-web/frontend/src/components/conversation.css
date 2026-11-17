@@ -429,3 +429,195 @@ html[data-theme] .conversation-composer .voice-timer { font-family: var(--sans);
 .message-queue .queue-requirements { flex: none; font-size: 11px; color: var(--dim); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 .message-queue .queue-edit-field { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--dim); }
 .message-queue .queue-edit-field textarea { resize: vertical; min-height: 34px; }
+
+/* 回合改动卡，对齐 dsh ChangedFiles：填充标题、单列路径、悬停预览、底部折叠。 */
+html[data-theme] .conversation-thread .changed-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin-top: 8px;
+  overflow: visible;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--ink);
+}
+html[data-theme] .conversation-thread .changed-head,
+html[data-theme] .conversation-thread .changed-row,
+html[data-theme] .conversation-thread .changed-toggle {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+html[data-theme] .conversation-thread .changed-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 60px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 12px 12px 0 0;
+  background: var(--panel);
+}
+html[data-theme] .conversation-thread .changed-card[data-single] .changed-head { border-radius: 12px; }
+html[data-theme] .conversation-thread .changed-head:hover,
+html[data-theme] .conversation-thread .changed-row:hover,
+html[data-theme] .conversation-thread .changed-toggle:hover {
+  background: var(--panel-2, rgba(255, 255, 255, 0.04));
+}
+html[data-theme] .conversation-thread .changed-tile {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+}
+html[data-theme] .conversation-thread .changed-tile svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+html[data-theme] .conversation-thread .changed-titles {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+html[data-theme] .conversation-thread .changed-title {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html[data-theme] .conversation-thread .changed-stat { display: inline-flex; font-size: 10px; line-height: 16px; color: var(--dim); }
+html[data-theme] .conversation-thread .changed-preview-hint { display: none; }
+html[data-theme] .conversation-thread .changed-head:hover .changed-stat-counts,
+html[data-theme] .conversation-thread .changed-head:focus-visible .changed-stat-counts { display: none; }
+html[data-theme] .conversation-thread .changed-head:hover .changed-preview-hint,
+html[data-theme] .conversation-thread .changed-head:focus-visible .changed-preview-hint { display: inline; }
+html[data-theme] .conversation-thread .changed-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+html[data-theme] .conversation-thread .changed-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 24px;
+  margin: 0;
+  padding: 7px 18px 7px 14px;
+  color: var(--muted);
+}
+html[data-theme] .conversation-thread .changed-path {
+  min-width: 0;
+  overflow: hidden;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html[data-theme] .conversation-thread .changed-counts {
+  display: inline-flex;
+  flex: none;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+html[data-theme] .conversation-thread .changed-added { color: var(--ok); }
+html[data-theme] .conversation-thread .changed-deleted { color: var(--err); }
+html[data-theme] .conversation-thread .changed-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  margin: 0;
+  padding: 10px 18px 10px 14px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+html[data-theme] .conversation-thread .changed-toggle svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+html[data-theme] .conversation-thread .changed-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 8px 6px;
+  border-top: 1px solid var(--line);
+}
+html[data-theme] .conversation-thread .changed-preview {
+  position: absolute;
+  z-index: 30;
+  left: 24px;
+  right: 24px;
+  top: calc(100% + 6px);
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+  animation: changed-preview-in 100ms ease;
+}
+@keyframes changed-preview-in { from { opacity: 0; } to { opacity: 1; } }
+html[data-theme] .conversation-thread .changed-preview-path {
+  padding: 8px 12px;
+  overflow-x: auto;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+}
+html[data-theme] .conversation-thread .changed-preview-diff {
+  margin: 0;
+  padding: 8px 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 18px;
+}
+html[data-theme] .conversation-thread .changed-line {
+  padding: 0 12px;
+  white-space: pre;
+}
+html[data-theme] .conversation-thread .changed-line.is-add { color: var(--ok); background: rgba(62, 207, 142, 0.12); }
+html[data-theme] .conversation-thread .changed-line.is-del { color: var(--err); background: rgba(255, 111, 111, 0.12); }
+html[data-theme] .conversation-thread .changed-preview-empty {
+  margin: 0;
+  padding: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}

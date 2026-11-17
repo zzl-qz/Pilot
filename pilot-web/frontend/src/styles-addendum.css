@@ -14,13 +14,7 @@
 
 .history-more-wrap { display: flex; justify-content: center; padding: 8px 0 2px; }
 
-.turn-card-files {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 8px 0 0;
-}
-.turn-card-files .change-file { max-width: 260px; }
+/* 回合改动清单改由 conversation.css 的 .changed-card 呈现，不再用折行标签。 */
 
 .turn-resolved {
   padding: 1px 8px;

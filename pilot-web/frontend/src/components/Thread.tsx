@@ -21,7 +21,8 @@ import { StructuredDocumentView, isStructuredDocumentFormat } from './Structured
 import { TOOL_STATUS_TITLES, toolArgsText, toolLabel } from '../lib/tool-meta.js';
 import { agentMeta, agentTitle, manifestFacts, splitSubagentResult, summarizeAgents, agentStatusLabel } from '../lib/agents.js';
 import { splitAttachmentMarkers, layoutMessageParts, attachmentUrl, isImageAttachment, fileBadge, formatBytes } from '../lib/attachments.js';
-import { changeFileTitle, splitPath, statusKind } from '../lib/changes.js';
+import { splitPath } from '../lib/changes.js';
+import { parseDiff } from '../lib/diff.js';
 import { writeClipboard } from '../lib/clipboard.js';
 import { formatCount, formatTime } from '../thread-utils.js';
 import { messagePeek } from '../lib/side-chat.js';
@@ -856,6 +857,165 @@ function CompactionCard({ row }: { row: CompactionRow }) {
   );
 }
 
+const CHANGED_COLLAPSED_ROWS = 4;
+const CHANGED_COUNT = new Intl.NumberFormat('en-US');
+
+type ChangedFile = ResultRow['changedFiles'][number];
+
+function changedCount(value: number) {
+  return CHANGED_COUNT.format(value);
+}
+
+function ChangedCounts({ added, removed }: { added: number; removed: number }) {
+  return (
+    <span className="changed-counts">
+      <span className="changed-added">+{changedCount(added)}</span>
+      <span className="changed-deleted">-{changedCount(removed)}</span>
+    </span>
+  );
+}
+
+function FileGlyph({ code }: { code: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      {code
+        ? <path d="M8 8 4.5 12 8 16M16 8l3.5 4L16 16M13 6l-2 12" />
+        : <><path d="M7 3.5h7.2L19.5 9v11.5H7z" /><path d="M14 3.8V9h5.2" /></>}
+    </svg>
+  );
+}
+
+function ChangedFilePreview({ file }: { file: ChangedFile }) {
+  const parsed = parseDiff(file.diff || '')[0];
+  const lines = (parsed?.lines || []).filter((line) => line.kind === 'add' || line.kind === 'del' || line.kind === 'ctx').slice(0, 80);
+  return (
+    <div className="changed-preview" data-changes-hover-preview>
+      <div className="changed-preview-path">{file.path}</div>
+      {lines.length === 0
+        ? <p className="changed-preview-empty">{file.note || '这一轮的改动内容已经不在了'}</p>
+        : (
+          <pre className="changed-preview-diff">
+            {lines.map((line, index) => (
+              <div key={index} className={`changed-line is-${line.kind}`}>
+                <span>{line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' '}</span>
+                {line.text}
+              </div>
+            ))}
+          </pre>
+        )}
+    </div>
+  );
+}
+
+function ChangedFilesCard({ files, canRollback, onOpen, onRollback }: {
+  files: ResultRow['changedFiles'];
+  canRollback: boolean;
+  onOpen: (file: ChangedFile) => void;
+  onRollback: () => void;
+}) {
+  const cardRef = useRef<HTMLElement>(null);
+  const pathDescriptionId = React.useId();
+  const [expanded, setExpanded] = useState(false);
+  const [preview, setPreview] = useState<number | null>(null);
+  const hoverTimer = useRef<number | null>(null);
+  const added = files.reduce((sum, file) => sum + Number(file.added || 0), 0);
+  const removed = files.reduce((sum, file) => sum + Number(file.removed || 0), 0);
+  const single = files.length === 1 ? files[0] : null;
+  const foldable = files.length > CHANGED_COLLAPSED_ROWS;
+  const rows = foldable && !expanded ? files.slice(0, CHANGED_COLLAPSED_ROWS) : files;
+
+  const clearHover = () => {
+    if (hoverTimer.current != null) window.clearTimeout(hoverTimer.current);
+    hoverTimer.current = null;
+  };
+  const schedulePreview = (index: number) => {
+    clearHover();
+    hoverTimer.current = window.setTimeout(() => setPreview(index), 500);
+  };
+  const closePreview = () => {
+    clearHover();
+    setPreview(null);
+  };
+  useEffect(() => {
+    if (preview == null) return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closePreview();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [preview]);
+
+  const header = (
+    <button
+      type="button"
+      className="changed-head"
+      aria-label={single ? `查看 ${single.path} 的改动` : '在侧边栏查看本轮改动'}
+      aria-describedby={single ? pathDescriptionId : undefined}
+      onClick={() => onOpen(single || files[0])}
+      onMouseEnter={() => schedulePreview(0)}
+    >
+      <span className="changed-tile"><FileGlyph code={single == null} /></span>
+      <span className="changed-titles">
+        <span className="changed-title">{single ? `已编辑 ${splitPath(single.path).name}` : `已编辑 ${files.length} 个文件`}</span>
+        <span className="changed-stat">
+          <span className="changed-stat-counts"><ChangedCounts added={single ? Number(single.added || 0) : added} removed={single ? Number(single.removed || 0) : removed} /></span>
+          <span className="changed-preview-hint">在侧边栏预览</span>
+        </span>
+      </span>
+    </button>
+  );
+
+  return (
+    <section ref={cardRef} className="changed-card turn-card-files" data-changed-files data-single={single ? 'true' : undefined}
+      onMouseLeave={closePreview}>
+      {header}
+      {single && <span id={pathDescriptionId} hidden>{single.path}</span>}
+      {single == null && (
+        <ul className="changed-list">
+          {rows.map((file, index) => (
+            <li key={file.path}>
+              <button
+                type="button"
+                className="changed-row"
+                aria-label={`查看 ${file.path} 的改动`}
+                aria-describedby={`${pathDescriptionId}-${index}`}
+                onClick={() => onOpen(file)}
+                onMouseEnter={() => schedulePreview(index)}
+              >
+                <span className="changed-path">{file.path}</span>
+                <ChangedCounts added={Number(file.added || 0)} removed={Number(file.removed || 0)} />
+              </button>
+              <span id={`${pathDescriptionId}-${index}`} hidden>{file.path}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {foldable && (
+        <button
+          type="button"
+          className="changed-toggle"
+          aria-expanded={expanded}
+          aria-label={expanded ? '收起改动文件列表' : `展开全部 ${files.length} 个改动文件`}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          <span>{expanded ? '收起' : `全部 ${files.length} 个文件`}</span>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d={expanded ? 'M4 10l4-4 4 4' : 'M4 6l4 4 4-4'} /></svg>
+        </button>
+      )}
+      {canRollback && (
+        <div className="changed-foot">
+          <Button size="sm" variant="ghost" label="回滚本次改动" onClick={onRollback} />
+        </div>
+      )}
+      {preview != null && files[preview] && (
+        <div onMouseEnter={() => { clearHover(); setPreview(preview); }} onMouseLeave={closePreview}>
+          <ChangedFilePreview file={files[preview]} />
+        </div>
+      )}
+    </section>
+  );
+}
+
 function ResultCard({ row, duplicate, hasPrecedingReply = false }: { row: ResultRow; duplicate: boolean; hasPrecedingReply?: boolean }) {
   const rollbackRun = useStore((state) => state.rollbackRun);
   const compact = (!row.detail || duplicate || row.continued || row.resumable) && !row.changedFiles?.length;
@@ -887,31 +1047,18 @@ function ResultCard({ row, duplicate, hasPrecedingReply = false }: { row: Result
           : <div className="turn-card-detail"><MarkdownBody text={row.detail} /></div>
       )}
       {!!(row.changedFiles || []).length && (
-        <div className="turn-card-files">
-          {row.changedFiles.map((file) => (
-            <button
-              key={file.path}
-              type="button"
-              className={`change-file is-${statusKind(file.status)}`}
-              onClick={() => {
-                const state = useStore.getState();
-                const runId = row.runIds.at(-1);
-                if (runId) state.setUi({ inspectorOpen: true, inspectorTab: 'changes', reviewRunId: runId, changeView: file.path });
-                else state.openPreview(file.path);
-              }}
-              title={changeFileTitle(file)}
-            >
-              <span className="change-file-path">{splitPath(file.path).name}</span>
-              <span className="change-file-status">{file.status}</span>
-            </button>
-          ))}
-        </div>
+        <ChangedFilesCard
+          files={row.changedFiles}
+          canRollback={!row.continued}
+          onRollback={() => rollbackRun(row.runIds?.[0])}
+          onOpen={(file) => {
+            const state = useStore.getState();
+            const runId = row.runIds.at(-1);
+            if (runId) state.setUi({ inspectorOpen: true, inspectorTab: 'changes', reviewRunId: runId, changeView: file.path });
+            else state.openPreview(file.path);
+          }}
+        />
       )}
-      <div className="turn-actions">
-        {!row.continued && !!(row.changedFiles || []).length && (
-          <Button size="sm" variant="ghost" label="回滚本次改动" onClick={() => rollbackRun(row.runIds?.[0])} />
-        )}
-      </div>
     </article>
   );
 }
