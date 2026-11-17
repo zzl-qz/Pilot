@@ -66,7 +66,8 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private static final long DEFAULT_MAX_OUTPUT_TOKENS = 500_000L;
     private static final int REVIEWER_RESERVED_REQUESTS = 2;
     private static final int MAX_CONSECUTIVE_RESEARCH_FAILURES = 3;
-    private static final int INVESTIGATION_NUDGE_AT = 16;
+    /** 连续只读超过这一档就提醒一次；之后每再多这么多次再提醒，避免长任务一直读不改。 */
+    private static final int INVESTIGATION_NUDGE_AT = 8;
     private static final Set<String> RESEARCH_TOOLS = Set.of(ToolNames.WEB_SEARCH, ToolNames.WEB_FETCH);
     /** 命令的发起与查询：两者的证据按同一条命令归并。 */
     private static final Set<String> COMMAND_TOOLS = Set.of(ToolNames.RUN_COMMAND, ToolNames.COMMAND_STATUS);
@@ -270,10 +271,12 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                 observations++;
             }
         }
-        if (observations < INVESTIGATION_NUDGE_AT || phase.equals(investigationNudgeSignature)) {
+        int bucket = observations / INVESTIGATION_NUDGE_AT;
+        String mark = phase + "#" + bucket;
+        if (observations < INVESTIGATION_NUDGE_AT || mark.equals(investigationNudgeSignature)) {
             return null;
         }
-        investigationNudgeSignature = phase;
+        investigationNudgeSignature = mark;
         return prompts.render("loop/investigation-nudge", Map.of("count", String.valueOf(observations))).strip();
     }
 
