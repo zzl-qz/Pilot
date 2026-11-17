@@ -36,7 +36,12 @@ export function createSideChatActions({ set, get }: StoreContext): StoreSlice<'c
       const owned = sideChatsFor(state.sideChats, { sessionId, workspace });
       const existing = owned.items.find(item => item.id === owned.activeId);
       if (existing && !force) {
-        set(draft => { draft.sideChats.activeId = existing.id; draft.ui.inspectorOpen = true; draft.ui.inspectorTab = 'chat'; });
+        set(draft => {
+          draft.sideChats.activeId = existing.id;
+          draft.ui.inspectorOpen = true;
+          draft.ui.inspectorTab = 'chat';
+          draft.ui.besideTab = 'chat';
+        });
         writeSideChats(get().sideChats);
         return existing;
       }
@@ -62,6 +67,7 @@ export function createSideChatActions({ set, get }: StoreContext): StoreSlice<'c
               draft.sideChats.activeId = item.id;
               draft.ui.inspectorOpen = true;
               draft.ui.inspectorTab = 'chat';
+              draft.ui.besideTab = 'chat';
             }
           });
           writeSideChats(get().sideChats);
@@ -86,6 +92,7 @@ export function createSideChatActions({ set, get }: StoreContext): StoreSlice<'c
         draft.sideChats.activeId = id;
         draft.ui.inspectorOpen = true;
         draft.ui.inspectorTab = 'chat';
+        draft.ui.besideTab = 'chat';
       });
       writeSideChats(get().sideChats);
     },
@@ -131,11 +138,11 @@ export function createSideChatActions({ set, get }: StoreContext): StoreSlice<'c
       if (state.embeddedSessionId) {
         return;
       }
-      if (state.ui.inspectorOpen && state.ui.inspectorTab === 'chat') {
+      if (state.ui.inspectorOpen && state.ui.inspectorTab === 'chat' && state.ui.besideTab === 'chat') {
         state.setUi({ inspectorOpen: false });
         return;
       }
-      state.createSideChat();
+      void state.createSideChat();
     },
 
     /** 把选中的文本带进当前任务的侧边对话（没有就现开一条）。 */

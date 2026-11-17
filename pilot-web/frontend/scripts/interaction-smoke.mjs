@@ -222,7 +222,7 @@ async function run(page,name,url) {
   await page.locator('.queue-text').click();await page.getByLabel('编辑排队消息').fill('changed');await page.locator('#queue-edit').getByText('保存',{exact:true}).click();
   assert.equal(await page.getByLabel('编辑排队消息').inputValue(),'changed');
   await page.getByLabel('编辑排队消息').fill(' ');assert.equal(await page.locator('#queue-edit').getByText('保存',{exact:true}).isDisabled(),true);
-  await page.getByLabel('编辑排队消息').fill('saved');await page.evaluate(()=>{api.updateQueueItem=async()=>({});api.queue=async()=>({items:[]});});
+  await page.getByLabel('编辑排队消息').fill('saved');await page.evaluate(()=>{api.updateQueueItem=async()=>{api.queue=async()=>({items:[]});return {};};});
   await page.locator('#queue-edit').getByText('保存',{exact:true}).click();await page.waitForFunction(()=>store.getState().ui.queueEdit===null);
   // In-flight send, switch session, late failure cannot mutate the new conversation or lose original draft.
   await input.fill('slow original');await paste('slow.txt');
@@ -334,10 +334,18 @@ async function run(page,name,url) {
   assert.deepEqual(pdfConsoleErrors,[],`PDF.js 控制台错误: ${pdfConsoleErrors.join(' | ')}`);
   assert.equal(pdfRequestType,'fetch','PDF 作为数据请求，不通过浏览器文档导航触发系统下载器');
   assert.equal(await page.getByRole('button',{name:'下一页'}).isDisabled(),true);
-  const pdfWidthBeforeZoom=await page.locator('.pdf-attachment-scroll canvas').evaluate(canvas=>canvas.clientWidth);
+  const pdfWidthBeforeZoom=await page.locator('.pdf-attachment-scroll canvas').evaluate(canvas=>{
+    window.__pdfHiddenMutations = 0;
+    const obs = new MutationObserver(() => { if (canvas.hidden) window.__pdfHiddenMutations++; });
+    obs.observe(canvas, { attributes: true, attributeFilter: ['hidden'] });
+    window.__pdfObs = obs;
+    return canvas.clientWidth;
+  });
   await page.getByRole('button',{name:'放大'}).click();
   assert.equal(await page.getByText('110%').count(),1);
   await page.waitForFunction(before=>document.querySelector('.pdf-attachment-scroll canvas')?.clientWidth>before,pdfWidthBeforeZoom);
+  const pdfFlickerCount = await page.evaluate(() => { window.__pdfObs?.disconnect(); return window.__pdfHiddenMutations; });
+  assert.equal(pdfFlickerCount, 0, 'PDF 缩放重绘期间画布保持双缓冲显示，不得隐藏闪烁');
   if(name==='chromium') {
     await page.screenshot({path:join(temp,'chromium-pdf-preview.png'),animations:'disabled'});
     await page.setViewportSize({width:390,height:844});
@@ -346,6 +354,19 @@ async function run(page,name,url) {
     await page.screenshot({path:join(temp,'chromium-pdf-preview-mobile.png'),animations:'disabled'});
     await page.setViewportSize({width:1440,height:900});
   }
+  await page.keyboard.press('Escape');
+  // Structured XLSX spreadsheet table preview with sheet tabs and right-aligned numeric columns.
+  await page.evaluate(()=>{
+    const xlsxPath='/home/u/.pilot/attachments/test-a/12345678-1234-1234-1234-123456789abc-summary.xlsx';
+    const text=`检查报表\n\n[附件 summary.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet) 已保存到 ${xlsxPath}，需要时用工具读取]`;
+    window.api.attachmentPreviewText=async()=>({text:'[sheet] 采购汇总\n物料 | 数量 | 金额\n伺服电机 | 12 | 4800.00\n传感器 | 5 | 950.50\n[sheet] 备注\n项 | 说明\n币种 | CNY'});
+    store.setState(s=>{s.thread.rows=[{key:'xlsx-attachment',type:'user',text,sequence:4,attachments:[],imagePositions:[],start:4,end:4}];});
+  });
+  await page.getByRole('button',{name:'预览附件 summary.xlsx'}).click();
+  await page.locator('.sdoc-table').waitFor();
+  assert.equal(await page.locator('.sdoc-tab').count(),2,'多工作表展示页签切换');
+  assert.equal(await page.locator('.sdoc-table td.is-num').first().evaluate(el=>getComputedStyle(el).textAlign),'right','表格数值列自动右对齐');
+  if(name==='chromium') await page.screenshot({path:join(temp,'chromium-xlsx-preview.png'),animations:'disabled'});
   await page.keyboard.press('Escape');
   // Review expanded, line-range feedback preserves draft attachments; never sends automatically.
   await page.locator('#toggle-activity').click();await page.locator('#panel-changes').waitFor();

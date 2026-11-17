@@ -17,7 +17,7 @@ export async function checkSideChat(page, name, temp) {
     api.sendMessage = async (id, body) => { sideEvents.push(['send', id, body.content]); return { sessionId: id, runId: `run-${id}` }; };
     api.cancelRun = async id => { sideEvents.push(['stop', id]); };
     store.setState({ sessionId: 'parent-a', workspace: '/workspace/a', sideChats: { items: [], activeId: null }, sideDrafts: {}, running: true });
-    store.getState().setUi({ inspectorOpen: true, inspectorTab: 'chat', reviewExpanded: false });
+    store.getState().setUi({ inspectorOpen: true, inspectorTab: 'chat', besideTab: 'chat', reviewExpanded: false });
   });
   const input = page.getByRole('textbox', { name: '侧边对话输入' });
   const panel = page.locator('#panel-side-chat');

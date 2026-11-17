@@ -37,7 +37,7 @@ export function BesidePanel() {
       <div className="beside-body" role="tabpanel" id={`beside-panel-${tab}`} aria-labelledby={`beside-tab-${tab}`}>
         {/* 两个页签都保持挂载：切走再切回来不该丢掉正在写的草稿或刚开的侧边对话 */}
         <div hidden={tab !== 'notes'}><SessionNotes embedded onAsk={(text) => void askAbout(text)} /></div>
-        <div hidden={tab !== 'chat'}><SideChatPanel /></div>
+        <div hidden={tab !== 'chat'}><SideChatPanel active={tab === 'chat'} /></div>
       </div>
     </div>
   );

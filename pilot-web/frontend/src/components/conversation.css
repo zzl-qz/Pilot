@@ -11,7 +11,7 @@ html[data-theme] .conversation-thread > .thread {
 html[data-theme] .conversation-thread > .thread.is-empty {
   padding-inline: var(--conversation-gutter);
 }
-html[data-theme] .conversation-thread .thread-column { gap: 18px; }
+html[data-theme] .conversation-thread .thread-column { gap: 14px; }
 .conversation-thread > .thread:focus-visible { outline: 2px solid var(--ink-2); outline-offset: -2px; }
 .conversation-thread:has(.conversation-latest) { padding-block-end: calc(var(--conversation-control) + 20px); }
 .conversation-thread .conversation-latest {
@@ -64,11 +64,12 @@ html[data-theme] .conversation-thread .msg-user .msg-actions {
   margin: 1px 0 0;
   opacity: 1;
   transform: none;
+  transition: opacity 0.14s ease;
 }
-.conversation-reply-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 28px; }
+.conversation-reply-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 26px; }
 html[data-theme] .conversation-thread .conversation-reply-head .who {
   margin: 0;
-  color: var(--ink-2);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 600;
   opacity: 1;
@@ -79,6 +80,13 @@ html[data-theme] .conversation-thread .conversation-reply-head .reply-actions {
   gap: 2px;
   height: auto;
   opacity: 1;
+  transition: opacity 0.14s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  html[data-theme] .conversation-thread .msg-user:not(:hover):not(:focus-within) .msg-actions,
+  html[data-theme] .conversation-thread .msg-assistant:not(:hover):not(:focus-within) .reply-actions {
+    opacity: 0;
+  }
 }
 html[data-theme] .conversation-thread .message-action { width: 28px; height: 28px; border-radius: 6px; }
 .conversation-streaming { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
@@ -158,10 +166,10 @@ html[data-theme] .conversation-composer .composer {
 }
 html[data-theme] .conversation-composer .composer:focus-within { border-color: var(--ink-2); }
 html[data-theme] .conversation-composer .input-flow {
-  min-height: 42px;
+  min-height: 36px;
   max-height: min(200px, 25vh);
   max-height: min(200px, 25dvh);
-  padding: 3px 4px 8px;
+  padding: 2px 4px 6px;
   color: var(--ink);
   font-size: 14px;
 }
@@ -289,19 +297,59 @@ html[data-theme] .conversation-composer .voice-timer { font-family: var(--sans);
 .conversation-composer .voice-button[aria-controls]:not([aria-disabled]) { background: var(--ui-selected); }
 
 .attachment-preview.conversation-attachment-preview {
+  display: flex;
+  flex-direction: column;
   width: 100%;
-  height: min(800px, calc(100dvh - 24px));
+  height: auto;
+  max-height: min(800px, calc(100dvh - 24px));
   min-height: 0;
   border: 0;
+  background: var(--panel);
 }
-.attachment-preview.conversation-attachment-preview.is-inline { height: min(440px, 55dvh); border: 1px solid var(--line); }
+.attachment-preview.conversation-attachment-preview:has(.is-pdf) {
+  height: min(800px, calc(100dvh - 24px));
+}
+.conversation-attachment-preview > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--panel);
+  flex: none;
+}
+.conversation-attachment-preview > header > strong {
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conversation-attachment-preview > header > div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.conversation-attachment-preview > footer {
+  padding: 8px 14px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: 12px;
+  background: var(--panel);
+  flex: none;
+}
+.attachment-preview.conversation-attachment-preview.is-inline { height: min(440px, 55dvh); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .conversation-attachment-preview .attachment-preview-content {
   flex: 1;
   min-height: 0;
   overflow: auto;
   display: grid;
   place-items: center;
-  background: var(--bg);
+  background: var(--bg-soft);
 }
 .attachment-preview-content.is-pdf { display: block; }
 .attachment-preview-content > img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }

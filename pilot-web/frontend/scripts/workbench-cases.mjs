@@ -132,12 +132,12 @@ export async function checkWorkbench(page, name, output) {
   await page.getByText('已清理 2 条事件、1 轮快照、3 条调用记录、4 份备份和 5 个校验文件。', { exact: true }).waitFor();
   const validation = page.getByText('校验证据：', { exact: false });
   await validation.waitFor();
-  assert.match(await validation.innerText(), /已覆盖当前产物/);
+  assert.match(await validation.innerText(), /已验证/);
   assert.equal(await validation.evaluate(el => el.classList.contains('is-error')), false);
   await page.evaluate(() => { api.validation = async () => ({ report: { current: false, reason: '产物已变化' } }); });
   await page.locator('.settings-nav').getByRole('button', { name: '关于', exact: true }).click();
   await page.locator('.settings-nav').getByRole('button', { name: '诊断', exact: true }).click();
-  await page.getByText('校验证据：未覆盖当前产物（产物已变化）', { exact: true }).waitFor();
+  await page.getByText(/校验证据：(未验证|证据已过期)（产物已变化）/).waitFor();
   assert.equal(await validation.evaluate(el => el.classList.contains('is-error')), true);
   for (let i = 0; i < 14; i++) await page.keyboard.press('Tab');
   assert.equal(await page.evaluate(() => !!document.activeElement.closest('#settings')), true);

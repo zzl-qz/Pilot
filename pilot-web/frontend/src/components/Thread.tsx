@@ -17,6 +17,7 @@ import { useStore } from '../store.js';
 import { api, apiFetch } from '../api.js';
 import { historyPrefetchDistance } from '../lib/history.js';
 import { MarkdownBody } from './MarkdownBody.jsx';
+import { StructuredDocumentView, isStructuredDocumentFormat } from './StructuredDocumentView.jsx';
 import { TOOL_STATUS_TITLES, toolArgsText, toolLabel } from '../lib/tool-meta.js';
 import { agentMeta, agentTitle, manifestFacts, splitSubagentResult, summarizeAgents, agentStatusLabel } from '../lib/agents.js';
 import { splitAttachmentMarkers, layoutMessageParts, attachmentUrl, isImageAttachment, fileBadge, formatBytes } from '../lib/attachments.js';
@@ -77,14 +78,58 @@ export function Thread() {
   const armed = useRef(false);
   const earlierTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const navigationUntil = useRef(0);
+  /*
+   * 惯性上滑过程中直接前插缓冲页时，部分内核会暂时抑制原生 overflow-anchor。
+   * 在插入前后记录 scrollHeight 与 scrollTop，若浏览器未自动补偿锚点，则在 useLayoutEffect
+   * 绘制前同步补齐高度差，做到上滑翻页既不撞顶卡顿，也不发生肉眼可见跳动。
+   */
+  const prependAnchorRef = useRef<{ scrollHeight: number; scrollTop: number; firstKey: string | null; count: number }>({
+    scrollHeight: 0, scrollTop: 0, firstKey: null, count: 0
+  });
+  const capturePrependAnchor = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    prependAnchorRef.current = {
+      scrollHeight: el.scrollHeight,
+      scrollTop: el.scrollTop,
+      firstKey: rows[0]?.key ?? null,
+      count: rows.length
+    };
+  }, [rows, scrollRef]);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const prev = prependAnchorRef.current;
+    const currentFirstKey = rows[0]?.key ?? null;
+    if (el && prev.count > 0 && rows.length > prev.count && currentFirstKey !== prev.firstKey && !isAtBottom) {
+      const deltaHeight = el.scrollHeight - prev.scrollHeight;
+      const browserDeltaTop = el.scrollTop - prev.scrollTop;
+      if (deltaHeight > 0 && Math.abs(browserDeltaTop - deltaHeight) > 16) {
+        el.scrollTop = prev.scrollTop + deltaHeight;
+        lastScrollTop.current = el.scrollTop;
+      }
+    }
+    if (el) {
+      prependAnchorRef.current = {
+        scrollHeight: el.scrollHeight,
+        scrollTop: el.scrollTop,
+        firstKey: currentFirstKey,
+        count: rows.length
+      };
+    }
+  }, [rows, isAtBottom, scrollRef]);
+
   const beforeNavigation = useCallback(() => {
     clearTimeout(earlierTimer.current);
     navigationUntil.current = performance.now() + 250;
   }, []);
   const scheduleEarlier = useCallback(() => {
     clearTimeout(earlierTimer.current);
-    earlierTimer.current = setTimeout(() => requestEarlierHistory(), 140);
-  }, [requestEarlierHistory]);
+    earlierTimer.current = setTimeout(() => {
+      capturePrependAnchor();
+      void requestEarlierHistory();
+    }, 80);
+  }, [capturePrependAnchor, requestEarlierHistory]);
   useEffect(() => () => clearTimeout(earlierTimer.current), []);
 
   const handleScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
@@ -103,14 +148,22 @@ export function Thread() {
     if (goingUp && toTop <= threshold) {
       if (!armed.current) {
         armed.current = true;
-        prefetchEarlier();
+        void prefetchEarlier();
+      }
+      // 接近顶部缓冲区且预取页已就绪时立即无缝接入，避免惯性滚动一路撞到 scrollTop=0 硬停顿
+      if (toTop <= Math.max(120, threshold * 0.35)) {
+        capturePrependAnchor();
+        if (applyEarlierPage()) {
+          clearTimeout(earlierTimer.current);
+          return;
+        }
       }
       scheduleEarlier();
     }
     if (goingDown && toBottom <= threshold) {
-      requestLaterHistory();
+      void requestLaterHistory();
     }
-  }, [prefetchEarlier, requestLaterHistory, scheduleEarlier]);
+  }, [applyEarlierPage, capturePrependAnchor, prefetchEarlier, requestLaterHistory, scheduleEarlier]);
 
   /* 已经贴在顶部时继续上滑不会再产生 scroll 事件，靠 wheel 兜住「还想看更早」的意图。 */
   const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
@@ -118,11 +171,12 @@ export function Thread() {
       return;
     }
     stopScroll();
-    // 顶到头还在推：缓冲里有就当场插进去，不用再等那 140ms 的空闲计时
+    capturePrependAnchor();
+    // 顶到头还在推：缓冲里有就当场插进去，不用再等空闲计时
     if (!applyEarlierPage()) {
       scheduleEarlier();
     }
-  }, [applyEarlierPage, scheduleEarlier, stopScroll]);
+  }, [applyEarlierPage, capturePrependAnchor, scheduleEarlier, stopScroll]);
 
   /* 内容不足一屏时不会产生滚动事件，主动补更早的一页，否则历史永远加载不出来。 */
   useEffect(() => {
@@ -164,7 +218,13 @@ export function Thread() {
             />
           )}
           {rows.map((row, index) => (
-            <RowView key={row.key} row={row} duplicate={row.type === 'result' && duplicateResult(rows, index)} isLast={!rows.slice(index + 1).some(item => item.type === 'turn' || item.type === 'user')} />
+            <RowView
+              key={row.key}
+              row={row}
+              duplicate={row.type === 'result' && duplicateResult(rows, index)}
+              hasPrecedingReply={index > 0 && rows[index - 1]?.type === 'turn' && Boolean((rows[index - 1] as TurnRow).reply?.text)}
+              isLast={!rows.slice(index + 1).some(item => item.type === 'turn' || item.type === 'user')}
+            />
           ))}
           {history.hasNewer && history.forwardError && (
             <RetryRow label="加载更新失败，点击重试" onClick={() => requestLaterHistory({ force: true })} />
@@ -220,12 +280,7 @@ function EmptyState() {
         <div className="thread-column">
           <section className="conversation-empty" id="empty-state" aria-labelledby="conversation-empty-title">
             <h2 id="conversation-empty-title" className="empty-title">从一个任务开始</h2>
-            <p className="empty-sub">描述你想完成的工作。Pilot 会在所选工作区执行任务，执行记录和改动可随时审阅。</p>
-            {/* 第一屏就把产品在做什么说清楚：否则用户只能看到又一个聊天框。 */}
-            <p className="empty-thesis">
-              它不替你下结论：每次运行留下改动、执行过的检查和验证结论；文件再被改动时，旧结论会自动作废，
-              输入框上方那条就是当前状态。
-            </p>
+            <p className="empty-sub">描述目标或拖入资料，Pilot 会在工作区执行任务，并留下可核对的改动与验证结论。</p>
             <div className="conversation-scope">
               <Icon name="folder" />
               <div>
@@ -266,13 +321,13 @@ function EmptyState() {
   );
 }
 
-const RowView = memo(function RowView({ row, isLast, duplicate }: { row: ThreadRow; isLast: boolean; duplicate: boolean }) {
+const RowView = memo(function RowView({ row, isLast, duplicate, hasPrecedingReply = false }: { row: ThreadRow; isLast: boolean; duplicate: boolean; hasPrecedingReply?: boolean }) {
   switch (row.type) {
     case 'user': return <UserMessage row={row} />;
     case 'turn': return <Turn row={row} isLast={isLast} />;
     case 'plan': return <PlanCard row={row} />;
     case 'compaction': return <CompactionCard row={row} />;
-    case 'result': return <ResultCard row={row} duplicate={duplicate} />;
+    case 'result': return <ResultCard row={row} duplicate={duplicate} hasPrecedingReply={hasPrecedingReply} />;
     case 'sandbox': return <SandboxCard row={row} />;
     case 'arb': return <ArbitrationCard row={row} />;
     default: return null;
@@ -460,7 +515,9 @@ function AttachmentPreview({ file, onClose }: { file: MessageAttachment; onClose
         : blobUrl && image ? <img src={blobUrl} alt={name} />
         : pdfData ? <React.Suspense fallback={<p role="status">正在加载 PDF 阅读器…</p>}>
           <PdfAttachmentPreview data={pdfData} name={name} />
-        </React.Suspense> : <pre tabIndex={0}>{text}</pre>}
+        </React.Suspense> : isStructuredDocumentFormat(name)
+          ? <StructuredDocumentView text={text} filename={name} />
+          : <pre tabIndex={0}>{text}</pre>}
     </div>
     {office && officeFallback && <footer role="status">这里只展示可提取文本，不还原 Office 版式；完整文件可用右上角下载。</footer>}
   </section>;
@@ -799,9 +856,13 @@ function CompactionCard({ row }: { row: CompactionRow }) {
   );
 }
 
-function ResultCard({ row, duplicate }: { row: ResultRow; duplicate: boolean }) {
+function ResultCard({ row, duplicate, hasPrecedingReply = false }: { row: ResultRow; duplicate: boolean; hasPrecedingReply?: boolean }) {
   const rollbackRun = useStore((state) => state.rollbackRun);
   const compact = (!row.detail || duplicate || row.continued || row.resumable) && !row.changedFiles?.length;
+  // 普通纯文本问答已有回复正文、无文件变更且无错误/中断时，不再重复堆砌空洞的「执行结束」行
+  if (compact && hasPrecedingReply && (row.tone === 'ok' || row.tone === 'text') && !row.continued && !row.resumable) {
+    return null;
+  }
   return (
     <article className={`turn-card is-${row.tone}${compact ? ' is-compact' : ''}${row.continued ? ' is-continued' : ''}`}>
       <div className="turn-card-head">

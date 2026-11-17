@@ -20,7 +20,7 @@ import { MarkdownBody } from './MarkdownBody.jsx';
  * <p>打开这一页就等于开一条侧边对话，不用先点「新建」；
  * 切到别的任务时这里只显示属于那条任务的侧边对话，关掉即丢弃。
  */
-export function SideChatPanel() {
+export function SideChatPanel({ active = true }: { active?: boolean } = {}) {
   const sideChats = useStore((state) => state.sideChats);
   const sessionId = useStore((state) => state.sessionId);
   const workspace = useStore((state) => state.workspace);
@@ -45,6 +45,9 @@ export function SideChatPanel() {
    * 只在这一页刚打开时尝试一次——用户手动关掉后留在空态，反复重建会很吵。
    */
   useEffect(() => {
+    if (!active) {
+      return;
+    }
     const owner = JSON.stringify([sessionId, workspace]);
     if (openedFor.current === owner) {
       return;
@@ -54,9 +57,9 @@ export function SideChatPanel() {
     }
     openedFor.current = owner;
     if (!items.length) {
-      create();
+      void create();
     }
-  }, [sessionId, workspace, embedded, items.length, create]);
+  }, [active, sessionId, workspace, embedded, items.length, create]);
 
   return (
     <div id="panel-side-chat" className="panel side-chat-panel">

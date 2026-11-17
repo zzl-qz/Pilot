@@ -1,3 +1,4 @@
+import { browserOptions } from './browser-options.mjs';
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
 import { chromium } from 'playwright-core';
@@ -142,7 +143,7 @@ const server = await createServer({
 await server.listen();
 const base = server.resolvedUrls.local[0].replace(/\/$/, '');
 
-const browser = await chromium.launch();
+const browser = await chromium.launch(browserOptions());
 const failures = [];
 
 async function open(name, path, width = 1440) {

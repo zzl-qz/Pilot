@@ -290,7 +290,7 @@ function Workbench() {
   if (layout.sidebarW) {
     appStyle['--sidebar-w'] = `${layout.sidebarW}px`;
   }
-  if (inspectorTab === 'preview' && inspectorOpen && !embedded) {
+  if ((inspectorTab === 'preview' || inspectorTab === 'files') && inspectorOpen && !embedded) {
     const available = narrowViewport
       ? Math.max(280, viewportWidth - 52)
       : Math.min(760, Math.max(280, viewportWidth - 52 - (sidebarOpen ? 240 : 0) - 420));

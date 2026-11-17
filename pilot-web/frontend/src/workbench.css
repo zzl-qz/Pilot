@@ -140,7 +140,7 @@ html[data-theme] .msg-assistant .reply-actions .icon-action { height: 22px; widt
 .turn-card.is-text .turn-card-title::before { background: var(--muted); }
 html[data-theme] .composer { border-radius: 12px; border: 1px solid var(--line); padding: 12px 14px 10px; box-shadow: 0 3px 14px #0000000a; }
 html[data-theme] .composer:focus-within { border-color: var(--muted); }
-html[data-theme] .input-flow { font-size: 14px; line-height: 1.65; min-height: 44px; padding: 2px 0 8px; }
+html[data-theme] .input-flow { font-size: 14px; line-height: 1.65; min-height: 36px; padding: 2px 0 6px; }
 html[data-theme] .composer-bar { flex-wrap: wrap; gap: 8px; padding-top: 8px; }
 /* 桌面分栏也可能很窄：按容器剩余空间换行，不依赖窗口断点。 */
 html[data-theme] .composer-left { max-width: 100%; }
@@ -581,7 +581,29 @@ html[data-theme] .session-item .session-title { flex: 1; }
 html[data-theme] .workspace-files { flex: 0 1 auto; margin: 0 4px; }
 html[data-theme] .workspace-files.is-open { flex: 0 1 auto; min-height: 0; max-height: 34%; }
 html[data-theme] .workspace-files-body { min-height: 0; }
-html[data-theme] .rail-foot { padding: 10px 6px; }
+html[data-theme] .rail-foot {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 36px;
+  padding: 6px 10px;
+}
+html[data-theme] .rail-foot .conn {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html[data-theme] .rail-foot .workspace-chip {
+  flex: 0 1 auto;
+  max-width: 48%;
+  font-size: 11.5px;
+  text-align: right;
+}
 html[data-theme] .composer { border-radius: 16px; background: var(--panel); box-shadow: none; border-color: var(--composer-edge); transition: border-color .15s ease; }
 html[data-theme] .composer:focus-within { border: 1px solid var(--accent); background: var(--panel); box-shadow: none; }
 html[data-theme] .composer .composer-bar { border-top: 1px solid var(--line-soft); padding-top: 8px; }
@@ -727,14 +749,24 @@ html[data-theme] .msg-assistant .bubble-md p + p { margin-top: 12px; }
 html[data-theme] .msg-assistant .bubble-md :is(pre, blockquote, table) { margin-block: 12px; }
 html[data-theme] .msg-assistant .bubble-md pre { border-radius: 6px; }
 
-/* Task acceptance stays visible without reading like a full-width alert. */
+/* Task acceptance aligns on the exact conversation column axis and recedes quietly until opened. */
 html[data-theme] .task-contract {
-  margin: 4px max(24px, calc((100% - 760px) / 2)) 0;
-  border-radius: 6px;
+  --contract-gutter: max(16px, calc((100% - 760px) / 2));
+  margin: 0 var(--contract-gutter) 0 max(48px, var(--contract-gutter));
+  border: 0;
+  border-bottom: 1px solid var(--line-soft);
+  border-radius: 0;
   background: transparent;
+  box-shadow: none;
 }
-html[data-theme] .task-contract > summary { min-height: 32px; padding: 5px 9px; }
-html[data-theme] .task-contract[open] { background: var(--bg-soft); }
+html[data-theme] .task-contract > summary { min-height: 30px; padding: 4px 2px; }
+html[data-theme] .task-contract[open] {
+  margin-top: 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--bg-soft);
+}
+html[data-theme] .task-contract[open] > summary { padding: 6px 10px; }
 
 /* Execution trace: compact grouped rows with clear type/state contrast. */
 html[data-theme] .tool-group {
