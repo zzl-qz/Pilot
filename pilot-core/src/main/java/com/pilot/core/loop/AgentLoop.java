@@ -943,6 +943,33 @@ public final class AgentLoop {
         return pruned > 0 || truncated > 0;
     }
 
+    /**
+     * 发送前把历史收进安全输入预算。
+     * 先收掉已经看过的长工具输出，再按组丢掉最早的对话，直到估算能发出去，或者已经没有可丢的旧组。
+     */
+    private void fitHistoryToInputBudget(List<Message> messages, Consumer<SessionEvent> events, String guidance) {
+        int before = ContextCompactor.totalChars(messages);
+        recordToolObservationBoundary(messages);
+        ContextCompactor.truncateLongToolOutputs(messages, messages.size());
+        int guard = messages.size() + 1;
+        while (guard-- > 0 && !requestFits(messages, guidance)) {
+            int chars = ContextCompactor.totalChars(messages);
+            int dropped = ContextCompactor.dropOldestGroups(messages, Math.max(8_000, chars * 2 / 3));
+            if (dropped == 0) {
+                break;
+            }
+            observedThroughIndex = Math.min(observedThroughIndex, messages.size());
+        }
+        if (ContextCompactor.totalChars(messages) < before) {
+            events.accept(new RunContinued(1, 1, "上下文超过安全输入预算，已折叠更早的记录并继续"));
+        }
+    }
+
+    private boolean requestFits(List<Message> messages, String guidance) {
+        return RequestBudget.assessRequest(requestMessages(messages, guidance), tools.definitions(), contextLimit())
+            .fits();
+    }
+
     /** 审批通过不等于仍可执行；开始产生副作用前再消费一次控制信号。 */
     private final class ToolStartGuard implements Supplier<String> {
         private Message correction;
@@ -1117,9 +1144,10 @@ public final class AgentLoop {
                 RequestBudget.Assessment admission =
                     RequestBudget.assessRequest(request, tools.definitions(), contextLimit());
                 if (!admission.fits()) {
-                    if (recordToolObservationBoundary(messages)) {
-                        request = requestMessages(messages, retainedGuidance);
-                    }
+                    // 本地字符预算比发送线松，长对话会在这里才发现超窗。先折掉更早的记录再发，
+                    // 不把整轮停成失败。系统提示和工具定义本身都放不下时，折叠也没有用。
+                    fitHistoryToInputBudget(messages, events, retainedGuidance);
+                    request = requestMessages(messages, retainedGuidance);
                     admission = RequestBudget.assessRequest(request, tools.definitions(), contextLimit());
                 }
                 if (!admission.fits()) {
