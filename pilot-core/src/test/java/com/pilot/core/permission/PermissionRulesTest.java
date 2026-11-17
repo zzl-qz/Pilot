@@ -84,9 +84,18 @@ class PermissionRulesTest {
     }
 
     @Test
+    void malformedSettingsAreReported() throws IOException {
+        PermissionRules rules = rules("{ not json");
+
+        assertTrue(rules.isEmpty());
+        assertTrue(rules.loadIssues().stream().anyMatch(issue -> issue.contains("settings.json")));
+    }
+
+    @Test
     void brokenSettingsNeverThrow() throws IOException {
         PermissionRules rules = rules("{\"permissions\": \"not-a-map\"}");
 
         assertTrue(rules.isEmpty());
+        assertTrue(rules.loadIssues().stream().anyMatch(issue -> issue.contains("permissions")));
     }
 }

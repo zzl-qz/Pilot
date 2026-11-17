@@ -25,9 +25,9 @@ class HooksTest {
     /** 这些用例只验证配置解析，执行器权限由 HookPermissionsTest 覆盖。 */
     private Hooks.Result run(Hooks hooks, Hooks.Event event, String name) {
         return hooks.run(event, name, command -> {
-            var tool = new HookCommandTool(command, null);
-            tool.execute(Map.of());
-            return tool.result("");
+            String configured = command.spec().command();
+            boolean ok = !configured.startsWith("exit ");
+            return new Hooks.CommandResult(configured.replace("echo ", ""), ok, true);
         });
     }
 
@@ -85,6 +85,7 @@ class HooksTest {
         Hooks hooks = Hooks.load(workspace);
 
         assertEquals("", run(hooks, Hooks.Event.POST_TOOL_USE, "edit_file").output());
+        assertTrue(hooks.skipped().stream().anyMatch(skipped -> skipped.reason().contains("settings.json")));
     }
 
     @Test

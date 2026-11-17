@@ -136,6 +136,7 @@ public final class Hooks {
         try {
             root = MAPPER.readValue(Files.readAllBytes(file), Map.class);
         } catch (IOException | RuntimeException e) {
+            skipped.add(new Skipped("配置文件", "读取配置失败 " + file + "：" + e.getMessage()));
             return;
         }
         Object hooks = root == null ? null : root.get("hooks");

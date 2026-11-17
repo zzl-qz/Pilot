@@ -8,6 +8,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.message.ToolNames;
 
@@ -31,6 +34,7 @@ import tools.jackson.databind.ObjectMapper;
  */
 public final class PermissionRules {
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final Logger LOG = LoggerFactory.getLogger(PermissionRules.class);
 
     /** @param tool 工具名；为空表示任意工具 */
     public record Rule(String tool, String specifier) {
@@ -39,15 +43,17 @@ public final class PermissionRules {
     private final List<Rule> allow;
     private final List<Rule> deny;
     private final List<Rule> ask;
+    private final List<String> loadIssues;
 
-    private PermissionRules(List<Rule> allow, List<Rule> deny, List<Rule> ask) {
+    private PermissionRules(List<Rule> allow, List<Rule> deny, List<Rule> ask, List<String> loadIssues) {
         this.allow = List.copyOf(allow);
         this.deny = List.copyOf(deny);
         this.ask = List.copyOf(ask);
+        this.loadIssues = List.copyOf(loadIssues);
     }
 
     public static PermissionRules none() {
-        return new PermissionRules(List.of(), List.of(), List.of());
+        return new PermissionRules(List.of(), List.of(), List.of(), List.of());
     }
 
     public boolean isEmpty() {
@@ -59,15 +65,20 @@ public final class PermissionRules {
         List<Rule> allow = new ArrayList<>();
         List<Rule> deny = new ArrayList<>();
         List<Rule> ask = new ArrayList<>();
+        List<String> loadIssues = new ArrayList<>();
         Path userHome = Path.of(System.getProperty("user.home", "."));
-        merge(userHome.resolve(".pilot").resolve("settings.json"), allow, deny, ask);
+        merge(userHome.resolve(".pilot").resolve("settings.json"), allow, deny, ask, loadIssues);
         if (workspace != null) {
-            merge(workspace.resolve(".pilot").resolve("settings.json"), allow, deny, ask);
+            merge(workspace.resolve(".pilot").resolve("settings.json"), allow, deny, ask, loadIssues);
         }
-        return allow.isEmpty() && deny.isEmpty() && ask.isEmpty() ? none() : new PermissionRules(allow, deny, ask);
+        return new PermissionRules(allow, deny, ask, loadIssues);
     }
 
-    private static void merge(Path file, List<Rule> allow, List<Rule> deny, List<Rule> ask) {
+    public List<String> loadIssues() {
+        return loadIssues;
+    }
+
+    private static void merge(Path file, List<Rule> allow, List<Rule> deny, List<Rule> ask, List<String> loadIssues) {
         if (!Files.isRegularFile(file)) {
             return;
         }
@@ -75,9 +86,15 @@ public final class PermissionRules {
         try {
             root = MAPPER.readValue(Files.readAllBytes(file), Map.class);
         } catch (IOException | RuntimeException e) {
+            String issue = "读取权限配置失败 " + file + "：" + e.getMessage();
+            loadIssues.add(issue);
+            LOG.warn("{}", issue);
             return;
         }
         if (root == null || !(root.get("permissions") instanceof Map<?, ?> permissions)) {
+            String issue = "权限配置缺少 permissions 对象：" + file;
+            loadIssues.add(issue);
+            LOG.warn("{}", issue);
             return;
         }
         collect(permissions.get("allow"), allow);
