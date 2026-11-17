@@ -1,5 +1,6 @@
 package com.pilot.core.loop;
 
+import java.nio.file.Path;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -13,6 +14,8 @@ import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.prompt.PromptLibrary;
+import com.pilot.core.quality.CodeQualityCheck;
+import com.pilot.core.quality.IndependentCodeReviewer;
 import com.pilot.core.tool.ToolResults;
 import com.pilot.core.tool.VerificationCheck;
 import com.pilot.core.util.Texts;
@@ -57,6 +60,8 @@ final class CompletionGate {
     private static final List<String> READ_ONLY_TASK_HINTS =
         List.of("本轮只读", "本次只读", "本任务只读", "仅做只读", "只分析不修改", "不要修改任何仓库文件", "不得修改任何仓库文件", "不要修改任何文件", "不得修改任何文件",
             "do not modify any files", "do not change any files", "do not edit any files", "this task is read-only");
+    /** 新增代码质量问题只打回一次；模型可以修正，也可以说明保留原因。 */
+    private static final int MAX_QUALITY_PROMPTS = 1;
     /** 只改这些后缀的文档不算「改了代码」，不强制跑构建。 */
     private static final Set<String> DOC_SUFFIXES = Set.of(".md", ".txt", ".rst", ".adoc");
     /** 目标像「调研 / 解释 / 定位」时，只读任务也要核对覆盖范围，不能读两个文件就下结论。 */
@@ -76,6 +81,10 @@ final class CompletionGate {
     private int verifyPrompts;
     private int reviewPrompts;
     private int actionPrompts;
+    private int qualityPrompts;
+    private boolean independentCodeReviewed;
+    /** 记录最近一次通过的构建/测试之后是否又改了代码，防止收尾重构改坏原有功能却漏跑验证。 */
+    private boolean codeDirtySincePassingCheck;
     private int toolCalls;
     private final Set<String> inspected = new LinkedHashSet<>();
 
@@ -91,6 +100,18 @@ final class CompletionGate {
 
     void countToolCall() {
         toolCalls++;
+    }
+
+    /** 追踪代码改动与验证的先后顺序：重构或修整代码后，此前旧版本的测试通过记录不能继续放行。 */
+    void recordOutcome(Collection<String> changedPaths, List<String> outcomeChecks) {
+        boolean passedNow = outcomeChecks != null && hasPassingCheck(outcomeChecks);
+        if (passedNow) {
+            codeDirtySincePassingCheck = false;
+            return;
+        }
+        if (changedPaths != null && touchesCode(changedPaths)) {
+            codeDirtySincePassingCheck = true;
+        }
     }
 
     /** 记下这次调用碰过的路径，只读任务自审时说明「已经看过哪些」。 */
@@ -149,6 +170,22 @@ final class CompletionGate {
 
     Nudge evaluate(Set<String> changedFiles, List<String> checks, List<PlanItem> plan, List<String> openSteps,
         boolean independentReview) {
+        return evaluate(changedFiles, checks, plan, openSteps, independentReview, Map.of());
+    }
+
+    Nudge evaluate(Set<String> changedFiles, List<String> checks, List<PlanItem> plan, List<String> openSteps,
+        boolean independentReview, Map<String, CodeQualityCheck.TextChange> qualityChanges) {
+        return evaluate(changedFiles, checks, plan, openSteps, independentReview, qualityChanges, null, null);
+    }
+
+    /**
+     * @param qualityChanges 本轮写前文本与当前文本；为空时跳过质量门，保持旧调用方行为
+     * @param workspaceRoot  工作区根目录；非空时支持跨文件克隆查重与已有常量关联推荐
+     * @param codeReviewer   轻量独立语义代码审查器；仅在验证通过且改动达标时最多运行一次
+     */
+    Nudge evaluate(Set<String> changedFiles, List<String> checks, List<PlanItem> plan, List<String> openSteps,
+        boolean independentReview, Map<String, CodeQualityCheck.TextChange> qualityChanges, Path workspaceRoot,
+        IndependentCodeReviewer codeReviewer) {
         if (!enabled) {
             return null;
         }
@@ -175,11 +212,37 @@ final class CompletionGate {
         if (!changed && !researching) {
             return null;
         }
-        if (changed && touchesCode(changedFiles) && !hasPassingCheck(checks) && verifyPrompts < MAX_VERIFY_PROMPTS) {
+        if (changed && qualityPrompts < MAX_QUALITY_PROMPTS) {
+            Path root =
+                workspaceRoot != null ? workspaceRoot : codeReviewer == null ? null : codeReviewer.workspaceRoot();
+            String issue = CodeQualityCheck.completionIssue(root, qualityChanges);
+            if (!issue.isBlank()) {
+                qualityPrompts++;
+                return new Nudge(
+                    "本轮新增代码有质量问题：" + issue + "。先复用项目已有常量、枚举或公共方法；只抽离至少 " + CodeQualityCheck.DUPLICATE_BLOCK_LINES
+                        + " 行且重复出现的代码块。修改代码后请重跑相关测试确认功能正常；若确属合理的一次性值或拆分无收益，保留代码并在最终答复说明原因，不要新增抽象层。",
+                    "新增代码含魔法值或重复块，已要求先复用或说明原因", qualityPrompts, MAX_QUALITY_PROMPTS);
+            }
+        }
+        boolean needsVerify = !hasPassingCheck(checks) || codeDirtySincePassingCheck;
+        if (changed && touchesCode(changedFiles) && needsVerify && verifyPrompts < MAX_VERIFY_PROMPTS) {
             verifyPrompts++;
-            String prompt = prompts.render("completion/verify", Map.of("changedFiles", bullets(changedFiles), "checks",
-                checks.isEmpty() ? "（本轮没有跑过构建或测试）" : bullets(checks))).strip();
-            return new Nudge(prompt, "改动未验证，已要求先跑构建或测试", verifyPrompts, MAX_VERIFY_PROMPTS);
+            String checkDesc = checks.isEmpty() ? "（本轮没有跑过构建或测试）"
+                : codeDirtySincePassingCheck ? bullets(checks) + "\n（注意：上述验证早于最近一次代码修改，请对最新代码重跑验证）" : bullets(checks);
+            String prompt =
+                prompts.render("completion/verify", Map.of("changedFiles", bullets(changedFiles), "checks", checkDesc))
+                    .strip();
+            String reason =
+                codeDirtySincePassingCheck && hasPassingCheck(checks) ? "最近一次代码整理后尚未重新验证，已要求重跑测试" : "改动未验证，已要求先跑构建或测试";
+            return new Nudge(prompt, reason, verifyPrompts, MAX_VERIFY_PROMPTS);
+        }
+        if (!independentReview && changed && codeReviewer != null && !independentCodeReviewed) {
+            independentCodeReviewed = true;
+            String refactorGuidance = codeReviewer.review(goal, qualityChanges);
+            if (refactorGuidance != null && !refactorGuidance.isBlank()) {
+                reviewPrompts = MAX_REVIEW_PROMPTS;
+                return new Nudge(refactorGuidance, "独立代码精简审查发现可安全收敛的重复逻辑或魔法值", 1, 1);
+            }
         }
         if (!independentReview && reviewPrompts < MAX_REVIEW_PROMPTS) {
             reviewPrompts++;

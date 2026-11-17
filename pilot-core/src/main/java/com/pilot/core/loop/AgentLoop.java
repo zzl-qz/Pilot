@@ -1,6 +1,8 @@
 package com.pilot.core.loop;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -13,6 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -45,6 +48,8 @@ import com.pilot.core.permission.PermissionGate;
 import com.pilot.core.permission.PolicyPermissionGate;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.prompt.PromptLibrary;
+import com.pilot.core.quality.CodeQualityCheck;
+import com.pilot.core.quality.IndependentCodeReviewer;
 import com.pilot.core.tool.ReadToolOutputTool;
 import com.pilot.core.tool.ToolCallJournal;
 import com.pilot.core.tool.ToolRegistry;
@@ -215,10 +220,37 @@ public final class AgentLoop {
     }
 
     private Supplier<Set<String>> restoredPaths = Set::of;
+    /** 本轮写前文本；null 表示文件原本不存在。读取失败由接入层抛异常。 */
+    private Function<String, String> originalFileText = path -> null;
+    /** 当前工作区文本；null 表示文件已删除或无法按文本读取。 */
+    private Function<String, String> currentFileText = path -> null;
+    private Path qualityWorkspace;
+    private IndependentCodeReviewer independentCodeReviewer;
 
     /** 接入层用本轮写前快照确认已经还原的路径；历史调用记录仍保留。 */
     public AgentLoop withRestoredPaths(Supplier<Set<String>> paths) {
         restoredPaths = Objects.requireNonNull(paths);
+        return this;
+    }
+
+    /**
+     * 接入代码质量收尾门。两个读取器都按工作区相对路径返回全文；当前文本读不到时返回 {@code null}。
+     */
+    public AgentLoop withQualityTexts(Function<String, String> originalText, Function<String, String> currentText) {
+        originalFileText = Objects.requireNonNull(originalText, "original text reader must not be null");
+        currentFileText = Objects.requireNonNull(currentText, "current text reader must not be null");
+        return this;
+    }
+
+    /** 提供工作区根目录供收尾门执行跨文件克隆查重与已有常量关联推荐。 */
+    public AgentLoop withQualityWorkspace(Path workspace) {
+        qualityWorkspace = workspace;
+        return this;
+    }
+
+    /** 接入轻量独立语义代码审查器，仅在改动达到阈值且测试通过后最多运行一次。 */
+    public AgentLoop withIndependentCodeReviewer(IndependentCodeReviewer reviewer) {
+        independentCodeReviewer = reviewer;
         return this;
     }
 
@@ -670,7 +702,8 @@ public final class AgentLoop {
         }
         // 通用验证先于模式级 reviewer；有独立审查时跳过重复的模型自审。
         CompletionGate.Nudge nudge = completionGate.evaluate(changedFiles, checks, plan, openSteps,
-            executionPolicy != null && executionPolicy.independentCompletionReview(changedFiles));
+            executionPolicy != null && executionPolicy.independentCompletionReview(changedFiles),
+            qualityChanges(changedFiles), qualityWorkspace, independentCodeReviewer);
         if (nudge != null) {
             runtimeGuidance.add(nudge.prompt());
             events.accept(new RunContinued(nudge.attempt(), nudge.max(), nudge.reason()));
@@ -887,6 +920,7 @@ public final class AgentLoop {
         if (!ToolResults.isSkipped(outcome.result())) {
             completionGate.recordTarget(call);
             completionGate.countToolCall();
+            completionGate.recordOutcome(outcome.changedPaths(), outcome.checks());
         }
         changedFiles.addAll(outcome.changedPaths());
         for (String check : outcome.checks()) {
@@ -924,6 +958,31 @@ public final class AgentLoop {
             }
             return hasInput(correction) ? "用户已纠正当前任务，本次调用未执行，请重新规划。" : null;
         }
+    }
+
+    /**
+     * 收尾前读取本轮仍保留的代码文本。读取失败的文件不加入结果，避免一次快照异常阻断任务。
+     */
+    private Map<String, CodeQualityCheck.TextChange> qualityChanges(Set<String> changedFiles) {
+        if (changedFiles.isEmpty() || originalFileText == null) {
+            return Map.of();
+        }
+        Map<String, CodeQualityCheck.TextChange> changes = new LinkedHashMap<>();
+        for (String path : changedFiles) {
+            if (!CodeQualityCheck.applies(path)) {
+                continue;
+            }
+            try {
+                String before = originalFileText.apply(path);
+                String after = currentFileText == null ? null : currentFileText.apply(path);
+                if (after != null) {
+                    changes.put(path, new CodeQualityCheck.TextChange(before, after));
+                }
+            } catch (RuntimeException ignored) {
+                // 质量门是提醒，不是安全边界；单个文件不可读时继续检查其余文件。
+            }
+        }
+        return Map.copyOf(changes);
     }
 
     private static boolean applySteering(List<Message> messages, Consumer<SessionEvent> events, Message input) {

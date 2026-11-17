@@ -13,8 +13,11 @@ import org.junit.jupiter.api.Test;
 
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
+import com.pilot.core.model.ModelResponse;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.prompt.PromptLibrary;
+import com.pilot.core.quality.CodeQualityCheck;
+import com.pilot.core.quality.IndependentCodeReviewer;
 
 class CompletionGateTest {
     private static final PromptLibrary PROMPTS = PromptLibrary.standard();
@@ -288,6 +291,64 @@ class CompletionGateTest {
         gate.countToolCall();
 
         assertNull(gate.evaluate(Set.of("src/A.java"), List.of(), List.of(), List.of()));
+    }
+
+    @Test
+    void newMagicValueAsksForReuseOnceBeforeVerification() {
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复订单状态");
+        Map<String, CodeQualityCheck.TextChange> changes = Map.of("src/main/Order.java",
+            new CodeQualityCheck.TextChange("class Order {}\n", "class Order {\n    int timeout = 86400;\n}\n"));
+
+        CompletionGate.Nudge first =
+            gate.evaluate(Set.of("src/main/Order.java"), List.of(), List.of(), List.of(), false, changes);
+        CompletionGate.Nudge second =
+            gate.evaluate(Set.of("src/main/Order.java"), List.of(), List.of(), List.of(), false, changes);
+
+        assertNotNull(first);
+        assertTrue(first.reason().contains("魔法值"), first.reason());
+        assertTrue(first.prompt().contains("86400"), first.prompt());
+        assertNotNull(second);
+        assertTrue(second.reason().contains("未验证"), second.reason());
+    }
+
+    @Test
+    void refactoringAfterPassingTestRequiresFreshVerificationSoBehaviorCannotBreakSilently() {
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "实现订单与退款服务");
+        Set<String> changed = Set.of("src/main/OrderService.java", "src/main/RefundService.java");
+        Map<String, CodeQualityCheck.TextChange> cleanChanges =
+            Map.of("src/main/OrderService.java", new CodeQualityCheck.TextChange(null, "class OrderService {}\n"),
+                "src/main/RefundService.java", new CodeQualityCheck.TextChange(null, "class RefundService {}\n"));
+
+        // 第一步：写代码并跑通测试
+        gate.recordOutcome(changed, List.of());
+        gate.recordOutcome(List.of(), List.of("mvnw test → exit 0"));
+
+        // 第二步：收尾时独立代码审查发现重复逻辑，要求精简重构
+        IndependentCodeReviewer reviewer =
+            new IndependentCodeReviewer(
+                (messages,
+                    tools) -> new ModelResponse("",
+                        List.of(new ToolCall("r1", "submit_code_review",
+                            Map.of("verdict", "REFACTOR", "issues",
+                                List.of("OrderService 与 RefundService 重复计算逻辑 -> 抽离公共方法"))))),
+                null, PROMPTS, () -> false);
+
+        CompletionGate.Nudge reviewNudge = gate.evaluate(changed, List.of("mvnw test → exit 0"), List.of(), List.of(),
+            false, cleanChanges, null, reviewer);
+        assertNotNull(reviewNudge);
+        assertTrue(reviewNudge.reason().contains("独立代码精简审查"), reviewNudge.reason());
+
+        // 第三步：模型按建议修改了代码，但还没重跑测试就想直接交差 -> 必须拦住重跑验证！
+        gate.recordOutcome(List.of("src/main/OrderService.java"), List.of());
+        CompletionGate.Nudge reverifyNudge = gate.evaluate(changed, List.of("mvnw test → exit 0"), List.of(), List.of(),
+            false, cleanChanges, null, reviewer);
+        assertNotNull(reverifyNudge);
+        assertTrue(reverifyNudge.reason().contains("尚未重新验证"), reverifyNudge.reason());
+
+        // 第四步：重跑测试通过后干净收尾，不再死循环
+        gate.recordOutcome(List.of(), List.of("mvnw test → exit 0"));
+        assertNull(gate.evaluate(changed, List.of("mvnw test → exit 0"), List.of(), List.of(), false, cleanChanges,
+            null, reviewer));
     }
 
     @Test
