@@ -753,6 +753,8 @@ public final class AgentLoop {
             // 无法核验时保守保留改动，继续走验证门。
         }
         // 通用验证先于模式级 reviewer；有独立审查时跳过重复的模型自审。
+        List<String> changed = List.copyOf(changedFiles);
+        List<String> checksOut = List.copyOf(checks);
         CompletionGate.Nudge nudge = completionGate.evaluate(changedFiles, checks, plan, openSteps,
             executionPolicy != null && executionPolicy.independentCompletionReview(changedFiles),
             qualityChanges(changedFiles), qualityWorkspace, independentCodeReviewer, content);
@@ -760,11 +762,10 @@ public final class AgentLoop {
             if (nudge.halt()) {
                 String partial = content + "\n\n规范检查未通过，已停止：" + nudge.reason();
                 messages.set(messages.size() - 1, Message.assistant(partial, List.of()));
-                events.accept(new RunEnded(RunOutcome.BLOCKED, RunFailureCode.TASK_INCOMPLETE.name(), partial,
-                    List.copyOf(changedFiles), List.copyOf(checks), done, plan.size(), openSteps, blockedSteps,
-                    List.of("修复规范检查问题后继续"), true));
-                return new Result(partial, RunFailureCode.TASK_INCOMPLETE.name(), conversation(messages),
-                    List.copyOf(changedFiles), List.copyOf(checks), plan);
+                events.accept(RunEnded.of(RunOutcome.BLOCKED, RunFailureCode.TASK_INCOMPLETE.name(), partial, changed,
+                    checksOut, plan, List.of("修复规范检查问题后继续")));
+                return new Result(partial, RunFailureCode.TASK_INCOMPLETE.name(), conversation(messages), changed,
+                    checksOut, plan);
             }
             runtimeGuidance.add(nudge.prompt());
             events.accept(new RunContinued(nudge.attempt(), nudge.max(), nudge.reason()));
@@ -807,19 +808,17 @@ public final class AgentLoop {
             }
             messages.set(messages.size() - 1, Message.assistant(partial, List.of()));
             events.accept(new AssistantDelta(partial));
-            events.accept(new RunEnded(RunOutcome.PARTIAL, RunFailureCode.TASK_INCOMPLETE.name(), partial,
-                List.copyOf(changedFiles), List.copyOf(checks), done, plan.size(), openSteps, blockedSteps,
-                List.of("查看本轮差异", "继续执行未完成步骤"), true));
-            return new Result(partial, RunFailureCode.TASK_INCOMPLETE.name(), conversation(messages),
-                List.copyOf(changedFiles), List.copyOf(checks), plan);
+            events.accept(RunEnded.of(RunOutcome.PARTIAL, RunFailureCode.TASK_INCOMPLETE.name(), partial, changed,
+                checksOut, plan, List.of("查看本轮差异", "继续执行未完成步骤")));
+            return new Result(partial, RunFailureCode.TASK_INCOMPLETE.name(), conversation(messages), changed,
+                checksOut, plan);
         }
         // 仅在剩余计划与验收检查通过后发出完成事件。
         if (!content.isBlank()) {
             events.accept(new AssistantDelta(content));
         }
-        events.accept(
-            new RunCompleted(summary, List.copyOf(changedFiles), List.copyOf(checks), done, plan.size(), openSteps));
-        return new Result(content, null, conversation(messages), List.copyOf(changedFiles), List.copyOf(checks), plan);
+        events.accept(new RunCompleted(summary, changed, checksOut, done, plan.size(), openSteps));
+        return new Result(content, null, conversation(messages), changed, checksOut, plan);
     }
 
     private Result reverifyCandidate(ToolCall reverification, LoopContext context) {
@@ -952,20 +951,17 @@ public final class AgentLoop {
         messages.add(Message.assistant(finalText, List.of()));
         events.accept(new AssistantDelta(finalText));
         List<PlanItem> plan = planSnapshot();
+        List<String> changed = List.copyOf(changedFiles);
+        List<String> checksOut = List.copyOf(checks);
         RunOutcome outcome = RunOutcome.fromCode(code);
         if (emitFailure) {
             if (outcome.failure()) {
                 events.accept(new RunFailed(code, reason, true));
             } else {
-                events.accept(new RunEnded(outcome, code, finalText, List.copyOf(changedFiles), List.copyOf(checks),
-                    (int)plan.stream().filter(PlanItem::done).count(), plan.size(),
-                    plan.stream().filter(PlanItem::open).map(PlanItem::step).toList(),
-                    plan.stream().filter(PlanItem::blocked).map(PlanItem::step).toList(), List.of("根据停止原因处理后继续"),
-                    true));
+                events.accept(RunEnded.of(outcome, code, finalText, changed, checksOut, plan, List.of("根据停止原因处理后继续")));
             }
         }
-        return new Result(finalText, code, conversation(messages), List.copyOf(changedFiles), List.copyOf(checks),
-            plan);
+        return new Result(finalText, code, conversation(messages), changed, checksOut, plan);
     }
 
     private static boolean hasInput(Message input) {

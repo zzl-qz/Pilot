@@ -28,6 +28,7 @@ import lombok.RequiredArgsConstructor;
 @Component
 @RequiredArgsConstructor
 public class TaskControlService {
+    private static final String TASK_PROMPT_RULES = "只有执行步骤完成不代表已满足目标；没有证据的验收项不能宣称通过。";
     private final ObjectMapper mapper;
     private final PilotDataDir data;
 
@@ -393,7 +394,7 @@ public class TaskControlService {
             runtime.put("budget_segments", execution.budgetSegments());
             text.append("runtime_state_json=").append(mapper.writeValueAsString(runtime)).append('\n');
         }
-        text.append("继续工作前对照 user_task_data_json；收尾时逐条说明验收结果、实际证据和未完成项。").append("只有执行步骤完成不代表已满足目标；没有证据的验收项不能宣称通过。");
+        text.append("继续工作前对照 user_task_data_json；收尾时逐条说明验收结果、实际证据和未完成项。").append(TASK_PROMPT_RULES);
         return text.toString();
     }
 
@@ -408,8 +409,8 @@ public class TaskControlService {
         if (task == null) {
             return "";
         }
-        return taskData(task).append("继续工作前对照 user_task_data_json；收尾时逐条说明验收结果、实际证据和未完成项。")
-            .append("只有执行步骤完成不代表已满足目标；没有证据的验收项不能宣称通过。").toString();
+        return taskData(task).append("继续工作前对照 user_task_data_json；收尾时逐条说明验收结果、实际证据和未完成项。").append(TASK_PROMPT_RULES)
+            .toString();
     }
 
     private StringBuilder taskData(TaskContract task) {
