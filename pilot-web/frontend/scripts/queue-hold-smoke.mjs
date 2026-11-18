@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
 import { chromium } from 'playwright-core';
+import { browserOptions } from './browser-options.mjs';
 import { fileURLToPath } from 'node:url';
 
 // 队列暂停/恢复：暂停不打断当前轮、队列保留可编辑、刷新后仍显示暂停。
@@ -56,7 +57,7 @@ await server.listen();
 const url = `http://127.0.0.1:${server.httpServer.address().port}/__hold`;
 let browser;
 try {
-  browser = await chromium.launch({ channel: 'chrome', headless: true });
+  browser = await chromium.launch(browserOptions());
   const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
   page.setDefaultTimeout(8000);
   const errors = [];
@@ -74,7 +75,7 @@ try {
 
   // 暂停期间仍可编辑
   await page.locator('.queue-text').first().click();
-  await page.locator('#queue-edit textarea').fill('暂停时改的任务一');
+  await page.getByRole('textbox', { name: '编辑排队消息' }).fill('暂停时改的任务一');
   await page.getByRole('button', { name: '保存' }).click();
   await page.waitForFunction(() => window.calls.some(call => call.body?.content === '暂停时改的任务一'));
   assert.equal(await page.evaluate(() => window.held), true, '编辑不改变暂停状态');

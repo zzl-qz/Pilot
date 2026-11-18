@@ -101,7 +101,7 @@ export function CommandsPanel() {
               <span className={`command-status is-${String(task.status || 'run').toLowerCase()}`} />
               <span className="command-name">{task.command || taskId}</span>
               <span className="command-row-meta">
-                {task.exitCode != null && <span className={`command-exit${task.exitCode ? ' is-bad' : ''}`}>exit {task.exitCode}</span>}
+                {task.exitCode != null && <span className={`command-exit${task.exitCode ? ' is-bad' : ''}`}>退出码 {task.exitCode}</span>}
                 <span className="command-duration">{durationLabel(task, running)}</span>
               </span>
               <span className="command-state">{commandStatusLabel(task)}</span>

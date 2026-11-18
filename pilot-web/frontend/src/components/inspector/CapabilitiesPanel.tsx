@@ -3,6 +3,7 @@ import type * as S from '../../types/server.js';
 import { useStore } from '../../store.js';
 import { MCP_TRUST_LABELS, mcpSourceLabel } from '../../lib/mcp.js';
 import { pluginStatusDetail, pluginStatusLabel, pluginStatusTone, pluginSummary } from '../../lib/plugin-status.js';
+import { toolLabel } from '../../lib/tool-meta.js';
 
 /* ---------- 能力清单 ---------- */
 
@@ -82,7 +83,7 @@ export function CapabilitiesPanel() {
               {tools.map((tool) => (
                 <li key={tool.name} className={`cap-item${tool.available ? '' : ' is-off'}`}>
                   <div className="cap-item-head">
-                    <code className="cap-name">{tool.name}</code>
+                    <code className="cap-name" title={tool.name}>{toolLabel(tool.name)}</code>
                     <span className={`cap-tag${tool.readOnly ? ' is-readonly' : ''}`}>{tool.readOnly ? '只读' : '可写'}</span>
                     {!tool.available && <span className="cap-tag is-off">不可用</span>}
                   </div>
