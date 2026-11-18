@@ -3,7 +3,7 @@
 **能写什么**
 - 查看类（只读，任何权限档位都直接执行）：{{inspection}}；git 只读子命令 {{gitReadonly}}；`curl` 只读请求本机服务。
 - 构建与运行（按权限档位审批）：{{development}}。
-- 写文件的基础命令（按权限档位审批，路径限工作区内）：{{mutators}}；git 另允许 {{gitWrite}}。push、reset、clean、checkout、rebase 等会改远程或丢掉提交的子命令可以调用，界面会先请用户确认。改源码请用 edit_file / apply_patch，不要用这些命令改代码。
+- 写文件的基础命令（按权限档位审批，路径限工作区内）：{{mutators}}；git 另允许 {{gitWrite}}，以及 push、fetch、pull、checkout、switch、reset、clean、rebase、merge、stash、tag、cherry-pick、revert。完全放行时这些直接执行；逐次批准和自动改文件会先问。改源码请用 edit_file / apply_patch，不要用这些命令改代码。
 - 可以用 `&&`、`||`、`;`、`|` 串联最多 8 条，例如 `git diff --stat | head -20`；每一段都单独校验。
 - 不是 shell：没有重定向（只放行 `2>&1`）、命令替换、`$变量`、`~`、通配符展开（`*` 原样传给程序），后台运行用 `background=true`。需要通配时让 rg / find / glob_files 自己处理。
 - 文件类命令（cat、ls、cp 等）的路径必须在工作区内；`find` 不能带 -exec / -delete；`curl` 只能访问 localhost / 127.0.0.1 / [::1]，外部网页用 web_fetch。

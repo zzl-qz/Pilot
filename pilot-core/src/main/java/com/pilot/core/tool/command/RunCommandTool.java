@@ -453,20 +453,20 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             String sub = tokens.size() > 1 ? tokens.get(1).toLowerCase(Locale.ROOT) : "";
             if (CommandPolicy.GIT_READONLY.contains(sub)) {
                 trackChanges = false;
-            } else if (CommandPolicy.confirms(tokens)) {
-                trackChanges = true;
-            } else if (CommandPolicy.GIT_WRITE.contains(sub)) {
+            } else if (CommandPolicy.GIT_WRITE.contains(sub) || CommandPolicy.GIT_MUTATING.contains(sub)) {
                 if (scope != null && !scope.writable()) {
                     return SegmentCheck.error("只读任务不允许 git " + sub + "，改动请通过沙箱写工具提交");
                 }
-                String problem = checkGitWrite(tokens, sub);
-                if (problem != null) {
-                    return SegmentCheck.error(problem);
+                if (CommandPolicy.GIT_WRITE.contains(sub)) {
+                    String problem = checkGitWrite(tokens, sub);
+                    if (problem != null) {
+                        return SegmentCheck.error(problem);
+                    }
                 }
             } else {
-                return SegmentCheck.error("git 只允许只读子命令与 add/commit: "
+                return SegmentCheck.error("git 子命令不在允许范围内: " + sub + "。可用只读子命令 "
                     + String.join(", ", CommandPolicy.GIT_READONLY.stream().sorted().toList())
-                    + "，以及 add/commit；push/reset/clean/checkout 等仍需人工执行。");
+                    + "，以及 add/commit/push/fetch/pull/checkout/reset 等。");
             }
         }
         if (CommandPolicy.FILE_MUTATORS.contains(executable) && scope != null && !scope.writable()) {

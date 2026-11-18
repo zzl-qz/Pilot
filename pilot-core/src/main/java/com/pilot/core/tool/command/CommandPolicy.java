@@ -34,8 +34,11 @@ final class CommandPolicy {
     static final Set<String> GIT_READONLY = Set.of("status", "diff", "log", "show", "branch", "rev-parse", "ls-files",
         "describe", "blame", "remote", "shortlog", "ls-tree", "cat-file", "rev-list", "grep");
     static final Set<String> GIT_WRITE = Set.of("add", "commit");
-    /** 会改远程、丢掉本地提交或切换检出。允许执行，但任何权限档位都要先弹审批。 */
-    static final Set<String> GIT_CONFIRM = Set.of("push", "reset", "clean", "checkout", "switch", "restore", "rebase",
+    /**
+     * 会改仓库或远程，但按 Codex 不算危险命令。完全放行时直接执行；
+     * 逐次批准和自动改文件仍把它们当普通命令审批。
+     */
+    static final Set<String> GIT_MUTATING = Set.of("push", "reset", "clean", "checkout", "switch", "restore", "rebase",
         "merge", "pull", "fetch", "stash", "tag", "cherry-pick", "revert");
     static final Set<String> INSPECTION_FLAGS =
         Set.of("-v", "--version", "-version", "version", "-h", "--help", "help");
@@ -77,13 +80,11 @@ final class CommandPolicy {
         return null;
     }
 
-    /** 发布、全局安装，以及会改远程或丢掉提交的 git。为真时不直接拒绝，交给审批弹窗。 */
+    /**
+     * 完全放行也要先问的动作。对照 Codex：普通 git（含 push、reset）直接跑，
+     * 只把发布包和全局安装留下。强制 rm、sudo 不在命令白名单里，到不了这里。
+     */
     static boolean confirms(List<String> tokens) {
-        String executable = tokens.getFirst().toLowerCase(Locale.ROOT);
-        if ("git".equals(executable) && tokens.size() > 1
-            && GIT_CONFIRM.contains(tokens.get(1).toLowerCase(Locale.ROOT))) {
-            return true;
-        }
         return forbidden(tokens) != null;
     }
 

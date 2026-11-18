@@ -129,7 +129,8 @@ class SandboxCommandToolTest {
             assertTrue(tool.execute(new HashMap<>(args)).startsWith("ERROR:"), args.toString());
         }
         assertFalse(tool.readOnly(Map.of("command", "npm test")));
-        assertTrue(tool.confirm(Map.of("command", "git push")));
+        assertFalse(tool.confirm(Map.of("command", "git push")));
+        assertTrue(tool.confirm(Map.of("command", "npm publish")));
         assertEquals(0, backend.calls);
     }
 

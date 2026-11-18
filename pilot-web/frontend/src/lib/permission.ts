@@ -11,7 +11,7 @@ export const PERMISSION_MODES: PermissionOption[] = [
     mode: 'AUTO',
     label: '完全放行',
     code: 'AUTO',
-    hint: '全部放行：写入与命令都不再打断，工作区边界仍由路径校验保证'
+    hint: '工作区内的命令直接执行，包括提交和推送。发布包、全局安装仍要你点头'
   },
   {
     mode: 'AUTO_EDIT',

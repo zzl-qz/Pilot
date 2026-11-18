@@ -84,14 +84,23 @@ class RunCommandToolTest {
     }
 
     @Test
-    void asksBeforeDangerousGitWrites() {
+    void ordinaryGitMutationsAreNotExtraConfirm() throws Exception {
         RunCommandTool tool = tool();
+        // 单独的空仓库，git 不会顺着父目录找到用户正在用的仓库。
+        ProcessBuilder init = new ProcessBuilder("git", "init");
+        init.directory(workspace.toFile());
+        Assumptions.assumeTrue(init.start().waitFor() == 0, "git init");
 
-        for (String command : List.of("git push origin main", "git reset --hard HEAD", "git clean -fd")) {
-            assertTrue(tool.confirm(Map.of("command", command)), command);
+        for (String command : List.of("git push origin HEAD:master", "git fetch origin", "git reset --hard HEAD",
+            "git clean -fd", "git checkout -- src/Main.java")) {
+            assertFalse(tool.confirm(Map.of("command", command)), command);
             assertFalse(tool.readOnly(Map.of("command", command)), command);
+            String result = tool.execute(Map.of("command", command));
+            assertFalse(result.contains("不在允许范围内"), command + " -> " + result);
+            assertFalse(result.contains("仍需人工执行"), command + " -> " + result);
         }
         assertFalse(tool.confirm(Map.of("command", "git status")));
+        assertTrue(tool.confirm(Map.of("command", "npm publish")));
     }
 
     @Test
@@ -266,9 +275,11 @@ class RunCommandToolTest {
         AgentScope scope = AgentScope.readOnly(List.of(), List.of()).withCommands(List.of("git"), List.of());
         RunCommandTool tool = new RunCommandTool(new PathValidator(workspace, scope));
 
-        String result = tool.execute(Map.of("command", "git commit -m \"test\""));
+        String commit = tool.execute(Map.of("command", "git commit -m \"test\""));
+        String push = tool.execute(Map.of("command", "git push"));
 
-        assertTrue(result.startsWith("ERROR: 只读任务不允许 git commit"), result);
+        assertTrue(commit.startsWith("ERROR: 只读任务不允许 git commit"), commit);
+        assertTrue(push.startsWith("ERROR: 只读任务不允许 git push"), push);
     }
 
     @Test
