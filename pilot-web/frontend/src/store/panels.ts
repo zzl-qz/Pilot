@@ -11,10 +11,8 @@ export function createPanelActions({ set, get }: StoreContext): StoreSlice<'load
   return {
     /* ---------- 变更 / 预览 ---------- */
     async loadChanges({ strict = false } = {}) {
-      const { sessionId, sessionEpoch, workspace } = get();
-      if (!sessionId || get().changesState === 'restoring') {
-        return;
-      }
+      const { sessionId, sessionEpoch, workspace, changesState } = get();
+      if (!sessionId || changesState === 'restoring') return;
       const request = (get()._changesRequest || 0) + 1;
       const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch && get().workspace === workspace && get()._changesRequest === request;
       set((draft) => { draft.changesState = 'loading'; draft._changesRequest = request; });
@@ -38,10 +36,8 @@ export function createPanelActions({ set, get }: StoreContext): StoreSlice<'load
      * 失败文件逐条回报，别把「撤销没成」显示成成功。
      */
     async restoreChanges(paths, all = false) {
-      const { sessionId, sessionEpoch, workspace } = get();
-      if (!sessionId || get().changesState === 'restoring') {
-        return null;
-      }
+      const { sessionId, sessionEpoch, workspace, changesState } = get();
+      if (!sessionId || changesState === 'restoring') return null;
       const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch && get().workspace === workspace;
       set((draft) => { draft.changesState = 'restoring'; draft._changesRequest = (draft._changesRequest || 0) + 1; });
       try {
@@ -128,21 +124,22 @@ export function createPanelActions({ set, get }: StoreContext): StoreSlice<'load
         && get().workspace === workspace && get().sessionEpoch === sessionEpoch;
       try {
         const data = sessionId ? await api.file(sessionId, target) : await api.workspaceFile(workspace, target);
-        if (current()) set((draft) => { draft._previewData = data; draft._previewLoading = false; });
+        if (!current()) return;
+        set((draft) => {
+          draft._previewData = data;
+          draft._previewLoading = false;
+        });
       } catch (error) {
-        if (current()) {
-          set((draft) => { draft._previewLoading = false; });
-          get().showNotice('读取文件失败：' + errorInfo(error).message);
-        }
+        if (!current()) return;
+        set((draft) => { draft._previewLoading = false; });
+        get().showNotice('读取文件失败：' + errorInfo(error).message);
       }
     },
 
     /* ---------- 命令任务 ---------- */
     async loadCommandTasks() {
       const { sessionId, sessionEpoch } = get();
-      if (!sessionId) {
-        return;
-      }
+      if (!sessionId) return;
       try {
         const data = await apiJson<{ tasks: CommandTask[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/commands`);
         if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
@@ -165,9 +162,7 @@ export function createPanelActions({ set, get }: StoreContext): StoreSlice<'load
     async loadCommandLog(task) {
       const { sessionId, sessionEpoch } = get();
       const taskId = task?.taskId || task?.id;
-      if (!sessionId || !taskId) {
-        return;
-      }
+      if (!sessionId || !taskId) return;
       const sameTask = get().commandLogTaskId === taskId;
       const offset = sameTask ? (get().commandLog?.offset || 0) : 0;
       set((draft) => {

@@ -160,8 +160,7 @@ public class ValidationLedger {
         }
         if (!latest.passed()) {
             // 状态码留给 reason code，用户文案不要夹英文 raw status。
-            return new Report(false, "最近一次校验没有通过", ValidationReason.FAILED,
-                currentCandidateHash, latest, entries);
+            return new Report(false, "最近一次校验没有通过", ValidationReason.FAILED, currentCandidateHash, latest, entries);
         }
         return new Report(true, "", ValidationReason.OK, currentCandidateHash, latest, entries);
     }

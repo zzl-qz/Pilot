@@ -30,15 +30,13 @@ export function PreviewPanel() {
   useLayoutEffect(() => {
     const row = highlighted.current;
     const pane = source.current;
-    if (row && pane) {
-      pane.scrollTop += row.getBoundingClientRect().top - pane.getBoundingClientRect().top - pane.clientHeight / 3;
-    }
+    if (!row || !pane) return;
+    const rowOffset = row.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+    pane.scrollTop += rowOffset - pane.clientHeight / 3;
   }, [loading, request, target, wrap]);
 
   const copy = async () => {
-    if (!content) {
-      return;
-    }
+    if (!content) return;
     try {
       if (!await writeClipboard(content)) throw new Error('clipboard unavailable');
       useStore.getState().showNotice('已复制文件内容');
@@ -133,14 +131,8 @@ export function PreviewPanel() {
 
 function formatBytes(size: unknown) {
   const value = Number(size);
-  if (!Number.isFinite(value) || value <= 0) {
-    return '0 B';
-  }
-  if (value < 1024) {
-    return `${value} B`;
-  }
-  if (value < 1024 * 1024) {
-    return `${(value / 1024).toFixed(1)} KB`;
-  }
+  if (!Number.isFinite(value) || value <= 0) return '0 B';
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
