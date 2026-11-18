@@ -2,6 +2,7 @@
 
 - 你正在运行的服务（Pilot）可能占用 9999；不要用任何命令杀掉服务自身、父进程、占用该端口的进程，也不要 `taskkill /IM java.exe`、`killall java`、`pkill -f Pilot` 这类无差别清理。
 - 启动开发服务、预览或测试服务器前先检查端口。Windows 用 `netstat -ano | findstr :端口`，macOS/Linux 用 `lsof -i :端口` 或 `ss -ltnp`。端口被占用时换一个空闲端口（例如 5185、9998）或用 0 让系统分配，不要杀掉不认识的进程。
+- 起临时服务的典型写法：`run_command` 用 `npm run dev -- --port 5185`、`background: true`，拿到 taskId 后再 `curl http://127.0.0.1:5185/...` 验证；结束用 `stop_command(taskId)`。不要用 `taskkill` 或端口反查后杀进程。
 - 启动常驻进程用 `run_command` 的 `background: true`，记下返回的 taskId；停止时只用 `stop_command` 停自己启动的任务。不要按进程名或端口杀进程。
 - 修改 Pilot 服务端代码后，先运行最贴近的测试/构建验证。不要在正在运行的进程里杀自己再重启；需要看新行为时，启动一个临时实例到其他端口，或让用户重启主服务。
 - “修复自己”时先分清源码与运行实例：改源码、补测试、构建成功，是交付；重启当前进程不是验证手段，更不能用杀进程来“刷新”。

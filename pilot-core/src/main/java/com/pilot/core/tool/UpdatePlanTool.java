@@ -33,7 +33,8 @@ public final class UpdatePlanTool implements Tool {
     public Map<String, Object> parameters() {
         return ToolSchemas.object(
             Map.of("explanation", ToolSchemas.string("本次更新的原因（可选）"), "plan",
-                Map.of("type", "array", "description", "完整步骤列表，整体替换上一次的计划", "items",
+                Map.of("type", "array", "description", "完整步骤列表，整体替换上一次的计划；大型任务按 5–12 个可验证步骤拆分",
+                        "items",
                     ToolSchemas.object(Map.of("step", ToolSchemas.string("步骤描述"), "status",
                         Map.of("type", "string", "enum",
                             List.of(PlanItem.PENDING, PlanItem.IN_PROGRESS, PlanItem.COMPLETED, PlanItem.BLOCKED,

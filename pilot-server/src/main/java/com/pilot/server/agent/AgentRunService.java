@@ -118,18 +118,18 @@ import lombok.extern.slf4j.Slf4j;
 @org.springframework.context.annotation.DependsOn("historyEditCoordinator")
 @Slf4j
 public class AgentRunService implements RunStarter {
-    private static final int MAX_AUTO_CONTINUE = 8;
+    private static final int MAX_AUTO_CONTINUE = Integer.getInteger("pilot.agent.max-auto-continue", 8);
     /**
      * 预算触顶不是失败：一次大型任务可以分几个预算段继续，像 DSH 的 goal round 一样
      * 每段重新计数。上限只防失控，不把生产任务卡在第一次触顶。
      */
-    private static final int MAX_BUDGET_SEGMENTS = 8;
+    private static final int MAX_BUDGET_SEGMENTS = Integer.getInteger("pilot.agent.max-budget-segments", 8);
     /**
      * 目标还没核验完时，步数触顶也在同一会话里再开一轮。
      * dsh 默认最多 256 个 goal round，而且不要求计划先发生变化。
-     * 我们每一轮自己还有步数上限，外层再给 {@value #MAX_GOAL_ROUNDS} 轮，避免一次触顶就把长任务停死。
+     * 我们每一轮自己还有步数上限，外层再给若干轮（默认 32），避免一次触顶就把长任务停死。
      */
-    private static final int MAX_GOAL_ROUNDS = 32;
+    private static final int MAX_GOAL_ROUNDS = Integer.getInteger("pilot.agent.max-goal-rounds", 32);
     /** 这些失败码与任务状态同名：运行停下后任务直接记为同名状态，不归并成 INTERRUPTED。 */
     private static final Set<TaskControlStatus> PRESERVED_FAILURE_STATUSES =
         Set.of(TaskControlStatus.BLOCKED, TaskControlStatus.BUDGET_LIMITED, TaskControlStatus.WAITING,
@@ -1016,9 +1016,9 @@ public class AgentRunService implements RunStarter {
     /**
      * 步数/预算触顶时接上下一轮。普通任务看计划有没有动；目标任务还没核验完就在同一会话里继续。
      *
-     * <p>普通任务最多连续 {@value #MAX_AUTO_CONTINUE} 次，计划连续两轮没变就停下。
-     * 预算触顶则按 {@value #MAX_BUDGET_SEGMENTS} 个预算段继续，每段重新计数；
-     * 这是长任务的分段推进，不是任务失败。目标任务最多 {@value #MAX_GOAL_ROUNDS} 轮。
+     * <p>普通任务最多连续 8 次，计划连续两轮没变就停下。
+     * 预算触顶则按 8 个预算段继续，每段重新计数；
+     * 这是长任务的分段推进，不是任务失败。目标任务最多 32 轮。
      */
     private boolean maybeAutoContinue(String sessionId, String finishedRunId, String status, RunHandle handle) {
         boolean budgetLimited = RunFailureCode.BUDGET_LIMITED.is(status);
