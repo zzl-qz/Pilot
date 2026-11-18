@@ -1114,8 +1114,8 @@ public class AgentRunService implements RunStarter {
     /**
      * 组装本轮 system：正文全部来自 {@code prompts/} 资源，这里只注入环境与当前计划。
      *
-     * <p>计划每轮重新注入：压缩会折叠历史，但 system 是重建的，长期约束不会丢
-     * （与 Claude Code 把约束放 CLAUDE.md 的思路一致）。计划与日期排在 system 最尾：
+     * <p>计划每轮重新注入：压缩会折叠历史，但 system 是重建的，AGENTS.md 里的约定不会丢。
+     * 计划与日期排在 system 最尾：
      * 越动态的段越靠后，前缀缓存按 token 匹配，尾部变化只损失尾部缓存。
      *
      * <p>正文段落按 {@code availableTools} 过滤：依赖的工具没注册，对应段落不进提示词，
@@ -1136,11 +1136,6 @@ public class AgentRunService implements RunStarter {
         String rules = projectRules(workspace);
         if (!rules.isEmpty()) {
             parts.add(new ContextComposition.Source("rules", rules));
-        }
-        String constraints = projectConstraintText(sessionId);
-        if (!constraints.isEmpty()) {
-            parts.add(new ContextComposition.Source("constraints",
-                PROMPTS.render("system/project-constraints", Map.of("constraints", constraints)).strip()));
         }
         String memory = ProjectRuleLoader.loadMemory(toolFactory.resolve(workspace), PROMPTS);
         if (!memory.isEmpty()) {
@@ -1394,17 +1389,6 @@ public class AgentRunService implements RunStarter {
         return ProjectRuleLoader.load(root, PROMPTS);
     }
 
-    private String projectConstraintText(String sessionId) {
-        if (projects == null || sessionId == null) {
-            return "";
-        }
-        String projectId = sessions.find(sessionId).map(Session::projectId).orElse(null);
-        if (projectId == null || projectId.isBlank()) {
-            return "";
-        }
-        return projects.find(projectId).map(project -> project.constraints()).orElse("");
-    }
-
     private String planBrief(String sessionId) {
         List<PlanItem> items = plans.load(sessionId);
         if (items.isEmpty()) {
@@ -1534,7 +1518,7 @@ public class AgentRunService implements RunStarter {
             .withCompletionClaim(() -> claimCompletion(sessionId, handle)).withRestoredPaths(snapshots::restoredPaths)
             .withQualityWorkspace(resolvedWorkspace)
             .withQualityTexts(snapshots::originalText, path -> WorkspaceTexts.read(resolvedWorkspace, path))
-            .withLintGate(properties.lintGate()).withProjectConstraints(projectConstraintText(sessionId))
+            .withLintGate(properties.lintGate())
             .withIndependentCodeReviewer(review.active() ? null
                 : new IndependentCodeReviewer(measuredMain, resolvedWorkspace, handle.cancelled::get))
             // 编辑后自动格式化/lint 之类交给 .pilot/settings.json，不再占用模型注意力

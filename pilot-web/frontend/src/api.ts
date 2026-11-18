@@ -235,6 +235,7 @@ export const api = {
   renameProject: (id: string, body: { name: string }) => apiJson<ApiResults['renameProject']>(`/api/projects/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   saveProjectFolders: (id: string, folders: string[]) => apiJson<ApiResults['saveProjectFolders']>(`/api/projects/${encodeURIComponent(id)}/folders`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folders }) }),
   saveProjectConstraints: (id: string, text: string) => apiJson<ApiResults['saveProjectConstraints']>(`/api/projects/${encodeURIComponent(id)}/constraints`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }),
+  readProjectAgents: (id: string) => apiJson<ApiResults['readProjectAgents']>(`/api/projects/${encodeURIComponent(id)}/agents`),
   deleteProject: (id: string) => apiJson<ApiResults['deleteProject']>(`/api/projects/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   worktrees: (body: { workspace: string; branch?: string; title?: string; projectId?: string | null }) => apiJson<ApiResults['worktrees']>('/api/worktrees', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   worktreeInfo: (path?: string) => apiJson<ApiResults['worktreeInfo']>(`/api/worktrees?path=${encodeURIComponent(path || '')}`),

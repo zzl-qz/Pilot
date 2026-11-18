@@ -38,7 +38,7 @@ import com.pilot.core.model.ContextComposition.Source;
  * prompts/system/dispatch.md        多智能体调度（requires: dispatch_agents）
  * prompts/system/output.md          结论格式
  * prompts/context/repository.md     仓库快照（顶层结构 / git / 构建方式）
- * prompts/system/project-rules.md   项目约定（PILOT.md 等）
+ * prompts/system/project-rules.md   项目约定（只认 AGENTS.md）
  * prompts/system/plan-context.md    计划注入（{{planItems}}）
  * prompts/system/plan-done.md       计划已全部完成时的提醒
  * prompts/tools/&lt;name&gt;.md           每个工具的描述，名字必须与 Tool.name() 一致

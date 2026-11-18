@@ -657,6 +657,13 @@ export interface ProjectControllerProjectResponse {
   constraints?: string;
 }
 
+/** ProjectController.java / AgentsFile */
+export interface ProjectControllerAgentsFile {
+  folder: string;
+  text: string;
+  truncated: boolean;
+}
+
 /** RecoveryReportService.java / Snapshot */
 export interface RecoveryReportServiceSnapshot {
   recoveredAt: string;

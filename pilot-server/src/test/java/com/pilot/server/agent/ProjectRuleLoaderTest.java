@@ -17,23 +17,27 @@ class ProjectRuleLoaderTest {
     Path root;
 
     @Test
-    void loadsAncestorAndWorkspaceRulesWithSourcesAndOneFilePerDirectory() throws IOException {
+    void onlyTheWorkspaceRootAgentsFileCounts() throws IOException {
         Path workspace = Files.createDirectories(root.resolve("repo/worktree"));
         Files.writeString(root.resolve("AGENTS.md"), "上层规则");
-        Files.writeString(root.resolve("CLAUDE.md"), "同层低优先级规则");
-        Files.writeString(workspace.resolve("PILOT.md"), "工作区规则");
+        Files.writeString(workspace.resolve("CLAUDE.md"), "别的文件名");
+        Files.writeString(workspace.resolve("PILOT.md"), "也不认");
 
+        String missing = ProjectRuleLoader.load(workspace, PromptLibrary.classpathOnly());
+
+        assertTrue(missing.isEmpty(), missing);
+        Files.writeString(workspace.resolve("AGENTS.md"), "工作区规则");
         String rules = ProjectRuleLoader.load(workspace, PromptLibrary.classpathOnly());
-
-        assertTrue(rules.contains(root.resolve("AGENTS.md").toString()));
-        assertTrue(rules.contains(workspace.resolve("PILOT.md").toString()));
-        assertTrue(rules.indexOf("上层规则") < rules.indexOf("工作区规则"));
-        assertFalse(rules.contains("同层低优先级规则"));
+        assertTrue(rules.contains(workspace.resolve("AGENTS.md").toString()));
+        assertTrue(rules.contains("工作区规则"));
+        assertFalse(rules.contains("上层规则"));
+        assertFalse(rules.contains("别的文件名"));
+        assertFalse(rules.contains("也不认"));
     }
 
     @Test
     void boundsLongRuleWithoutReadingWholeFile() throws IOException {
-        Files.writeString(root.resolve("PILOT.md"), "A".repeat(20_000));
+        Files.writeString(root.resolve("AGENTS.md"), "A".repeat(20_000));
 
         String rules = ProjectRuleLoader.load(root, PromptLibrary.classpathOnly());
 

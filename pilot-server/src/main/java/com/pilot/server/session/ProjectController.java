@@ -1,6 +1,7 @@
 package com.pilot.server.session;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -42,6 +43,9 @@ import com.pilot.server.workspace.WorkspaceService;
 @RequestMapping("/api/projects")
 public class ProjectController {
     private static final int MAX_FOLDERS = 12;
+    /** 和 ProjectRuleLoader 读进提示词的单文件上限一致，避免界面保存后模型只看到一半。 */
+    private static final int MAX_AGENTS_CHARS = 8_000;
+    private static final int MAX_AGENTS_READ = 100_000;
 
     private final ProjectRepository projects;
     private final SessionService sessions;
@@ -89,8 +93,7 @@ public class ProjectController {
         Project project = projects.create("prj_" + UUID.randomUUID(), name(request.name()), folders,
             gitHead(folders.get(0)), clock.instant());
         if (request.constraints() != null && !request.constraints().isBlank()) {
-            projects.updateConstraints(project.id(), request.constraints(), clock.instant());
-            project = require(project.id());
+            writeAgents(folders.get(0), request.constraints());
         }
         return response(project);
     }
@@ -121,16 +124,30 @@ public class ProjectController {
         return response(require(id));
     }
 
-    /** 保存这个项目的自然语言约束。空文本表示清空。 */
+    /** 读第一个绑定文件夹根目录的 AGENTS.md。没有文件时文本为空。 */
+    @GetMapping("/{id}/agents")
+    public AgentsFile agents(@PathVariable String id) {
+        Project project = require(id);
+        if (project.folders().isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "项目还没有文件夹");
+        }
+        return readAgents(project.folders().get(0));
+    }
+
+    /**
+     * 把界面上的约定写进第一个绑定文件夹根目录的 AGENTS.md。
+     * 空文本会删掉这个文件。不再另存一份到项目记录里。
+     */
     @PutMapping("/{id}/constraints")
     public ProjectResponse updateConstraints(@PathVariable String id,
         @RequestBody(required = false) ConstraintsRequest request) {
-        require(id);
-        String text = request == null || request.text() == null ? "" : request.text();
-        if (!projects.updateConstraints(id, text, clock.instant())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "project not found: " + id);
+        Project project = require(id);
+        if (project.folders().isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "项目还没有文件夹");
         }
-        return response(require(id));
+        String text = request == null || request.text() == null ? "" : request.text();
+        writeAgents(project.folders().get(0), text);
+        return response(project);
     }
 
     /**
@@ -221,6 +238,65 @@ public class ProjectController {
         }
     }
 
+    private AgentsFile readAgents(String folder) {
+        Path file = agentsFile(folder);
+        if (!Files.isRegularFile(file) || Files.isSymbolicLink(file)) {
+            return new AgentsFile(file.getParent().toString(), "", false);
+        }
+        try {
+            String text = Files.readString(file, StandardCharsets.UTF_8);
+            if (text.startsWith("\uFEFF")) {
+                text = text.substring(1);
+            }
+            if (text.length() > MAX_AGENTS_READ) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "AGENTS.md 超过 10 万字，请在仓库里直接改");
+            }
+            boolean truncated = text.length() > MAX_AGENTS_CHARS;
+            return new AgentsFile(file.getParent().toString(), truncated ? text.substring(0, MAX_AGENTS_CHARS) : text,
+                truncated);
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "读不了 AGENTS.md：" + e.getMessage());
+        }
+    }
+
+    private void writeAgents(String folder, String text) {
+        Path file = agentsFile(folder);
+        if (Files.isSymbolicLink(file)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "AGENTS.md 是符号链接，请在仓库里直接改");
+        }
+        String body = text == null ? "" : text.replace("\r\n", "\n");
+        if (body.strip().isEmpty()) {
+            try {
+                Files.deleteIfExists(file);
+            } catch (IOException e) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "删不掉 AGENTS.md：" + e.getMessage());
+            }
+            return;
+        }
+        if (body.length() > MAX_AGENTS_CHARS) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "AGENTS.md 最多 8000 字，这和模型读到的上限一致");
+        }
+        try {
+            Files.writeString(file, body, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "写不了 AGENTS.md：" + e.getMessage());
+        }
+    }
+
+    private Path agentsFile(String folder) {
+        Path dir;
+        try {
+            dir = workspaces.requireDirectory(folder).toAbsolutePath().normalize();
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
+        Path file = dir.resolve("AGENTS.md").normalize();
+        if (file.getParent() == null || !file.getParent().equals(dir)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "只能读写文件夹根目录的 AGENTS.md");
+        }
+        return file;
+    }
+
     private Project require(String id) {
         return projects.find(id)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "project not found: " + id));
@@ -249,6 +325,10 @@ public class ProjectController {
     }
 
     public record ConstraintsRequest(String text) {
+    }
+
+    /** @param truncated 文件超过模型能读的 8000 字。界面只展示前半，并且不保存，避免截掉后半。 */
+    public record AgentsFile(String folder, String text, boolean truncated) {
     }
 
     /**

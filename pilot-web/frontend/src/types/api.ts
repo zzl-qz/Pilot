@@ -124,6 +124,7 @@ export interface ApiResults {
   renameProject: S.ProjectControllerProjectResponse;
   saveProjectFolders: S.ProjectControllerProjectResponse;
   saveProjectConstraints: S.ProjectControllerProjectResponse;
+  readProjectAgents: S.ProjectControllerAgentsFile;
   deleteProject: null;
   worktrees: S.WorktreeControllerOpened;
   worktreeInfo: S.WorktreeControllerInfo;

@@ -7,6 +7,7 @@ import { Icon, FileIcon } from './Icon.jsx';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
 import { errorInfo } from '../lib/errors.js';
+import { MarkdownBody } from './MarkdownBody.jsx';
 import { appendProjectFolders, folderPaths, MAX_PROJECT_FOLDERS, validateProjectFolders } from '../lib/project-folders.js';
 import type { ApiResults } from '../types/api.js';
 import type * as S from '../types/server.js';
@@ -19,7 +20,10 @@ export function ProjectEditor() {
   const project = useStore(state => state.projects.find(item => item.id === state.ui.projectEditor?.id));
   const [name, setName] = useState(editor?.name ?? project?.name ?? '');
   const [folders, setFolders] = useState((editor?.folders ?? project?.folders ?? []).join('\n'));
-  const [constraints, setConstraints] = useState(project?.constraints ?? '');
+  const [constraints, setConstraints] = useState('');
+  const [agentsLocked, setAgentsLocked] = useState(false);
+  const [agentsReady, setAgentsReady] = useState(!editor?.id);
+  const [editingAgents, setEditingAgents] = useState(!editor?.id);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [browserOpen, setBrowserOpen] = useState(false);
@@ -28,6 +32,26 @@ export function ProjectEditor() {
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const paths = folderPaths(folders);
   const close = () => useStore.getState().setUi({ projectEditor: null });
+
+  useEffect(() => {
+    if (!editor?.id) {
+      return;
+    }
+    let cancel = false;
+    setAgentsReady(false);
+    api.readProjectAgents(editor.id).then(file => {
+      if (cancel) return;
+      const text = file?.text || '';
+      setConstraints(text);
+      setAgentsLocked(Boolean(file?.truncated));
+      setEditingAgents(!text.trim());
+      setAgentsReady(true);
+    }).catch(failure => {
+      if (cancel) return;
+      setError(errorInfo(failure).message || '读不到 AGENTS.md。');
+    });
+    return () => { cancel = true; };
+  }, [editor?.id]);
 
   function addFolders(selected: string[]) {
     try {
@@ -76,8 +100,11 @@ export function ProjectEditor() {
         await api.deleteProject(editor.id);
       } else if (editor?.id) {
         await api.renameProject(editor.id, { name });
+        // 先写回打开时读到的那份文件，再改文件夹列表，避免顺序一变就写进另一个目录。
+        if (agentsReady && !agentsLocked) {
+          await api.saveProjectConstraints(editor.id, constraints);
+        }
         await api.saveProjectFolders(editor.id, list);
-        await api.saveProjectConstraints(editor.id, constraints);
       } else {
         await api.createProject({ name, folders: list, constraints });
       }
@@ -99,7 +126,7 @@ export function ProjectEditor() {
             danger: true,
             onConfirm: () => update('delete')
           })} />}
-        <Button id="project-save" onClick={() => update('save')} variant="primary" label={busy === 'save' ? '保存中…' : '保存'} isDisabled={Boolean(busy) || !name.trim() || !paths.length} />
+        <Button id="project-save" onClick={() => update('save')} variant="primary" label={busy === 'save' ? '保存中…' : '保存'} isDisabled={Boolean(busy) || !name.trim() || !paths.length || (Boolean(editor?.id) && !agentsReady)} />
   </>;
 
   return <Modal id="project-modal" title={editor?.id ? '编辑项目' : '新建项目'} onClose={close} dismissible={!busy} footer={footer}>
@@ -110,13 +137,28 @@ export function ProjectEditor() {
       if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.keyCode === 229)) event.preventDefault();
     }}>
       <TextInput id="project-name" label="项目名称" width="100%" size="lg" value={name} isDisabled={Boolean(busy)} onChange={setName} />
-      <label className="project-constraints" htmlFor="project-constraints">
-        <span>这个项目必须遵守</span>
-        <textarea id="project-constraints" value={constraints} disabled={Boolean(busy)} maxLength={4000}
-          placeholder="用平时说话的方式写，一行一条。例如：金额计算必须调用 Money.round"
-          onChange={event => setConstraints(event.target.value)} />
-        <p className="project-folder-help">只对这个项目生效。每次运行都会交给模型，收尾时再对一遍。</p>
-      </label>
+      <div className="project-constraints">
+        <div className="agents-head">
+          <span id="project-constraints-label">AGENTS.md</span>
+          {agentsReady && !agentsLocked && constraints.trim() && (
+            <Button type="button" variant="ghost" label={editingAgents ? '看渲染' : '编辑'}
+              isDisabled={Boolean(busy)} onClick={() => setEditingAgents(value => !value)} />
+          )}
+        </div>
+        {editingAgents || !constraints.trim() ? (
+          <textarea id="project-constraints" aria-labelledby="project-constraints-label" value={constraints}
+            readOnly={agentsLocked} maxLength={8000}
+            disabled={Boolean(busy) || (Boolean(editor?.id) && !agentsReady)}
+            placeholder={'用平时说话的方式写，保存后会在文件夹根目录创建 AGENTS.md。\n\n# 必须遵守\n- 金额计算必须调用 Money.round'}
+            onChange={event => setConstraints(event.target.value)} />
+        ) : (
+          <div className="agents-preview" aria-labelledby="project-constraints-label">
+            <MarkdownBody text={constraints} />
+          </div>
+        )}
+        <p className="project-folder-help">只认第一个文件夹根目录的 AGENTS.md。这里没有这份文件就不算有约定。写好后保存，会自动创建。</p>
+        {agentsLocked && <p className="pilot-inline-status" role="status">这份文件超过 8000 字。模型只能看到前 8000 字。这里不保存，避免把后面截掉。请直接在仓库里改短。</p>}
+      </div>
       <section className="project-folders-section" aria-labelledby="project-folders-label">
         <div className="project-folders-heading">
           <span id="project-folders-label">绑定文件夹 <span className="project-folder-count">{paths.length} / {MAX_PROJECT_FOLDERS}</span></span>
