@@ -19,7 +19,8 @@ public record ProjectLint(Status status, String command, String source, int time
         "eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", "eslint.config.ts", ".eslintrc", ".eslintrc.js",
         ".eslintrc.cjs", ".eslintrc.json", ".eslintrc.yml", "ruff.toml", ".ruff.toml", "pyproject.toml",
         ".golangci.yml", ".golangci.yaml", ".golangci.toml", "phpcs.xml", "phpcs.xml.dist", ".rubocop.yml",
-        ".rubocop.yaml", "analysis_options.yaml", "clippy.toml", ".clippy.toml", "deno.json", "deno.jsonc");
+        ".rubocop.yaml", "analysis_options.yaml", "clippy.toml", ".clippy.toml", "deno.json", "deno.jsonc",
+        "config/quality/rules.json", "config/java/checkstyle-strict.xml");
     private static final int DEFAULT_TIMEOUT_SECONDS = 60;
     private static final int MAX_TIMEOUT_SECONDS = 180;
     private static final int DIGEST_CHARS = 20_000;
@@ -187,6 +188,9 @@ public record ProjectLint(Status status, String command, String source, int time
     }
 
     private static ProjectLint fromMarker(Path root, int timeout) {
+        if (exists(root, "scripts/quality-gate.mjs") && exists(root, "config/quality/rules.json")) {
+            return ready("node scripts/quality-gate.mjs {files}", "scripts/quality-gate.mjs", timeout);
+        }
         if (exists(root, "biome.json") || exists(root, "biome.jsonc")) {
             return ready("biome check {files}", "biome.json", timeout);
         }

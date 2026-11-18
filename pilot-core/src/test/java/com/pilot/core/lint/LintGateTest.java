@@ -51,6 +51,12 @@ class LintGateTest {
 
         Files.delete(root.resolve("go.mod"));
         assertEquals(ProjectLint.Status.UNCONFIGURED, ProjectLint.discover(root).status());
+
+        Files.createDirectories(root.resolve("scripts"));
+        Files.createDirectories(root.resolve("config/quality"));
+        Files.writeString(root.resolve("scripts/quality-gate.mjs"), "// gate\n");
+        Files.writeString(root.resolve("config/quality/rules.json"), "{}\n");
+        assertEquals("node scripts/quality-gate.mjs {files}", ProjectLint.discover(root).command());
     }
 
     @Test

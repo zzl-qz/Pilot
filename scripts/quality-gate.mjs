@@ -56,13 +56,14 @@ function usage(message) {
     '  --all                全量检查全部坏味道（诊断用，存量也会报）',
     '  --base <ref>         指定对比基线（默认 HEAD；CI 里可传 origin/master）',
     '  --java-only / --ts-only',
-    '  --max-findings <n>   最多打印多少条（默认 40）'
+    '  --max-findings <n>   最多打印多少条（默认 40）',
+    '  [文件...]            只检查列出的仓库相对路径；不写则检查 git 里的全部改动'
   ].join('\n'));
   process.exit(message ? 2 : 0);
 }
 
 function parseArgs(argv) {
-  const options = { mode: 'changed', base: 'HEAD', java: true, ts: true, maxFindings: 40 };
+  const options = { mode: 'changed', base: 'HEAD', java: true, ts: true, maxFindings: 40, files: [] };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--changed') options.mode = 'changed';
@@ -72,7 +73,8 @@ function parseArgs(argv) {
     else if (arg === '--base') options.base = argv[++i] ?? 'HEAD';
     else if (arg === '--max-findings') options.maxFindings = Number(argv[++i] ?? 40);
     else if (arg === '--help' || arg === '-h') usage();
-    else usage(`未知参数：${arg}`);
+    else if (arg.startsWith('-')) usage(`未知参数：${arg}`);
+    else if (arg !== '{files}') options.files.push(arg.replace(/\\/g, '/').replace(/^\.\//, ''));
   }
   return options;
 }
@@ -114,8 +116,11 @@ function resolveBase(ref) {
 }
 
 // Map<仓库相对路径, Set<改动后的行号>>；未跟踪文件整体视为改动。
-function changedLines(base) {
-  const patch = git(['diff', '--unified=0', '--no-color', base]);
+// only 有值时只看这些路径，避免 agent 每次写入都把仓库里其他脏文件一起查一遍。
+function changedLines(base, only = []) {
+  const args = ['diff', '--unified=0', '--no-color', base];
+  if (only.length) args.push('--', ...only);
+  const patch = git(args);
   if (patch.status !== 0) throw new Error(patch.stderr.trim() || `git diff ${base} 失败`);
   const map = new Map();
   let current = null;
@@ -133,9 +138,11 @@ function changedLines(base) {
     const set = map.get(current);
     for (let i = 0; i < count; i++) set.add(start + i);
   }
-  const untracked = git(['ls-files', '--others', '--exclude-standard']);
+  const allow = only.length ? new Set(only) : null;
+  const untracked = git(['ls-files', '--others', '--exclude-standard', ...(only.length ? ['--', ...only] : [])]);
   if (untracked.status === 0) {
     for (const path of untracked.stdout.split('\n').filter(Boolean)) {
+      if (allow && !allow.has(path)) continue;
       const text = safeRead(join(ROOT, path));
       if (text !== null) map.set(path, new Set(text.split('\n').map((_, index) => index + 1)));
     }
@@ -421,8 +428,10 @@ function scanAll(options) {
 
 function scanChanged(options) {
   const base = resolveBase(options.base);
-  const lines = changedLines(base);
-  const paths = [...lines.keys()].filter((path) => (options.java && JAVA_EXT.test(path)) || (options.ts && TS_EXT.test(path)));
+  const lines = changedLines(base, options.files);
+  const allow = options.files.length ? new Set(options.files) : null;
+  const paths = [...lines.keys()].filter((path) => (!allow || allow.has(path))
+    && ((options.java && JAVA_EXT.test(path)) || (options.ts && TS_EXT.test(path))));
   const entries = paths.map((path) => ({ path, text: safeRead(join(ROOT, path)) })).filter((entry) => entry.text !== null);
 
   // 基线版本的内容写到临时目录里检查，用同一套规则算出「本来就有的问题」。

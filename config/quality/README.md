@@ -4,7 +4,7 @@
 
 ## 为什么要这一层
 
-提交门禁的阈值只放在这一份目录里，生成 Checkstyle 配置。CI 会拒绝目录和生成文件各写各的。代理到别的仓库干活时不读这份目录。
+提交门禁的阈值只放在这一份目录里，生成 Checkstyle 配置。CI 会拒绝目录和生成文件各写各的。代理到别的仓库干活时不读这份目录。本仓库根上同时有 `scripts/quality-gate.mjs` 和本文件时，Pilot 会执行 `node scripts/quality-gate.mjs {files}`，只把这次改动的文件交进去。调整阈值改 `rules.json`，再执行 `node scripts/quality-sync.mjs --write`。同一次运行里改规则文件，会被当成关掉检查。
 
 ## 文件结构
 
