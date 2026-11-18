@@ -17,10 +17,16 @@ import java.util.Objects;
  * @param baseCommit 建项目时记录的仓库基线；沙箱与变更审阅都应以它为起点
  */
 public record Project(String id, String name, List<String> folders, String baseCommit, Instant createdAt,
-    Instant updatedAt) {
-    /** 兼容调用：不记录基线。 */
+    Instant updatedAt, String constraints) {
+    /** 兼容调用：不记录基线，也没有项目约束。 */
     public Project(String id, String name, List<String> folders, Instant createdAt, Instant updatedAt) {
-        this(id, name, folders, null, createdAt, updatedAt);
+        this(id, name, folders, null, createdAt, updatedAt, "");
+    }
+
+    /** 兼容调用：没有项目约束。 */
+    public Project(String id, String name, List<String> folders, String baseCommit, Instant createdAt,
+        Instant updatedAt) {
+        this(id, name, folders, baseCommit, createdAt, updatedAt, "");
     }
 
     public Project {
@@ -34,6 +40,7 @@ public record Project(String id, String name, List<String> folders, String baseC
         Objects.requireNonNull(updatedAt, "updatedAt must not be null");
         name = name.strip();
         folders = normalize(folders);
+        constraints = normalizeConstraints(constraints);
     }
 
     /** 去空、去重、保持顺序：同一路径绑两次没有意义。 */
@@ -54,20 +61,32 @@ public record Project(String id, String name, List<String> folders, String baseC
         return List.copyOf(new ArrayList<>(unique));
     }
 
+    private static String normalizeConstraints(String constraints) {
+        if (constraints == null) {
+            return "";
+        }
+        String text = constraints.strip();
+        return text.length() <= 4_000 ? text : text.substring(0, 4_000);
+    }
+
     /** 新建对话时的默认工作区；没有绑定任何文件夹时为 {@code null}。 */
     public String primaryFolder() {
         return folders.isEmpty() ? null : folders.get(0);
     }
 
     public Project rename(String newName, Instant now) {
-        return new Project(id, newName, folders, baseCommit, createdAt, now);
+        return new Project(id, newName, folders, baseCommit, createdAt, now, constraints);
     }
 
     public Project withFolders(List<String> newFolders, Instant now) {
-        return new Project(id, name, newFolders, baseCommit, createdAt, now);
+        return new Project(id, name, newFolders, baseCommit, createdAt, now, constraints);
     }
 
     public Project withBaseCommit(String commit, Instant now) {
-        return new Project(id, name, folders, commit, createdAt, now);
+        return new Project(id, name, folders, commit, createdAt, now, constraints);
+    }
+
+    public Project withConstraints(String text, Instant now) {
+        return new Project(id, name, folders, baseCommit, createdAt, now, text);
     }
 }

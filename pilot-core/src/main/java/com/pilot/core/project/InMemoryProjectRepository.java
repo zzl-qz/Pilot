@@ -49,6 +49,16 @@ public final class InMemoryProjectRepository implements ProjectRepository {
     }
 
     @Override
+    public boolean updateConstraints(String id, String constraints, Instant now) {
+        Project existing = projects.get(id);
+        if (existing == null) {
+            return false;
+        }
+        projects.put(id, existing.withConstraints(constraints, now));
+        return true;
+    }
+
+    @Override
     public boolean delete(String id) {
         return projects.remove(id) != null;
     }

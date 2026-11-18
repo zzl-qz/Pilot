@@ -201,6 +201,7 @@ public final class AgentLoop {
     private Consumer<String> liveReasoning;
     /** 收尾门：有了目标之后在 run/resume 里创建，一次运行一个。 */
     private CompletionGate completionGate;
+    private String projectConstraints = "";
     private ExecutionPolicy executionPolicy;
     private Hooks hooks = Hooks.none();
 
@@ -258,6 +259,12 @@ public final class AgentLoop {
         this.lintGate = lintGate == null ? LintGate.disabled() : lintGate;
         this.lintGate.setOriginalText(originalFileText);
         toolExecutor.withLint(this.lintGate, qualityWorkspace);
+        return this;
+    }
+
+    /** 当前项目在界面里写下的约束。空字符串表示这个项目没有额外约束。 */
+    public AgentLoop withProjectConstraints(String text) {
+        projectConstraints = text == null ? "" : text.strip();
         return this;
     }
 
@@ -412,6 +419,7 @@ public final class AgentLoop {
         List<Message> messages = seed(history);
         String goal = userInput.strip();
         this.completionGate = new CompletionGate(PROMPTS, config.completionChecks(), goal, lintGate);
+        this.completionGate.useProjectConstraints(projectConstraints);
         lintGate.lock(qualityWorkspace);
         messages.add(Message.user(goal, attachments == null ? List.of() : attachments,
             imagePositions == null ? List.of() : imagePositions));
@@ -436,6 +444,7 @@ public final class AgentLoop {
             throw new IllegalArgumentException("history is empty, nothing to resume");
         }
         this.completionGate = new CompletionGate(PROMPTS, config.completionChecks(), goal, lintGate);
+        this.completionGate.useProjectConstraints(projectConstraints);
         lintGate.lock(qualityWorkspace);
         this.completionGate.restoreFrom(history);
         return loop(messages, events, checkpoint);

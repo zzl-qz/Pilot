@@ -50,7 +50,7 @@ export interface StoreData extends Omit<ReducerState, 'ui'> {
   projects: ProjectSummary[]; currentProjectId: string | null; inputHistory: string[]; inputHistoryIndex: number; inputHistoryDraft: string;
   /** 当前会话的想法：只属于这个会话，保存与回填都不发送消息。 */
   notes: S.SessionNotesNote[]; noteSeed: NoteSeed | null; noteFocus: string | null; notesState: 'idle' | 'loading' | 'ready' | 'error'; notesError: string; notesSaving: string;
-  sideChats: SideChatsState; sideQuote: { id: string; text: string; nonce: number } | null; sideDrafts?: Record<string, string>;
+  sideChats: SideChatsState; sideQuote: { id: string; text: string; nonce: number; quote?: boolean } | null; sideDrafts?: Record<string, string>;
   runId: string | null; lastRunId: string | null; running: boolean; cancelling: boolean; pausing: boolean; steering: boolean;
   queueBusy: boolean; queueRevision: string | null; runStartedAt: number; lastEventAt: number; modelRetryUntil: number;
   runUsage: RunUsage | null; requestReports: RequestReport[]; latestContextReport: RequestReport | null; liveOutputTokens: number;
@@ -105,7 +105,7 @@ export interface StoreActions {
   forkCheckpoint(sequence: number, revision: number): Promise<void>; currentProject(): ProjectSummary | null;
   createSideChat(options?: ForceOptions): Promise<SideChatTab | null>; selectSideChat(id: string): void; closeSideChat(id: string): Promise<boolean>;
   setSideDraft(id: string, value: string | ((text: string) => string)): void; toggleSideChatPane(): void;
-  askSideChat(text: string): Promise<void>; takeSideQuote(id: string): string | null;
+  askSideChat(text: string, quote?: boolean): Promise<void>; takeSideQuote(id: string): string | null;
   switchWorkspace(workspace: string, options?: { throwOnError?: boolean }): Promise<void>;
   openWorktree(branch?: string): Promise<void>; handoffWorktree(): Promise<void>;
   decideSandbox(id: string, action: string, candidateHash?: string): Promise<boolean>;

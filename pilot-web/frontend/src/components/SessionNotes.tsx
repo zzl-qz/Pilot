@@ -156,6 +156,7 @@ export function SessionNotes({ onClose, embedded = false, onAsk }: { onClose?: (
 
   const error = localError || notesError;
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [searchOpen, setSearchOpen] = useState(false);
   const visible = statusFilter === 'all' ? notes : notes.filter(note => (note.status || 'inbox') === statusFilter);
   const inboxCount = notes.filter(note => (note.status || 'inbox') === 'inbox').length;
   return <div id="notes-menu" className={embedded ? 'notes-embedded' : 'composer-flyout notes-flyout'}
@@ -163,47 +164,39 @@ export function SessionNotes({ onClose, embedded = false, onAsk }: { onClose?: (
     <header className="notes-head">
       <strong>想法</strong>
       <span className="notes-count" aria-label={`${notes.length} 条想法`}>{notes.length}</span>
+      {projectId && <button type="button" className={`note-filter notes-search-toggle${searchOpen ? ' is-active' : ''}`}
+        aria-expanded={searchOpen} onClick={() => setSearchOpen(open => !open)}>搜索</button>}
       {!embedded && onClose && <IconButton className="notes-close" label="关闭想法" icon={<Icon name="close" />} variant="ghost" onClick={onClose} />}
     </header>
     {!sessionId && <p className="notes-draft-hint">还没开始任务：想法先存在本机，发出第一条消息后自动并入当前会话。</p>}
     {seed?.source?.sequence != null && <p className="note-source is-seed" role="status">
       来自第 {seed.source.sequence} 条消息的选中文字；保存后仍可定位，来源被清理时会保留引用原文。
     </p>}
-    <div className="notes-search">
-      <label htmlFor="notes-search-input">在项目中搜索想法</label>
-      {projectId ? <div className="notes-search-row">
+    {searchOpen && <div className="notes-search">
+      <div className="notes-search-row">
         <input id="notes-search-input" type="search" value={query} maxLength={200}
-          placeholder="输入关键词，回车搜索" aria-label="在项目中搜索想法"
+          placeholder="在这个项目的想法里找" aria-label="在项目中搜索想法"
           onChange={event => setQuery(event.target.value)}
           onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void searchProject(); } }} />
         <Button size="sm" label={searching ? '搜索中…' : '搜索'} isDisabled={!query.trim() || searching}
           onClick={() => void searchProject()} />
-      </div> : <p className="notes-draft-hint">当前会话还没有所属项目；打开项目里的会话后可以跨会话搜索想法。</p>}
+      </div>
       {searchError && <p className="notes-status is-error" role="alert">{searchError}</p>}
       {hits && <ul className="notes-search-hits" aria-label="项目想法搜索结果">
         {hits.map(hit => <li key={hit.sessionId + ':' + hit.noteId}>
-          <button type="button" onClick={() => void openHit(hit)}>
-            <span className="notes-hit-session">{hit.sessionTitle}</span>
+          <div className="notes-hit">
+            <span className="notes-hit-session">{hit.sessionTitle} · {noteWhen(hit.createdAt)}</span>
             <span className="notes-hit-snippet">{hit.snippet}</span>
-          </button>
+            <span className="notes-hit-actions">
+              <button type="button" onClick={() => insert(hit.content)}>放到输入框</button>
+              <button type="button" onClick={() => void openHit(hit)}>打开那条对话</button>
+            </span>
+          </div>
         </li>)}
         {!hits.length && <li className="notes-empty">没有匹配的想法。</li>}
       </ul>}
-    </div>
-    <div className="notes-form">
-      <textarea id="notes-input" ref={inputRef} aria-label="新想法" rows={3} maxLength={NOTE_LIMIT}
-        placeholder="记下这一刻的想法，稍后可带回输入框…" value={draft}
-        onChange={event => setDraft(event.target.value)}
-        onKeyDown={event => {
-          if (event.nativeEvent.isComposing || event.keyCode === 229) return;
-          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.stopPropagation(); void save(); }
-        }} />
-      <div className="notes-form-foot">
-        <span className="notes-hint">不会发送，也不会加入执行队列</span>
-        <Button id="notes-save" type="button" size="sm" label={saving === 'create' ? '保存中…' : '保存想法'}
-          isDisabled={!draft.trim() || Boolean(saving)} onClick={() => void save()} />
-      </div>
-    </div>
+    </div>}
+    <div className="notes-scroll">
     {notesState === 'loading' && !notes.length && <p className="notes-status" role="status">正在读取想法…</p>}
     {error && <p className="notes-status is-error" role="alert">{error}
       {!localError && <Button label="重试" size="sm" variant="ghost" onClick={() => void useStore.getState().loadNotes()} />}
@@ -214,7 +207,7 @@ export function SessionNotes({ onClose, embedded = false, onAsk }: { onClose?: (
           .map(([value, label]) => <button key={value} type="button" className={`note-filter${statusFilter === value ? ' is-active' : ''}`}
             aria-pressed={statusFilter === value} onClick={() => setStatusFilter(value)}>{label}</button>)}
       </li>}
-      {visible.map(note => <li key={note.id} className="note-row" data-note-id={note.id}>
+      {visible.map(note => <li key={note.id} className="note-row" data-note-id={note.id} data-status={note.status || 'inbox'}>
         {editing === note.id
           ? <div className="note-edit">
             <textarea ref={editRef} aria-label="编辑想法" rows={3} maxLength={NOTE_LIMIT} value={editText}
@@ -230,31 +223,29 @@ export function SessionNotes({ onClose, embedded = false, onAsk }: { onClose?: (
             </div>
           </div>
           : <>
-            <div className="note-head">
-              <button type="button" className="note-content" title="添加到输入框" onClick={() => insert(note.content)}>
-                {note.content}
-              </button>
-              {/* 状态在 .note-actions 之外：那组按钮平时是透明的，
-                  状态跟着一起隐藏，上方的筛选器就失去了对照物。 */}
-              <span className="note-status" data-status={note.status || 'inbox'}>{NOTE_STATUS_LABELS[note.status || 'inbox'] || note.status}</span>
+            <p className="note-content">{note.content}</p>
+            <div className="note-meta">
+              <time dateTime={note.createdAt}>{noteWhen(note.createdAt)}</time>
+              <label className="note-status-pick">
+                <span className="note-status-label">状态</span>
+                <select aria-label="切换想法状态" value={note.status || 'inbox'} disabled={Boolean(saving)}
+                  data-status={note.status || 'inbox'}
+                  onChange={event => void changeStatus(note.id, event.target.value)}>
+                  {Object.entries(NOTE_STATUS_LABELS).map(([value, label]) =>
+                    <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+              {note.source && <NoteSource source={note.source} />}
             </div>
-            {note.source && <NoteSource source={note.source} />}
             <div className="note-actions">
+              <Button size="sm" variant="ghost" label="放到输入框" isDisabled={Boolean(saving)} onClick={() => insert(note.content)} />
               {onAsk && (
-                <Button size="sm" variant="ghost" label="就这条问一下" isDisabled={Boolean(saving)}
+                <Button size="sm" variant="ghost" label="问一下" isDisabled={Boolean(saving)}
                   onClick={() => { setLocalError(''); onAsk(note.content); }} />
               )}
               {note.status !== 'planned' && note.status !== 'done' && (
-                <Button size="sm" variant="ghost" label="转为任务" isDisabled={Boolean(saving)}
+                <Button size="sm" variant="ghost" label="转成任务" isDisabled={Boolean(saving)}
                   onClick={() => void promote(note.id)} />
-              )}
-              {(note.status || 'inbox') !== 'done' && (
-                <Button size="sm" variant="ghost" label="标记完成" isDisabled={Boolean(saving)}
-                  onClick={() => void changeStatus(note.id, 'done')} />
-              )}
-              {note.status !== 'dropped' && (
-                <IconButton label="放弃这条想法" icon={<Icon name="close" />} variant="ghost"
-                  isDisabled={Boolean(saving)} onClick={() => void changeStatus(note.id, 'dropped')} />
               )}
               <IconButton label="编辑想法" icon={<Icon name="edit" />} variant="ghost"
                 isDisabled={Boolean(saving)} onClick={() => startEdit(note.id, note.content)} />
@@ -264,9 +255,34 @@ export function SessionNotes({ onClose, embedded = false, onAsk }: { onClose?: (
           </>}
       </li>)}
       {!visible.length && notesState === 'ready' && notes.length > 0 && <li className="notes-empty">这个状态下没有想法。</li>}
-      {notesState === 'ready' && !notes.length && <li className="notes-empty">还没有想法。执行任务时可以在这里记下稍后要用的内容。</li>}
+      {notesState === 'ready' && !notes.length && <li className="notes-empty">还没有想法。先在下面记下，之后可以放回输入框、拿去问一句，或转成任务。</li>}
     </ul>
+    </div>
+    <div className="notes-form">
+      <textarea id="notes-input" ref={inputRef} aria-label="新想法" rows={3} maxLength={NOTE_LIMIT}
+        placeholder="记下这一刻的想法，稍后可带回输入框…" value={draft}
+        onChange={event => setDraft(event.target.value)}
+        onKeyDown={event => {
+          if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.stopPropagation(); void save(); }
+        }} />
+      <div className="notes-form-foot">
+        <span className="notes-hint">⌘/Ctrl + Enter 保存，不会发出去</span>
+        <Button id="notes-save" type="button" size="sm" label={saving === 'create' ? '保存中…' : '保存'}
+          isDisabled={!draft.trim() || Boolean(saving)} onClick={() => void save()} />
+      </div>
+    </div>
   </div>;
+}
+
+function noteWhen(iso: string) {
+  const time = Date.parse(iso);
+  if (!Number.isFinite(time)) return '';
+  const delta = Date.now() - time;
+  if (delta < 60_000) return '刚刚';
+  if (delta < 3_600_000) return `${Math.floor(delta / 60_000)} 分钟前`;
+  if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)} 小时前`;
+  return new Date(time).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
 }
 
 /** 想法来源：可用时点击滚到原消息；历史编辑/清理后只保留引用原文并说明不可用。 */

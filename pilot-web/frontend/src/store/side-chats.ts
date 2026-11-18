@@ -145,8 +145,8 @@ export function createSideChatActions({ set, get }: StoreContext): StoreSlice<'c
       void state.createSideChat();
     },
 
-    /** 把选中的文本带进当前任务的侧边对话（没有就现开一条）。 */
-    async askSideChat(text) {
+    /** 把一段文字带进当前任务的侧边对话。选中消息时按引用排版；想法本身就是要问的话，原样放进去。 */
+    async askSideChat(text, quote = true) {
       if (!String(text || '').trim() || get().embeddedSessionId) {
         return;
       }
@@ -154,7 +154,7 @@ export function createSideChatActions({ set, get }: StoreContext): StoreSlice<'c
       if (!item) {
         return;
       }
-      set((draft) => { draft.sideQuote = { id: item.id, text, nonce: Date.now() }; });
+      set((draft) => { draft.sideQuote = { id: item.id, text, nonce: Date.now(), quote }; });
     },
 
     takeSideQuote(id) {

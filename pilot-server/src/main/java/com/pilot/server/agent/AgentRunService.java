@@ -61,6 +61,7 @@ import com.pilot.core.multi.AgentProfileCatalog;
 import com.pilot.core.permission.PermissionGate;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.plan.PlanSink;
+import com.pilot.core.project.ProjectRepository;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.quality.IndependentCodeReviewer;
 import com.pilot.core.quality.WorkspaceTexts;
@@ -180,6 +181,12 @@ public class AgentRunService implements RunStarter {
     private com.pilot.server.work.WorkProductService workProducts;
     private com.pilot.server.work.SkillDraftService skillDrafts;
     private SkillInstallService skillInstaller;
+    private ProjectRepository projects;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setProjects(ProjectRepository projects) {
+        this.projects = projects;
+    }
 
     @org.springframework.beans.factory.annotation.Autowired
     public void setSkillInstaller(SkillInstallService skillInstaller) {
@@ -1130,6 +1137,11 @@ public class AgentRunService implements RunStarter {
         if (!rules.isEmpty()) {
             parts.add(new ContextComposition.Source("rules", rules));
         }
+        String constraints = projectConstraintText(sessionId);
+        if (!constraints.isEmpty()) {
+            parts.add(new ContextComposition.Source("constraints",
+                PROMPTS.render("system/project-constraints", Map.of("constraints", constraints)).strip()));
+        }
         String memory = ProjectRuleLoader.loadMemory(toolFactory.resolve(workspace), PROMPTS);
         if (!memory.isEmpty()) {
             parts.add(new ContextComposition.Source("rules", memory));
@@ -1382,6 +1394,17 @@ public class AgentRunService implements RunStarter {
         return ProjectRuleLoader.load(root, PROMPTS);
     }
 
+    private String projectConstraintText(String sessionId) {
+        if (projects == null || sessionId == null) {
+            return "";
+        }
+        String projectId = sessions.find(sessionId).map(Session::projectId).orElse(null);
+        if (projectId == null || projectId.isBlank()) {
+            return "";
+        }
+        return projects.find(projectId).map(project -> project.constraints()).orElse("");
+    }
+
     private String planBrief(String sessionId) {
         List<PlanItem> items = plans.load(sessionId);
         if (items.isEmpty()) {
@@ -1511,7 +1534,7 @@ public class AgentRunService implements RunStarter {
             .withCompletionClaim(() -> claimCompletion(sessionId, handle)).withRestoredPaths(snapshots::restoredPaths)
             .withQualityWorkspace(resolvedWorkspace)
             .withQualityTexts(snapshots::originalText, path -> WorkspaceTexts.read(resolvedWorkspace, path))
-            .withLintGate(properties.lintGate())
+            .withLintGate(properties.lintGate()).withProjectConstraints(projectConstraintText(sessionId))
             .withIndependentCodeReviewer(review.active() ? null
                 : new IndependentCodeReviewer(measuredMain, resolvedWorkspace, handle.cancelled::get))
             // 编辑后自动格式化/lint 之类交给 .pilot/settings.json，不再占用模型注意力

@@ -3,6 +3,7 @@ export interface ProjectSummary {
   id: string | null;
   name?: string;
   folders?: string[];
+  constraints?: string;
   sessionCount?: number;
 }
 

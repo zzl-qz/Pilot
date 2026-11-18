@@ -40,79 +40,96 @@
 .notes-form {
   display: grid;
   gap: 6px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--line-soft);
+  flex: none;
+  padding: 10px 0 12px;
+  border-top: 1px solid var(--line-soft);
 }
+.notes-search-toggle { margin-inline-start: auto; }
+.notes-hit { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--line-soft); border-radius: 12px; }
+.notes-hit-actions { display: flex; gap: 8px; }
+.notes-hit-actions button { border: 0; background: none; padding: 0; color: var(--muted); font: 12px var(--sans); cursor: pointer; }
+.notes-hit-actions button:hover { color: var(--ink); }
 .notes-form textarea,
 .note-edit textarea {
   width: 100%;
   min-height: 64px;
   max-height: 180px;
   resize: vertical;
-  padding: 8px 9px;
+  padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--ui-field, var(--panel-2));
+  border-radius: 12px;
+  background: var(--ui-field, var(--panel));
   color: var(--ink);
-  font: 12.5px/1.55 var(--sans);
+  font: 12.5px/1.6 var(--sans);
+  appearance: none;
 }
-.notes-form textarea:focus-visible,
-.note-edit textarea:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 1px; }
+.notes-form textarea::placeholder,
+.note-edit textarea::placeholder { color: var(--dim); }
+.notes-form textarea:focus,
+.note-edit textarea:focus {
+  outline: none;
+  border-color: rgba(123, 140, 255, 0.45);
+  box-shadow: 0 0 0 3px rgba(123, 140, 255, 0.12);
+}
 .notes-form-foot { display: flex; align-items: center; gap: 8px; }
 .notes-hint { color: var(--muted); font-size: 11.5px; line-height: 1.4; }
 .notes-form-foot > button { margin-inline-start: auto; flex: none; }
 
+.notes-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.notes-flyout .notes-scroll { max-height: min(320px, 40dvh); }
+.notes-flyout .notes-form, .notes-flyout .notes-search { padding-inline: 12px; }
 .notes-list {
   display: grid;
-  gap: 2px;
+  gap: 8px;
   margin: 0;
-  padding: 4px 6px 8px;
+  padding: 8px 0 12px;
   list-style: none;
-  max-height: min(320px, 40vh);
-  max-height: min(320px, 40dvh);
-  overflow: auto;
-  overscroll-behavior: contain;
 }
 
 .note-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 2px;
-  padding: 6px 7px;
-  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
 }
-.note-row:hover { background: var(--ui-hover, rgba(255, 255, 255, 0.045)); }
-
 .note-content {
   flex: 1;
   min-width: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--ink-2);
-  font: 12.5px/1.55 var(--sans);
-  text-align: start;
+  margin: 0;
+  color: var(--ink);
+  font: 13px/1.6 var(--sans);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  cursor: pointer;
-  max-height: 7.5em;
-  overflow: auto;
 }
-.note-content:hover { color: var(--ink); }
-.note-content:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; border-radius: 4px; }
 
 /* 想法正文与状态同一行：状态要一直看得见，否则上方的筛选器没有对照物。 */
 .note-head { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 8px; }
 
-.note-actions { display: flex; flex: none; align-items: center; gap: 4px; opacity: 0; transition: opacity 0.12s ease; }
-.note-row:hover .note-actions,
-.note-row:focus-within .note-actions { opacity: 1; }
+.note-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--dim); font-size: 11px; }
+.note-meta time { font-variant-numeric: tabular-nums; }
+.note-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 
-/* 想法状态：只用来把「还没安排的」挑出来，不追求看板级别的视觉。 */
-.note-status { flex: none; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; font-size: 10.5px; color: var(--dim); white-space: nowrap; }
-.note-status[data-status='planned'] { color: var(--accent); border-color: var(--accent-line, var(--line)); }
-.note-status[data-status='done'] { color: var(--ok); border-color: rgba(62, 207, 142, 0.4); }
-.note-status[data-status='dropped'] { opacity: 0.6; text-decoration: line-through; }
+.note-row[data-status='dropped'] .note-content { opacity: 0.55; }
+.note-status-pick { display: inline-flex; align-items: center; }
+.note-status-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.note-status-pick select {
+  appearance: none;
+  margin: 0;
+  padding: 2px 22px 2px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239aa3b2' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 8px center;
+  color: var(--dim);
+  font: 11.5px var(--sans);
+  cursor: pointer;
+}
+.note-status-pick select[data-status='planned'] { color: var(--accent); border-color: var(--accent-line, var(--line)); }
+.note-status-pick select[data-status='done'] { color: var(--ok); border-color: rgba(62, 207, 142, 0.4); }
+.note-status-pick select[data-status='dropped'] { opacity: 0.7; }
+.note-status-pick select:focus { outline: none; box-shadow: 0 0 0 3px rgba(123, 140, 255, 0.12); }
+.note-status-pick select:disabled { cursor: default; }
 .notes-filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 8px 4px; }
 .note-filter { padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; background: none; color: var(--dim); font: inherit; font-size: 11.5px; cursor: pointer; }
 .note-filter.is-active { color: var(--ink); border-color: var(--accent-line, var(--line)); }
@@ -153,7 +170,24 @@
 .notes-flyout .notes-search-row,
 .notes-embedded .notes-search-row { display: flex; gap: 6px; align-items: center; }
 .notes-flyout .notes-search-row input,
-.notes-embedded .notes-search-row input { flex: 1 1 auto; min-width: 0; }
+.notes-embedded .notes-search-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 34px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--ui-field, var(--panel));
+  color: var(--ink);
+  font: 12.5px/1.5 var(--sans);
+  appearance: none;
+}
+.notes-flyout .notes-search-row input:focus,
+.notes-embedded .notes-search-row input:focus {
+  outline: none;
+  border-color: rgba(123, 140, 255, 0.45);
+  box-shadow: 0 0 0 3px rgba(123, 140, 255, 0.12);
+}
 .notes-flyout .notes-search-hits,
 .notes-embedded .notes-search-hits { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow: auto; }
 .notes-flyout .notes-search-hits button,

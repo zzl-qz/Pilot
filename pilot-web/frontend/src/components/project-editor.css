@@ -3,6 +3,28 @@
 .project-folder-count, .project-folder-help { color: var(--muted); font-size: 12px; }
 .project-folder-count { margin-inline-start: 6px; font-variant-numeric: tabular-nums; }
 .project-folder-help { margin: 0; line-height: 1.6; }
+.project-constraints { display: grid; gap: 6px; }
+.project-constraints > span { font-size: 13px; color: var(--ink); }
+.project-constraints textarea {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--ui-field, var(--panel));
+  color: var(--ink);
+  font: 13px/1.6 var(--sans);
+  appearance: none;
+}
+.project-constraints textarea::placeholder { color: var(--dim); }
+.project-constraints textarea:focus {
+  outline: none;
+  border-color: rgba(123, 140, 255, 0.45);
+  box-shadow: 0 0 0 3px rgba(123, 140, 255, 0.12);
+}
+.modal .pilot-dialog-frame .project-constraints textarea:focus-visible { outline: none; }
 .project-no-folders { padding: 16px 0; margin: 0; color: var(--muted); font-size: 13px; }
 .project-folder-list, .project-browser-list { list-style: none; padding: 0; margin: 0; min-width: 0; }
 .project-folder-list { border-block: 1px solid var(--line); }

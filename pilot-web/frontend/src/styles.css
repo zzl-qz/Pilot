@@ -4103,11 +4103,11 @@ html[data-theme="light"] .accent-dot.is-on { box-shadow: 0 0 0 2px #fff, 0 0 0 4
 .task-field-label { font-size: 12px; color: var(--ink-2); margin-top: 8px; }
 .task-field { display: grid; gap: 5px; font-size: 12px; margin: 10px 0; color: var(--ink-2); }
 .task-field textarea, .task-criterion input[type="text"], .task-criterion textarea {
-  width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px;
-  background: var(--panel-2); color: var(--ink); font: inherit; resize: vertical; min-width: 0;
+  width: 100%; border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px;
+  background: var(--ui-field, var(--panel-2)); color: var(--ink); font: 13px/1.6 var(--sans); resize: vertical; min-width: 0; appearance: none;
 }
 .task-field textarea:focus, .task-criterion input:focus, .task-criterion textarea:focus {
-  outline: 2px solid var(--accent-line); outline-offset: 1px;
+  outline: none; border-color: rgba(123, 140, 255, 0.45); box-shadow: 0 0 0 3px rgba(123, 140, 255, 0.12);
 }
 .task-help { color: var(--muted); font-size: 11px; line-height: 1.6; }
 .task-acceptance { display: grid; gap: 8px; margin: 8px 0; }

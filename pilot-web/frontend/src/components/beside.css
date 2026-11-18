@@ -11,7 +11,9 @@
    内嵌后要给内容自己的左右留白：浮层时代那层留白来自浮层外壳，内嵌后没有外壳了。 */
 .beside-panel .notes-embedded { display: flex; flex-direction: column; min-height: 0; flex: 1; padding: 0 14px; }
 .beside-panel .notes-embedded .notes-head { padding-inline: 0; }
-.beside-panel .notes-embedded .notes-list { overflow-y: auto; }
+.beside-panel .notes-embedded .notes-scroll { flex: 1; }
+.beside-panel .notes-embedded .notes-list { overflow: visible; }
+.beside-panel .notes-embedded .notes-form { padding-inline: 0; }
 .beside-panel .notes-embedded .notes-filters { padding-inline: 0; }
 
 @media (pointer: coarse) {

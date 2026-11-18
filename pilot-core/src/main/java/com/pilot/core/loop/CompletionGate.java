@@ -87,6 +87,7 @@ final class CompletionGate {
     private final String goal;
     private final RefactorEvidenceGate evidenceGate;
     private final LintGate lintGate;
+    private String projectConstraints = "";
     private int planPrompts;
     private int verifyPrompts;
     private int reviewPrompts;
@@ -112,6 +113,11 @@ final class CompletionGate {
         this.goal = goal;
         this.evidenceGate = new RefactorEvidenceGate(goal);
         this.lintGate = lintGate == null ? LintGate.disabled() : lintGate;
+    }
+
+    /** 用户在项目里写下的约束。收尾自审会再对一遍。 */
+    void useProjectConstraints(String text) {
+        projectConstraints = text == null ? "" : text.strip();
     }
 
     void countToolCall() {
@@ -298,14 +304,24 @@ final class CompletionGate {
                         bullets(changedFiles), "planProgress",
                         plan.isEmpty() ? "（本轮没有维护计划）" : done + "/" + plan.size() + " 已完成", "openSteps",
                         openSteps.isEmpty() ? "（无）" : bullets(openSteps), "checks",
-                        checks.isEmpty() ? "（未执行验证）" : bullets(checks)));
+                        checks.isEmpty() ? "（未执行验证）" : bullets(checks), "constraints", constraintBlock()));
             } else {
                 prompt = prompts.render("completion/review-readonly", Map.of("goal", goalText, "toolCalls",
                     String.valueOf(toolCalls), "inspected", inspected.isEmpty() ? "（未记录具体路径）" : bullets(inspected)));
+                if (!projectConstraints.isBlank()) {
+                    prompt = prompt + constraintBlock();
+                }
             }
             return new Nudge(prompt.strip(), "收尾前自审：核对目标与结论是否真的覆盖完整", reviewPrompts, MAX_REVIEW_PROMPTS);
         }
         return null;
+    }
+
+    private String constraintBlock() {
+        if (projectConstraints.isBlank()) {
+            return "";
+        }
+        return "\n本项目约束（必须遵守，做不到就继续改，不要宣称完成）：\n" + projectConstraints;
     }
 
     private static boolean looksLikeAction(String goal) {

@@ -643,9 +643,8 @@ public class MultiAgentService {
         };
         Path workspaceRoot = toolFactory.resolve(dispatch.workspace());
         AgentLoop loop = new AgentLoop(budgeted, tools, new PolicyPermissionGate(mode), ApprovalBroker.denyAll(),
-            config, cancellation, () -> null, trace)
-            .withLintGate(agent.lintGate())
-            .withQualityWorkspace(workspaceRoot).withQualityTexts(path -> WorkspaceTexts.read(workspaceRoot, path),
+            config, cancellation, () -> null, trace).withLintGate(agent.lintGate()).withQualityWorkspace(workspaceRoot)
+            .withQualityTexts(path -> WorkspaceTexts.read(workspaceRoot, path),
                 path -> sink.currentText(path, WorkspaceTexts.read(workspaceRoot, path)));
 
         publish(dispatch.events(), new SubagentStarted(agentId, Texts.oneLine(spec.title() + "：" + spec.goal(), 200),

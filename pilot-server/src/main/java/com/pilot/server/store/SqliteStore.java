@@ -432,6 +432,7 @@ public final class SqliteStore {
         statement.execute("UPDATE sessions SET updated_at = COALESCE((SELECT created_at FROM events "
             + "WHERE session_id = sessions.id ORDER BY sequence DESC LIMIT 1), created_at) WHERE updated_at IS NULL");
         addColumnIfMissing(statement, "projects", "base_commit", "TEXT");
+        addColumnIfMissing(statement, "projects", "constraints", "TEXT NOT NULL DEFAULT ''");
         // 图片附件已经由 AttachmentService 复制到稳定的数据目录；这里持久化引用，
         // 让 checkpoint / resume / 进程重启后仍能重建同一条多模态消息。
         addColumnIfMissing(statement, "conversation_messages", "attachments", "TEXT");

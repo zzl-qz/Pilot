@@ -19,6 +19,7 @@ export function ProjectEditor() {
   const project = useStore(state => state.projects.find(item => item.id === state.ui.projectEditor?.id));
   const [name, setName] = useState(editor?.name ?? project?.name ?? '');
   const [folders, setFolders] = useState((editor?.folders ?? project?.folders ?? []).join('\n'));
+  const [constraints, setConstraints] = useState(project?.constraints ?? '');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [browserOpen, setBrowserOpen] = useState(false);
@@ -76,8 +77,9 @@ export function ProjectEditor() {
       } else if (editor?.id) {
         await api.renameProject(editor.id, { name });
         await api.saveProjectFolders(editor.id, list);
+        await api.saveProjectConstraints(editor.id, constraints);
       } else {
-        await api.createProject({ name, folders: list });
+        await api.createProject({ name, folders: list, constraints });
       }
       await useStore.getState().loadProjects();
       if (useStore.getState().ui.projectEditor === editor) close();
@@ -108,6 +110,13 @@ export function ProjectEditor() {
       if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.keyCode === 229)) event.preventDefault();
     }}>
       <TextInput id="project-name" label="项目名称" width="100%" size="lg" value={name} isDisabled={Boolean(busy)} onChange={setName} />
+      <label className="project-constraints" htmlFor="project-constraints">
+        <span>这个项目必须遵守</span>
+        <textarea id="project-constraints" value={constraints} disabled={Boolean(busy)} maxLength={4000}
+          placeholder="用平时说话的方式写，一行一条。例如：金额计算必须调用 Money.round"
+          onChange={event => setConstraints(event.target.value)} />
+        <p className="project-folder-help">只对这个项目生效。每次运行都会交给模型，收尾时再对一遍。</p>
+      </label>
       <section className="project-folders-section" aria-labelledby="project-folders-label">
         <div className="project-folders-heading">
           <span id="project-folders-label">绑定文件夹 <span className="project-folder-count">{paths.length} / {MAX_PROJECT_FOLDERS}</span></span>

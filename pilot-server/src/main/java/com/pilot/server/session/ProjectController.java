@@ -88,6 +88,10 @@ public class ProjectController {
         }
         Project project = projects.create("prj_" + UUID.randomUUID(), name(request.name()), folders,
             gitHead(folders.get(0)), clock.instant());
+        if (request.constraints() != null && !request.constraints().isBlank()) {
+            projects.updateConstraints(project.id(), request.constraints(), clock.instant());
+            project = require(project.id());
+        }
         return response(project);
     }
 
@@ -112,6 +116,18 @@ public class ProjectController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "至少保留一个文件夹");
         }
         if (!projects.updateFolders(id, folders, clock.instant())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "project not found: " + id);
+        }
+        return response(require(id));
+    }
+
+    /** 保存这个项目的自然语言约束。空文本表示清空。 */
+    @PutMapping("/{id}/constraints")
+    public ProjectResponse updateConstraints(@PathVariable String id,
+        @RequestBody(required = false) ConstraintsRequest request) {
+        require(id);
+        String text = request == null || request.text() == null ? "" : request.text();
+        if (!projects.updateConstraints(id, text, clock.instant())) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "project not found: " + id);
         }
         return response(require(id));
@@ -220,16 +236,19 @@ public class ProjectController {
             owned.stream().filter(session -> session.isBlank() && !session.archived()).findFirst().orElse(null);
         return new ProjectResponse(project.id(), project.name(), project.folders(), project.baseCommit(), owned.size(),
             blank == null ? null : blank.id(), blank == null ? 0 : 1, project.createdAt(), project.updatedAt(),
-            lastActive);
+            lastActive, project.constraints());
     }
 
-    public record CreateProjectRequest(String name, List<String> folders) {
+    public record CreateProjectRequest(String name, List<String> folders, String constraints) {
     }
 
     public record RenameProjectRequest(String name) {
     }
 
     public record FoldersRequest(List<String> folders) {
+    }
+
+    public record ConstraintsRequest(String text) {
     }
 
     /**
@@ -239,6 +258,7 @@ public class ProjectController {
      * @param blankSessionId 项目当前那条空白对话；没有则为空
      */
     public record ProjectResponse(String id, String name, List<String> folders, String baseCommit, int sessionCount,
-        String blankSessionId, int blankCount, Instant createdAt, Instant updatedAt, Instant lastActiveAt) {
+        String blankSessionId, int blankCount, Instant createdAt, Instant updatedAt, Instant lastActiveAt,
+        String constraints) {
     }
 }

@@ -21,7 +21,7 @@ export function BesidePanel() {
   /** 就这条想法问一句：带引用开一条侧边对话，并切到「问」页签。 */
   const askAbout = async (text: string) => {
     setTab('chat');
-    await useStore.getState().askSideChat(text);
+    await useStore.getState().askSideChat(text, false);
   };
   return (
     <div id="panel-beside" className="panel beside-panel">

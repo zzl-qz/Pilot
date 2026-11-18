@@ -24,6 +24,9 @@ public interface ProjectRepository {
     /** 整体替换绑定文件夹列表。 */
     boolean updateFolders(String id, List<String> folders, Instant now);
 
+    /** 替换这个项目的自然语言约束。空字符串表示没有。 */
+    boolean updateConstraints(String id, String constraints, Instant now);
+
     /** 删除项目记录；项目下的对话由调用方决定是否级联删除。 */
     boolean delete(String id);
 }

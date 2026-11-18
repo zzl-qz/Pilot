@@ -213,7 +213,8 @@ public final class SearchTool implements Tool.ParallelReadOnly {
 
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) {
-                    if (System.nanoTime() > deadline || matches.size() > MAX_MATCHES || seen[0]++ > FALLBACK_MAX_FILES) {
+                    if (System.nanoTime() > deadline || matches.size() > MAX_MATCHES
+                        || seen[0]++ > FALLBACK_MAX_FILES) {
                         return FileVisitResult.TERMINATE;
                     }
                     if (attributes.isSymbolicLink() || !paths.allows(file)) {

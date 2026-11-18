@@ -130,12 +130,15 @@
 .queue-edit { padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
 .queue-edit textarea {
   border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  background: var(--panel);
+  border-radius: 12px;
+  background: var(--ui-field, var(--panel));
   color: var(--ink);
-  font: inherit;
+  font: 12.5px/1.6 var(--sans);
+  padding: 8px 12px;
   resize: vertical;
+  appearance: none;
 }
+.queue-edit textarea:focus { outline: none; border-color: rgba(123, 140, 255, 0.45); box-shadow: 0 0 0 3px rgba(123, 140, 255, 0.12); }
 .queue-edit-actions { display: flex; gap: 8px; justify-content: flex-end; }
 
 .approval-card {
@@ -731,7 +734,8 @@
   animation: spin .8s linear infinite;
 }
 .browser-find { display: flex; gap: 6px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line-soft); }
-.browser-find input { flex: 1; height: 28px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); padding: 0 8px; }
+.browser-find input { flex: 1; height: 30px; border: 1px solid var(--line); border-radius: 999px; background: var(--ui-field, var(--panel)); color: var(--ink); padding: 0 12px; appearance: none; }
+.browser-find input:focus { outline: none; border-color: rgba(123, 140, 255, 0.45); box-shadow: 0 0 0 3px rgba(123, 140, 255, 0.12); }
 .browser-find button { border: 0; background: transparent; color: var(--muted); font-size: 12px; }
 .browser-panel .browser-recent img {
   width: 16px;
@@ -991,13 +995,19 @@ html[data-theme] .tool-status.is-interrupted {
 
 .task-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; font-size: 12.5px; color: var(--muted); }
 .task-field input, .task-field textarea {
-  padding: 6px 8px;
+  padding: 8px 12px;
   border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  background: var(--panel);
+  border-radius: 12px;
+  background: var(--ui-field, var(--panel));
   color: var(--ink);
-  font: inherit;
+  font: 13px/1.6 var(--sans);
   resize: vertical;
+  appearance: none;
+}
+.task-field input:focus, .task-field textarea:focus {
+  outline: none;
+  border-color: rgba(123, 140, 255, 0.45);
+  box-shadow: 0 0 0 3px rgba(123, 140, 255, 0.12);
 }
 .option-row { display: flex; gap: 8px; margin-bottom: 16px; }
 .option {
@@ -1201,33 +1211,44 @@ html[data-theme] .tool-status.is-interrupted {
   flex: none;
   gap: 8px;
   align-items: flex-end;
-  margin: 8px;
-  padding: 6px 6px 6px 10px;
+  margin: 0 14px 12px;
+  padding: 8px 8px 8px 12px;
   border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--panel);
+  border-radius: 15px;
+  background: linear-gradient(180deg, rgba(21, 27, 39, 0.96), rgba(13, 17, 24, 0.98));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
 }
-.side-chat-compose:focus-within { border-color: var(--accent-line); }
+.side-chat-compose:focus-within {
+  border-color: rgba(123, 140, 255, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045), 0 0 0 3px rgba(123, 140, 255, 0.12);
+}
 .side-chat-compose textarea {
   flex: 1;
-  min-height: 36px;
-  max-height: 120px;
+  min-width: 0;
+  min-height: 52px;
+  max-height: 140px;
   resize: none;
   border: 0;
   background: transparent;
   color: var(--ink);
-  padding: 6px 0;
-  font: inherit;
-  font-size: 13px;
+  padding: 4px 0;
+  font: 13px/1.6 var(--sans);
   outline: none;
+  appearance: none;
+}
+.side-chat-compose textarea::placeholder { color: var(--dim); }
+html[data-theme="light"] .side-chat-compose {
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.04);
 }
 .side-chat-send,
 .side-chat-stop {
   display: grid;
   flex: none;
+  align-self: flex-end;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   border: 0;
   border-radius: 50%;
   background: var(--ink);
@@ -1811,7 +1832,8 @@ html[data-theme='light'] .cap-tag[data-tone='error'] { background: rgba(183, 53,
   background: var(--panel);
 }
 .skills-install-row { display: flex; gap: 6px; }
-.skills-install-row input { flex: 1; min-width: 0; }
+.skills-install-row input { flex: 1; min-width: 0; min-height: 34px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--ui-field, var(--panel)); color: var(--ink); font: 13px/1.5 var(--sans); appearance: none; }
+.skills-install-row input:focus { outline: none; border-color: rgba(123, 140, 255, 0.45); box-shadow: 0 0 0 3px rgba(123, 140, 255, 0.12); }
 .skills-install-candidates { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; margin: 6px 0; }
 .skills-install-item {
   display: grid;
@@ -1883,16 +1905,17 @@ html[data-theme='light'] .cap-tag[data-tone='error'] { background: rgba(183, 53,
 .activity-search-input {
   flex: 1;
   min-width: 0;
-  height: 24px;
-  padding: 0 8px;
+  height: 30px;
+  padding: 0 12px;
   border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--bg);
+  border-radius: 999px;
+  background: var(--ui-field, var(--bg));
   color: var(--ink);
   font: inherit;
-  font-size: 11.5px;
+  font-size: 12px;
+  appearance: none;
 }
-.activity-search-input:focus { outline: none; border-color: var(--accent-line); }
+.activity-search-input:focus { outline: none; border-color: rgba(123, 140, 255, 0.45); box-shadow: 0 0 0 3px rgba(123, 140, 255, 0.12); }
 .activity-search-count { flex: none; color: var(--dim); font-family: var(--mono); font-size: 11px; }
 .timeline .event { cursor: pointer; }
 .timeline .event.is-open .event-title,
@@ -1953,7 +1976,8 @@ html[data-theme="dark"] .file-ref-line { color: #d0d0d0; background: #333; }
 #panel-changes .change-diff { flex: 1; min-height: 0; }
 .review-feedback { padding: 8px 12px; display: flex; align-items: end; gap: 8px; flex-wrap: wrap; background: var(--panel-2); }
 .review-feedback label { flex: 1 1 200px; font-size: 12px; }
-.review-feedback textarea { display: block; width: 100%; margin-top: 6px; min-height: 56px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 8px; font: inherit; resize: vertical; }
+.review-feedback textarea { display: block; width: 100%; margin-top: 6px; min-height: 56px; background: var(--ui-field, var(--panel)); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; font: 12.5px/1.6 var(--sans); resize: vertical; appearance: none; }
+.review-feedback textarea:focus { outline: none; border-color: rgba(123, 140, 255, 0.45); box-shadow: 0 0 0 3px rgba(123, 140, 255, 0.12); }
 .diff-line button.n { cursor: pointer; border: 0; border-right: 1px solid var(--line); background: transparent; border-radius: 0; font: inherit; }
 .diff-line.is-selected { background: var(--accent-soft) !important; box-shadow: inset 3px 0 var(--accent); }
 html .app.review-expanded { grid-template-columns: minmax(0, 1fr); }

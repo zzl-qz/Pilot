@@ -10,8 +10,8 @@ import com.pilot.core.util.FileNames;
  * 测试、压缩脚本和构建产物不算，lint 只把本次改动里的生产源码交给检查命令。
  */
 public final class SourceFiles {
-    private static final Set<String> CODE_EXTS = Set.of("java", "kt", "kts", "js", "jsx", "ts", "tsx", "mjs", "cjs", "py",
-        "php", "go", "rs", "cs", "cpp", "cc", "c", "h", "swift");
+    private static final Set<String> CODE_EXTS = Set.of("java", "kt", "kts", "js", "jsx", "ts", "tsx", "mjs", "cjs",
+        "py", "php", "go", "rs", "cs", "cpp", "cc", "c", "h", "swift");
     private static final Set<String> SKIPPED_DIRS = Set.of("test", "tests", "spec", "specs", "__tests__", "fixture",
         "fixtures", "target", "build", "dist", "out", "node_modules", ".pilot");
 

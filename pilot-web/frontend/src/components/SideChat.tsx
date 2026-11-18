@@ -206,10 +206,15 @@ function SimpleSideChat({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     if (!quote || quote.id !== sessionId) return;
-    const text = useStore.getState().takeSideQuote(sessionId);
-    if (!text) return;
-    const block = quoteMarkdown(text);
-    setDraft((current) => (current ? `${current}\n\n${block}\n\n` : `${block}\n\n`));
+    const taken = useStore.getState().takeSideQuote(sessionId);
+    if (!taken) return;
+    const quoted = quote?.quote !== false;
+    const block = quoted ? quoteMarkdown(taken) : String(taken).trim();
+    if (!block) return;
+    setDraft((current) => {
+      if (!current.trim()) return block;
+      return quoted ? `${current.replace(/\s+$/, '')}\n\n${block}\n\n` : `${current.replace(/\s+$/, '')}\n${block}`;
+    });
   }, [quote, sessionId]);
 
   useEffect(() => {

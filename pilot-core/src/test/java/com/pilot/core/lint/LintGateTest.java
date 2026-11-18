@@ -201,7 +201,8 @@ class LintGateTest {
         String renamed = copied.replace("buildLabel", "buildTitle").replace("left", "first").replace("right", "second")
             .replace("orderId", "sku").replace("buyer", "name");
         Files.writeString(root.resolve("src/app.js"), before + "\n" + copied + "\n" + renamed);
-        LintGate gate = new LintGate(true, (workspace, command, timeout) -> new LintRunner.LintResult(0, "", false, true));
+        LintGate gate =
+            new LintGate(true, (workspace, command, timeout) -> new LintRunner.LintResult(0, "", false, true));
         gate.setOriginalText(path -> "src/app.js".equals(path) ? before : null);
         LintGate.LintAssessment renamedCopy = gate.assess(root, List.of("src/app.js"));
         assertEquals(LintGate.LintAssessment.Kind.FINDINGS, renamedCopy.kind());
@@ -210,7 +211,8 @@ class LintGateTest {
         String once = before + "\n" + copied;
         String twice = once + "\n" + copied;
         Files.writeString(root.resolve("src/app.js"), twice);
-        LintGate exact = new LintGate(true, (workspace, command, timeout) -> new LintRunner.LintResult(0, "", false, true));
+        LintGate exact =
+            new LintGate(true, (workspace, command, timeout) -> new LintRunner.LintResult(0, "", false, true));
         exact.setOriginalText(path -> "src/app.js".equals(path) ? once : null);
         LintGate.LintAssessment pasted = exact.assess(root, List.of("src/app.js"));
         assertEquals(LintGate.LintAssessment.Kind.FINDINGS, pasted.kind());
@@ -222,7 +224,8 @@ class LintGateTest {
         writeSample();
         String before = "export const timeout = 1;\n";
         Files.writeString(root.resolve("src/app.js"), before + "export const retry = 86400;\n");
-        LintGate gate = new LintGate(true, (workspace, command, timeout) -> new LintRunner.LintResult(0, "", false, true));
+        LintGate gate =
+            new LintGate(true, (workspace, command, timeout) -> new LintRunner.LintResult(0, "", false, true));
         gate.setOriginalText(path -> "src/app.js".equals(path) ? before : null);
         LintGate.LintAssessment assessment = gate.assess(root, List.of("src/app.js"));
         assertEquals(LintGate.LintAssessment.Kind.CLEAN, assessment.kind());

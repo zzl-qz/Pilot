@@ -654,6 +654,7 @@ export interface ProjectControllerProjectResponse {
   createdAt: string;
   updatedAt: string;
   lastActiveAt: string;
+  constraints?: string;
 }
 
 /** RecoveryReportService.java / Snapshot */

@@ -13,6 +13,9 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
+
+import com.pilot.core.util.FileNames;
 
 /**
  * 收尾时的规范检查。开关关掉就什么都不跑。
@@ -27,6 +30,7 @@ public final class LintGate {
         /** 规范没过就停止，不标成完成。 */
         STOP
     }
+
     private static final int MAX_PROMPT_CHARS = 2_000;
     /** 同一条诊断重复这么多次，就停止打补丁。 */
     public static final int SAME_FAILURE_LIMIT = 3;
@@ -272,21 +276,23 @@ public final class LintGate {
         if (!file.startsWith(workspace.normalize()) || file.getParent() == null) {
             return List.of();
         }
-        String ext = com.pilot.core.util.FileNames.extension(relative);
+        String ext = FileNames.extension(relative);
         List<String> texts = new ArrayList<>();
-        try (java.util.stream.Stream<Path> list = Files.list(file.getParent())) {
+        try (Stream<Path> list = Files.list(file.getParent())) {
             for (Path candidate : list.limit(24).toList()) {
-                if (texts.size() >= 12 || candidate.equals(file) || !Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)) {
+                if (texts.size() >= 12 || candidate.equals(file)
+                    || !Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)) {
                     continue;
                 }
                 if (candidate.toFile().length() > 48 * 1024) {
                     continue;
                 }
                 String name = candidate.getFileName().toString();
-                if (!ext.equals(com.pilot.core.util.FileNames.extension(name)) || SourceFiles.isTestSource(name)) {
+                if (!ext.equals(FileNames.extension(name)) || SourceFiles.isTestSource(name)) {
                     continue;
                 }
-                String text = readCurrent(workspace, workspace.normalize().relativize(candidate.normalize()).toString());
+                String text =
+                    readCurrent(workspace, workspace.normalize().relativize(candidate.normalize()).toString());
                 if (!text.isEmpty()) {
                     texts.add(text);
                 }
@@ -520,8 +526,8 @@ public final class LintGate {
         }
 
         static LintAssessment builtin(String output) {
-            String prompt = "[lint 修正指令] 这个仓库没有自己的 lint，已用内置通用检查。它只看裸数字和重复字符串，不理解业务。\n"
-                + output + "\n建议改的可以改；确认是一次性的值可以保留。到次数上限且测试通过才放行。";
+            String prompt = "[lint 修正指令] 这个仓库没有自己的 lint，已用内置通用检查。它只看裸数字和重复字符串，不理解业务。\n" + output
+                + "\n建议改的可以改；确认是一次性的值可以保留。到次数上限且测试通过才放行。";
             return new LintAssessment(Kind.FINDINGS, prompt, "仓库未配置 lint，内置通用检查未通过", output);
         }
 

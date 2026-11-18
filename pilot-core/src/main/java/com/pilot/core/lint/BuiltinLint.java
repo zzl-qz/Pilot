@@ -2,6 +2,7 @@ package com.pilot.core.lint;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -83,7 +84,7 @@ final class BuiltinLint {
         for (String line : lines(before)) {
             existing.merge(line.strip(), 1, Integer::sum);
         }
-        Set<Integer> numbers = new java.util.LinkedHashSet<>();
+        Set<Integer> numbers = new LinkedHashSet<>();
         int number = 0;
         for (String line : lines(after)) {
             number++;
@@ -103,7 +104,8 @@ final class BuiltinLint {
 
     private static boolean isComment(String line) {
         String trimmed = line.strip();
-        return trimmed.startsWith("//") || trimmed.startsWith("#") || trimmed.startsWith("*") || trimmed.startsWith("/*");
+        return trimmed.startsWith("//") || trimmed.startsWith("#") || trimmed.startsWith("*")
+            || trimmed.startsWith("/*");
     }
 
     private static String addedText(List<String> added) {

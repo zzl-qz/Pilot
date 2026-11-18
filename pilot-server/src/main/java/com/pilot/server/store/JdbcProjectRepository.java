@@ -25,13 +25,14 @@ public final class JdbcProjectRepository implements ProjectRepository {
         Project project = new Project(id, name, folders, baseCommit, now, now);
         JdbcSupport.inTransaction(store, connection -> {
             JdbcSupport.exec(connection,
-                "INSERT INTO projects (id, name, created_at, updated_at, base_commit) " + "VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO projects (id, name, created_at, updated_at, base_commit, constraints) VALUES (?, ?, ?, ?, ?, ?)",
                 statement -> {
                     statement.setString(1, id);
                     statement.setString(2, project.name());
                     statement.setString(3, now.toString());
                     statement.setString(4, now.toString());
                     statement.setString(5, project.baseCommit());
+                    statement.setString(6, project.constraints());
                 });
             JdbcSupport.batch(connection, INSERT_FOLDER, folderBinders(id, project.folders()));
         }, "创建项目失败: " + id);
@@ -44,17 +45,19 @@ public final class JdbcProjectRepository implements ProjectRepository {
             return Optional.empty();
         }
         return JdbcSupport
-            .queryOne(store, "SELECT id, name, created_at, updated_at, base_commit FROM projects WHERE id = ?",
+            .queryOne(store,
+                "SELECT id, name, created_at, updated_at, base_commit, constraints FROM projects WHERE id = ?",
                 statement -> statement.setString(1, id), JdbcProjectRepository::mapHead, "读取项目失败: " + id)
             .map(project -> new Project(project.id(), project.name(), foldersOf(id), project.baseCommit(),
-                project.createdAt(), project.updatedAt()));
+                project.createdAt(), project.updatedAt(), project.constraints()));
     }
 
     @Override
     public List<Project> list() {
         String updatedAt = SqliteStore.normalizedInstantSql("updated_at");
         List<Project> heads = JdbcSupport.query(store,
-            "SELECT id, name, created_at, updated_at, base_commit FROM projects ORDER BY " + updatedAt + " DESC",
+            "SELECT id, name, created_at, updated_at, base_commit, constraints FROM projects ORDER BY " + updatedAt
+                + " DESC",
             statement -> {
             }, JdbcProjectRepository::mapHead, "读取项目列表失败");
         if (heads.isEmpty()) {
@@ -69,7 +72,7 @@ public final class JdbcProjectRepository implements ProjectRepository {
         }
         return heads.stream()
             .map(project -> new Project(project.id(), project.name(), folders.getOrDefault(project.id(), List.of()),
-                project.baseCommit(), project.createdAt(), project.updatedAt()))
+                project.baseCommit(), project.createdAt(), project.updatedAt(), project.constraints()))
             .toList();
     }
 
@@ -99,6 +102,17 @@ public final class JdbcProjectRepository implements ProjectRepository {
     }
 
     @Override
+    public boolean updateConstraints(String id, String constraints, Instant now) {
+        Project normalized = new Project(id, "placeholder", List.of(), now, now).withConstraints(constraints, now);
+        return JdbcSupport.update(store, "UPDATE projects SET constraints = ?, updated_at = ? WHERE id = ?",
+            statement -> {
+                statement.setString(1, normalized.constraints());
+                statement.setString(2, now.toString());
+                statement.setString(3, id);
+            }, "更新项目约束失败: " + id) > 0;
+    }
+
+    @Override
     public boolean delete(String id) {
         boolean[] removed = {false};
         JdbcSupport.inTransaction(store, connection -> {
@@ -113,7 +127,8 @@ public final class JdbcProjectRepository implements ProjectRepository {
     /** 先建一个不带文件夹的项目头，再把文件夹一次填进去，避免每行查一次。 */
     private static Project mapHead(java.sql.ResultSet rows) throws java.sql.SQLException {
         return new Project(rows.getString("id"), rows.getString("name"), List.of(), rows.getString("base_commit"),
-            Instant.parse(rows.getString("created_at")), Instant.parse(rows.getString("updated_at")));
+            Instant.parse(rows.getString("created_at")), Instant.parse(rows.getString("updated_at")),
+            rows.getString("constraints"));
     }
 
     private List<String> foldersOf(String projectId) {

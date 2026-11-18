@@ -109,8 +109,7 @@ public final class GlobFilesTool implements Tool.ParallelReadOnly {
                 @Override
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attributes) {
                     if (!dir.equals(base) && (attributes.isSymbolicLink()
-                        || SKIPPED_DIRECTORIES.contains(dir.getFileName().toString())
-                        || !paths.allowsDirectory(dir))) {
+                        || SKIPPED_DIRECTORIES.contains(dir.getFileName().toString()) || !paths.allowsDirectory(dir))) {
                         return FileVisitResult.SKIP_SUBTREE;
                     }
                     return FileVisitResult.CONTINUE;
