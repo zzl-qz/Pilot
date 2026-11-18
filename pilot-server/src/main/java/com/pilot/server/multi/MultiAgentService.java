@@ -35,6 +35,7 @@ import com.pilot.core.event.PlanUpdated;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunContinued;
+import com.pilot.core.event.RunEnded;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.RunFailureCode;
 import com.pilot.core.event.RunRetrying;
@@ -808,8 +809,8 @@ public class MultiAgentService {
             if (event instanceof AssistantDelta || event instanceof AssistantPreview
                 || event instanceof AssistantReasoning || event instanceof ContextCompacted
                 || event instanceof PlanUpdated || event instanceof RunUsageUpdated || event instanceof RunCompleted
-                || event instanceof RunFailed || event instanceof RunCancelled || event instanceof RunContinued
-                || event instanceof RunRetrying || event instanceof ApprovalRequired
+                || event instanceof RunEnded || event instanceof RunFailed || event instanceof RunCancelled
+                || event instanceof RunContinued || event instanceof RunRetrying || event instanceof ApprovalRequired
                 || event instanceof ApprovalResolved) {
                 return;
             }

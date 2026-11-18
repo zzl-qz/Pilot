@@ -12,15 +12,16 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public final class JdbcPlanRepository implements PlanRepository {
     private static final String DELETE = "DELETE FROM plan_items WHERE session_id = ?";
-    private static final String INSERT = "INSERT INTO plan_items (session_id, ord, step, status) VALUES (?, ?, ?, ?)";
+    private static final String INSERT =
+        "INSERT INTO plan_items (session_id, ord, step, status, note) VALUES (?, ?, ?, ?, ?)";
 
     private final SqliteStore store;
 
     @Override
     public List<PlanItem> load(String sessionId) {
-        return JdbcSupport.query(store, "SELECT step, status FROM plan_items WHERE session_id = ? ORDER BY ord",
-            statement -> statement.setString(1, sessionId), rows -> new PlanItem(rows.getString(1), rows.getString(2)),
-            "读取计划失败: " + sessionId);
+        return JdbcSupport.query(store, "SELECT step, status, note FROM plan_items WHERE session_id = ? ORDER BY ord",
+            statement -> statement.setString(1, sessionId),
+            rows -> new PlanItem(rows.getString(1), rows.getString(2), rows.getString(3)), "读取计划失败: " + sessionId);
     }
 
     @Override
@@ -34,6 +35,7 @@ public final class JdbcPlanRepository implements PlanRepository {
                 statement.setInt(2, position);
                 statement.setString(3, item.step());
                 statement.setString(4, item.status());
+                statement.setString(5, item.note());
             });
         }
         JdbcSupport.inTransaction(store, connection -> {

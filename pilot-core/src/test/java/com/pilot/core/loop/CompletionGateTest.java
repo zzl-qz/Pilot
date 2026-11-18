@@ -189,8 +189,7 @@ class CompletionGateTest {
     @Test
     void successfulBuildTestLintAndFormatChecksVerifyCodeChanges() {
         for (String check : List.of("mvnw -q test → exit 0", "gradlew :app:build → exit 0", "npm run lint → exit 0",
-            "node --test → exit 0", "python3 -m pytest -q → exit 0", "cargo check → exit 0", "go vet ./... → exit 0",
-            "git diff --check → exit 0")) {
+            "node --test → exit 0", "python3 -m pytest -q → exit 0", "cargo check → exit 0", "go vet ./... → exit 0")) {
             CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
 
             CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/A.java"), List.of(check), List.of(), List.of());
@@ -198,6 +197,17 @@ class CompletionGateTest {
             assertNotNull(nudge, check);
             assertTrue(nudge.reason().contains("自审"), check + ": " + nudge.reason());
         }
+    }
+
+    @Test
+    void formatOnlyCheckDoesNotVerifyCodeChanges() {
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+
+        CompletionGate.Nudge nudge =
+            gate.evaluate(Set.of("src/A.java"), List.of("git diff --check → exit 0"), List.of(), List.of());
+
+        assertNotNull(nudge);
+        assertTrue(nudge.reason().contains("未验证"), nudge.reason());
     }
 
     @Test

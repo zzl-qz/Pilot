@@ -18,6 +18,7 @@ import com.pilot.core.event.ApprovalRequired;
 import com.pilot.core.event.ApprovalResolved;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
+import com.pilot.core.event.RunEnded;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.RunFailureCode;
 import com.pilot.core.event.RunRetrying;
@@ -125,6 +126,10 @@ public class RunStateTracker {
                         "等待模型恢复后重试（第 " + retrying.attempt() + " 次）", RunCheckpoint.PHASE_MODEL, now);
                 case RunCompleted ignored -> current.advance(current.step(), current.lastToolCallId(), "本轮已完成",
                     "等待用户验收或下一轮输入", RunCheckpoint.PHASE_FINISHED, now).status(RunCheckpoint.STATUS_COMPLETED, now);
+                case RunEnded ended -> current
+                    .advance(current.step(), current.lastToolCallId(), "本轮结束：" + ended.outcome(),
+                        ended.outcome().resumable() ? "可继续执行" : "按终态处理", RunCheckpoint.PHASE_FINISHED, now)
+                    .status(ended.outcome().checkpointStatus(), now);
                 case RunCancelled ignored ->
                     current.advance(current.step(), current.lastToolCallId(), "运行已被取消，进度与对话已保存", "确认后可继续执行",
                         RunCheckpoint.PHASE_FINISHED, now).status(RunCheckpoint.STATUS_INTERRUPTED, now);
@@ -264,7 +269,8 @@ public class RunStateTracker {
     private static boolean affectsCheckpoint(SessionEvent event) {
         return event instanceof RunStarted || event instanceof ToolStarted || event instanceof ToolCompleted
             || event instanceof ApprovalRequired || event instanceof ApprovalResolved || event instanceof RunRetrying
-            || event instanceof RunCompleted || event instanceof RunCancelled || event instanceof RunFailed;
+            || event instanceof RunCompleted || event instanceof RunEnded || event instanceof RunCancelled
+            || event instanceof RunFailed;
     }
 
     /** 运行结束状态可能是任务状态，也可能是失败码；这里归并成检查点的四种终态。 */
@@ -275,8 +281,12 @@ public class RunStateTracker {
         if (TaskControlStatus.PAUSED.is(status)) {
             return RunCheckpoint.STATUS_PAUSED;
         }
-        if (TaskControlStatus.INTERRUPTED.is(status)
-            || WireEnum.in(status, RunFailureCode.CANCELLED, RunFailureCode.MAX_STEPS)) {
+        if (WireEnum.in(status, TaskControlStatus.INTERRUPTED, TaskControlStatus.AWAITING_REVIEW,
+            TaskControlStatus.BLOCKED, TaskControlStatus.BUDGET_LIMITED, TaskControlStatus.NEED_INPUT,
+            TaskControlStatus.WAITING, TaskControlStatus.NO_PROGRESS, TaskControlStatus.REVIEW_UNAVAILABLE,
+            TaskControlStatus.VERIFICATION_FAILED)
+            || WireEnum.in(status, RunFailureCode.CANCELLED, RunFailureCode.MAX_STEPS,
+                RunFailureCode.TASK_INCOMPLETE)) {
             return RunCheckpoint.STATUS_INTERRUPTED;
         }
         return RunCheckpoint.STATUS_FAILED;

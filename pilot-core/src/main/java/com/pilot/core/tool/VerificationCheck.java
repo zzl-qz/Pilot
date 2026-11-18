@@ -20,7 +20,8 @@ public final class VerificationCheck {
         TEST, BUILD, STATIC_ANALYSIS, FORMAT_CHECK, OTHER;
 
         public boolean qualifies() {
-            return this != OTHER;
+            // 格式/空白检查只能满足 lint 门，不能证明功能正确。
+            return this == TEST || this == BUILD || this == STATIC_ANALYSIS;
         }
     }
 

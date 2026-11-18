@@ -65,6 +65,9 @@ final class CompletionGate {
     private static final int MAX_EVIDENCE_PROMPTS = 1;
     /** 只改这些后缀的文档不算「改了代码」，不强制跑构建。 */
     private static final Set<String> DOC_SUFFIXES = Set.of(".md", ".txt", ".rst", ".adoc");
+    /** 这些后缀是图片/字体/锁文件等非代码资源，不触发构建或测试门。 */
+    private static final Set<String> ASSET_SUFFIXES = Set.of(".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".ico",
+        ".svg", ".woff", ".woff2", ".ttf", ".otf", ".map", ".lock", ".snap");
     /** 目标像「调研 / 解释 / 定位」时，只读任务也要核对覆盖范围，不能读两个文件就下结论。 */
     private static final List<String> RESEARCH_HINTS = List.of("分析", "梳理", "说明", "解释", "为什么", "怎么实现", "如何实现", "调用链",
         "流程", "审查", "评估", "调研", "看一下", "读一下", "哪些", "对比", "定位");
@@ -222,10 +225,9 @@ final class CompletionGate {
             goal != null && READ_ONLY_TASK_HINTS.stream().anyMatch(goal.toLowerCase(Locale.ROOT)::contains);
         if (!readOnlyTask && !openSteps.isEmpty() && planPrompts < 2) {
             planPrompts++;
-            return new Nudge(
-                "原始用户目标：" + (goal == null ? "见持久任务上下文" : goal) + "\n计划进度："
-                    + plan.stream().filter(PlanItem::done).count() + "/" + plan.size() + "\n仍未完成的计划：\n"
-                    + bullets(openSteps) + "\n继续完成可执行工作。仅在取得验证证据后更新步骤；不要删除或缩小要求来通过完成检查。确有阻塞请如实交付部分结果与阻塞原因。",
+            return new Nudge("原始用户目标：" + (goal == null ? "见持久任务上下文" : goal) + "\n计划进度："
+                + plan.stream().filter(PlanItem::done).count() + "/" + plan.size() + "\n仍未完成的计划：\n" + bullets(openSteps)
+                + "\n继续完成可执行工作。仅在取得验证证据后更新步骤；不要删除或缩小要求来通过完成检查。" + "确实无法执行的步骤标 blocked 并写明原因，用户同意跳过的标 skipped；不要假装完成。",
                 "计划仍有未完成项，继续执行并核对原始目标", planPrompts, 2);
         }
         boolean changed = !changedFiles.isEmpty();
@@ -362,7 +364,8 @@ final class CompletionGate {
     private static boolean touchesCode(Collection<String> changedFiles) {
         return changedFiles.stream().anyMatch(path -> {
             String lower = path.toLowerCase(Locale.ROOT);
-            return DOC_SUFFIXES.stream().noneMatch(lower::endsWith);
+            return DOC_SUFFIXES.stream().noneMatch(lower::endsWith)
+                && ASSET_SUFFIXES.stream().noneMatch(lower::endsWith);
         });
     }
 

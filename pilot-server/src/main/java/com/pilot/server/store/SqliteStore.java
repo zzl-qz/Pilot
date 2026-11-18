@@ -442,6 +442,7 @@ public final class SqliteStore {
         addColumnIfMissing(statement, "session_notes", "status", "TEXT NOT NULL DEFAULT 'inbox'");
         addColumnIfMissing(statement, "session_notes", "link_kind", "TEXT");
         addColumnIfMissing(statement, "session_notes", "link_id", "TEXT");
+        addColumnIfMissing(statement, "plan_items", "note", "TEXT NOT NULL DEFAULT ''");
         // 索引依赖上面补出来的列，必须放在补列之后
         statement.execute("CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id, created_at)");
         // 按父会话找侧边对话（关闭父对话时一并清理）走这条索引

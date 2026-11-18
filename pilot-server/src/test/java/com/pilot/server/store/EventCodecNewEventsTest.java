@@ -20,6 +20,8 @@ import com.pilot.core.event.PlanUpdated;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunContinued;
+import com.pilot.core.event.RunEnded;
+import com.pilot.core.event.RunOutcome;
 import com.pilot.core.event.RunRetrying;
 import com.pilot.core.event.RunSteered;
 import com.pilot.core.event.RunUsageUpdated;
@@ -185,6 +187,16 @@ class EventCodecNewEventsTest {
         assertEquals(AssistantReasoning.discarded(),
             codec.decode("assistant.reasoning", "{\"text\":\"\",\"reset\":true}"));
         assertEquals(new AssistantReasoning("旧推理片段"), codec.decode("assistant.reasoning", "{\"text\":\"旧推理片段\"}"));
+    }
+
+    @Test
+    void roundTripsRunEndedWithArtifacts() {
+        RunEnded event = new RunEnded(RunOutcome.PARTIAL, "TASK_INCOMPLETE", "部分交付", List.of("src/A.java"),
+            List.of("npm test → exit 0"), 1, 3, List.of("验证"), List.of("浏览器回归"), List.of("查看差异"), true);
+
+        RunEnded decoded = assertInstanceOf(RunEnded.class, roundTrip("run.ended", event));
+        assertEquals(event, decoded);
+        assertEquals(RunOutcome.PARTIAL, decoded.outcome());
     }
 
     private SessionEvent roundTrip(String type, SessionEvent event) {

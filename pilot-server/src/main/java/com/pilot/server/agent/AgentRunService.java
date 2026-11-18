@@ -40,6 +40,7 @@ import com.pilot.core.event.PlanUpdated;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunContinued;
+import com.pilot.core.event.RunEnded;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.RunFailureCode;
 import com.pilot.core.event.RunStarted;
@@ -118,13 +119,18 @@ import lombok.extern.slf4j.Slf4j;
 @org.springframework.context.annotation.DependsOn("historyEditCoordinator")
 @Slf4j
 public class AgentRunService implements RunStarter {
-    private static final int MAX_AUTO_CONTINUE = 3;
+    private static final int MAX_AUTO_CONTINUE = 8;
+    /**
+     * 预算触顶不是失败：一次大型任务可以分几个预算段继续，像 DSH 的 goal round 一样
+     * 每段重新计数。上限只防失控，不把生产任务卡在第一次触顶。
+     */
+    private static final int MAX_BUDGET_SEGMENTS = 8;
     /**
      * 目标还没核验完时，步数触顶也在同一会话里再开一轮。
      * dsh 默认最多 256 个 goal round，而且不要求计划先发生变化。
-     * 我们每一轮自己还有步数上限，外层只再给 8 轮，避免一次触顶就把长任务停死。
+     * 我们每一轮自己还有步数上限，外层再给 {@value #MAX_GOAL_ROUNDS} 轮，避免一次触顶就把长任务停死。
      */
-    private static final int MAX_GOAL_ROUNDS = 8;
+    private static final int MAX_GOAL_ROUNDS = 32;
     /** 这些失败码与任务状态同名：运行停下后任务直接记为同名状态，不归并成 INTERRUPTED。 */
     private static final Set<TaskControlStatus> PRESERVED_FAILURE_STATUSES =
         Set.of(TaskControlStatus.BLOCKED, TaskControlStatus.BUDGET_LIMITED, TaskControlStatus.WAITING,
@@ -748,8 +754,7 @@ public class AgentRunService implements RunStarter {
                     }
                     queuedMessages.save("steer:" + sessionId, List.of());
                 } else if (previous != null) {
-                    if (continuation && previous.automation() == null
-                        && TaskControlStatus.BUDGET_LIMITED.is(previous.status())) {
+                    if (continuation && TaskControlStatus.BUDGET_LIMITED.is(previous.status())) {
                         taskControls.extendBudget(sessionId);
                     }
                     if (regenerate) {
@@ -809,13 +814,15 @@ public class AgentRunService implements RunStarter {
                 handle.accepting = false;
             }
             runs.remove(runId, handle);
+            // 部分交付不是失败：runs 表记成 INTERRUPTED，和 checkpoint 的可恢复语义一致。
+            String recordedStatus = RunFailureCode.TASK_INCOMPLETE.is(status) ? "INTERRUPTED" : status;
             try {
-                runRepository.finished(runId, status, java.time.Instant.now());
+                runRepository.finished(runId, recordedStatus, java.time.Instant.now());
             } catch (RuntimeException e) {
                 log.warn("记录 run {} 结束状态失败", runId, e);
             }
             if (runStates != null) {
-                runStates.finish(sessionId, runId, status);
+                runStates.finish(sessionId, runId, recordedStatus);
             }
             if (!resultCaptured) {
                 captureResult(sessionId, runId);
@@ -825,8 +832,10 @@ public class AgentRunService implements RunStarter {
                 synchronized (queue) {
                     // 释放槽位和启动排队消息必须连在一起，HTTP 新请求不能抢进交接窗口。
                     registry.unregister(runId);
-                    if (!continued && TaskControlStatus.COMPLETED.is(status) && !handle.cancelled.get()
-                        && plans.load(sessionId).stream().allMatch(com.pilot.core.plan.PlanItem::done)) {
+                    if (!continued
+                        && (TaskControlStatus.COMPLETED.is(status) || RunFailureCode.TASK_INCOMPLETE.is(status))
+                        && !handle.cancelled.get() && (RunFailureCode.TASK_INCOMPLETE.is(status)
+                            || plans.load(sessionId).stream().noneMatch(com.pilot.core.plan.PlanItem::open))) {
                         drainQueue(sessionId, queue);
                     }
                 }
@@ -905,7 +914,7 @@ public class AgentRunService implements RunStarter {
         }
         TaskControlService.TaskContract task = taskControls.load(sessionId);
         if (task == null || !TaskControlStatus.COMPLETED.is(task.status())
-            || plans.load(sessionId).stream().anyMatch(item -> !item.done())) {
+            || plans.load(sessionId).stream().anyMatch(com.pilot.core.plan.PlanItem::open)) {
             return;
         }
         try {
@@ -925,7 +934,7 @@ public class AgentRunService implements RunStarter {
         }
         TaskControlService.TaskContract task = taskControls.load(sessionId);
         if (task == null || !TaskControlStatus.COMPLETED.is(task.status())
-            || plans.load(sessionId).stream().anyMatch(item -> !item.done())) {
+            || plans.load(sessionId).stream().anyMatch(com.pilot.core.plan.PlanItem::open)) {
             return "等待验收";
         }
         return "";
@@ -994,7 +1003,7 @@ public class AgentRunService implements RunStarter {
             TaskControlService.TaskContract task = taskControls.load(sessionId);
             if (task == null || !TaskControlStatus.COMPLETED.is(task.status())
                 || registry.activeRun(sessionId).isPresent()
-                || plans.load(sessionId).stream().anyMatch(item -> !item.done())) {
+                || plans.load(sessionId).stream().anyMatch(com.pilot.core.plan.PlanItem::open)) {
                 return;
             }
             try {
@@ -1006,13 +1015,15 @@ public class AgentRunService implements RunStarter {
     }
 
     /**
-     * 步数触顶时接上下一轮。普通任务看计划有没有动；目标任务还没核验完就在同一会话里继续。
+     * 步数/预算触顶时接上下一轮。普通任务看计划有没有动；目标任务还没核验完就在同一会话里继续。
      *
      * <p>普通任务最多连续 {@value #MAX_AUTO_CONTINUE} 次，计划连续两轮没变就停下。
-     * 目标任务最多 {@value #MAX_GOAL_ROUNDS} 轮，计划暂时不动也继续，核验通过或在等用户时不再自动开轮。
+     * 预算触顶则按 {@value #MAX_BUDGET_SEGMENTS} 个预算段继续，每段重新计数；
+     * 这是长任务的分段推进，不是任务失败。目标任务最多 {@value #MAX_GOAL_ROUNDS} 轮。
      */
     private boolean maybeAutoContinue(String sessionId, String finishedRunId, String status, RunHandle handle) {
-        if (!RunFailureCode.MAX_STEPS.is(status) || handle.cancelled.get()
+        boolean budgetLimited = RunFailureCode.BUDGET_LIMITED.is(status);
+        if (!RunFailureCode.MAX_STEPS.is(status) && !budgetLimited || handle.cancelled.get()
             || runStates != null && runStates.leaseLost(finishedRunId)) {
             autoContinueAttempts.remove(sessionId);
             autoContinueSignature.remove(sessionId);
@@ -1020,7 +1031,14 @@ public class AgentRunService implements RunStarter {
         }
         boolean goalOpen = goalStillOpen(sessionId);
         List<PlanItem> items = plans.load(sessionId);
-        if (!goalOpen && items.stream().allMatch(com.pilot.core.plan.PlanItem::done)) {
+        if (!goalOpen && items.stream().noneMatch(com.pilot.core.plan.PlanItem::open)) {
+            autoContinueAttempts.remove(sessionId);
+            autoContinueSignature.remove(sessionId);
+            return false;
+        }
+        TaskControlService.TaskContract current = taskControls.load(sessionId);
+        int segments = current == null || current.execution() == null ? 0 : current.execution().budgetSegments();
+        if (budgetLimited && segments >= MAX_BUDGET_SEGMENTS) {
             autoContinueAttempts.remove(sessionId);
             autoContinueSignature.remove(sessionId);
             return false;
@@ -1028,14 +1046,15 @@ public class AgentRunService implements RunStarter {
 
         String signature = items.stream().map(item -> item.step() + "=" + item.status())
             .collect(java.util.stream.Collectors.joining("|"));
-        if (!goalOpen && signature.equals(autoContinueSignature.get(sessionId))) {
+        // 预算触顶不等于原地打转：模型可能已经推进了很多步，只是到了分段上限。
+        if (!goalOpen && !budgetLimited && signature.equals(autoContinueSignature.get(sessionId))) {
             // 普通任务的计划两轮没变，说明模型在原地打转。目标任务以核验阶段为准，计划暂时不动也继续。
             autoContinueAttempts.remove(sessionId);
             autoContinueSignature.remove(sessionId);
             return false;
         }
-        int cap = goalOpen ? MAX_GOAL_ROUNDS : MAX_AUTO_CONTINUE;
-        int attempt = autoContinueAttempts.merge(sessionId, 1, Integer::sum);
+        int cap = budgetLimited ? MAX_BUDGET_SEGMENTS : goalOpen ? MAX_GOAL_ROUNDS : MAX_AUTO_CONTINUE;
+        int attempt = budgetLimited ? segments + 1 : autoContinueAttempts.merge(sessionId, 1, Integer::sum);
         if (attempt > cap) {
             autoContinueAttempts.remove(sessionId);
             return false;
@@ -1044,8 +1063,9 @@ public class AgentRunService implements RunStarter {
         autoContinueSignature.put(sessionId, signature);
         String runId = "run_" + java.util.UUID.randomUUID();
         publish(sessionId, runId, new RunStarted("（继续上一次未完成的任务）"));
-        publish(sessionId, runId,
-            new RunContinued(attempt, cap, goalOpen ? "目标尚未核验，同一会话继续第 " + attempt + " 轮" : "步数触顶，按未完成计划继续"));
+        String reason = budgetLimited ? "预算分段继续第 " + attempt + "/" + cap + " 段"
+            : goalOpen ? "目标尚未核验，同一会话继续第 " + attempt + " 轮" : "步数触顶，按未完成计划继续";
+        publish(sessionId, runId, new RunContinued(attempt, cap, reason));
         launch(sessionId, runId, null, List.of(), true);
         return true;
     }
@@ -1394,7 +1414,7 @@ public class AgentRunService implements RunStarter {
         if (items.isEmpty()) {
             return "";
         }
-        List<PlanItem> open = items.stream().filter(item -> !item.done()).toList();
+        List<PlanItem> open = items.stream().filter(PlanItem::open).toList();
         if (open.isEmpty()) {
             return PROMPTS.render("system/plan-done", Map.of()).strip();
         }
@@ -1417,8 +1437,8 @@ public class AgentRunService implements RunStarter {
         PlanSink planSink = (items, explanation) -> {
             plans.save(sessionId, items);
             publish(sessionId, runId,
-                new PlanUpdated(
-                    items.stream().map(item -> new PlanUpdated.PlanItemPayload(item.step(), item.status())).toList(),
+                new PlanUpdated(items.stream()
+                    .map(item -> new PlanUpdated.PlanItemPayload(item.step(), item.status(), item.note())).toList(),
                     explanation));
         };
         ToolRegistry tools =
@@ -1543,13 +1563,24 @@ public class AgentRunService implements RunStarter {
             conversations.save(sessionId, result.conversation());
             log.info("Agent run {} completed: failureCode={}, messages={}, workspace={}", runId, result.failureCode(),
                 result.conversation().size(), workspace == null ? properties.workspace() : workspace);
+            // 失败/部分交付也要把已经跑过的检查记进证据账本；不能因为收尾是 TASK_INCOMPLETE
+            // 就让用户看到「还没有任何校验证据」。只有取消/启动失败这类没有产物的终态跳过。
+            if (!WireEnum.in(result.failureCode(), RunFailureCode.CANCELLED, RunFailureCode.START_FAILED)) {
+                RunCompleted completed = lastCompleted.get();
+                List<String> checks = completed == null ? result.checks() : completed.checks();
+                recordValidation(sessionId, runId, workspace, checks, result.failureCode() == null);
+            }
             if (result.failureCode() == null) {
-                recordValidation(sessionId, runId, workspace, lastCompleted.get());
                 TaskControlService.TaskContract task = taskControls.load(sessionId);
                 return task == null ? TaskControlStatus.COMPLETED.name() : task.status();
             }
             if (handle.paused) {
                 return TaskControlStatus.PAUSED.name();
+            }
+            // 部分交付不是失败：任务状态由 RunEnded 的 outcome 落到 AWAITING_REVIEW，
+            // 外层只需要把这个码原样带回，让 runOnWorker 映射成可恢复的 run 状态。
+            if (RunFailureCode.TASK_INCOMPLETE.is(result.failureCode())) {
+                return result.failureCode();
             }
             // 步数触顶要单独返回，外层才会按未完成计划自动接下一轮。
             // 以前一律收成 FAILED，自动继续的判断永远进不去。
@@ -1645,12 +1676,15 @@ public class AgentRunService implements RunStarter {
                 }
             } else if (event instanceof RunFailed failed) {
                 taskControls.status(sessionId, failureTaskStatus(failed.code()));
+            } else if (event instanceof RunEnded ended) {
+                // 部分交付/阻塞/等用户：任务状态由 outcome 派生，不再走 FAILED。
+                taskControls.status(sessionId, ended.outcome().taskStatus());
             } else if (event instanceof RunCompleted completed) {
                 delivered = completedEvent(sessionId, planSink, completed);
             }
             metrics.count("event." + delivered.type().wireName());
-            if (delivered instanceof RunCompleted || delivered instanceof RunFailed
-                || delivered instanceof RunCancelled) {
+            if (delivered instanceof RunCompleted || delivered instanceof RunFailed || delivered instanceof RunCancelled
+                || delivered instanceof RunEnded) {
                 // 收到终止事件的客户端会立即请求本轮补丁，先保存完成态。
                 finishSnapshots(runId);
             }
@@ -1665,6 +1699,9 @@ public class AgentRunService implements RunStarter {
     private String failureTaskStatus(String code) {
         if (RunFailureCode.MAX_STEPS.is(code) && properties.goalModeEnabledValue()) {
             return TaskControlStatus.BUDGET_LIMITED.name();
+        }
+        if (RunFailureCode.TASK_INCOMPLETE.is(code)) {
+            return TaskControlStatus.AWAITING_REVIEW.name();
         }
         return preservedAsTaskStatus(code) ? code : TaskControlStatus.INTERRUPTED.name();
     }
@@ -1721,12 +1758,16 @@ public class AgentRunService implements RunStarter {
     }
 
     /**
-     * 把「本轮成功」绑定到当前产物指纹、实际检查命令和环境。
+     * 把本轮产物绑定到当前指纹、实际检查命令和环境。
      *
      * <p>没有产物变化（只回答问题）时不写证据：那不构成对代码的完成声明。
      * 有变化但没有任何检查记录时记为 {@code skipped}，界面会显示「未经校验」，而不是通过。
+     *
+     * <p>失败/部分交付也要调用：已经跑过的检查是事实，不能因为收尾事件不是 completed 就丢掉。
+     * 只有真正成功的终态才执行策略门禁，避免把「部分交付、还没验证」再改写成 VERIFICATION_FAILED。
      */
-    private void recordValidation(String sessionId, String runId, String workspace, RunCompleted completed) {
+    private void recordValidation(String sessionId, String runId, String workspace, List<String> checks,
+        boolean enforcePolicy) {
         if (validations == null) {
             return;
         }
@@ -1739,21 +1780,22 @@ public class AgentRunService implements RunStarter {
             if (candidate.isBlank()) {
                 return;
             }
-            List<String> checks = completed == null ? List.of() : completed.checks();
+            List<String> effectiveChecks = checks == null ? List.of() : checks;
             TaskControlService.TaskContract task = taskControls.load(sessionId);
             String phase =
                 task == null || task.execution() == null ? ExecutionPhase.UNVERIFIED.name() : task.execution().phase();
             // 使用已绑定当前源码版本的账本判断，不能把旧检查或普通 exit 0 重新包装成通过。
-            boolean qualifying =
-                checks.stream().anyMatch(check -> com.pilot.core.tool.VerificationCheck.passingKind(check).qualifies());
+            boolean qualifying = effectiveChecks.stream()
+                .anyMatch(check -> com.pilot.core.tool.VerificationCheck.passingKind(check).qualifies());
             String status = ExecutionPhase.CHECKS_FAILED.is(phase) ? ValidationEvidence.FAILED
-                : qualifying && WireEnum.in(phase, ExecutionPhase.CHECKS_PASSED, ExecutionPhase.VERIFIED)
-                    ? ValidationEvidence.PASSED : ValidationEvidence.SKIPPED;
+                : qualifying ? ValidationEvidence.PASSED : ValidationEvidence.SKIPPED;
             validations.record(new ValidationEvidence("val_" + java.util.UUID.randomUUID(), sessionId, runId, candidate,
-                files, checks, status, com.pilot.server.multi.SandboxStore.environmentFingerprint(), "run",
+                files, effectiveChecks, status, com.pilot.server.multi.SandboxStore.environmentFingerprint(), "run",
                 java.time.Instant.now()));
             revokeAcceptanceIfEvidenceStale(sessionId, workspace);
-            enforceVerificationPolicy(sessionId, workspace, files, checks);
+            if (enforcePolicy) {
+                enforceVerificationPolicy(sessionId, workspace, files, effectiveChecks);
+            }
         } catch (RuntimeException e) {
             log.debug("记录校验证据失败：session={}, run={}", sessionId, runId, e);
         }

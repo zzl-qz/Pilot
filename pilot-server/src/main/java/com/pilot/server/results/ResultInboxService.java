@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
+import com.pilot.core.event.RunEnded;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.message.ToolNames;
 import com.pilot.core.session.Session;
@@ -141,18 +142,21 @@ public class ResultInboxService {
                 continue;
             }
             var completed = end.payload() instanceof RunCompleted c ? c : null;
+            var ended = end.payload() instanceof RunEnded e ? e : null;
             var resultTask = tasks.result(end.runId());
-            ChatState state =
-                completed == null || verificationNeedsAttention(resultTask, completed) ? ChatState.NEEDS_ATTENTION
-                    : completed.openSteps().isEmpty() ? ChatState.COMPLETED : ChatState.AWAITING_REVIEW;
-            String summary = completed == null ? ((RunFailed)end.payload()).message() : completed.summary();
+            ChatState state = completed != null
+                ? (verificationNeedsAttention(resultTask, completed) ? ChatState.NEEDS_ATTENTION
+                    : completed.openSteps().isEmpty() ? ChatState.COMPLETED : ChatState.AWAITING_REVIEW)
+                : ended != null ? ChatState.AWAITING_REVIEW : ChatState.NEEDS_ATTENTION;
+            String summary = completed != null ? completed.summary()
+                : ended != null ? ended.summary() : ((RunFailed)end.payload()).message();
             String revision = end.sessionId() + ":" + end.sequence();
             var receipt = receipt(receipts, end.runId(), revision);
             items.add(new Item(end.runId(), revision, session.id(), session.title(), Source.CHAT.name(), state.name(),
                 summary, end.timestamp(), end.runId(), null, receipt.seen(), receipt.handled(),
-                completed == null ? List.of() : completed.changedFiles(),
-                completed == null ? List.of() : completed.checks(),
-                completed == null ? List.of() : completed.openSteps(), null));
+                completed != null ? completed.changedFiles() : ended != null ? ended.changedFiles() : List.of(),
+                completed != null ? completed.checks() : ended != null ? ended.checks() : List.of(),
+                completed != null ? completed.openSteps() : ended != null ? ended.openSteps() : List.of(), null));
         }
         items.sort(Comparator.comparing(Item::at).reversed().thenComparing(Item::id));
         return new Page(items.stream().filter(item -> !item.at().isBefore(since)).limit(limit).toList(),
@@ -177,8 +181,9 @@ public class ResultInboxService {
     }
 
     private static String scheduleSummary(ScheduledTask job, EventEnvelope end) {
-        String result = end == null ? "" : end.payload() instanceof RunCompleted c ? c.summary()
-            : end.payload() instanceof RunFailed f ? f.message() : "";
+        String result = end == null ? ""
+            : end.payload() instanceof RunCompleted c ? c.summary() : end.payload() instanceof RunEnded e ? e.summary()
+                : end.payload() instanceof RunFailed f ? f.message() : "";
         if (result == null || result.isBlank()) {
             return job.message();
         }

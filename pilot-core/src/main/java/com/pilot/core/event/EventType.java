@@ -16,7 +16,9 @@ public enum EventType {
     ARBITRATION_REQUIRED("arbitration.required"), ARBITRATION_RESOLVED("arbitration.resolved"),
     TOOL_STARTED("tool.started"), APPROVAL_REQUIRED("approval.required"), APPROVAL_RESOLVED("approval.resolved"),
     TOOL_COMPLETED("tool.completed"), RUN_FAILED("run.failed"), RUN_CANCELLED("run.cancelled"),
-    RUN_COMPLETED("run.completed");
+    RUN_COMPLETED("run.completed"),
+    /** 非失败终态：部分交付、阻塞、等待用户、预算用尽等。 */
+    RUN_ENDED("run.ended");
 
     private final String wireName;
 

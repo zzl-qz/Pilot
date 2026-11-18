@@ -27,6 +27,7 @@ import com.pilot.core.event.AssistantPreview;
 import com.pilot.core.event.AssistantReasoning;
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.EventType;
+import com.pilot.core.event.RunEnded;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.RunFailureCode;
 import com.pilot.core.event.RunStarted;
@@ -606,6 +607,8 @@ public final class SessionService {
             case APPROVAL_REQUIRED, ARBITRATION_REQUIRED -> SessionStatus.WAITING_APPROVAL;
             case APPROVAL_RESOLVED, ARBITRATION_RESOLVED -> SessionStatus.RUNNING;
             case RUN_COMPLETED -> SessionStatus.COMPLETED;
+            // 非失败终态：部分交付/阻塞/等用户不能伪装成红色失败。
+            case RUN_ENDED -> endedStatus(event);
             // 用户暂停、进程中断与真正失败分别显示；暂停仍是本轮终态，可以另起一轮续跑。
             case RUN_FAILED -> failedStatus(event);
             case RUN_CANCELLED -> SessionStatus.CANCELLED;
@@ -623,6 +626,20 @@ public final class SessionService {
             }
         }
         return SessionStatus.FAILED;
+    }
+
+    /** 非失败终态的会话状态：只有真正完成才 COMPLETED，其余可继续的落 INTERRUPTED。 */
+    private static SessionStatus endedStatus(SessionEvent event) {
+        if (!(event instanceof RunEnded ended)) {
+            return SessionStatus.INTERRUPTED;
+        }
+        return switch (ended.outcome()) {
+            case COMPLETED -> SessionStatus.COMPLETED;
+            case PAUSED -> SessionStatus.PAUSED;
+            case CANCELLED -> SessionStatus.CANCELLED;
+            case FAILED -> SessionStatus.FAILED;
+            default -> SessionStatus.INTERRUPTED;
+        };
     }
 
     /**

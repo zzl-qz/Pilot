@@ -28,7 +28,9 @@ import com.pilot.core.event.AssistantReasoning;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunContinued;
+import com.pilot.core.event.RunEnded;
 import com.pilot.core.event.RunFailed;
+import com.pilot.core.event.RunOutcome;
 import com.pilot.core.event.RunRetrying;
 import com.pilot.core.event.RunUsageUpdated;
 import com.pilot.core.event.SessionEvent;
@@ -475,8 +477,8 @@ class AgentLoopTest {
 
         assertEquals("WAITING", result.failureCode());
         assertEquals(8, status.executions.get(), "动态轮询保险丝前不应伪造跳过结果");
-        assertTrue(
-            events.stream().anyMatch(event -> event instanceof RunFailed failed && failed.code().equals("WAITING")));
+        assertTrue(events.stream().anyMatch(event -> event instanceof RunEnded ended
+            && ended.outcome() == RunOutcome.WAITING && ended.code().equals("WAITING")));
         assertTrue(result.finalText().contains("taskId") || result.finalText().contains("稍后"), result.finalText());
     }
 
@@ -1477,6 +1479,27 @@ class AgentLoopTest {
         assertEquals(2, events.stream().filter(RunContinued.class::isInstance).count());
         assertEquals("TASK_INCOMPLETE", result.failureCode());
         assertTrue(result.finalText().contains("跑回归测试"));
+        assertFalse(events.stream().anyMatch(RunCompleted.class::isInstance));
+        assertTrue(events.stream().anyMatch(event -> event instanceof RunEnded ended
+            && ended.outcome() == RunOutcome.PARTIAL && ended.openSteps().contains("跑回归测试") && ended.resumable()));
+        assertFalse(events.stream().anyMatch(RunFailed.class::isInstance), "部分交付不应再发 run.failed");
+    }
+
+    /** 计划里明确 blocked 的步骤不能把整轮判成失败。 */
+    @Test
+    void blockedPlanEndsAsPartialNotFailure() {
+        ScriptedModelClient client = new ScriptedModelClient(new ModelResponse("浏览器验证需要人工环境。", List.of()));
+        List<PlanItem> plan =
+            List.of(new PlanItem("实现接口", PlanItem.COMPLETED), new PlanItem("浏览器回归", PlanItem.BLOCKED, "当前环境没有浏览器"));
+        AgentLoop loop =
+            new AgentLoop(client, registry(), readOnlyGate(), new AgentLoop.Config(8, 3, "你是测试代理", () -> plan, 1));
+
+        AgentLoop.Result result = loop.run("继续", List.of(), events::add);
+
+        assertEquals("TASK_INCOMPLETE", result.failureCode());
+        assertTrue(events.stream().anyMatch(event -> event instanceof RunEnded ended
+            && ended.outcome() == RunOutcome.PARTIAL && ended.blockedSteps().contains("浏览器回归") && ended.resumable()));
+        assertFalse(events.stream().anyMatch(RunFailed.class::isInstance));
         assertFalse(events.stream().anyMatch(RunCompleted.class::isInstance));
     }
 

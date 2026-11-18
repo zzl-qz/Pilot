@@ -35,7 +35,9 @@ import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunCompleted;
+import com.pilot.core.event.RunEnded;
 import com.pilot.core.event.RunFailed;
+import com.pilot.core.event.RunOutcome;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.event.RunSteered;
 import com.pilot.core.message.Attachment;
@@ -525,8 +527,8 @@ class AgentRunTaskControlTest {
             f.finished("VERIFICATION_FAILED");
 
             assertEquals("VERIFICATION_FAILED", f.tasks.load(f.id).status());
-            assertTrue(f.sessions.events(f.id).stream().map(EventEnvelope::payload)
-                .anyMatch(event -> event instanceof RunFailed failed && "VERIFICATION_FAILED".equals(failed.code())));
+            assertTrue(f.sessions.events(f.id).stream().map(EventEnvelope::payload).anyMatch(
+                event -> event instanceof RunEnded ended && ended.outcome() == RunOutcome.VERIFICATION_FAILED));
         }
     }
 

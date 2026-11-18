@@ -17,6 +17,7 @@ import com.pilot.core.event.PlanUpdated;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunContinued;
+import com.pilot.core.event.RunEnded;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.RunRetrying;
 import com.pilot.core.event.RunStarted;
@@ -79,6 +80,7 @@ public class EventCodec {
             case "approval.resolved" -> ApprovalResolved.class;
             case "run.completed" -> RunCompleted.class;
             case "run.failed" -> RunFailed.class;
+            case "run.ended" -> RunEnded.class;
             default -> throw new IllegalArgumentException("未知事件类型: " + type);
         };
         // 历史事件不会带上后来新增的字段：Jackson 3 默认对原生类型字段缺省即报错，

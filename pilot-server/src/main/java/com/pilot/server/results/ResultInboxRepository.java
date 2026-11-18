@@ -17,8 +17,10 @@ import org.springframework.stereotype.Component;
 
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunCancelled;
+import com.pilot.core.event.RunEnded;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.RunFailureCode;
+import com.pilot.core.event.RunOutcome;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
@@ -52,7 +54,9 @@ public class ResultInboxRepository {
     /** 等待唤醒和暂停还不算结果，不进收件箱。下面 SQL 里的同名条件要和这里一致。 */
     public static boolean stillPending(SessionEvent payload) {
         return payload instanceof RunFailed failed
-            && WireEnum.in(failed.code(), RunFailureCode.WAITING, RunFailureCode.PAUSED);
+            && WireEnum.in(failed.code(), RunFailureCode.WAITING, RunFailureCode.PAUSED)
+            || payload instanceof RunEnded ended
+                && (ended.outcome() == RunOutcome.WAITING || ended.outcome() == RunOutcome.PAUSED);
     }
 
     public List<EventEnvelope> endings(int limit) {
@@ -66,7 +70,8 @@ public class ResultInboxRepository {
                 .sorted(Comparator.comparing(Session::createdAt).thenComparing(Session::id)).forEach(s -> {
                     Map<String, EventEnvelope> byRun = new HashMap<>();
                     sessions.events(s.id()).stream()
-                        .filter(e -> Set.of("run.completed", "run.failed", "run.cancelled").contains(e.type()))
+                        .filter(
+                            e -> Set.of("run.completed", "run.failed", "run.ended", "run.cancelled").contains(e.type()))
                         .forEach(e -> byRun.put(e.runId(), e));
                     byRun.forEach(latest::putIfAbsent);
                 });
@@ -82,10 +87,11 @@ public class ResultInboxRepository {
                     ORDER BY %s, s.id, e.sequence DESC) AS result_rank
                 FROM events e JOIN sessions s ON s.id = e.session_id
                 WHERE (s.parent_session_id IS NULL OR s.parent_session_id = '')
-                AND e.type IN ('run.completed','run.failed','run.cancelled')
+                AND e.type IN ('run.completed','run.failed','run.ended','run.cancelled')
             )
             SELECT * FROM candidates WHERE result_rank=1 AND type != 'run.cancelled'
             AND (type != 'run.failed' OR COALESCE(json_extract(payload, '$.code'), '') NOT IN ('WAITING','PAUSED'))
+            AND (type != 'run.ended' OR COALESCE(json_extract(payload, '$.outcome'), '') NOT IN ('WAITING','PAUSED'))
             AND %s >= ?
             ORDER BY %s DESC, session_id, sequence DESC LIMIT ?
             """.formatted(sessionCreatedAt, createdAt, createdAt), q -> {
@@ -116,7 +122,7 @@ public class ResultInboxRepository {
                 }
                 for (EventEnvelope event : sessions.events(session.id())) {
                     if (ids.contains(event.runId())
-                        && Set.of("run.completed", "run.failed", "run.cancelled").contains(event.type())) {
+                        && Set.of("run.completed", "run.failed", "run.ended", "run.cancelled").contains(event.type())) {
                         latest.put(event.runId(), event);
                     }
                 }
@@ -128,7 +134,7 @@ public class ResultInboxRepository {
             var chunk = ids.subList(from, Math.min(ids.size(), from + 400));
             result.addAll(JdbcSupport.query(store,
                 "SELECT * FROM events WHERE run_id IN (" + String.join(",", Collections.nCopies(chunk.size(), "?"))
-                    + ") AND type IN ('run.completed','run.failed','run.cancelled') ORDER BY sequence",
+                    + ") AND type IN ('run.completed','run.failed','run.ended','run.cancelled') ORDER BY sequence",
                 q -> {
                     for (int i = 0; i < chunk.size(); i++) {
                         q.setString(i + 1, chunk.get(i));

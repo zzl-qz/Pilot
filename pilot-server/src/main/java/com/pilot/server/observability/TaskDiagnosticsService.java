@@ -13,6 +13,7 @@ import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
+import com.pilot.core.event.RunEnded;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.RunRetrying;
 import com.pilot.core.event.RunStarted;
@@ -186,7 +187,8 @@ public class TaskDiagnosticsService {
                 return retrying;
             }
             if (event instanceof ToolStarted || event instanceof ToolCompleted || event instanceof AssistantDelta
-                || event instanceof RunCompleted || event instanceof RunFailed || event instanceof RunCancelled) {
+                || event instanceof RunCompleted || event instanceof RunEnded || event instanceof RunFailed
+                || event instanceof RunCancelled) {
                 return null;
             }
         }

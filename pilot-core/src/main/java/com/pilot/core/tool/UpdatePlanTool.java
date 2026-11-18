@@ -31,12 +31,15 @@ public final class UpdatePlanTool implements Tool {
 
     @Override
     public Map<String, Object> parameters() {
-        return ToolSchemas.object(Map.of("explanation", ToolSchemas.string("本次更新的原因（可选）"), "plan",
-            Map.of("type", "array", "description", "完整步骤列表，整体替换上一次的计划", "items", ToolSchemas.object(
-                Map.of("step", ToolSchemas.string("步骤描述"), "status",
-                    Map.of("type", "string", "enum",
-                        List.of(PlanItem.PENDING, PlanItem.IN_PROGRESS, PlanItem.COMPLETED), "description", "步骤状态")),
-                List.of("step", "status")))),
+        return ToolSchemas.object(
+            Map.of("explanation", ToolSchemas.string("本次更新的原因（可选）"), "plan",
+                Map.of("type", "array", "description", "完整步骤列表，整体替换上一次的计划", "items",
+                    ToolSchemas.object(Map.of("step", ToolSchemas.string("步骤描述"), "status",
+                        Map.of("type", "string", "enum",
+                            List.of(PlanItem.PENDING, PlanItem.IN_PROGRESS, PlanItem.COMPLETED, PlanItem.BLOCKED,
+                                PlanItem.SKIPPED),
+                            "description", "步骤状态；blocked/skipped 必须同时在 note 写原因"),
+                        "note", ToolSchemas.string("可选说明；blocked/skipped 时必填原因")), List.of("step", "status")))),
             List.of("plan"));
     }
 
@@ -58,11 +61,12 @@ public final class UpdatePlanTool implements Tool {
             }
             String step = text(map.get("step"));
             String status = text(map.get("status"));
+            String note = text(map.get("note"));
             if (step.isBlank()) {
                 return "ERROR: 每个步骤都需要 step 文本";
             }
             try {
-                items.add(new PlanItem(step, status));
+                items.add(new PlanItem(step, status, note));
             } catch (IllegalArgumentException e) {
                 return "ERROR: " + e.getMessage();
             }
