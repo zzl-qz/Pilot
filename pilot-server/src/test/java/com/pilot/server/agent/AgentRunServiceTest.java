@@ -1014,7 +1014,8 @@ class AgentRunServiceTest {
     /** 用户输入序列：过滤会话首条自动注入的仓库快照（以「## 仓库现状」开头的 user 消息）。 */
     private static List<String> userInputs(List<Message> messages) {
         return messages.stream().filter(message -> "user".equals(message.role())).map(Message::content)
-            .filter(content -> !content.startsWith("## 仓库现状")).toList();
+            .filter(content -> !content.startsWith("## 仓库现状"))
+            .filter(content -> !content.contains("[Runtime task context]")).toList();
     }
 
     private static ModelResponse readFile() {

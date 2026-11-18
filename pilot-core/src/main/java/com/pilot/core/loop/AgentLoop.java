@@ -1041,8 +1041,12 @@ public final class AgentLoop {
      */
     private void fitHistoryToInputBudget(List<Message> messages, Consumer<SessionEvent> events, String guidance) {
         int before = ContextCompactor.totalChars(messages);
-        recordToolObservationBoundary(messages);
-        ContextCompactor.truncateLongToolOutputs(messages, messages.size());
+        // 只有在当前请求放不下时才裁剪旧观察。每步都裁剪会把历史中间的消息改掉，
+        // 供应商的 prefix cache 从第一个被改的 token 起全部失效；能放下就保持原样追加。
+        if (!requestFits(messages, guidance)) {
+            recordToolObservationBoundary(messages);
+            ContextCompactor.truncateLongToolOutputs(messages, messages.size());
+        }
         if (!requestFits(messages, guidance) && historyCanShrink(messages)) {
             int wireLimit = (int)Math.min(Integer.MAX_VALUE, RequestBudget
                 .assessRequest(requestMessages(messages, guidance), tools.definitions(), contextLimit()).inputLimit());
@@ -1136,37 +1140,27 @@ public final class AgentLoop {
 
     private void refreshTaskContext(List<Message> messages, String runtimeGuidance) {
         String context = taskContext.get();
-        if (client.profile().instructionMessages()) {
-            messages.set(0, Message.system(config.systemPrompt()));
-            String state = "[Runtime task context]\n以下是当前任务状态与约束，更新此前的任务状态。\n" + (context == null ? "" : context);
+        // 系统提示词保持稳定，运行时任务状态作为追加的 user reminder 进入历史。
+        // 这样每次状态变化只改尾部，不会重写 system 前缀，也不会破坏供应商的 prefix cache。
+        if (context != null && !context.isBlank()) {
+            String state = "<system-reminder>\n[Runtime task context]\n" + context + "\n</system-reminder>";
             String previous = messages.stream().filter(AgentLoop::runtimeContext).map(Message::content)
                 .reduce((a, b) -> b).orElse("");
-            if (!state.equals(previous) && ((context != null && !context.isBlank()) || !previous.isEmpty())) {
-                messages.add(Message.system(state));
+            if (!state.equals(previous)) {
+                messages.add(Message.user(state));
             }
-            return;
         }
-        // 切到只支持首条 system 的兼容端点时，把可信任务约束归并回头部，接受明确的前缀失效。
-        int beforeRemoval = messages.size();
-        messages.removeIf(AgentLoop::runtimeContext);
-        observedThroughIndex = Math.max(0, observedThroughIndex - (beforeRemoval - messages.size()));
-        StringBuilder system = new StringBuilder(config.systemPrompt());
-        if (context != null && !context.isBlank()) {
-            system.append("\n\n[Runtime task context]\n").append(context);
-        }
-        if (runtimeGuidance != null && !runtimeGuidance.isBlank()) {
-            system.append("\n\n[Runtime guidance; not a new user request]\n").append(runtimeGuidance.strip());
-        }
-        messages.set(0, Message.system(system.toString()));
+        // runtimeGuidance 只对本次请求生效，由 requestMessages 临时追加，不写回历史。
     }
 
     private static boolean runtimeContext(Message message) {
-        return "system".equals(message.role()) && message.content().startsWith("[Runtime task context]");
+        return ("user".equals(message.role()) || "system".equals(message.role()))
+            && message.content().contains("[Runtime task context]");
     }
 
     private List<Message> requestMessages(List<Message> messages, String guidance) {
         refreshTaskContext(messages, guidance);
-        if (!client.profile().instructionMessages() || guidance == null || guidance.isBlank()) {
+        if (guidance == null || guidance.isBlank()) {
             return List.copyOf(messages);
         }
         List<Message> request = new ArrayList<>(messages);

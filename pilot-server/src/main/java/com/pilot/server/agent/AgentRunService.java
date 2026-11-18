@@ -78,7 +78,6 @@ import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.core.tool.command.RunCommandTool;
 import com.pilot.core.tool.command.StopCommandTool;
 import com.pilot.core.trace.JsonlTraceRecorder;
-import com.pilot.core.util.Texts;
 import com.pilot.core.util.WireEnum;
 import com.pilot.core.workspace.AgentScope;
 import com.pilot.core.workspace.PathValidator;
@@ -1169,8 +1168,9 @@ public class AgentRunService implements RunStarter {
     }
 
     private String currentTaskContext(String sessionId) {
-        return taskControls.prompt(sessionId) + "\n历史目标或验收范围不明时，先 read_task_history 恢复用户原文，不能按摘要自行缩小范围。"
-            + commandContext(sessionId) + "\n\n"
+        // 稳定的任务数据放前面；计划只在 update_plan 后变化，作为尾部提醒追加。
+        // 运行中的命令状态不再每轮塞进上下文：需要时用 command_status 查询，避免缓存前缀抖动。
+        return taskControls.stablePrompt(sessionId) + "\n历史目标或验收范围不明时，先 read_task_history 恢复用户原文，不能按摘要自行缩小范围。" + "\n\n"
             + PROMPTS.render("system/today", Map.of("today", java.time.LocalDate.now().toString())).strip() + "\n\n"
             + planBrief(sessionId);
     }
@@ -1916,19 +1916,6 @@ public class AgentRunService implements RunStarter {
         // 浏览器与 MCP：始终注册，是否可见由工具自己的 availability 在运行时决定。
         toolFactory.sessionExtras(sessionId, workspace).forEach(tools::register);
         return tools;
-    }
-
-    private String commandContext(String sessionId) {
-        List<CommandTaskManager.Task> tasks = commandTasks.list(sessionId);
-        if (tasks.isEmpty()) {
-            return "";
-        }
-        return "\n\n本会话最近的命令任务（后台命令独立运行，已启动不代表验证通过）：\n"
-            + tasks.stream().limit(10)
-                .map(task -> "- " + task.taskId() + " [" + task.status() + "] " + Texts.oneLine(task.command(), 180)
-                    + (task.exitCode() == null ? "" : "，退出码 " + task.exitCode()))
-                .collect(Collectors.joining("\n"))
-            + "\n用 command_status 确认实际退出结果、command_logs 查看增量日志，必要时 stop_command 停止进程。";
     }
 
     private void publish(String sessionId, String runId, SessionEvent event) {

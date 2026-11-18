@@ -89,6 +89,7 @@ class CacheContextTest {
         assertNull(result.failureCode());
         assertEquals(2, requests.size());
         assertEquals("stable", requests.get(1).getFirst().content());
+        assertEquals("stable", requests.get(1).getFirst().content());
         assertEquals("system", requests.get(1).getLast().role());
         assertTrue(requests.get(1).getLast().content().contains("Runtime guidance"));
         assertFalse(result.conversation().stream().anyMatch(m -> m.content().contains("Runtime guidance")));
@@ -142,15 +143,10 @@ class CacheContextTest {
             int step = i;
             var request = requests.get(i);
             assertTrue(request.stream()
-                .anyMatch(m -> m.role().equals("system") && m.content().contains("trusted state " + step)));
-            if (supported) {
-                assertEquals("stable-system", request.getFirst().content());
-                if (i > 0) {
-                    assertEquals(requests.get(i - 1), request.subList(0, requests.get(i - 1).size()));
-                }
-            } else {
-                assertTrue(request.getFirst().content().contains("trusted state " + i));
-                assertEquals(1, request.stream().filter(m -> m.role().equals("system")).count());
+                .anyMatch(m -> m.role().equals("user") && m.content().contains("trusted state " + step)));
+            assertEquals("stable-system", request.getFirst().content());
+            if (i > 0) {
+                assertEquals(requests.get(i - 1), request.subList(0, requests.get(i - 1).size()));
             }
         }
         assertTrue(requests.getLast().stream().anyMatch(m -> "call2".equals(m.toolCallId())));

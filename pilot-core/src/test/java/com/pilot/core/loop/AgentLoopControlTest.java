@@ -290,15 +290,18 @@ class AgentLoopControlTest {
         AgentLoop loop = loop(model, tool, () -> false, () -> null).withTaskContext(context::get);
         AgentLoop.Result result = loop.run("继续", List.of(), event -> {
         });
-        assertTrue(requests.get(0).getFirst().content().contains("不改数据库"));
-        assertTrue(requests.get(1).getFirst().content().contains("验收：重连测试通过"));
+        assertTrue(requests.get(0).stream().anyMatch(m -> "user".equals(m.role()) && m.content().contains("不改数据库")));
+        assertTrue(
+            requests.get(1).stream().anyMatch(m -> "user".equals(m.role()) && m.content().contains("验收：重连测试通过")));
         assertFalse(result.conversation().stream().anyMatch(m -> m.role().equals("system")));
         loop(model, tool, () -> false, () -> null).withTaskContext(context::get).resume(result.conversation(),
             event -> {
             }, messages -> {
             });
-        assertTrue(requests.getLast().getFirst().content().contains("原始目标：修复登录"));
-        assertTrue(requests.getLast().getFirst().content().contains("验收：重连测试通过"));
+        assertTrue(
+            requests.getLast().stream().anyMatch(m -> "user".equals(m.role()) && m.content().contains("原始目标：修复登录")));
+        assertTrue(
+            requests.getLast().stream().anyMatch(m -> "user".equals(m.role()) && m.content().contains("验收：重连测试通过")));
     }
 
     private static ToolCall call(String id) {

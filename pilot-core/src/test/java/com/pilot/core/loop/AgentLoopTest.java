@@ -296,7 +296,9 @@ class AgentLoopTest {
         AgentLoop.Result result = loop.run("按方案开始修改", List.of(), events::add);
 
         assertNull(result.failureCode());
-        assertTrue(client.requests.getFirst().getFirst().content().contains("执行效率检查"),
+        assertTrue(
+            client.requests.getFirst().stream()
+                .anyMatch(message -> "system".equals(message.role()) && message.content().contains("执行效率检查")),
             client.requests.getFirst().getFirst().content());
         assertFalse(
             client.requests.getFirst().stream()
@@ -326,7 +328,8 @@ class AgentLoopTest {
         AgentLoop.Result result = loop.run("完成任务", List.of(), events::add);
 
         assertNull(result.failureCode());
-        assertTrue(client.requests.get(1).getFirst().content().contains("补充针对性验证"));
+        assertTrue(client.requests.get(1).stream()
+            .anyMatch(message -> "system".equals(message.role()) && message.content().contains("补充针对性验证")));
         assertFalse(client.requests.get(1).stream()
             .anyMatch(message -> "user".equals(message.role()) && message.content().contains("补充针对性验证")));
         assertFalse(result.conversation().stream().anyMatch(message -> message.content().contains("补充针对性验证")));
@@ -373,7 +376,8 @@ class AgentLoopTest {
         assertEquals(7, tool.executions.get(), "停滞判断必须依据实际返回结果");
         assertEquals(8, client.requests.size());
         // 第 4 次请求通过一次性 system 上下文收到提醒；不能伪装成用户消息或写入会话。
-        assertTrue(client.requests.get(3).getFirst().content().contains("连续第 3 次"));
+        assertTrue(client.requests.get(3).stream()
+            .anyMatch(message -> "system".equals(message.role()) && message.content().contains("连续第 3 次")));
         assertFalse(client.requests.get(3).stream()
             .anyMatch(message -> "user".equals(message.role()) && message.content().contains("连续第 3 次")));
         assertFalse(result.conversation().stream()
@@ -515,7 +519,8 @@ class AgentLoopTest {
         AgentLoop.Result result = loop.run("逐个读取文件并保存要求的进度", List.of(), events::add);
 
         for (int index = 0; index < 8; index++) {
-            assertEquals(index >= 6, client.requests.get(index).getFirst().content().contains("执行额度提醒"));
+            assertEquals(index >= 6, client.requests.get(index).stream()
+                .anyMatch(message -> "system".equals(message.role()) && message.content().contains("执行额度提醒")));
         }
         assertEquals("MAX_STEPS", result.failureCode());
         assertEquals(8, tool.executions.get());
@@ -932,7 +937,10 @@ class AgentLoopTest {
 
         assertNull(result.failureCode());
         assertEquals(2, requests.size());
-        assertTrue(requests.stream().allMatch(request -> request.getFirst().content().contains("运行定向验证")),
+        assertTrue(
+            requests.stream()
+                .allMatch(request -> request.stream()
+                    .anyMatch(message -> "system".equals(message.role()) && message.content().contains("运行定向验证"))),
             "瞬时重试必须保留同一份一次性 guidance");
         assertFalse(result.conversation().stream().anyMatch(message -> message.content().contains("运行定向验证")));
     }
@@ -1092,8 +1100,10 @@ class AgentLoopTest {
         assertEquals("最终完整结果", result.finalText());
         assertEquals(3, client.requests.size());
         assertEquals(2, events.stream().filter(RunContinued.class::isInstance).count());
-        assertTrue(client.requests.get(1).getFirst().content().contains("输出长度上限"));
-        assertTrue(client.requests.get(2).getFirst().content().contains("输出长度上限"));
+        assertTrue(client.requests.get(1).stream()
+            .anyMatch(message -> "system".equals(message.role()) && message.content().contains("输出长度上限")));
+        assertTrue(client.requests.get(2).stream()
+            .anyMatch(message -> "system".equals(message.role()) && message.content().contains("输出长度上限")));
         assertFalse(result.conversation().stream()
             .anyMatch(message -> "user".equals(message.role()) && message.content().contains("输出长度上限")));
         assertFalse(events.stream()
@@ -1540,7 +1550,7 @@ class AgentLoopTest {
 
         assertNull(result.failureCode());
         assertEquals(2, client.requests.size(), "恢复后的只读调研仍应经过一次覆盖范围自审");
-        String review = client.requests.get(1).getFirst().content();
+        String review = lastContent(client.requests.get(1));
         assertTrue(review.contains("A.java") && review.contains("B.java"), review);
         assertTrue(review.contains("分析一下这个模块的调用链"), review);
     }
@@ -1633,7 +1643,8 @@ class AgentLoopTest {
     }
 
     private static String lastContent(List<Message> messages) {
-        return String.valueOf(messages.getFirst().content());
+        return messages.stream().filter(message -> "system".equals(message.role())).map(Message::content)
+            .reduce((first, second) -> second).orElse("");
     }
 
     private static ToolRegistry registry(Tool... tools) {

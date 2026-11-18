@@ -77,7 +77,17 @@ public final class UpdatePlanTool implements Tool {
         }
         sink.update(List.copyOf(items), text(args == null ? null : args.get("explanation")));
         long done = items.stream().filter(PlanItem::done).count();
-        return "Plan updated（" + done + "/" + items.size() + " 已完成）";
+        // 把完整计划回给模型，作为后续步骤的唯一可见副本；不再依赖每轮重写 system 的 planBrief。
+        StringBuilder detail =
+            new StringBuilder("Plan updated（").append(done).append("/").append(items.size()).append(" 已完成）\n");
+        for (PlanItem item : items) {
+            detail.append("- [").append(item.status()).append("] ").append(item.step());
+            if (!item.note().isBlank()) {
+                detail.append("（").append(item.note()).append("）");
+            }
+            detail.append('\n');
+        }
+        return detail.toString();
     }
 
     private static String text(Object value) {

@@ -759,7 +759,8 @@ class AgentRunTaskControlTest {
 
     private static List<String> userInputs(List<Message> messages) {
         return messages.stream().filter(message -> "user".equals(message.role())).map(Message::content)
-            .filter(content -> !content.startsWith("## 仓库现状")).toList();
+            .filter(content -> !content.startsWith("## 仓库现状"))
+            .filter(content -> !content.contains("[Runtime task context]")).toList();
     }
 
     private static ModelResponse done() {
