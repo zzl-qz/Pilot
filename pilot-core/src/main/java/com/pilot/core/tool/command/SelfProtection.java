@@ -20,8 +20,8 @@ final class SelfProtection {
             return null;
         }
         String executable = bare(tokens.getFirst());
-        List<String> args = tokens.subList(1, tokens.size()).stream()
-            .map(value -> value.toLowerCase(Locale.ROOT)).toList();
+        List<String> args =
+            tokens.subList(1, tokens.size()).stream().map(value -> value.toLowerCase(Locale.ROOT)).toList();
         if (Set.of("kill", "taskkill", "pkill", "killall", "stop-process").contains(executable)) {
             return "不要从命令里杀进程；停止后台任务请用 stop_command（只停本会话启动的 taskId）";
         }
