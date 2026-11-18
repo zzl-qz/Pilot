@@ -964,7 +964,7 @@ function ApprovalDock() {
         const toolHash = typeof item.structuredArgs?.toolHash === 'string' ? item.structuredArgs.toolHash : '';
         const isMcp = item.name === 'mcp_tools' || item.name === 'mcp_call';
         return (
-          <article key={item.callId} className="approval-card" aria-busy={item.busy}>
+          <article key={item.callId} className="approval-card" data-tool-name={item.name} aria-busy={item.busy}>
             <h3 className="approval-title"><StatusDot variant="warning" label="待审批" aria-hidden="true" />需要你批准：{toolLabel(item.name)}</h3>
             <pre className="approval-args" tabIndex={0} aria-label="操作参数">{toolArgsText(item.name, item.args) || item.args}</pre>
             <div className="approval-actions">

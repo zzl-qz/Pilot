@@ -7,6 +7,8 @@ test('常见工具显示中文名，不直接甩协议名', () => {
   assert.equal(toolLabel('command_logs'), '读日志');
   assert.equal(toolLabel('browser'), '浏览器');
   assert.equal(toolLabel('run_command'), '命令');
+  assert.equal(toolLabel('mcp_tools'), 'MCP 工具');
+  assert.equal(toolLabel('mcp_call'), 'MCP 调用');
 });
 
 test('command_status 参数收成人话，不露 waitSeconds 原文', () => {

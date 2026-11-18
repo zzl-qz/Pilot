@@ -47,13 +47,16 @@ try {
   const oldCard = dock.locator('.approval-card').nth(2);
   assert.equal(await oldCard.getByRole('button', { name: /记住 fake 当前这条启动命令/ }).count(), 0);
 
-  const first = dock.locator('.approval-card').filter({ hasText: 'mcp_tools' });
+  // 界面展示中文名；用 data-tool-name 区分 mcp_tools / mcp_call，避免再依赖协议原文。
+  const first = dock.locator('.approval-card[data-tool-name="mcp_tools"]');
+  assert.match(await first.locator('.approval-title').innerText(), /MCP 工具/);
   await first.getByRole('button', { name: /记住 fake 当前这条启动命令/ }).click();
   await page.waitForFunction(() => window.calls.length === 2);
   assert.deepEqual(await page.evaluate(() => calls.map(call => call[0])), ['approval', 'trust'], '必须先批准再写信任');
   assert.equal((await page.evaluate(() => calls[1][2])).configHash, 'sha256:aa');
 
-  const second = dock.locator('.approval-card').filter({ hasText: 'mcp_call' }).first();
+  const second = dock.locator('.approval-card[data-tool-name="mcp_call"]').first();
+  assert.match(await second.locator('.approval-title').innerText(), /MCP 调用/);
   await second.getByRole('button', { name: /记住 fake\.echo/ }).click();
   await page.waitForFunction(() => window.calls.length === 4);
   const calls = await page.evaluate(() => window.calls);

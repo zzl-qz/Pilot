@@ -106,7 +106,7 @@ async function run(page, name, url) {
     await page.getByRole('heading',{name:'核对跨平台文件行为',exact:true}).waitFor();
     await page.locator('.result-row').first().click();
     await page.locator(`[data-verification-phase="${phase}"]`).waitFor();
-    assert.equal(await page.locator('[data-verification-phase]').innerText(),label);
+    assert.equal(await page.locator('[data-verification-phase] .result-verification-badge').innerText(),label);
     if (phase !== 'VERIFIED') assert.equal(await page.getByText('目标核验通过',{exact:true}).count(),0);
   }
   await page.keyboard.press('Escape');

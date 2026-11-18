@@ -14,6 +14,8 @@ import { useStore } from '../store.js';
 import { MCP_TRUST_LABELS, mcpSourceLabel } from '../lib/mcp.js';
 import { writeClipboard } from '../lib/clipboard.js';
 import { statusFromCode, verificationStatusLabel } from '../lib/verification-status.js';
+import { commandStatusLabel } from '../lib/command-tasks.js';
+import { verificationLabel } from '../lib/verification.js';
 import { api } from '../api.js';
 import { Icon } from './Icon.jsx';
 import { Modal } from './Modal.jsx';
@@ -888,6 +890,23 @@ type DiagnosticsSnapshot = {
   validation: ApiResults['validation'] | null;
 };
 
+const SESSION_STATUS_LABELS: Record<string, string> = {
+  CREATED: '已创建',
+  RUNNING: '运行中',
+  WAITING_APPROVAL: '等待批准',
+  COMPLETED: '已完成',
+  FAILED: '失败',
+  CANCELLED: '已取消',
+  PAUSED: '已暂停',
+  INTERRUPTED: '已中断',
+  MISSING: '会话不存在'
+};
+
+function sessionStatusLabel(status: string | null | undefined) {
+  const key = String(status || '').trim().toUpperCase();
+  return SESSION_STATUS_LABELS[key] || status || '未知';
+}
+
 function DiagnosticsSettings() {
   const sessionId = useStore((state) => state.sessionId);
   const [data, setData] = useState<DiagnosticsSnapshot | null>(null);
@@ -1051,7 +1070,7 @@ function DiagnosticsSettings() {
           {diagnostics && (
             <>
               <dl className="diag-grid">
-                <div><dt>状态</dt><dd>{diagnostics.sessionStatus} · {diagnostics.phase || '—'} 第 {diagnostics.step} 步</dd></div>
+                <div><dt>状态</dt><dd>{sessionStatusLabel(diagnostics.sessionStatus)} · {verificationLabel(diagnostics.phase) || diagnostics.phase || '—'} 第 {diagnostics.step} 步</dd></div>
                 <div><dt>上次成功</dt><dd>{diagnostics.lastSuccessfulStep || '—'}</dd></div>
                 <div><dt>下一步</dt><dd>{diagnostics.nextAction || '—'}</dd></div>
                 <div><dt>模型请求</dt><dd>{diagnostics.modelRequests} 次</dd></div>
@@ -1069,7 +1088,7 @@ function DiagnosticsSettings() {
                   {diagnostics.commands.map((task) => (
                     <li key={task.taskId}>
                       <code>{task.command}</code>
-                      <span>{task.status}{task.exitCode != null ? ` · exit ${task.exitCode}` : ''}</span>
+                      <span>{commandStatusLabel(task.status)}{task.exitCode != null ? ` · 退出码 ${task.exitCode}` : ''}</span>
                     </li>
                   ))}
                 </ul>
