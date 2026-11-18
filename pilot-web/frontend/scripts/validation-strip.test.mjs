@@ -51,6 +51,15 @@ test('校验被跳过时不说成没通过', () => {
   assert.equal(skipped.tone, 'muted');
   assert.equal(skipped.needsRerun, true);
   assert.doesNotMatch(skipped.detail, /没有通过/);
+
+  // 旧账本偶发 failed + (skipped) 文案：按证据状态纠正，并清掉英文码
+  const legacy = stripView(view({
+    current: false, code: 'failed', reason: '最近一次校验没有通过 (skipped)',
+    latest: evidence({ status: 'skipped', checks: [] })
+  }), true);
+  assert.equal(legacy.label, '还没校验完');
+  assert.equal(legacy.tone, 'muted');
+  assert.doesNotMatch(legacy.detail, /skipped/i);
 });
 
 test('校验失败与账本异常各有自己的说法', () => {

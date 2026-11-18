@@ -38,8 +38,10 @@ export function stripView(view: S.DiagnosticsControllerValidationView | null | u
   }
   const report = view.report;
   const latest = report.latest ?? null;
-  const code = report.code ?? '';
-  const reason = (report.reason ?? '').trim();
+  // 旧账本偶尔把 skipped 记成 failed 文案；以证据状态为准，别让用户看见英文码。
+  const rawCode = report.code ?? '';
+  const code = latest?.status === 'skipped' && rawCode === 'failed' ? 'skipped' : rawCode;
+  const reason = cleanReason(report.reason ?? '');
 
   if (report.current) {
     return {
@@ -105,6 +107,14 @@ export function stripView(view: S.DiagnosticsControllerValidationView | null | u
     needsRerun: true,
     facts: factsOf(latest)
   };
+}
+
+/** 去掉括号里的 passed/failed/skipped 英文状态码，界面只留人话。 */
+function cleanReason(value: string) {
+  return String(value || '')
+    .replace(/[（(]\s*(passed|failed|skipped|missing|unknown|ok)\s*[）)]/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 }
 
 /** 依据里放什么：跑过哪些检查、覆盖了哪些文件、什么时候记的。只给可核对的东西。 */

@@ -121,7 +121,7 @@ await page.evaluate(() => {
           {
             callId: 'c1',
             name: 'command_status',
-            args: 'taskId=cmd_x,waitSeconds=5',
+            args: 'taskId=cmd_16162ef8abcd waitSeconds=5',
             status: 'run',
             meta: '',
             body: '',
@@ -129,8 +129,8 @@ await page.evaluate(() => {
           },
           {
             callId: 'c2',
-            name: 'browser_click',
-            args: 'selector=button',
+            name: 'browser',
+            args: 'click',
             status: 'run',
             meta: '',
             body: '',
@@ -171,6 +171,9 @@ await page.waitForTimeout(400);
 const ui = await page.evaluate(() => ({
   label: document.querySelector('.tool-group-label')?.textContent || '',
   attention: document.querySelector('.conversation-tool-attention')?.textContent || '',
+  names: [...document.querySelectorAll('.conversation-tool-name')].map((el) => el.textContent.trim()),
+  args: [...document.querySelectorAll('.tool-args')].map((el) => el.textContent.trim()),
+  counts: document.querySelector('.tool-group-count')?.textContent || '',
   states: [...document.querySelectorAll('.conversation-tool-state')].map((el) => ({
     text: el.textContent.trim(),
     cls: el.className,
@@ -197,6 +200,12 @@ assert.ok(
   JSON.stringify(ui.states),
 );
 assert.match(ui.attention, /需留意/);
+assert.deepEqual(ui.names, ['查命令', '浏览器']);
+assert.match(ui.args.join(' '), /最多等 5 秒/);
+assert.match(ui.args.join(' '), /点击/);
+assert.doesNotMatch(ui.args.join(' '), /waitSeconds|taskId=/);
+assert.match(ui.counts, /查命令/);
+assert.doesNotMatch(ui.counts, /command_status/);
 
 console.log(JSON.stringify({ ok: true, ui }, null, 2));
 await browser.close();

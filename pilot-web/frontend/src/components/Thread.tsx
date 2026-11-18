@@ -748,7 +748,7 @@ const AgentCard = memo(function AgentCard({ agent }: { agent: AgentView }) {
               <div key={index} className="tool-row">
                 <div className="conversation-agent-tool">
                   <span className="conversation-tool-name">{toolLabel(tool.name)}</span>
-                  <span className="tool-args" title={tool.args}>{tool.args}</span>
+                  <span className="tool-args" title={toolArgsText(tool.name, tool.args)}>{toolArgsText(tool.name, tool.args)}</span>
                   <span className={'conversation-tool-state is-' + toolStatus}>{(TOOL_STATUS_TITLES[toolStatus] || '状态未知').split('：')[0]}</span>
                 </div>
               </div>

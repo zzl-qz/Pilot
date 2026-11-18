@@ -45,9 +45,12 @@ export function runPhase({running, cancelling, pausing, queueHeld, pendingApprov
   const tool = [...(turn?.tools || [])].reverse().find(tool => tool.status === 'run');
   if (tool) {
     const name = tool.name || '';
-    if (/read|list|search|glob/.test(name)) return '正在读取';
+    if (/read|list|search|glob|web_fetch|web_search|command_logs/.test(name)) return '正在读取';
     if (/edit|create|patch|write/.test(name)) return '正在修改';
     if (name === 'run_command') return /test|pytest|vitest|jest|mvn.*verify/.test(tool.args || '') ? '正在测试' : '正在执行命令';
+    if (name === 'command_status') return '正在等待命令';
+    if (name === 'browser') return '正在浏览';
+    if (name === 'stop_command') return '正在停止命令';
     return '正在执行';
   }
   return turn?.reply?.live ? '正在回复' : '正在思考';

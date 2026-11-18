@@ -26,6 +26,7 @@ import { readAttachmentFile, readDesktopClipboardFiles } from '../lib/attachment
 import { checkIncomingFile, requireAttachmentLimits } from '../lib/attachments.js';
 import { writeDraft, readDraft, dropDraft, readDraftSnapshot, writeDraftSnapshot, dropDraftSnapshot } from '../lib/drafts.js';
 import { resumeBar } from '../lib/queue.js';
+import { toolArgsText, toolLabel } from '../lib/tool-meta.js';
 import { PERMISSION_MODES, normalizePermission, permissionLabel } from '../lib/permission.js';
 import { ModelPicker } from './ModelPicker.jsx';
 import { usageLevel, usagePercent } from '../lib/context-usage.js';
@@ -964,8 +965,8 @@ function ApprovalDock() {
         const isMcp = item.name === 'mcp_tools' || item.name === 'mcp_call';
         return (
           <article key={item.callId} className="approval-card" aria-busy={item.busy}>
-            <h3 className="approval-title"><StatusDot variant="warning" label="待审批" aria-hidden="true" />需要你批准：{item.name}</h3>
-            <pre className="approval-args" tabIndex={0} aria-label="操作参数">{item.args}</pre>
+            <h3 className="approval-title"><StatusDot variant="warning" label="待审批" aria-hidden="true" />需要你批准：{toolLabel(item.name)}</h3>
+            <pre className="approval-args" tabIndex={0} aria-label="操作参数">{toolArgsText(item.name, item.args) || item.args}</pre>
             <div className="approval-actions">
               {item.busy && <span role="status">正在确认审批…</span>}
               <Button label="拒绝" size="sm" variant="ghost" isDisabled={item.busy} onClick={() => resolve(item.callId, false)} />

@@ -19,7 +19,7 @@ import {
   trimHistoryWindowAtRows
 } from './lib/history.js';
 import { classifyRunFailure, isEphemeral, isRunEnd, planProgressLabel, type RUN_END_EVENTS } from './lib/events.js';
-import { eventTimestamp, parseTimestamp, toolLabel } from './lib/tool-meta.js';
+import { eventTimestamp, parseTimestamp, toolArgsText, toolLabel } from './lib/tool-meta.js';
 import { preview, estimateTokens, sameUserInput } from './thread-utils.js';
 import { splitAttachmentMarkers } from './lib/attachments.js';
 
@@ -151,7 +151,12 @@ export function settleStoppedWork(draft: ReducerState, finishedAt = Date.now()) 
   if (draft.running) {
     return;
   }
-  for (const row of draft.thread.rows) {
+  // 刷新中途的草稿状态可能还没有 rows；不能在这里抛错把整次同步打成失败。
+  const rows = draft.thread?.rows;
+  if (!Array.isArray(rows)) {
+    return;
+  }
+  for (const row of rows) {
     if (row.type === 'turn') settleTurn(row, finishedAt);
   }
   if (draft.runUsage && !draft.runUsage.finishedAt) {
@@ -632,11 +637,12 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
       turn.tools.push(row);
       turn.toolIndex[row.callId] = row;
       if (owner) {
-        owner.latest = `${toolLabel(event.payload.name)} ${row.args}`.trim().slice(0, 64);
+        const shownArgs = toolArgsText(event.payload.name, row.args);
+        owner.latest = `${toolLabel(event.payload.name)} ${shownArgs}`.trim().slice(0, 64);
       }
       record(draft, event, {
         kind: 'tool', tone: 'tool', status: '运行中',
-        title: `${owner ? `@${owner.id?.slice(0, 8)} ` : ''}${event.payload.name} · ${event.payload.summary}`,
+        title: `${owner ? `@${owner.id?.slice(0, 8)} ` : ''}${toolLabel(event.payload.name)} · ${toolArgsText(event.payload.name, event.payload.summary)}`,
         detail: null
       });
       break;

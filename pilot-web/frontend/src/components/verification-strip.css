@@ -3,11 +3,11 @@
 .verification-strip {
   flex: none;
   margin: 0 0 6px;
-  padding: 6px 10px;
-  border: 1px solid var(--line);
-  border-inline-start-width: 3px;
-  border-radius: 8px;
-  background: var(--panel-2, transparent);
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
+  border-inline-start-width: 2px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel-2, transparent) 88%, transparent);
   font-size: 12px;
   line-height: 1.5;
   min-width: 0;
@@ -17,23 +17,33 @@
 }
 .verification-strip[data-tone='ok'] { border-inline-start-color: var(--ok, #4ea672); }
 .verification-strip[data-tone='stale'] { border-inline-start-color: var(--warn, #bf853c); }
-.verification-strip[data-tone='error'] { border-inline-start-color: var(--err, #b73535); }
-.verification-strip[data-tone='muted'] { border-inline-start-color: var(--muted, #8a8a8a); }
+.verification-strip[data-tone='error'] { border-inline-start-color: color-mix(in srgb, var(--err, #b73535) 70%, var(--line)); }
+.verification-strip[data-tone='muted'] {
+  border-inline-start-color: color-mix(in srgb, var(--muted, #8a8a8a) 55%, var(--line));
+  background: transparent;
+}
 .verification-strip[data-tone='running'] { border-inline-start-color: var(--accent, #7b8cff); }
 
 .verification-strip-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .verification-strip-badge {
   flex: none;
-  padding: 0 7px;
-  border: 1px solid currentColor;
-  border-radius: 999px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 6px;
   font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
   white-space: nowrap;
+  background: color-mix(in srgb, currentColor 12%, transparent);
 }
 .verification-strip[data-tone='ok'] .verification-strip-badge { color: var(--ok, #4ea672); }
 .verification-strip[data-tone='stale'] .verification-strip-badge { color: var(--warn, #bf853c); }
 .verification-strip[data-tone='error'] .verification-strip-badge { color: var(--err, #b73535); }
-.verification-strip[data-tone='muted'] .verification-strip-badge { color: var(--muted, #8a8a8a); }
+.verification-strip[data-tone='muted'] .verification-strip-badge {
+  color: var(--muted, #8a8a8a);
+  background: color-mix(in srgb, var(--muted, #8a8a8a) 10%, transparent);
+  font-weight: 500;
+}
 .verification-strip[data-tone='running'] .verification-strip-badge { color: var(--accent, #7b8cff); }
 
 .verification-strip-detail { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

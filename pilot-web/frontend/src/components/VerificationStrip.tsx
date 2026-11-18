@@ -3,6 +3,7 @@ import { useStore } from '../store.js';
 import { runPhase } from '../lib/interaction.js';
 import { formatClock } from '../thread-utils.js';
 import { REVERIFY_TEXT, stripView } from '../lib/validation-strip.js';
+import { toolArgsText, toolLabel } from '../lib/tool-meta.js';
 import './verification-strip.css';
 
 /**
@@ -77,10 +78,11 @@ function RunningStatus() {
   );
 }
 
-function currentAction(thread: { rows?: { type?: string; tools?: { status?: string; args?: string }[] }[] } | null | undefined) {
+function currentAction(thread: { rows?: { type?: string; tools?: { status?: string; name?: string; args?: string }[] }[] } | null | undefined) {
   const turn = [...(thread?.rows || [])].reverse().find(row => row.type === 'turn');
   const tool = [...(turn?.tools || [])].reverse().find(item => item.status === 'run');
-  const args = String(tool?.args || '').replace(/\s+/g, ' ').trim();
-  if (!args) return '';
+  if (!tool) return '';
+  const args = toolArgsText(tool.name || '', tool.args).replace(/\s+/g, ' ').trim();
+  if (!args) return toolLabel(tool.name || '');
   return args.length > 72 ? `${args.slice(0, 72)}…` : args;
 }

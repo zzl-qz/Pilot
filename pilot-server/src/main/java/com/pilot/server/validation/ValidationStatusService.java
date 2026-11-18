@@ -45,7 +45,7 @@ public class ValidationStatusService {
             return ValidationSnapshot.unverified("这一轮没有跑完校验", ValidationReason.SKIPPED, current);
         }
         if (!latest.passed()) {
-            return ValidationSnapshot.unverified("最近一次校验没有通过（" + latest.status() + "）", ValidationReason.FAILED,
+            return ValidationSnapshot.unverified("最近一次校验没有通过", ValidationReason.FAILED,
                 current);
         }
         if (artifactPath != null && !artifactPath.isBlank() && !covers(latest.files(), artifactPath)) {

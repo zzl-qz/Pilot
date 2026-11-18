@@ -67,7 +67,7 @@ class TaskDiagnosticsServiceTest {
         assertEquals(latest.recordedAt(), view.recordedAt());
         assertEquals(latest.runId(), view.runId());
         assertEquals(covered ? "" : "skipped".equals(latestStatus) ? "这一轮没有跑完校验"
-            : "最近一次校验没有通过（" + latestStatus + "）", view.reason());
+            : "最近一次校验没有通过", view.reason());
     }
 
     @Test
