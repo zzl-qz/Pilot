@@ -17,6 +17,8 @@ public final class ValidationReason {
     public static final String STALE_CANDIDATE = "stale_candidate";
     /** 最近一次校验没有通过。 */
     public static final String FAILED = "failed";
+    /** 有记录，但校验没有真正跑完。 */
+    public static final String SKIPPED = "skipped";
     /** 证据存在，但没有覆盖到这份产物。 */
     public static final String NOT_COVERED = "not_covered";
     /** 账本自身读写异常，结论不可信。 */

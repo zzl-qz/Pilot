@@ -5,7 +5,7 @@ import { api } from '../api.js';
 import { sortChangeFiles } from '../lib/changes.js';
 import { errorInfo } from '../lib/errors.js';
 import { canLoadEarlier, isValidEarlierHistoryPage } from '../lib/history.js';
-import { applyEvent, initialThread, prependHistoryPage, appendHistoryPage } from '../thread-reducer.js';
+import { applyEvent, initialThread, prependHistoryPage, appendHistoryPage, settleStoppedWork } from '../thread-reducer.js';
 import { requireData } from './shared.js';
 
 /** 历史窗口拥有预取缓存和请求代次；关闭会话时统一作废，版本变化交给事件流重建。 */
@@ -106,6 +106,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
           for (const event of data.events || []) {
             applyEvent(draft, event, { live: false });
           }
+          if (!draft.running) settleStoppedWork(draft);
           draft.thread.replaying = false;
           draft.thread.history.hasMore = data.hasMore === true;
           draft.thread.history.hasNewer = false;

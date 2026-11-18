@@ -32,6 +32,7 @@ class OsSandboxTest {
         assertTrue(workspaceAllow >= 0, profile);
         assertTrue(gitDeny > workspaceAllow, "保护规则必须写在工作区允许之后");
         assertTrue(profile.contains("(allow network*)"));
+        assertTrue(profile.contains("(allow file-map-executable)"));
         assertTrue(profile.contains("(deny default)"));
         assertTrue(profile.contains("(allow file-write* (literal \"/dev/null\"))"));
     }

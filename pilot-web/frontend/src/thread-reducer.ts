@@ -110,18 +110,52 @@ function ensureTurn(draft: ReducerState): TurnRow {
  * 运行已经结束，却还挂在「运行中」的工具行：不可能再等到 tool.completed 了
  * （事件丢失、进程被中断、或整轮被取消）。留着转圈会让人以为卡死，统一收成中断态。
  */
-function settleUnfinishedTools(turn: TurnRow | null, event: EventMetadata) {
-  if (!turn?.tools) {
+function settleTurn(turn: TurnRow, finishedAt: number) {
+  for (let index = 0; index < (turn.tools || []).length; index += 1) {
+    const tool = turn.tools[index];
+    if (tool.status !== 'run' && tool.status !== 'wait') {
+      continue;
+    }
+    // 整段替换，避免数组项和 toolIndex 各留一份还在转的旧对象。
+    const stopped = {
+      ...tool,
+      status: 'interrupted' as const,
+      meta: tool.meta || '未返回结果',
+      finishedAt
+    };
+    turn.tools[index] = stopped;
+    turn.toolIndex[tool.callId] = stopped;
+  }
+  for (const agent of Object.values(turn.agents || {})) {
+    if (agent.status === 'running') {
+      agent.status = 'stopped';
+      agent.finishedAt = agent.finishedAt || finishedAt;
+    }
+    for (const tool of agent.tools || []) {
+      if (tool.status === 'run' || tool.status === 'wait') {
+        tool.status = 'interrupted';
+      }
+    }
+  }
+  if (turn.stats?.startedAt && !turn.stats.finishedAt) {
+    turn.stats = { ...turn.stats, finishedAt };
+  }
+  if (turn.thinking?.live) {
+    turn.thinking.live = false;
+    turn.thinking.finishedAt = turn.thinking.finishedAt || finishedAt;
+  }
+}
+
+/** 会话已经不在跑：每一段里还转着的工具、思考和用量都停在结束时刻，不再用「现在」继续加秒。 */
+export function settleStoppedWork(draft: ReducerState, finishedAt = Date.now()) {
+  if (draft.running) {
     return;
   }
-  const finishedAt = eventTimestamp(event);
-  for (const tool of turn.tools) {
-    if (tool.status === 'run' || tool.status === 'wait') {
-      tool.status = 'interrupted';
-      tool.meta = tool.meta || '未返回结果';
-      tool.finishedAt = finishedAt;
-      turn.toolIndex[tool.callId] = { ...tool };
-    }
+  for (const row of draft.thread.rows) {
+    if (row.type === 'turn') settleTurn(row, finishedAt);
+  }
+  if (draft.runUsage && !draft.runUsage.finishedAt) {
+    draft.runUsage.finishedAt = finishedAt;
   }
 }
 
@@ -175,8 +209,8 @@ function settleRun(draft: ReducerState, event: EventMetadata) {
   if (turn) {
     turn.reply.live = false;
     turn.end = event.sequence;
-    settleUnfinishedTools(turn, event);
   }
+  settleStoppedWork(draft, eventTimestamp(event));
   return turn;
 }
 
@@ -213,13 +247,14 @@ function appendRunResult(draft: ReducerState, event: Extract<EventEnvelope, { ty
     const failure = classifyRunFailure(code);
     const label = OUTCOME_LABELS[failure.outcome] || '';
     result.title = label ? `本轮结束 · ${label}`
+      : failure.incomplete ? '还有步骤没做完'
       : failure.blocked ? '任务遇到阻塞'
       : failure.budgetLimited ? '本轮已达预算'
-      : failure.paused ? `本轮已暂停 · ${code}`
-      : failure.interrupted ? `运行已中断 · ${code}`
+      : failure.paused ? '本轮已暂停'
+      : failure.interrupted ? '运行已中断'
       : failure.cancelled ? '本轮已取消'
       : `运行失败 · ${code || 'ERROR'}`;
-    status = label || (failure.blocked ? '遇到阻塞' : failure.budgetLimited ? '已达预算'
+    status = label || (failure.incomplete ? '可继续' : failure.blocked ? '遇到阻塞' : failure.budgetLimited ? '已达预算'
       : failure.paused ? '可继续' : failure.interrupted ? '已中断' : failure.cancelled ? '已取消' : '失败');
     result.tone = failure.resumable || failure.cancelled ? 'warn' : 'error';
     result.detail = event.payload?.message || event.payload?.error || null;
@@ -685,7 +720,12 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
 
     case 'run.steered': {
       const previous = openTurn(draft);
-      if (previous) { settleThinking(previous, event); previous.reply.live = false; previous.reply.preview = ''; }
+      if (previous) {
+        // 引导会在用户消息后新开一段。旧段里还在转的工具必须先停住，否则会一直加秒。
+        settleTurn(previous, eventTimestamp(event));
+        previous.reply.live = false;
+        previous.reply.preview = '';
+      }
       appendUserRow(draft, event.payload?.input || '', event.sequence, { attachments: event.payload?.attachments || [], imagePositions: event.payload?.imagePositions || [] }).steered = true;
       draft.queueHeld = false;
       // 旧的「继续执行」按钮作废

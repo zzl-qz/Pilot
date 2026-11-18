@@ -1,5 +1,7 @@
 import type { WorkbenchRefresherOptions, RefreshOptions, WorkbenchView } from '../types/sync.js';
+import type { ReducerState } from '../types/thread.js';
 import { errorInfo } from './errors.js';
+import { settleStoppedWork } from '../thread-reducer.js';
 /** 不重建编辑器和历史窗口的数据同步；Web 与桌面共用，后台窗口暂停轮询。 */
 export function watchWorkbench({ refresh, window: win = window, document: doc = document, interval = 15000 }: { refresh: (options: RefreshOptions) => unknown; window?: Pick<Window, 'addEventListener' | 'removeEventListener' | 'setInterval' | 'clearInterval'>; document?: Pick<Document, 'hidden' | 'addEventListener' | 'removeEventListener'>; interval?: number }) {
   let lastWake = 0;
@@ -67,7 +69,13 @@ export function createWorkbenchRefresher({ get, set, api }: WorkbenchRefresherOp
             }
             if (state.thread.cursor !== cursor || state.runId !== runId) return;
             if (active?.runId) { state.runId = active.runId; state.running = true; }
-            else { state.runId = null; state.running = false; state.cancelling = false; state.pausing = false; }
+            else {
+              state.runId = null;
+              state.running = false;
+              state.cancelling = false;
+              state.pausing = false;
+              settleStoppedWork(state as unknown as ReducerState);
+            }
           });
           await get().loadQueue({ strict: true });
           if (!current()) { superseded = true; return false; }

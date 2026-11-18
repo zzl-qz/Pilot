@@ -37,6 +37,7 @@ export function runPhase({running, cancelling, pausing, queueHeld, pendingApprov
     if (failure.interrupted) return '已中断';
     if (failure.blocked) return '遇到阻塞';
     if (failure.budgetLimited) return '已达预算';
+    if (failure.incomplete) return '可继续';
     return ({ WAITING: '等待外部事件', UNVERIFIED: '结果待核验', NO_PROGRESS: '暂无有效进展',
       REVIEW_UNAVAILABLE: '核验暂不可用' } as Record<string, string>)[failure.outcome] || '运行失败';
   }

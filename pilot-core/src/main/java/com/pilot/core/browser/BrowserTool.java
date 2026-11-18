@@ -29,7 +29,8 @@ import com.pilot.core.workspace.PathValidator;
  * 并查看控制台与网络记录。独立浏览器上下文按会话隔离存储；桌面标签按会话归属，共享工作区浏览器分区。
  *
  * <p>能力随运行时握手声明（{@link #availability()}）：浏览器没装或没起来时模型根本看不到这个工具。
- * 默认打开回环地址；公开 HTTPS 站点需 external=true 并逐次确认。上传的文件必须在工作区内。
+ * 默认打开回环地址。公开 HTTPS 在完全放行时直接打开；其他档位仍要确认。
+ * 在页面里执行任意脚本（evaluate）始终审批。上传的文件必须在工作区内。
  *
  * <p>权限按动作区分：看（导航 / 快照 / 截图 / 控制台 / 网络 / 等待）视为只读；
  * 点击、输入、选择、上传是本机交互（{@link LocalInteraction}），READ_ONLY 拒绝、ASK 审批、AUTO_EDIT 放行；
@@ -74,7 +75,7 @@ public final class BrowserTool extends PromptedTool implements LocalInteraction 
         properties.put("action", Map.of("type", "string", "enum", ACTIONS, "description",
             "要执行的动作；先 navigate，再 snapshot 取得元素 ref，之后用 ref 操作"));
         properties.put("url", ToolSchemas.string("navigate 地址：默认回环；外网公开 HTTPS 需 external=true 和 purpose"));
-        properties.put("external", ToolSchemas.bool("外网站点导航/操作必须设 true；每次操作都需用户即时确认，普通本机动作不能绕过"));
+        properties.put("external", ToolSchemas.bool("打开公开 HTTPS 时设 true。完全放行直接打开；其他档位仍要确认。登录和验证码仍要用户在页面上完成"));
         properties.put("expected_url", ToolSchemas.string("外网交互的当前完整页面 URL，审批后页面变化则拒绝执行"));
         properties.put("purpose", ToolSchemas.string("外网操作的目标、最终提交内容和影响；提交申请/发送前明确列出对象与内容"));
         properties.put("ref", ToolSchemas.string("元素引用，形如 e3，来自最近一次 snapshot；页面变化后旧 ref 可能失效，需要重新 snapshot"));
@@ -102,6 +103,9 @@ public final class BrowserTool extends PromptedTool implements LocalInteraction 
 
     @Override
     public boolean readOnly(Map<String, Object> args) {
+        if (external(args)) {
+            return false;
+        }
         String action = action(args);
         // 参数不合法时只会返回错误说明，不必为此审批。
         return action == null || !ACTIONS.contains(action) || OBSERVATIONS.contains(action);
@@ -109,6 +113,9 @@ public final class BrowserTool extends PromptedTool implements LocalInteraction 
 
     @Override
     public boolean localInteraction(Map<String, Object> args) {
+        if (external(args)) {
+            return false;
+        }
         String action = action(args);
         return action != null && INTERACTIONS.contains(action);
     }
@@ -120,7 +127,13 @@ public final class BrowserTool extends PromptedTool implements LocalInteraction 
 
     @Override
     public boolean confirm(Map<String, Object> args) {
-        return args != null && (Boolean.TRUE.equals(args.get("external")) || "evaluate".equals(action(args)));
+        // 完全放行时外网打开和点击不再弹窗。evaluate 仍要确认。
+        // 外网动作不是只读，逐次批准和自动改文件仍会问。
+        return "evaluate".equals(action(args));
+    }
+
+    private static boolean external(Map<String, Object> args) {
+        return args != null && Boolean.TRUE.equals(args.get("external"));
     }
 
     @Override

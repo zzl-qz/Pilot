@@ -22,7 +22,6 @@ import { StructuredDocumentView, isStructuredDocumentFormat } from './Structured
 import { TOOL_STATUS_TITLES, formatLatency, toolArgsText, toolLabel } from '../lib/tool-meta.js';
 import { agentMeta, agentTitle, manifestFacts, splitSubagentResult, summarizeAgents, agentStatusLabel } from '../lib/agents.js';
 import { splitAttachmentMarkers, layoutMessageParts, attachmentUrl, isImageAttachment, fileBadge, formatBytes } from '../lib/attachments.js';
-import { splitPath } from '../lib/changes.js';
 import { parseDiff } from '../lib/diff.js';
 import { writeClipboard } from '../lib/clipboard.js';
 import { formatClock, formatCount, formatTime } from '../thread-utils.js';
@@ -575,8 +574,13 @@ const Turn = memo(function Turn({ row, isLast }: { row: TurnRow; isLast: boolean
  * 直接跳过比对。旧实现靠命令式只改几个节点，React 这边靠这个切分拿到同样的代价。
  */
 const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] }) {
-  const running = tools.filter(tool => tool.status === 'run').length;
-  const attention = tools.filter(tool => ['error', 'wait', 'interrupted'].includes(tool.status));
+  const sessionLive = useStore(state => state.running);
+  const running = sessionLive ? tools.filter(tool => tool.status === 'run').length : 0;
+  // 会话已停时，还停在 run 的行界面上会当成中断；组头统计也要跟显示一致，别再写「正在执行」。
+  const attention = tools.filter((tool) => {
+    const status = tool.status === 'run' && !sessionLive ? 'interrupted' : tool.status;
+    return ['error', 'wait', 'interrupted'].includes(status);
+  });
   const needsAttention = attention.length > 0;
   const failed = attention.some(tool => tool.status === 'error');
   const ref = useRef<HTMLDetailsElement>(null);
@@ -627,12 +631,14 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
   const body = String(tool.body || '').trim();
   const [open, setOpen] = useState(['error', 'wait', 'interrupted'].includes(tool.status));
   useEffect(() => { if (['error', 'wait', 'interrupted'].includes(tool.status)) setOpen(true); }, [tool.status]);
-  const running = tool.status === 'run';
+  const sessionLive = useStore(state => state.running);
+  const running = tool.status === 'run' && sessionLive;
+  const shownStatus = tool.status === 'run' && !sessionLive ? 'interrupted' : tool.status;
   useSecondTick(running);
-  const seconds = running ? elapsedSeconds(tool.startedAt) : 0;
+  const seconds = running ? elapsedSeconds(tool.startedAt, tool.finishedAt) : 0;
   const meta = formatLatency(tool.meta === '未返回结果' ? '' : (tool.meta || ''));
   const args = toolArgsText(tool.name, tool.args);
-  const status = TOOL_STATUS_TITLES[tool.status] || '状态未知';
+  const status = TOOL_STATUS_TITLES[shownStatus] || '状态未知';
   const Header = body ? 'button' : 'div';
   return (
     <div className={'tool-row' + (open && body ? ' is-open' : '')}>
@@ -641,9 +647,9 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
         {body ? <span className="tool-group-chevron" aria-hidden="true" /> : <span aria-hidden="true" />}
         <span className="conversation-tool-name">{toolLabel(tool.name)}</span>
         <span className="tool-args" title={args}>{args}</span>
-        <span className={'conversation-tool-state is-' + tool.status} title={status}>
+        <span className={'conversation-tool-state is-' + shownStatus} title={status}>
           {running ? <Spinner size="sm" shade="subtle" aria-hidden="true" />
-            : tool.status === 'ok' ? <Icon name="check" /> : <Icon name="info" />}
+            : shownStatus === 'ok' ? <Icon name="check" /> : <Icon name="info" />}
           {running && seconds >= 3 ? formatClock(seconds) : status.split('：')[0]}
         </span>
         {meta && !running && <span className="tool-meta" title={meta}>{meta}</span>}
@@ -712,36 +718,42 @@ const AgentGroup = memo(function AgentGroup({ agents }: { agents: Record<string,
 });
 
 const AgentCard = memo(function AgentCard({ agent }: { agent: AgentView }) {
-  useSecondTick(agent.status === 'running');
+  const sessionLive = useStore(state => state.running);
+  const live = agent.status === 'running' && sessionLive;
+  useSecondTick(live);
   // 回传正文末尾的 <subagent_result> 是给父模型合并用的清单，不该原样糊在界面上
   const split = splitSubagentResult(agent.result);
   const facts = manifestFacts(split);
   const tools = (agent.tools || []).length;
-  const ms = agent.startedAt ? (agent.finishedAt || Date.now()) - agent.startedAt : null;
+  const ms = agent.startedAt ? ((live ? Date.now() : (agent.finishedAt || Date.now())) - agent.startedAt) : null;
+  const status = live ? agent.status : (agent.status === 'running' ? 'stopped' : agent.status);
   return (
-    <details className={`tool-group agent-card is-${agent.status || 'stopped'}`}>
+    <details className={`tool-group agent-card is-${status || 'stopped'}`}>
       <summary className="tool-group-head agent-head">
         <span className="tool-group-chevron" aria-hidden="true" />
-        <StatusDot variant={agent.status === 'failed' ? 'error' : agent.status === 'running' ? 'accent' : 'neutral'}
-          label={agentStatusLabel(agent.status)} aria-hidden="true" />
+        <StatusDot variant={status === 'failed' ? 'error' : status === 'running' ? 'accent' : 'neutral'}
+          label={agentStatusLabel(status)} aria-hidden="true" />
         <span className="tool-group-label agent-name" title={agent.task}>
           {agent.name || agentTitle(agent.task) || agent.id}
         </span>
-        <span className="agent-state">{agentStatusLabel(agent.status)}</span>
-        <span className="tool-group-count">{agentMeta({ tools, ms, status: agent.status })}</span>
+        <span className="agent-state">{agentStatusLabel(status)}</span>
+        <span className="tool-group-count">{agentMeta({ tools, ms, status })}</span>
       </summary>
       <div className="agent-body">
         <p className="agent-brief">{agent.task}</p>
         <div className="tool-group-list agent-tools">
-          {(agent.tools || []).map((tool, index) => (
-            <div key={index} className="tool-row">
-              <div className="conversation-agent-tool">
-                <span className="conversation-tool-name">{toolLabel(tool.name)}</span>
-                <span className="tool-args" title={tool.args}>{tool.args}</span>
-                <span className={'conversation-tool-state is-' + tool.status}>{(TOOL_STATUS_TITLES[tool.status] || '状态未知').split('：')[0]}</span>
+          {(agent.tools || []).map((tool, index) => {
+            const toolStatus = tool.status === 'run' && !sessionLive ? 'interrupted' : tool.status;
+            return (
+              <div key={index} className="tool-row">
+                <div className="conversation-agent-tool">
+                  <span className="conversation-tool-name">{toolLabel(tool.name)}</span>
+                  <span className="tool-args" title={tool.args}>{tool.args}</span>
+                  <span className={'conversation-tool-state is-' + toolStatus}>{(TOOL_STATUS_TITLES[toolStatus] || '状态未知').split('：')[0]}</span>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
         {split.text && (
           <>
@@ -781,14 +793,16 @@ const TurnStats = memo(function TurnStats({ stats, reports, agentCount }: { stat
   const liveRunId = useStore(state => state.running ? state.runId : null);
   const runStartedAt = useStore(state => state.runStartedAt);
   const live = Boolean(liveRunId) && (!stats?.runId || stats.runId === liveRunId);
-  useSecondTick(live || (Boolean(stats?.startedAt) && !stats?.finishedAt));
+  useSecondTick(live);
   if (!stats) {
     return null;
   }
   const clockStart = live && runStartedAt
     ? Math.min(stats.startedAt || runStartedAt, runStartedAt)
     : stats.startedAt;
-  const elapsed = clockStart ? elapsedSeconds(clockStart, live ? null : stats.finishedAt) : null;
+  const elapsed = !clockStart ? null : live
+    ? elapsedSeconds(clockStart, null)
+    : stats.finishedAt ? elapsedSeconds(clockStart, stats.finishedAt) : null;
   const elapsedLabel = elapsed == null ? '' : formatClock(elapsed);
   // 没有模型实测用量时是估算值，加 ≈（旧版 formatTokenCount 的 exact 语义）
   const mark = stats.exact === false ? '≈' : '';
@@ -875,7 +889,7 @@ function CompactionCard({ row }: { row: CompactionRow }) {
   );
 }
 
-const CHANGED_COLLAPSED_ROWS = 4;
+const CHANGED_COLLAPSED_ROWS = 3;
 const CHANGED_COUNT = new Intl.NumberFormat('en-US');
 
 type ChangedFile = ResultRow['changedFiles'][number];
@@ -893,12 +907,21 @@ function ChangedCounts({ added, removed }: { added: number; removed: number }) {
   );
 }
 
-function FileGlyph({ code }: { code: boolean }) {
+function EditedGlyph() {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      {code
-        ? <path d="M8 8 4.5 12 8 16M16 8l3.5 4L16 16M13 6l-2 12" />
-        : <><path d="M7 3.5h7.2L19.5 9v11.5H7z" /><path d="M14 3.8V9h5.2" /></>}
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M3.2 2.6h6.1L12.8 6v7.4H3.2z" />
+      <path d="M9.1 2.8V6h3.4" />
+      <path d="M5.2 8.6h5.2M5.2 10.8h3.2" />
+    </svg>
+  );
+}
+
+function UndoGlyph() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M3.4 6.4h4.6a3.3 3.3 0 1 1 0 6.6H6.2" />
+      <path d="M5.6 3.8 3.2 6.4l2.4 2.6" />
     </svg>
   );
 }
@@ -959,9 +982,9 @@ function ChangedFilesCard({ files, canRollback, onOpen, onRollback }: {
   const [place, setPlace] = useState<{ left: number; top: number; width: number; maxHeight: number } | null>(null);
   const added = files.reduce((sum, file) => sum + Number(file.added || 0), 0);
   const removed = files.reduce((sum, file) => sum + Number(file.removed || 0), 0);
-  const single = files.length === 1 ? files[0] : null;
   const foldable = files.length > CHANGED_COLLAPSED_ROWS;
   const rows = foldable && !expanded ? files.slice(0, CHANGED_COLLAPSED_ROWS) : files;
+  const hiddenCount = files.length - rows.length;
 
   const clearOpen = () => {
     if (openTimer.current != null) window.clearTimeout(openTimer.current);
@@ -1058,68 +1081,60 @@ function ChangedFilesCard({ files, canRollback, onOpen, onRollback }: {
     };
   }, [preview]);
 
-  const header = (
-    <button
-      type="button"
-      className="changed-head"
-      aria-label={single ? `查看 ${single.path} 的改动` : '在侧边栏查看本轮改动'}
-      aria-describedby={single ? pathDescriptionId : undefined}
-      onClick={() => { dismissPreview(true); onOpen(single || files[0]); }}
-      onPointerEnter={single ? (event) => schedulePreview(0, event.currentTarget, event) : undefined}
-      onPointerLeave={single ? () => armClose() : undefined}
-    >
-      <span className="changed-tile"><FileGlyph code={single == null} /></span>
-      <span className="changed-titles">
-        <span className="changed-title">{single ? `已编辑 ${splitPath(single.path).name}` : `已编辑 ${files.length} 个文件`}</span>
-        <span className="changed-stat">
-          <span className="changed-stat-counts"><ChangedCounts added={single ? Number(single.added || 0) : added} removed={single ? Number(single.removed || 0) : removed} /></span>
-          <span className="changed-preview-hint">在侧边栏预览</span>
-        </span>
-      </span>
-    </button>
-  );
-
   return (
-    <section ref={cardRef} className="changed-card turn-card-files" data-changed-files data-single={single ? 'true' : undefined}>
-      {header}
-      {single && <span id={pathDescriptionId} hidden>{single.path}</span>}
-      {single == null && (
-        <ul className="changed-list">
-          {rows.map((file, index) => (
-            <li key={file.path}>
-              <button
-                type="button"
-                className="changed-row"
-                aria-label={`查看 ${file.path} 的改动`}
-                aria-describedby={`${pathDescriptionId}-${index}`}
-                onClick={() => { dismissPreview(true); onOpen(file); }}
-                onPointerEnter={(event) => schedulePreview(index, event.currentTarget, event)}
-                onPointerLeave={() => armClose()}
-              >
-                <span className="changed-path">{file.path}</span>
-                <ChangedCounts added={Number(file.added || 0)} removed={Number(file.removed || 0)} />
-              </button>
-              <span id={`${pathDescriptionId}-${index}`} hidden>{file.path}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+    <section ref={cardRef} className="changed-card turn-card-files" data-changed-files>
+      <div className="changed-bar">
+        <span className="changed-tile"><EditedGlyph /></span>
+        <span className="changed-titles">
+          <span className="changed-title">{`已编辑 ${files.length} 个文件`}</span>
+          <ChangedCounts added={added} removed={removed} />
+        </span>
+        <span className="changed-actions">
+          {canRollback && (
+            <button type="button" className="changed-undo" title="撤回这一轮写进工作区的文件" onClick={onRollback}>
+              撤销
+              <UndoGlyph />
+            </button>
+          )}
+          <button
+            type="button"
+            className="changed-review"
+            onClick={() => { dismissPreview(true); onOpen(files[0]); }}
+          >
+            查看变更
+          </button>
+        </span>
+      </div>
+      <ul className="changed-list">
+        {rows.map((file, index) => (
+          <li key={file.path}>
+            <button
+              type="button"
+              className="changed-row"
+              aria-label={`查看 ${file.path} 的改动`}
+              aria-describedby={`${pathDescriptionId}-${index}`}
+              onClick={() => { dismissPreview(true); onOpen(file); }}
+              onPointerEnter={(event) => schedulePreview(index, event.currentTarget, event)}
+              onPointerLeave={() => armClose()}
+            >
+              <span className="changed-path">{file.path}</span>
+              <ChangedCounts added={Number(file.added || 0)} removed={Number(file.removed || 0)} />
+            </button>
+            <span id={`${pathDescriptionId}-${index}`} hidden>{file.path}</span>
+          </li>
+        ))}
+      </ul>
       {foldable && (
         <button
           type="button"
           className="changed-toggle"
           aria-expanded={expanded}
-          aria-label={expanded ? '收起改动文件列表' : `展开全部 ${files.length} 个改动文件`}
+          aria-label={expanded ? '收起改动文件列表' : `再显示 ${hiddenCount} 个改动文件`}
           onClick={() => setExpanded((value) => !value)}
         >
-          <span>{expanded ? '收起' : `全部 ${files.length} 个文件`}</span>
+          <span>{expanded ? '收起' : `再显示 ${hiddenCount} 个文件`}</span>
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d={expanded ? 'M4 10l4-4 4 4' : 'M4 6l4 4 4-4'} /></svg>
         </button>
-      )}
-      {canRollback && (
-        <div className="changed-foot">
-          <Button size="sm" variant="ghost" label="回滚本次改动" onClick={onRollback} />
-        </div>
       )}
       {preview != null && files[preview] && place && createPortal(
         <div
@@ -1140,51 +1155,57 @@ function ChangedFilesCard({ files, canRollback, onOpen, onRollback }: {
 
 function ResultCard({ row, duplicate, hasPrecedingReply = false }: { row: ResultRow; duplicate: boolean; hasPrecedingReply?: boolean }) {
   const rollbackRun = useStore((state) => state.rollbackRun);
-  const compact = (!row.detail || duplicate || row.continued || row.resumable) && !row.changedFiles?.length;
-  // 普通纯文本问答已有回复正文、无文件变更且无错误/中断时，不再重复堆砌空洞的「执行结束」行
-  if (compact && hasPrecedingReply && (row.tone === 'ok' || row.tone === 'text') && !row.continued && !row.resumable) {
-    return null;
-  }
+  const files = row.changedFiles || [];
+  const settled = row.tone === 'ok' || row.tone === 'text';
+  // 失败时结论收成一行，改动卡不跟着失败原因换样子。
+  const compact = !row.detail || duplicate || row.continued || row.resumable || (!settled && files.length > 0);
+  // 纯文本问答已经有回复正文时，不再重复一行「执行结束」。改过的文件仍然单独留下。
+  const hideStatus = compact && hasPrecedingReply && (row.tone === 'ok' || row.tone === 'text') && !row.continued && !row.resumable;
+  if (hideStatus && !files.length) return null;
+  const filesCard = files.length > 0 && (
+    <ChangedFilesCard
+      files={files}
+      canRollback={!row.continued}
+      onRollback={() => {
+        const runId = row.key.startsWith('result:run_') ? row.key.slice('result:'.length) : row.runIds.at(-1);
+        if (runId) rollbackRun(runId);
+      }}
+      onOpen={(file) => {
+        const state = useStore.getState();
+        const runId = row.runIds.at(-1);
+        if (runId) state.setUi({ inspectorOpen: true, inspectorTab: 'changes', reviewRunId: runId, changeView: file.path });
+        else state.openPreview(file.path);
+      }}
+    />
+  );
+  if (hideStatus) return filesCard;
   return (
-    <article className={`turn-card is-${row.tone}${compact ? ' is-compact' : ''}${row.continued ? ' is-continued' : ''}`}>
-      <div className="turn-card-head">
-        <span className="turn-card-title">{row.title}</span>
-        {row.continued && <span className="turn-resolved">已继续执行</span>}
-      </div>
-      {row.detail && !duplicate && (
-        row.continued || row.resumable
-          ? (
-            <details className="turn-card-more">
-              <summary>{row.continued ? '查看错误详情' : '查看运行详情'}</summary>
-              <div className="turn-card-detail"><MarkdownBody text={row.detail} /></div>
-            </details>
-          )
-          : String(row.detail).length > 280
-          ? (
-            <details className="turn-card-more">
-              <summary>查看结论</summary>
-              <div className="turn-card-detail"><MarkdownBody text={row.detail} /></div>
-            </details>
-          )
-          : <div className="turn-card-detail"><MarkdownBody text={row.detail} /></div>
-      )}
-      {!!(row.changedFiles || []).length && (
-        <ChangedFilesCard
-          files={row.changedFiles}
-          canRollback={!row.continued}
-          onRollback={() => {
-            const runId = row.key.startsWith('result:run_') ? row.key.slice('result:'.length) : row.runIds.at(-1);
-            if (runId) rollbackRun(runId);
-          }}
-          onOpen={(file) => {
-            const state = useStore.getState();
-            const runId = row.runIds.at(-1);
-            if (runId) state.setUi({ inspectorOpen: true, inspectorTab: 'changes', reviewRunId: runId, changeView: file.path });
-            else state.openPreview(file.path);
-          }}
-        />
-      )}
-    </article>
+    <>
+      <article className={`turn-card is-${row.tone}${compact ? ' is-compact' : ''}${row.continued ? ' is-continued' : ''}`}>
+        <div className="turn-card-head">
+          <span className="turn-card-title">{row.title}</span>
+          {row.continued && <span className="turn-resolved">已继续执行</span>}
+        </div>
+        {row.detail && !duplicate && (
+          row.continued || row.resumable || (!settled && files.length > 0)
+            ? (
+              <details className="turn-card-more">
+                <summary>{row.continued ? '查看错误详情' : '查看运行详情'}</summary>
+                <div className="turn-card-detail"><MarkdownBody text={row.detail} /></div>
+              </details>
+            )
+            : String(row.detail).length > 280
+            ? (
+              <details className="turn-card-more">
+                <summary>查看结论</summary>
+                <div className="turn-card-detail"><MarkdownBody text={row.detail} /></div>
+              </details>
+            )
+            : <div className="turn-card-detail"><MarkdownBody text={row.detail} /></div>
+        )}
+      </article>
+      {filesCard}
+    </>
   );
 }
 

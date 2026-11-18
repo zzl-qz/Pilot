@@ -123,7 +123,8 @@ public final class OsSandbox {
             profile.append("(deny file-write* (subpath \"").append(escape(path)).append("\"))\n");
         }
         profile.append("(allow process*)\n(allow signal)\n(allow sysctl-read)\n");
-        profile.append("(allow mach-lookup)\n(allow ipc-posix*)\n");
+        profile.append("(allow mach*)\n(allow ipc-posix*)\n");
+        profile.append("(allow file-ioctl)\n(allow file-map-executable)\n(allow system-socket)\n");
         // git、编译器会用读写方式打开这些设备。不放行时 git status 会报 Operation not permitted。
         for (String device : List.of("/dev/null", "/dev/zero", "/dev/urandom", "/dev/random", "/dev/tty",
             "/dev/dtracehelper")) {
@@ -177,6 +178,12 @@ public final class OsSandbox {
         Set<Path> roots = new LinkedHashSet<>();
         roots.add(real(workspace));
         roots.add(real(Path.of(System.getProperty("java.io.tmpdir", "/tmp"))));
+        roots.add(real(Path.of("/tmp")));
+        if (family == Family.MAC) {
+            roots.add(real(Path.of("/private/tmp")));
+            roots.add(real(Path.of("/private/var/folders")));
+            roots.add(real(Path.of("/var/folders")));
+        }
         Path home = Path.of(System.getProperty("user.home", ""));
         if (!home.toString().isBlank()) {
             for (String cache : CACHE_DIRS) {

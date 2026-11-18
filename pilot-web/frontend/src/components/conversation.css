@@ -430,7 +430,7 @@ html[data-theme] .conversation-composer .voice-timer { font-family: var(--sans);
 .message-queue .queue-edit-field { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--dim); }
 .message-queue .queue-edit-field textarea { resize: vertical; min-height: 34px; }
 
-/* 回合改动卡，对齐 dsh ChangedFiles：填充标题、单列路径、悬停预览、底部折叠。 */
+/* 回合改动卡：标题、增减、撤销、查看变更在一行，下面是文件。成功和失败都用这一张。 */
 html[data-theme] .conversation-thread .changed-card {
   position: relative;
   display: flex;
@@ -439,13 +439,14 @@ html[data-theme] .conversation-thread .changed-card {
   margin-top: 8px;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--bg);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ink) 4%, var(--bg));
   color: var(--ink);
 }
-html[data-theme] .conversation-thread .changed-head,
 html[data-theme] .conversation-thread .changed-row,
-html[data-theme] .conversation-thread .changed-toggle {
+html[data-theme] .conversation-thread .changed-toggle,
+html[data-theme] .conversation-thread .changed-undo,
+html[data-theme] .conversation-thread .changed-review {
   border: 0;
   background: transparent;
   color: inherit;
@@ -453,83 +454,104 @@ html[data-theme] .conversation-thread .changed-toggle {
   text-align: left;
   cursor: pointer;
 }
-html[data-theme] .conversation-thread .changed-head {
+html[data-theme] .conversation-thread .changed-bar {
   display: flex;
   align-items: center;
   gap: 10px;
-  box-sizing: border-box;
-  width: 100%;
   min-width: 0;
-  height: 60px;
-  margin: 0;
-  padding: 8px 10px;
-  border-radius: 12px 12px 0 0;
-  background: var(--panel);
-}
-html[data-theme] .conversation-thread .changed-card[data-single] .changed-head { border-radius: 12px; }
-html[data-theme] .conversation-thread .changed-head:hover,
-html[data-theme] .conversation-thread .changed-row:hover,
-html[data-theme] .conversation-thread .changed-toggle:hover {
-  background: var(--panel-2, rgba(255, 255, 255, 0.04));
+  padding: 10px 12px;
 }
 html[data-theme] .conversation-thread .changed-tile {
   display: grid;
   flex: none;
   place-items: center;
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--bg);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  color: var(--ink);
 }
-html[data-theme] .conversation-thread .changed-tile svg {
-  width: 20px;
-  height: 20px;
+html[data-theme] .conversation-thread .changed-tile svg,
+html[data-theme] .conversation-thread .changed-undo svg {
+  width: 15px;
+  height: 15px;
   fill: none;
-  stroke: var(--muted);
-  stroke-width: 1.5;
+  stroke: currentColor;
+  stroke-width: 1.4;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 html[data-theme] .conversation-thread .changed-titles {
   display: flex;
-  flex: 1;
+  flex: 1 1 auto;
   flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
   min-width: 0;
 }
 html[data-theme] .conversation-thread .changed-title {
   overflow: hidden;
   font-size: 13px;
-  font-weight: 500;
-  line-height: 20px;
+  font-weight: 550;
+  line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-html[data-theme] .conversation-thread .changed-stat { display: inline-flex; font-size: 10px; line-height: 16px; color: var(--dim); }
-html[data-theme] .conversation-thread .changed-preview-hint { display: none; }
-html[data-theme] .conversation-thread .changed-head:hover .changed-stat-counts,
-html[data-theme] .conversation-thread .changed-head:focus-visible .changed-stat-counts { display: none; }
-html[data-theme] .conversation-thread .changed-head:hover .changed-preview-hint,
-html[data-theme] .conversation-thread .changed-head:focus-visible .changed-preview-hint { display: inline; }
+html[data-theme] .conversation-thread .changed-titles .changed-counts { font-size: 11px; gap: 6px; }
+html[data-theme] .conversation-thread .changed-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+html[data-theme] .conversation-thread .changed-undo {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 2px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+html[data-theme] .conversation-thread .changed-undo:hover { color: var(--ink); }
+html[data-theme] .conversation-thread .changed-review {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 26px;
+}
+html[data-theme] .conversation-thread .changed-review:hover { background: color-mix(in srgb, var(--ink) 12%, transparent); }
+html[data-theme] .conversation-thread .changed-undo:focus-visible,
+html[data-theme] .conversation-thread .changed-review:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
 html[data-theme] .conversation-thread .changed-list {
   margin: 0;
-  padding: 0;
+  padding: 2px 0 4px;
   list-style: none;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
 }
 html[data-theme] .conversation-thread .changed-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  min-height: 24px;
+  min-height: 28px;
   margin: 0;
-  padding: 7px 18px 7px 14px;
+  padding: 4px 12px;
   color: var(--muted);
 }
+html[data-theme] .conversation-thread .changed-row:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
 html[data-theme] .conversation-thread .changed-path {
   min-width: 0;
   overflow: hidden;
@@ -542,9 +564,9 @@ html[data-theme] .conversation-thread .changed-path {
 html[data-theme] .conversation-thread .changed-counts {
   display: inline-flex;
   flex: none;
-  gap: 6px;
+  gap: 8px;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 18px;
   white-space: nowrap;
 }
@@ -556,12 +578,13 @@ html[data-theme] .conversation-thread .changed-toggle {
   gap: 4px;
   width: 100%;
   margin: 0;
-  padding: 10px 18px 10px 14px;
-  border-top: 1px solid var(--line);
+  padding: 8px 12px;
+  border-top: 1px solid var(--line-soft);
   color: var(--muted);
   font-size: 12px;
   line-height: 18px;
 }
+html[data-theme] .conversation-thread .changed-toggle:hover { color: var(--ink); }
 html[data-theme] .conversation-thread .changed-toggle svg {
   width: 14px;
   height: 14px;
@@ -571,11 +594,9 @@ html[data-theme] .conversation-thread .changed-toggle svg {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-html[data-theme] .conversation-thread .changed-foot {
-  display: flex;
-  justify-content: flex-end;
-  padding: 4px 8px 6px;
-  border-top: 1px solid var(--line);
+@media (max-width: 560px) {
+  html[data-theme] .conversation-thread .changed-bar { flex-wrap: wrap; }
+  html[data-theme] .conversation-thread .changed-actions { width: 100%; justify-content: flex-end; }
 }
 /* 悬停预览挂到 body：比文件卡左右各收 24px，贴着当前行上方或下方，不推进对话。 */
 html[data-theme] .changed-hover-card {

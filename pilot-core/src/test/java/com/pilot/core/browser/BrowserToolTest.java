@@ -246,7 +246,8 @@ class BrowserToolTest {
         assertTrue(backend.commands.isEmpty());
         Map<String, Object> navigate = Map.of("action", "navigate", "url", "https://example.com", "external", true,
             "purpose", "查看公开岗位", "userInitiated", true);
-        assertTrue(browser.confirm(navigate));
+        assertFalse(browser.readOnly(navigate));
+        assertFalse(browser.confirm(navigate));
         assertEquals("ok", browser.execute(navigate));
         assertEquals(true, backend.commands.getLast().get("approvedExternal"));
         assertFalse(backend.commands.getLast().containsKey("userInitiated"));

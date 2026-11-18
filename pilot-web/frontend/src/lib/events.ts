@@ -64,6 +64,8 @@ export function classifyRunFailure(code: unknown) {
   const interrupted = value === 'INTERRUPTED';
   const blocked = value === 'BLOCKED';
   const budgetLimited = value === 'BUDGET_LIMITED';
+  // 计划没做完不是崩溃：进度还在，用户接着说一句就能继续。
+  const incomplete = value === 'TASK_INCOMPLETE';
   const outcome = ['WAITING', 'NEED_INPUT', 'UNVERIFIED', 'NO_PROGRESS', 'REVIEW_UNAVAILABLE']
     .includes(value) ? value : '';
   return {
@@ -72,8 +74,9 @@ export function classifyRunFailure(code: unknown) {
     interrupted,
     blocked,
     budgetLimited,
+    incomplete,
     outcome,
-    resumable: paused || interrupted || blocked || budgetLimited || Boolean(outcome)
+    resumable: paused || interrupted || blocked || budgetLimited || incomplete || Boolean(outcome)
   };
 }
 

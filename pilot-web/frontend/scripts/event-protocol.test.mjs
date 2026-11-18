@@ -54,6 +54,33 @@ for (const [type, payload, before, verify] of cases) {
     else assert.equal(state.thread.windowEvents.at(-1).type, type);
   });
 }
+test('一轮结束时，前面几段里还在转的工具一起停住', () => {
+  let state = { thread: initialThread(), ui: { notice: null }, timeline: [], pendingInputs: [], queue: [], pendingApprovals: {}, pendingArbitrations: {}, agents: {}, running: false, runUsage: null };
+  let sequence = 0;
+  const apply = (type, payload) => {
+    state = produce(state, draft => applyEvent(draft, { type, payload, sequence: ++sequence, runId: 'r', timestamp: '2026-11-18T00:00:00Z' }, { live: true }));
+  };
+  apply('run.started', { input: '任务' });
+  apply('tool.started', { callId: 'a', name: 'command_status', summary: 'taskId=cmd_old,waitSeconds=5' });
+  apply('run.steered', { input: '继续看', attachments: [], imagePositions: [] });
+  assert.equal(state.thread.rows.find(row => row.type === 'turn').tools[0].status, 'interrupted');
+  apply('tool.started', { callId: 'b', name: 'command_status', summary: 'taskId=cmd_old,waitSeconds=5' });
+  apply('run.failed', { code: 'TASK_INCOMPLETE', message: '计划仍有未完成项' });
+  const turns = state.thread.rows.filter(row => row.type === 'turn');
+  assert.equal(turns.length, 2);
+  assert.equal(turns[0].tools[0].status, 'interrupted');
+  assert.equal(turns[1].tools[0].status, 'interrupted');
+  assert.equal(state.running, false);
+});
+test('计划没做完按可继续展示，不写成运行失败', () => {
+  let state = { thread: initialThread(), ui: { notice: null }, timeline: [], pendingInputs: [], queue: [], pendingApprovals: {}, pendingArbitrations: {}, agents: {}, running: false };
+  state = produce(state, draft => applyEvent(draft, { type: 'run.started', payload: { input: '任务' }, sequence: 1, runId: 'r' }, { live: true }));
+  state = produce(state, draft => applyEvent(draft, { type: 'run.failed', payload: { code: 'TASK_INCOMPLETE', message: '计划仍有未完成项；已保存进度，可继续执行。' }, sequence: 2, runId: 'r' }, { live: true }));
+  const row = state.thread.rows.find(item => item.type === 'result');
+  assert.equal(row.title, '还有步骤没做完');
+  assert.equal(row.resumable, true);
+  assert.equal(row.tone, 'warn');
+});
 test('未知历史事件保留游标和原记录而不新增可见行', () => {
   const state = { thread: initialThread(), ui: {}, timeline: [] };
   applyEvent(state, { type: 'future.event', sequence: 7, payload: {} }, { live: false });

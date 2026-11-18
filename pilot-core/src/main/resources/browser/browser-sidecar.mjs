@@ -114,7 +114,8 @@ function candidateExecutables() {
 
 function launchArgs() {
   const extra = (process.env.PILOT_BROWSER_ARGS || '').split(/\s+/).filter(Boolean);
-  return ['--disable-dev-shm-usage', '--no-first-run', '--no-default-browser-check', ...extra];
+  // 命令沙箱里再套 Chrome 自己的沙箱会直接起不来。验证用的浏览器关掉这层。
+  return ['--disable-dev-shm-usage', '--no-first-run', '--no-default-browser-check', '--no-sandbox', ...extra];
 }
 
 let presentHeaded = false;

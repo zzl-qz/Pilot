@@ -45,6 +45,14 @@ test('证据过期要单独一档，并提示可以重新验证', () => {
   assert.notEqual(sv.label, unverified.label);
 });
 
+test('校验被跳过时不说成没通过', () => {
+  const skipped = stripView(view({ current: false, code: 'skipped', reason: '这一轮没有跑完校验', latest: evidence({ status: 'skipped', checks: [] }) }), true);
+  assert.equal(skipped.label, '还没校验完');
+  assert.equal(skipped.tone, 'muted');
+  assert.equal(skipped.needsRerun, true);
+  assert.doesNotMatch(skipped.detail, /没有通过/);
+});
+
 test('校验失败与账本异常各有自己的说法', () => {
   const failed = stripView(view({ current: false, code: 'failed', reason: '', latest: evidence({ status: 'failed' }) }), true);
   assert.equal(failed.label, '校验未通过');

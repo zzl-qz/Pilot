@@ -63,6 +63,17 @@ export function stripView(view: S.DiagnosticsControllerValidationView | null | u
     };
   }
 
+  if (code === 'skipped') {
+    return {
+      visible: true,
+      label: '还没校验完',
+      tone: 'muted',
+      detail: reason || '这一轮没有跑完校验，不能当成通过。',
+      needsRerun: true,
+      facts: factsOf(latest)
+    };
+  }
+
   if (code === 'failed') {
     return {
       visible: true,

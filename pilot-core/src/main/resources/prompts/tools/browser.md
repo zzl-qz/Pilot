@@ -25,7 +25,8 @@
 - 浏览器里的 DELETE、提交表单等操作会真实改变应用数据，只对用户要求验证的流程执行。
 
 
-外网流程：使用 external=true、purpose 明确目标与影响，navigate 只支持公开 HTTPS 域名；每次均请求用户确认。
+外网流程：使用 external=true、purpose 说明要看什么。完全放行时直接打开和操作，不再逐次确认。其他权限档位仍要确认。evaluate 任何档位都要确认。登录页和验证码要用户在页面上自己完成，模型过不了。
+要看 Pilot 自己的界面，打开本机工作台地址，不要重启当前桌面进程。这个进程里跑着当前任务，拉起新的桌面端会把这一轮一起停掉。
 外网 click/fill/type/press/select/upload/download/evaluate 还必须携带最近观察的 expected_url，页面改变后旧授权失效。
 搜索筛选与申请准备使用 snapshot/text/links 读取；外网变更须用 external=true，不能用普通本机动作绕过确认。
 提交申请/发送/发布前 purpose 必须列出最终对象、字段和影响，让用户对本次具体动作确认。不要把一次导航授权当作后续提交授权。

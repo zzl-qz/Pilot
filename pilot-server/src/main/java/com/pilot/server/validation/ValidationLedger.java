@@ -155,6 +155,9 @@ public class ValidationLedger {
             return new Report(false, "最近一次校验针对的是旧产物，代码已变化", ValidationReason.STALE_CANDIDATE, currentCandidateHash,
                 latest, entries);
         }
+        if (ValidationEvidence.SKIPPED.equals(latest.status())) {
+            return new Report(false, "这一轮没有跑完校验", ValidationReason.SKIPPED, currentCandidateHash, latest, entries);
+        }
         if (!latest.passed()) {
             return new Report(false, "最近一次校验没有通过（" + latest.status() + "）", ValidationReason.FAILED,
                 currentCandidateHash, latest, entries);

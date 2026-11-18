@@ -41,6 +41,9 @@ public class ValidationStatusService {
             return new ValidationSnapshot(ValidationSnapshot.STALE, "证据针对的是旧产物，文件已经变化",
                 ValidationReason.STALE_CANDIDATE, current, latest.id(), latest.recordedAt());
         }
+        if (ValidationEvidence.SKIPPED.equals(latest.status())) {
+            return ValidationSnapshot.unverified("这一轮没有跑完校验", ValidationReason.SKIPPED, current);
+        }
         if (!latest.passed()) {
             return ValidationSnapshot.unverified("最近一次校验没有通过（" + latest.status() + "）", ValidationReason.FAILED,
                 current);
