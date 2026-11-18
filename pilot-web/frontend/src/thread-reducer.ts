@@ -20,6 +20,7 @@ import {
 } from './lib/history.js';
 import { classifyRunFailure, isEphemeral, isRunEnd, planProgressLabel, type RUN_END_EVENTS } from './lib/events.js';
 import { eventTimestamp, parseTimestamp, toolArgsText, toolLabel } from './lib/tool-meta.js';
+import { shortAgentId } from './lib/agents.js';
 import { preview, estimateTokens, sameUserInput } from './thread-utils.js';
 import { splitAttachmentMarkers } from './lib/attachments.js';
 
@@ -183,23 +184,28 @@ function finishTurnClock(draft: ReducerState, turn: TurnRow | null, event: Event
   if (draft.runUsage) {
     draft.runUsage.finishedAt = finishedAt;
   }
-  if (!turn) {
-    return;
-  }
-  if (turn.stats || draft.runUsage) {
-    turn.stats = { ...(turn.stats || draft.runUsage), finishedAt };
-  }
-  if (turn.thinking?.live) {
-    turn.thinking.live = false;
-    turn.thinking.finishedAt = finishedAt;
-  }
-  for (const agent of Object.values(turn.agents || {})) {
-    if (agent.status === 'running') {
-      agent.status = 'stopped';
-      agent.finishedAt = agent.finishedAt || finishedAt;
+  if (turn) {
+    if (turn.stats || draft.runUsage) {
+      turn.stats = { ...(turn.stats || draft.runUsage), finishedAt };
     }
-    // Immer 在后续事件中会分离两个路径的引用，不能依赖最初赋值的对象别名同步状态。
-    if (draft.agents[agent.id]) draft.agents[agent.id] = { ...agent };
+    if (turn.thinking?.live) {
+      turn.thinking.live = false;
+      turn.thinking.finishedAt = finishedAt;
+    }
+    for (const agent of Object.values(turn.agents || {})) {
+      if (agent.status === 'running') {
+        agent.status = 'stopped';
+        agent.finishedAt = agent.finishedAt || finishedAt;
+      }
+      // Immer 在后续事件中会分离两个路径的引用，不能依赖最初赋值的对象别名同步状态。
+      if (draft.agents[agent.id]) draft.agents[agent.id] = { ...agent };
+    }
+  }
+  // 底部 dock 读的是 draft.agents：主任务结束时，凡是还挂着 running 的都停住，别留假运行。
+  for (const [id, agent] of Object.entries(draft.agents || {})) {
+    if (agent.status === 'running') {
+      draft.agents[id] = { ...agent, status: 'stopped', finishedAt: agent.finishedAt || finishedAt };
+    }
   }
 }
 
@@ -689,7 +695,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
       syncToolRow(turn, row);
       record(draft, event, {
         kind: 'approval', tone: 'warn', status: '待审批',
-        title: `${event.payload.name} · ${event.payload.argsSummary}`,
+        title: `${toolLabel(event.payload.name)} · ${toolArgsText(event.payload.name, event.payload.argsSummary)}`,
         detail: '需要你批准后才能执行', actions: true, callId: event.payload.callId
       });
       break;
@@ -820,7 +826,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
         };
         draft.agents[id] = turn.agents[id];
       }
-      record(draft, event, { kind: 'run', tone: 'run', status: '启动', title: `子智能体启动 · ${event.payload?.name || event.payload?.agentId}`, detail: event.payload?.task || null });
+      record(draft, event, { kind: 'run', tone: 'run', status: '启动', title: `子智能体启动 · ${event.payload?.name || shortAgentId(event.payload?.agentId) || '子任务'}`, detail: event.payload?.task || null });
       break;
     }
 

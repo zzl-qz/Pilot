@@ -72,6 +72,20 @@ test('一轮结束时，前面几段里还在转的工具一起停住', () => {
   assert.equal(turns[1].tools[0].status, 'interrupted');
   assert.equal(state.running, false);
 });
+test('主任务取消后，底部 dock 里还在跑的子智能体一并停住', () => {
+  let state = { thread: initialThread(), ui: { notice: null }, timeline: [], pendingInputs: [], queue: [], pendingApprovals: {}, pendingArbitrations: {}, agents: {}, running: false };
+  let sequence = 0;
+  const apply = (type, payload) => {
+    state = produce(state, draft => applyEvent(draft, { type, payload, sequence: ++sequence, runId: 'r', timestamp: '2026-11-18T00:00:00Z' }, { live: true }));
+  };
+  apply('run.started', { input: '任务' });
+  apply('subagent.started', { agentId: 'agent_alive', task: '还在跑', name: '检查' });
+  assert.equal(state.agents.agent_alive.status, 'running');
+  apply('run.cancelled', { reason: '取消' });
+  assert.equal(state.running, false);
+  assert.equal(state.agents.agent_alive.status, 'stopped');
+});
+
 test('计划没做完按可继续展示，不写成运行失败', () => {
   let state = { thread: initialThread(), ui: { notice: null }, timeline: [], pendingInputs: [], queue: [], pendingApprovals: {}, pendingArbitrations: {}, agents: {}, running: false };
   state = produce(state, draft => applyEvent(draft, { type: 'run.started', payload: { input: '任务' }, sequence: 1, runId: 'r' }, { live: true }));

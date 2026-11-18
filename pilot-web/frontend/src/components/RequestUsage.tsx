@@ -22,7 +22,7 @@ export function RequestList({ reports = [] }: { reports?: RequestReport[] }) {
       <summary>
         <span className="request-group-title">{REQUEST_PURPOSES[group.purpose] || '其他'}请求 <span className="request-count">{group.reports.length} 次</span></span>
         {group.failed > 0 && <Badge className="request-failure" variant="error" label={group.failed + " 次失败"} />}
-        <span className="request-cost">{group.pricedRequests ? `≈ ${totalCost(group)}${group.pricedRequests < group.reports.length ? ' · 部分有价' : ''}` : '未返回单价'}</span>
+        <span className="request-cost">{group.pricedRequests ? `≈ ${totalCost(group)}${group.pricedRequests < group.reports.length ? ' · 部分有价' : ''}` : '未计价'}</span>
       </summary>
       {group.purpose === 'subagent' && <p className="request-note request-group-note">同一子智能体可多次请求模型，此处按请求计数。</p>}
       <RequestRows reports={group.reports} />
@@ -52,7 +52,7 @@ function RequestRows({ reports }: { reports: RequestReport[] }) {
             <div><dt>输出</dt><dd>{formatCost(report.cost.output, report.cost.currency)}</dd></div>
           </>}
         </dl>
-        <p className="request-note">{report.cost?.note || '费用未知'}{report.cost?.source ? ` · ${report.cost.source}` : ''}</p>
+        <p className="request-note">{report.cost?.note || '未计价'}{report.cost?.source ? ` · ${report.cost.source}` : ''}</p>
         {report.prefix && <p className="request-note">请求结构：{CHANGE_LABELS[report.prefix.change || ''] || report.prefix.change}。实际缓存命中以端点用量为准。</p>}
       </details>
     </li>)}

@@ -19,6 +19,7 @@ import { MobileConnectionContent } from './MobileConnection.jsx';
 import { verificationLabel, verificationHint, verificationTone, verificationNeedsRerun } from '../lib/verification.js';
 import { reverifyPrompt } from '../lib/verification-status.js';
 import { splitAttachmentMarkers } from '../lib/attachments.js';
+import { toolArgsText, toolLabel } from '../lib/tool-meta.js';
 
 export { Modal };
 
@@ -448,7 +449,7 @@ function exportTranscript() {
         messages.push({ role: 'user', text: row.text });
       } else {
         for (const tool of row.tools || []) {
-          messages.push({ role: 'tools', summary: `${tool.name} ${tool.args || ''}`.trim() });
+          messages.push({ role: 'tools', summary: `${toolLabel(tool.name)} ${toolArgsText(tool.name, tool.args) || ''}`.trim() });
         }
         if (row.reply?.text) {
           messages.push({ role: 'assistant', text: row.reply.text });

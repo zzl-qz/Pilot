@@ -628,12 +628,16 @@ function toolCounts(tools: ToolView[]) {
  * 转圈会被当成卡死，用户只能干等。
  */
 const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
-  const body = String(tool.body || '').trim();
+  const rawBody = String(tool.body || '').trim();
   const [open, setOpen] = useState(['error', 'wait', 'interrupted'].includes(tool.status));
   useEffect(() => { if (['error', 'wait', 'interrupted'].includes(tool.status)) setOpen(true); }, [tool.status]);
   const sessionLive = useStore(state => state.running);
   const running = tool.status === 'run' && sessionLive;
   const shownStatus = tool.status === 'run' && !sessionLive ? 'interrupted' : tool.status;
+  // 协议里失败正文常带 ERROR: 前缀，界面改成「失败：」。
+  const body = tool.status === 'error' && /^ERROR:\s*/i.test(rawBody)
+    ? rawBody.replace(/^ERROR:\s*/i, '失败：')
+    : rawBody;
   useSecondTick(running);
   const seconds = running ? elapsedSeconds(tool.startedAt, tool.finishedAt) : 0;
   const meta = formatLatency(tool.meta === '未返回结果' ? '' : (tool.meta || ''));
@@ -975,7 +979,6 @@ function ChangedFilesCard({ files, canRollback, onOpen, onRollback }: {
   const popRef = useRef<HTMLDivElement>(null);
   const openTimer = useRef<number | null>(null);
   const closeTimer = useRef<number | null>(null);
-  const pathDescriptionId = React.useId();
   const [expanded, setExpanded] = useState(false);
   const [preview, setPreview] = useState<number | null>(null);
   const [closing, setClosing] = useState(false);
@@ -1112,7 +1115,6 @@ function ChangedFilesCard({ files, canRollback, onOpen, onRollback }: {
               type="button"
               className="changed-row"
               aria-label={`查看 ${file.path} 的改动`}
-              aria-describedby={`${pathDescriptionId}-${index}`}
               onClick={() => { dismissPreview(true); onOpen(file); }}
               onPointerEnter={(event) => schedulePreview(index, event.currentTarget, event)}
               onPointerLeave={() => armClose()}
@@ -1120,7 +1122,6 @@ function ChangedFilesCard({ files, canRollback, onOpen, onRollback }: {
               <span className="changed-path">{file.path}</span>
               <ChangedCounts added={Number(file.added || 0)} removed={Number(file.removed || 0)} />
             </button>
-            <span id={`${pathDescriptionId}-${index}`} hidden>{file.path}</span>
           </li>
         ))}
       </ul>
