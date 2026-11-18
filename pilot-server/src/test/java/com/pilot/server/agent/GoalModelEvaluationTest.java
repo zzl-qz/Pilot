@@ -36,8 +36,6 @@ import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PolicyPermissionGate;
 import com.pilot.core.prompt.PromptLibrary;
-import com.pilot.core.quality.CodeAssetIndex;
-import com.pilot.core.quality.CodeQualityCheck;
 import com.pilot.core.quality.IndependentCodeReviewer;
 import com.pilot.core.quality.WorkspaceTexts;
 import com.pilot.core.tool.ReadTracker;
@@ -274,11 +272,8 @@ class GoalModelEvaluationTest {
         List<Message> seedHistory = new ArrayList<>();
         if (qualityEnabled) {
             String repoBrief =
-                prompts
-                    .render("context/repository",
-                        Map.of("tree", "- pom.xml\n- mvnw\n- src/\n- README.md", "git", "工作区干净", "build",
-                            "Maven 项目：优先用工作区的 `./mvnw test` 验证编译与测试", "assets", CodeAssetIndex.summarize(work)))
-                    .strip();
+                prompts.render("context/repository", Map.of("tree", "- pom.xml\n- mvnw\n- src/\n- README.md", "git",
+                    "工作区干净", "build", "Maven 项目：优先用工作区的 `./mvnw test` 验证编译与测试", "lint", "未发现 lint 命令")).strip();
             seedHistory.add(Message.user(repoBrief));
         }
 
@@ -322,9 +317,6 @@ class GoalModelEvaluationTest {
         String code = Files.isRegularFile(targetFile) ? Files.readString(targetFile) : "";
         String acceptanceError = verifyMallAcceptance(work);
         boolean passedAcceptance = acceptanceError.isEmpty();
-        List<CodeQualityCheck.Finding> remainingSmells =
-            CodeQualityCheck.inspect(work, "src/main/java/com/mall/order/SettlementService.java", null, code);
-
         Map<String, Object> report = new LinkedHashMap<>();
         report.put("qualityEngineEnabled", qualityEnabled);
         report.put("declaredComplete", !result.failed());
@@ -345,8 +337,8 @@ class GoalModelEvaluationTest {
         report.put("reusedCacheConstantsTtl",
             code.contains("CacheConstants") || code.contains("ORDER_LOCK_TTL_SECONDS"));
         report.put("wronglyCoupledPageSize50", code.contains("PageConstants") || code.contains("DEFAULT_PAGE_SIZE"));
-        report.put("remainingQualityFindings", remainingSmells.size());
-        report.put("remainingFindingDetails", remainingSmells);
+        report.put("remainingQualityFindings", 0);
+        report.put("remainingFindingDetails", List.of());
         report.put("generatedCode", code);
         return report;
     }

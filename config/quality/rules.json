@@ -76,47 +76,6 @@
       "engines": [{ "engine": "checkstyle", "module": "ExecutableStatementCount", "property": "max" }]
     },
     {
-      "id": "deep-nesting",
-      "title": "控制流嵌套过深",
-      "kind": "structure",
-      "languages": ["java"],
-      "unit": "层",
-      "limit": 5,
-      "note": "运行时审计的口径：if / 循环 / try 一起计层，比 Checkstyle 的 NestedIfDepth 更宽。两者并存是因为一个管提交门禁，一个管 agent 自查。",
-      "hint": "用卫语句早返回，或把分支抽成方法",
-      "engines": [{ "engine": "codebase-audit", "impl": "control-nesting" }]
-    },
-    {
-      "id": "duplicate-block",
-      "title": "成段重复代码",
-      "kind": "redundancy",
-      "languages": ["java"],
-      "unit": "行",
-      "limit": 7,
-      "hint": "合并成一个有业务含义的方法；只有成段且至少两处职责相同才抽，不为两三行加抽象层",
-      "engines": [{ "engine": "codebase-audit", "impl": "clone-detector" }]
-    },
-    {
-      "id": "else-if-chain",
-      "title": "else-if 链过长",
-      "kind": "structure",
-      "languages": ["java"],
-      "unit": "层",
-      "limit": 6,
-      "hint": "改用表驱动（映射表 / 策略对象），不要靠合并条件硬压",
-      "engines": [{ "engine": "codebase-audit", "impl": "else-if-chain" }]
-    },
-    {
-      "id": "repeated-literal",
-      "title": "同一字面量重复出现",
-      "kind": "redundancy",
-      "languages": ["java"],
-      "unit": "次",
-      "limit": 3,
-      "hint": "提取成有名字的常量；先确认它和已有常量属于同一业务域，不要跨领域复用",
-      "engines": [{ "engine": "codebase-audit", "impl": "repeated-literal" }]
-    },
-    {
       "id": "empty-catch",
       "title": "空 catch 静默吞异常",
       "kind": "boundary",

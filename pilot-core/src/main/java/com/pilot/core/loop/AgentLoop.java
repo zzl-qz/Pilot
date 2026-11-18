@@ -34,6 +34,8 @@ import com.pilot.core.event.RunUsageUpdated;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.exec.ExecutionBackends.Selection;
 import com.pilot.core.hook.Hooks;
+import com.pilot.core.lint.LintGate;
+import com.pilot.core.lint.SourceFiles;
 import com.pilot.core.message.Attachment;
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
@@ -48,8 +50,8 @@ import com.pilot.core.permission.PermissionGate;
 import com.pilot.core.permission.PolicyPermissionGate;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.prompt.PromptLibrary;
-import com.pilot.core.quality.CodeQualityCheck;
 import com.pilot.core.quality.IndependentCodeReviewer;
+import com.pilot.core.quality.TextChange;
 import com.pilot.core.tool.ReadToolOutputTool;
 import com.pilot.core.tool.ToolCallJournal;
 import com.pilot.core.tool.ToolRegistry;
@@ -225,6 +227,7 @@ public final class AgentLoop {
     /** 当前工作区文本；null 表示文件已删除或无法按文本读取。 */
     private Function<String, String> currentFileText = path -> null;
     private Path qualityWorkspace;
+    private LintGate lintGate = LintGate.enabled();
     private IndependentCodeReviewer independentCodeReviewer;
 
     /** 接入层用本轮写前快照确认已经还原的路径；历史调用记录仍保留。 */
@@ -242,9 +245,15 @@ public final class AgentLoop {
         return this;
     }
 
-    /** 提供工作区根目录供收尾门执行跨文件克隆查重与已有常量关联推荐。 */
+    /** 工作区根目录。收尾 lint 在这里发现并执行仓库自己的检查命令。 */
     public AgentLoop withQualityWorkspace(Path workspace) {
         qualityWorkspace = workspace;
+        return this;
+    }
+
+    /** 收尾 lint 开关。默认开启；进程配置关掉时传入 {@link LintGate#disabled()}。 */
+    public AgentLoop withLintGate(LintGate lintGate) {
+        this.lintGate = lintGate == null ? LintGate.disabled() : lintGate;
         return this;
     }
 
@@ -398,7 +407,7 @@ public final class AgentLoop {
         }
         List<Message> messages = seed(history);
         String goal = userInput.strip();
-        this.completionGate = new CompletionGate(PROMPTS, config.completionChecks(), goal);
+        this.completionGate = new CompletionGate(PROMPTS, config.completionChecks(), goal, lintGate);
         messages.add(Message.user(goal, attachments == null ? List.of() : attachments,
             imagePositions == null ? List.of() : imagePositions));
         return loop(messages, events, checkpoint);
@@ -421,7 +430,7 @@ public final class AgentLoop {
         if (messages.size() <= 1) {
             throw new IllegalArgumentException("history is empty, nothing to resume");
         }
-        this.completionGate = new CompletionGate(PROMPTS, config.completionChecks(), goal);
+        this.completionGate = new CompletionGate(PROMPTS, config.completionChecks(), goal, lintGate);
         this.completionGate.restoreFrom(history);
         return loop(messages, events, checkpoint);
     }
@@ -1005,23 +1014,23 @@ public final class AgentLoop {
     /**
      * 收尾前读取本轮仍保留的代码文本。读取失败的文件不加入结果，避免一次快照异常阻断任务。
      */
-    private Map<String, CodeQualityCheck.TextChange> qualityChanges(Set<String> changedFiles) {
+    private Map<String, TextChange> qualityChanges(Set<String> changedFiles) {
         if (changedFiles.isEmpty() || originalFileText == null) {
             return Map.of();
         }
-        Map<String, CodeQualityCheck.TextChange> changes = new LinkedHashMap<>();
+        Map<String, TextChange> changes = new LinkedHashMap<>();
         for (String path : changedFiles) {
-            if (!CodeQualityCheck.applies(path)) {
+            if (!SourceFiles.isProductionSource(path)) {
                 continue;
             }
             try {
                 String before = originalFileText.apply(path);
                 String after = currentFileText == null ? null : currentFileText.apply(path);
                 if (after != null) {
-                    changes.put(path, new CodeQualityCheck.TextChange(before, after));
+                    changes.put(path, new TextChange(before, after));
                 }
             } catch (RuntimeException ignored) {
-                // 质量门是提醒，不是安全边界；单个文件不可读时继续检查其余文件。
+                // 单个文件不可读时继续检查其余文件，不因此中断收尾。
             }
         }
         return Map.copyOf(changes);

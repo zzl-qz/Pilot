@@ -2,30 +2,22 @@ package com.pilot.core.quality;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-import com.pilot.core.quality.CodeQualityCheck.TextChange;
-import com.pilot.core.quality.CodebaseAuditor.AuditItem;
-import com.pilot.core.quality.CodebaseAuditor.AuditSnapshot;
-import com.pilot.core.quality.CodebaseAuditor.Category;
-import com.pilot.core.quality.CodebaseAuditor.DeltaReport;
+import com.pilot.core.lint.SourceFiles;
 import com.pilot.core.util.FileNames;
 
 /**
- * 存量重构、性能优化与边界加固的防糊弄硬证据门禁。
- * 对比改动前后真实静态审计账本、测试文件变更记录与验证执行记录，拦截无证据口头宣称完成。
+ * 边界加固和性能结论的证据门。
+ * 规范问题交给仓库自己的 lint，这里只核对「说完善了边界却没改测试」和「口头宣称性能提升却没有数据」。
  */
 public final class RefactorEvidenceGate {
-    private static final int MAX_SHOWN_ITEMS = 5;
-
     private static final Set<String> CODE_EXTS = Set.of("java", "kt", "kts", "js", "jsx", "ts", "tsx", "mjs", "cjs",
         "py", "go", "rs", "cs", "cpp", "cc", "c", "h", "swift");
-    private static final Set<String> TEST_DIRS = Set.of("test", "tests", "spec", "specs", "__tests__");
 
     private static final List<String> READ_ONLY_HINTS = List.of("本轮只读", "本次只读", "本任务只读", "仅做只读", "只分析不修改", "只输出方案",
         "不改代码", "不修改业务代码", "不要修改任何仓库文件", "不得修改任何仓库文件", "不要修改任何文件", "不得修改任何文件", "do not modify any files",
@@ -52,7 +44,7 @@ public final class RefactorEvidenceGate {
         "吞吐提升", "提速", "performance improved", "faster execution", "latency reduced");
     private static final Pattern CONCRETE_PERF_PROOF = Pattern.compile(
         "(?i)(?:\\b\\d+(?:\\.\\d+)?\\s*(?:ms|ns|us|s|%|倍|x|ops|qps|tps|kb|mb)\\b|->|→|O\\([1nN]|n\\+1|批量|预编译|复用"
-            + "|StringBuilder|有界|缓存|audit_codebase|未跑.*(?:基准|压测)|未做.*(?:基准|压测)|静态消除|not benchmarked)");
+            + "|StringBuilder|有界|缓存|未跑.*(?:基准|压测)|未做.*(?:基准|压测)|静态消除|not benchmarked)");
 
     public record Intent(boolean cleanup, boolean performance, boolean boundary) {
         public static final Intent NONE = new Intent(false, false, false);
@@ -63,8 +55,6 @@ public final class RefactorEvidenceGate {
     }
 
     private final Intent intent;
-    private AuditSnapshot workspaceBaseline;
-    private boolean auditToolInvoked;
 
     public RefactorEvidenceGate(String goal) {
         this.intent = classify(goal);
@@ -72,17 +62,6 @@ public final class RefactorEvidenceGate {
 
     public Intent intent() {
         return intent;
-    }
-
-    public void recordAuditToolCall() {
-        this.auditToolInvoked = true;
-    }
-
-    public AuditSnapshot captureBaseline(Path workspaceRoot) {
-        if (workspaceBaseline == null && workspaceRoot != null) {
-            workspaceBaseline = CodebaseAuditor.audit(workspaceRoot);
-        }
-        return workspaceBaseline == null ? AuditSnapshot.EMPTY : workspaceBaseline;
     }
 
     public static Intent classify(String goal) {
@@ -99,27 +78,6 @@ public final class RefactorEvidenceGate {
         return cleanup || perf || boundary ? new Intent(cleanup, perf, boundary) : Intent.NONE;
     }
 
-    public static DeltaReport delta(Path workspaceRoot, Map<String, TextChange> qualityChanges) {
-        if (qualityChanges == null || qualityChanges.isEmpty()) {
-            return CodebaseAuditor.compare(AuditSnapshot.EMPTY, AuditSnapshot.EMPTY);
-        }
-        Map<String, String> beforeTexts = new LinkedHashMap<>();
-        Map<String, String> afterTexts = new LinkedHashMap<>();
-        qualityChanges.forEach((path, change) -> {
-            if (change != null && CodeQualityCheck.applies(path)) {
-                if (change.before() != null && !change.before().isBlank()) {
-                    beforeTexts.put(path, change.before());
-                }
-                if (change.after() != null && !change.after().isBlank()) {
-                    afterTexts.put(path, change.after());
-                }
-            }
-        });
-        AuditSnapshot before = CodebaseAuditor.auditTexts(workspaceRoot, beforeTexts);
-        AuditSnapshot after = CodebaseAuditor.auditTexts(workspaceRoot, afterTexts);
-        return CodebaseAuditor.compare(before, after);
-    }
-
     public String evaluate(Path workspaceRoot, Set<String> changedFiles, Map<String, TextChange> qualityChanges,
         boolean hasPassingVerification, String candidateAnswer) {
         boolean perfClaimed = claimsPerformanceGain(candidateAnswer);
@@ -127,44 +85,23 @@ public final class RefactorEvidenceGate {
             return null;
         }
         Set<String> files = changedFiles == null ? Set.of() : changedFiles;
-        boolean prodChanged = files.stream().anyMatch(CodeQualityCheck::applies);
+        boolean prodChanged = files.stream().anyMatch(SourceFiles::isProductionSource);
         boolean testChanged = files.stream().anyMatch(RefactorEvidenceGate::isTestCodePath);
         if (!prodChanged && !perfClaimed) {
             return null;
         }
 
-        DeltaReport report = delta(workspaceRoot, qualityChanges);
         List<String> gaps = new ArrayList<>();
-
-        if (prodChanged && report.regressed()) {
-            gaps.add(
-                "变更后静态审计问题数不降反升（" + report.renderSummary() + "），请先清理引入或遗留的问题：" + formatItems(report.after().items()));
-        } else if (intent.cleanup() && prodChanged && report.totalIssuesAfter() > 0 && !report.improved()) {
-            gaps.add("目标要求精简存量代码或清理魔法值/重复逻辑，但触达文件问题总数未下降（" + report.renderSummary() + "），仍存在以下待收敛项："
-                + formatItems(report.after().items()));
-        }
-
         if (intent.boundary() && prodChanged && !testChanged) {
             gaps.add("目标要求完善边界情况，但本轮只改了业务代码，未新增或更新任何边界单元测试作为证据；请补充覆盖空值/极值/异常路径的测试并跑通");
-        } else if (intent.boundary() && prodChanged && report.after().boundaryHazards() > 0
-            && report.boundaryDelta() >= 0) {
-            gaps.add("触达代码仍残留 " + report.after().boundaryHazards() + " 处未关闭资源、空 catch 或无守卫取值隐患："
-                + formatItems(report.after().filterFocus(Category.BOUNDARY.focusKey())));
         }
-
         if (intent.performance() || perfClaimed) {
-            if (prodChanged && report.after().perfHazards() > 0 && report.perfDelta() >= 0) {
-                gaps.add("触达代码仍残留 " + report.after().perfHazards() + " 处循环 N+1、循环重分配或无界读取性能隐患："
-                    + formatItems(report.after().filterFocus(Category.PERFORMANCE.focusKey())));
-            }
             if (!hasPassingVerification) {
                 gaps.add("性能优化或性能提升结论缺少已通过的测试/命令执行记录；请实际运行验证或基准命令取得证据");
-            } else if (lacksConcretePerfProof(candidateAnswer, report)) {
-                gaps.add("候选结论存在无数据支撑的性能提升表述；请补充前后真实耗时/调用次数/复杂度消减证据（可结合 audit_codebase 或测试输出），"
-                    + "未做压测的部分必须如实说明为静态隐患消除，严禁夸大或捏造收益");
+            } else if (lacksConcretePerfProof(candidateAnswer)) {
+                gaps.add("候选结论存在无数据支撑的性能提升表述；请补充前后真实耗时/调用次数/复杂度消减证据，" + "未做压测的部分必须如实说明，严禁夸大或捏造收益");
             }
         }
-
         if (gaps.isEmpty()) {
             return null;
         }
@@ -172,7 +109,7 @@ public final class RefactorEvidenceGate {
         for (int i = 0; i < gaps.size(); i++) {
             nudge.append(i + 1).append(". ").append(gaps.get(i)).append('\n');
         }
-        nudge.append("请补齐上述真实代码收敛或测试证据，并在任何代码/测试修改后重新运行测试确保通过；若某处字面量或结构确需保留，请在最终回复逐处写明客观原因。");
+        nudge.append("请补齐上述真实测试或实测证据，并在任何代码/测试修改后重新运行测试确保通过。规范问题以仓库 lint 的输出为准。");
         return nudge.toString();
     }
 
@@ -184,34 +121,21 @@ public final class RefactorEvidenceGate {
         if (!CODE_EXTS.contains(FileNames.extension(norm))) {
             return false;
         }
-        String[] parts = norm.split("/");
-        if (CodeQualityCheck.isTestFile(parts[parts.length - 1])) {
-            return true;
-        }
-        for (int i = 0; i < parts.length - 1; i++) {
-            if (TEST_DIRS.contains(parts[i].toLowerCase(Locale.ROOT))) {
-                return true;
-            }
-        }
-        return false;
+        return SourceFiles.isTestSource(path);
     }
 
     static boolean claimsPerformanceGain(String text) {
         if (text == null || text.isBlank()) {
             return false;
         }
-        String lower = text.toLowerCase(Locale.ROOT);
-        return containsAny(lower, PERF_CLAIM_HINTS);
+        return containsAny(text.toLowerCase(Locale.ROOT), PERF_CLAIM_HINTS);
     }
 
-    private boolean lacksConcretePerfProof(String candidateAnswer, DeltaReport report) {
+    private static boolean lacksConcretePerfProof(String candidateAnswer) {
         if (candidateAnswer == null || candidateAnswer.isBlank()) {
             return false;
         }
-        if (CONCRETE_PERF_PROOF.matcher(candidateAnswer).find()) {
-            return false;
-        }
-        return !(auditToolInvoked && report.perfDelta() < 0);
+        return !CONCRETE_PERF_PROOF.matcher(candidateAnswer).find();
     }
 
     private static boolean isConsultationOrReadOnly(String goal, String lower) {
@@ -232,18 +156,5 @@ public final class RefactorEvidenceGate {
             }
         }
         return false;
-    }
-
-    private static String formatItems(List<AuditItem> items) {
-        if (items.isEmpty()) {
-            return "";
-        }
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < Math.min(MAX_SHOWN_ITEMS, items.size()); i++) {
-            AuditItem item = items.get(i);
-            sb.append("\n   - ").append(item.path()).append(':').append(item.line()).append(" [").append(item.kind())
-                .append("] ").append(item.message());
-        }
-        return sb.toString();
     }
 }

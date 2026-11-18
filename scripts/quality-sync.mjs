@@ -17,12 +17,9 @@ const KIND_LABELS = {
   architecture: '依赖与架构',
   hygiene: '工具链自检'
 };
-const ENGINES = ['checkstyle', 'quality-gate', 'codebase-audit', 'semgrep', 'jscpd'];
-// 运行时审计（pilot-core）实现的规则；Java 侧没有可 import 的清单，只能在这里登记，由 Java 单测反向校准。
-const AUDIT_IMPLS = new Set(['control-nesting', 'clone-detector', 'else-if-chain', 'repeated-literal']);
+const ENGINES = ['checkstyle', 'quality-gate', 'semgrep', 'jscpd'];
 // 声明了但还没接入实现的引擎：规则可以用它，但不能是 active，否则就是「说查但没人查」。
 const UNWIRED_ENGINES = new Set(['semgrep', 'jscpd']);
-const PROPERTIES_PATH = join(ROOT, 'pilot-core', 'src', 'main', 'resources', 'quality', 'rules.properties');
 
 function fail(message) {
   console.error(`[quality-sync] ${message}`);
@@ -43,7 +40,6 @@ export function validate(catalog) {
   const ids = new Set();
   const checkstyleModules = new Map();
   const usedImpls = new Set();
-  const usedAuditImpls = new Set();
   for (const [index, rule] of (catalog.rules ?? []).entries()) {
     const at = `rules[${index}]（${rule.id ?? '缺少 id'}）`;
     if (!rule.id || !/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(rule.id)) problems.push(`${at}：id 必须是 kebab-case`);
@@ -76,12 +72,6 @@ export function validate(catalog) {
         else if (!GATE_IMPLS.has(engine.impl)) problems.push(`${at}：门禁里没有实现 ${engine.impl}`);
         else usedImpls.add(engine.impl);
       }
-      if (engine.engine === 'codebase-audit') {
-        if (!engine.impl) problems.push(`${at}：codebase-audit 引擎缺少 impl`);
-        else if (!AUDIT_IMPLS.has(engine.impl)) problems.push(`${at}：运行时审计里没有实现 ${engine.impl}`);
-        else usedAuditImpls.add(engine.impl);
-        if (rule.limit === undefined) problems.push(`${at}：运行时审计规则必须给出 limit，Java 侧要读它`);
-      }
       if (UNWIRED_ENGINES.has(engine.engine) && status === 'active') {
         problems.push(`${at}：${engine.engine} 尚未接入，不能标成 active`);
       }
@@ -89,9 +79,6 @@ export function validate(catalog) {
   }
   for (const impl of GATE_IMPLS) {
     if (!usedImpls.has(impl)) problems.push(`门禁实现了 ${impl}，但 rules.json 里没有规则使用它（死代码）`);
-  }
-  for (const impl of AUDIT_IMPLS) {
-    if (!usedAuditImpls.has(impl)) problems.push(`运行时审计实现了 ${impl}，但 rules.json 里没有规则使用它（死代码）`);
   }
   return problems;
 }
@@ -150,16 +137,6 @@ export function renderCheckstyle(catalog) {
   return lines.join('\n');
 }
 
-export function renderProperties(catalog) {
-  const lines = ['# 由 config/quality/rules.json 生成，请勿手改。', '# 运行时审计（pilot-core）从中读取阈值，避免和提交门禁出现两套口径。'];
-  for (const rule of catalog.rules) {
-    if (rule.limit === undefined) continue;
-    lines.push(`${rule.id}.limit=${rule.limit}`);
-  }
-  lines.push('');
-  return lines.join('\n');
-}
-
 function listRules(catalog) {
   console.log(`共 ${catalog.rules.length} 条规则（语言：${catalog.languages.join(' / ')}）`);
   for (const kind of KINDS) {
@@ -190,8 +167,7 @@ function main() {
     return;
   }
   const generated = [
-    { path: CHECKSTYLE_PATH, content: renderCheckstyle(catalog), label: 'Checkstyle 配置' },
-    { path: PROPERTIES_PATH, content: renderProperties(catalog), label: '运行时审计阈值' }
+    { path: CHECKSTYLE_PATH, content: renderCheckstyle(catalog), label: 'Checkstyle 配置' }
   ];
   if (write) {
     for (const artifact of generated) {

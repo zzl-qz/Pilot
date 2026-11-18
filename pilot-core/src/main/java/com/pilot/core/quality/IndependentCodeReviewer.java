@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
 
+import com.pilot.core.lint.SourceFiles;
 import com.pilot.core.message.Message;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelRequestScope;
@@ -14,7 +15,6 @@ import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.multi.UnifiedDiff;
 import com.pilot.core.prompt.PromptLibrary;
-import com.pilot.core.quality.CodeQualityCheck.TextChange;
 import com.pilot.core.tool.ToolSchemas;
 import com.pilot.core.util.Texts;
 
@@ -29,7 +29,6 @@ public final class IndependentCodeReviewer {
     public static final int MIN_CODE_FILES = 2;
     public static final int MIN_ADDED_CODE_LINES = 35;
     private static final int MAX_DIFF_CHARS = 12_000;
-    private static final int MAX_ASSET_CHARS = 3_000;
     private static final int MAX_ISSUES = 4;
     private static final String TOOL_NAME = "submit_code_review";
 
@@ -61,7 +60,7 @@ public final class IndependentCodeReviewer {
         }
         int codeFiles = 0;
         for (Map.Entry<String, TextChange> entry : changes.entrySet()) {
-            if (CodeQualityCheck.applies(entry.getKey()) && entry.getValue() != null
+            if (SourceFiles.isProductionSource(entry.getKey()) && entry.getValue() != null
                 && entry.getValue().after() != null) {
                 codeFiles++;
             }
@@ -69,7 +68,7 @@ public final class IndependentCodeReviewer {
         if (codeFiles == 0) {
             return false;
         }
-        return codeFiles >= MIN_CODE_FILES || CodeQualityCheck.countAddedCodeLines(changes) >= MIN_ADDED_CODE_LINES;
+        return codeFiles >= MIN_CODE_FILES || addedLines(changes) >= MIN_ADDED_CODE_LINES;
     }
 
     /**
@@ -86,15 +85,9 @@ public final class IndependentCodeReviewer {
             return null;
         }
         try {
-            String assets = workspaceRoot == null ? "" : CodeAssetIndex.summarize(workspaceRoot);
-            if (assets.length() > MAX_ASSET_CHARS) {
-                assets = assets.substring(0, MAX_ASSET_CHARS) + "\n…（其余省略）";
-            }
-            String auditDelta = RefactorEvidenceGate.delta(workspaceRoot, changes).renderSummary();
             String userPayload =
                 "原始用户目标：\n" + (goal == null || goal.isBlank() ? "（按当前代码变更上下文判断）" : Texts.oneLine(goal, 600))
-                    + "\n\n工作区可复用公共代码清单：\n" + (assets.isBlank() ? "（无已索引的公共工具清单）" : assets) + "\n\n变更前后静态审计账本对比：\n"
-                    + auditDelta + "\n\n本次生产代码变更 Diff（待审数据）：\n" + diff;
+                    + "\n\n本次生产代码变更 Diff（待审数据）：\n" + diff;
 
             List<Message> messages = List.of(Message.system(prompts.render("completion/code-review", Map.of()).strip()),
                 Message.user(userPayload));
@@ -116,12 +109,25 @@ public final class IndependentCodeReviewer {
         }
     }
 
+    private static int addedLines(Map<String, TextChange> changes) {
+        int total = 0;
+        for (TextChange change : changes.values()) {
+            if (change == null || change.after() == null) {
+                continue;
+            }
+            int after = change.after().split("\n", -1).length;
+            int before = change.before() == null ? 0 : change.before().split("\n", -1).length;
+            total += Math.max(0, after - before);
+        }
+        return total;
+    }
+
     private static String buildProductionDiff(Map<String, TextChange> changes) {
         StringBuilder out = new StringBuilder();
         for (Map.Entry<String, TextChange> entry : changes.entrySet()) {
             String path = entry.getKey();
             TextChange change = entry.getValue();
-            if (!CodeQualityCheck.applies(path) || change == null || change.after() == null) {
+            if (!SourceFiles.isProductionSource(path) || change == null || change.after() == null) {
                 continue;
             }
             String patch = UnifiedDiff.create(path, change.before(), change.after());

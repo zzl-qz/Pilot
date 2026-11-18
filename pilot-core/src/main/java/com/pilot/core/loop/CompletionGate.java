@@ -10,14 +10,14 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import com.pilot.core.lint.LintGate;
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
-import com.pilot.core.message.ToolNames;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.prompt.PromptLibrary;
-import com.pilot.core.quality.CodeQualityCheck;
 import com.pilot.core.quality.IndependentCodeReviewer;
 import com.pilot.core.quality.RefactorEvidenceGate;
+import com.pilot.core.quality.TextChange;
 import com.pilot.core.tool.ToolResults;
 import com.pilot.core.tool.VerificationCheck;
 import com.pilot.core.util.Texts;
@@ -62,8 +62,8 @@ final class CompletionGate {
     private static final List<String> READ_ONLY_TASK_HINTS =
         List.of("本轮只读", "本次只读", "本任务只读", "仅做只读", "只分析不修改", "不要修改任何仓库文件", "不得修改任何仓库文件", "不要修改任何文件", "不得修改任何文件",
             "do not modify any files", "do not change any files", "do not edit any files", "this task is read-only");
-    /** 新增代码质量问题只打回一次；模型可以修正，也可以说明保留原因。 */
-    private static final int MAX_QUALITY_PROMPTS = 1;
+    /** 仓库 lint 未通过时最多打回两次，避免命令本身跑不起来时死循环。 */
+    private static final int MAX_LINT_PROMPTS = 2;
     /** 存量重构、性能优化与边界测试硬证据门最多打回一次，杜绝死循环。 */
     private static final int MAX_EVIDENCE_PROMPTS = 1;
     /** 只改这些后缀的文档不算「改了代码」，不强制跑构建。 */
@@ -82,11 +82,12 @@ final class CompletionGate {
     private final boolean enabled;
     private final String goal;
     private final RefactorEvidenceGate evidenceGate;
+    private final LintGate lintGate;
     private int planPrompts;
     private int verifyPrompts;
     private int reviewPrompts;
     private int actionPrompts;
-    private int qualityPrompts;
+    private int lintPrompts;
     private int evidencePrompts;
     private boolean independentCodeReviewed;
     /** 记录最近一次通过的构建/测试之后是否又改了代码，防止收尾重构改坏原有功能却漏跑验证。 */
@@ -99,10 +100,15 @@ final class CompletionGate {
      * @param enabled 关闭后直接放行，不做任何催办
      */
     CompletionGate(PromptLibrary prompts, boolean enabled, String goal) {
+        this(prompts, enabled, goal, LintGate.enabled());
+    }
+
+    CompletionGate(PromptLibrary prompts, boolean enabled, String goal, LintGate lintGate) {
         this.prompts = prompts;
         this.enabled = enabled;
         this.goal = goal;
         this.evidenceGate = new RefactorEvidenceGate(goal);
+        this.lintGate = lintGate == null ? LintGate.disabled() : lintGate;
     }
 
     void countToolCall() {
@@ -123,9 +129,6 @@ final class CompletionGate {
 
     /** 记下这次调用碰过的路径，只读任务自审时说明「已经看过哪些」。 */
     void recordTarget(ToolCall call) {
-        if (ToolNames.AUDIT_CODEBASE.equals(call.name())) {
-            evidenceGate.recordAuditToolCall();
-        }
         Object path = call.args() == null ? null : call.args().get("path");
         if (path == null) {
             return;
@@ -184,7 +187,7 @@ final class CompletionGate {
     }
 
     Nudge evaluate(Set<String> changedFiles, List<String> checks, List<PlanItem> plan, List<String> openSteps,
-        boolean independentReview, Map<String, CodeQualityCheck.TextChange> qualityChanges) {
+        boolean independentReview, Map<String, TextChange> qualityChanges) {
         return evaluate(changedFiles, checks, plan, openSteps, independentReview, qualityChanges, null, null);
     }
 
@@ -194,14 +197,14 @@ final class CompletionGate {
      * @param codeReviewer   轻量独立语义代码审查器；仅在验证通过且改动达标时最多运行一次
      */
     Nudge evaluate(Set<String> changedFiles, List<String> checks, List<PlanItem> plan, List<String> openSteps,
-        boolean independentReview, Map<String, CodeQualityCheck.TextChange> qualityChanges, Path workspaceRoot,
+        boolean independentReview, Map<String, TextChange> qualityChanges, Path workspaceRoot,
         IndependentCodeReviewer codeReviewer) {
         return evaluate(changedFiles, checks, plan, openSteps, independentReview, qualityChanges, workspaceRoot,
             codeReviewer, "");
     }
 
     Nudge evaluate(Set<String> changedFiles, List<String> checks, List<PlanItem> plan, List<String> openSteps,
-        boolean independentReview, Map<String, CodeQualityCheck.TextChange> qualityChanges, Path workspaceRoot,
+        boolean independentReview, Map<String, TextChange> qualityChanges, Path workspaceRoot,
         IndependentCodeReviewer codeReviewer, String candidateAnswer) {
         if (!enabled) {
             return null;
@@ -229,16 +232,13 @@ final class CompletionGate {
         if (!changed && !researching) {
             return null;
         }
-        if (changed && qualityPrompts < MAX_QUALITY_PROMPTS) {
+        if (changed && lintPrompts < MAX_LINT_PROMPTS) {
             Path root =
                 workspaceRoot != null ? workspaceRoot : codeReviewer == null ? null : codeReviewer.workspaceRoot();
-            String issue = CodeQualityCheck.completionIssue(root, qualityChanges);
-            if (!issue.isBlank()) {
-                qualityPrompts++;
-                return new Nudge(
-                    "本轮新增代码有质量问题：" + issue + "。先复用项目已有常量、枚举或公共方法；只抽离至少 " + CodeQualityCheck.DUPLICATE_BLOCK_LINES
-                        + " 行且重复出现的代码块。修改代码后请重跑相关测试确认功能正常；若确属合理的一次性值或拆分无收益，保留代码并在最终答复说明原因，不要新增抽象层。",
-                    "新增代码含魔法值或重复块，已要求先复用或说明原因", qualityPrompts, MAX_QUALITY_PROMPTS);
+            LintGate.LintAssessment lint = lintGate.assess(root, changedFiles);
+            if (lint.needsFix()) {
+                lintPrompts++;
+                return new Nudge(lint.prompt(), lint.reason(), lintPrompts, MAX_LINT_PROMPTS);
             }
         }
         boolean needsVerify = !hasPassingCheck(checks) || codeDirtySincePassingCheck;

@@ -44,9 +44,13 @@ class AgentPropertiesTest {
         var defaults = new AgentProperties(".", null, 1500, null, null, 0, 0, null, null, true);
         assertEquals(1_500, defaults.maxSteps());
         assertEquals(1_000, defaults.directMaxRequests());
+        assertTrue(defaults.lintGateEnabledValue());
+        var lintOff = new AgentProperties(".", null, 1500, null, null, 0, 0, null, null, true, null, null, null, null,
+            null, null, null, null, null, false);
+        assertFalse(lintOff.lintGateEnabledValue());
 
         var configured = new AgentProperties(".", null, 1500, 0, 5, 90, 20, null, 50_000, true, true, 1250, 70_000L,
-            7_000L, 70_000L, 30, 20_000L, 2_000L, 80_000L);
+            7_000L, 70_000L, 30, 20_000L, 2_000L, 80_000L, null);
         assertEquals(1_250, configured.directMaxRequests());
         assertEquals(0, configured.repeatRemindAt());
         assertEquals(90, configured.approvalTimeoutSeconds());

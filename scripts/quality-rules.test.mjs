@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadCatalog, validate, renderCheckstyle, renderProperties } from './quality-sync.mjs';
+import { loadCatalog, validate, renderCheckstyle } from './quality-sync.mjs';
 import { GATE_IMPLS } from './quality-gate.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -20,13 +20,6 @@ test('提交的 Checkstyle 配置与 rules.json 一致', () => {
   const committed = readFileSync(join(root, 'config', 'java', 'checkstyle-strict.xml'), 'utf8').replace(/\r\n/g, '\n');
   assert.equal(committed, renderCheckstyle(catalog),
     '生成文件与目录不一致：改过 rules.json 后要执行 node scripts/quality-sync.mjs --write');
-});
-
-test('运行时审计读取的阈值文件与 rules.json 一致', () => {
-  const committed = readFileSync(join(root, 'pilot-core', 'src', 'main', 'resources', 'quality', 'rules.properties'), 'utf8')
-    .replace(/\r\n/g, '\n');
-  assert.equal(committed, renderProperties(catalog),
-    'Java 侧读的 rules.properties 已经和目录脱节：执行 node scripts/quality-sync.mjs --write');
 });
 
 test('每条 active 的 Java 规则都在生成的配置里出现恰好一次', () => {

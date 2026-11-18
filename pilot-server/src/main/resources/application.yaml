@@ -75,6 +75,8 @@ pilot:
     prompt-caching: ${PILOT_MODEL_PROMPT_CACHING:false}
   agent:
     goal-mode-enabled: ${PILOT_AGENT_GOAL_MODE_ENABLED:true}
+    # 收尾时运行当前仓库自己的 lint。默认开启；设为 false 时不做规范检查，用来和开启时对照。
+    lint-gate-enabled: ${PILOT_AGENT_LINT_GATE_ENABLED:true}
     # 工具能碰到的根目录，默认是进程工作目录。建议显式指到项目根
     workspace: ${PILOT_WORKSPACE:${user.dir}}
     # 单轮步数上限，只当事故熔断。触顶后界面可以继续接着跑

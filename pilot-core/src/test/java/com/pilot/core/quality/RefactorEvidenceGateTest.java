@@ -11,8 +11,6 @@ import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
-import com.pilot.core.quality.CodeQualityCheck.TextChange;
-
 class RefactorEvidenceGateTest {
 
     @Test
@@ -52,58 +50,13 @@ class RefactorEvidenceGateTest {
     }
 
     @Test
-    void optimizationGoalCatchingUnresolvedOrAddedSmellsVersusRealCleanup() {
+    void cleanupIntentDoesNotInventAPrivateSmellScanner() {
         RefactorEvidenceGate gate = new RefactorEvidenceGate("重构老项目 OrderService，清理魔法值并精简代码");
         assertTrue(gate.intent().cleanup());
-
-        String legacySmelly = """
-            class OrderService {
-                int calc(int state) {
-                    int ttl = 86400;
-                    String status = "PAID";
-                    return state + ttl + status.length();
-                }
-            }
-            """;
-        String worseAfter = """
-            class OrderService {
-                int calc(int state) {
-                    int ttl = 86400;
-                    int extraMagic = 43200;
-                    String status = "PAID";
-                    return state + ttl + extraMagic + status.length();
-                }
-            }
-            """;
-
-        // 改动后坏味道不降反升 -> 携带 path:line 硬证据拦截
-        String regressed = gate.evaluate(null, Set.of("src/main/OrderService.java"),
-            Map.of("src/main/OrderService.java", new TextChange(legacySmelly, worseAfter)), true, "我已经重构得非常完美了！");
-        assertNotNull(regressed);
-        assertTrue(regressed.contains("不降反升"), regressed);
-        assertTrue(regressed.contains("src/main/OrderService.java:"), regressed);
-
-        // 仅做表面改名、魔法值一个没清 -> 同样拦截
-        String cosmetic = legacySmelly.replace("calc", "compute");
-        String unchangedSmells = gate.evaluate(null, Set.of("src/main/OrderService.java"),
-            Map.of("src/main/OrderService.java", new TextChange(legacySmelly, cosmetic)), true, "已完成代码精简与魔法值清理。");
-        assertNotNull(unchangedSmells);
-        assertTrue(unchangedSmells.contains("未下降"), unchangedSmells);
-
-        // 真正消除魔法值 -> 放行
-        String genuinelyCleaned = """
-            class OrderService {
-                private static final int ORDER_TTL_SECONDS = 86400;
-                private static final String STATUS_PAID = "PAID";
-
-                int calc(int state) {
-                    return state + ORDER_TTL_SECONDS + STATUS_PAID.length();
-                }
-            }
-            """;
         assertNull(gate.evaluate(null, Set.of("src/main/OrderService.java"),
-            Map.of("src/main/OrderService.java", new TextChange(legacySmelly, genuinelyCleaned)), true,
-            "已提炼具名常量消除魔法值。"));
+            Map.of("src/main/OrderService.java",
+                new TextChange("class A { int ttl = 86400; }\n", "class A { int ttl = 86400; int extra = 43200; }\n")),
+            true, "我已经重构得非常完美了！"));
     }
 
     @Test

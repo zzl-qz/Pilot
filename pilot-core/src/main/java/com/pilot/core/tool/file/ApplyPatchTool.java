@@ -16,7 +16,6 @@ import java.util.function.UnaryOperator;
 
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.message.ToolNames;
-import com.pilot.core.quality.CodeQualityCheck;
 import com.pilot.core.tool.PromptedTool;
 import com.pilot.core.tool.ReadGuard;
 import com.pilot.core.tool.SnapshotSink;
@@ -109,9 +108,8 @@ public final class ApplyPatchTool extends PromptedTool implements WritesFiles {
             return new ToolResult("ERROR: 写入失败: " + e.getMessage() + "。" + done + "。请 read_file 核对当前状态后再继续。",
                 List.copyOf(changed), List.of());
         }
-        String quality = qualitySummary(plan);
         String text = "已应用补丁（" + plan.size() + " 个文件）：\n" + String.join("\n", applied);
-        return new ToolResult(quality.isEmpty() ? text : text + "\n\n" + quality, List.copyOf(changed), List.of());
+        return new ToolResult(text, List.copyOf(changed), List.of());
     }
 
     @Override
@@ -129,26 +127,6 @@ public final class ApplyPatchTool extends PromptedTool implements WritesFiles {
 
     private record Planned(Kind kind, Path file, Path target, String before, String content, String summary,
         List<String> changed) {
-    }
-
-    /** 补丁已经完整落盘；质量提醒只描述新增代码，不改变事务结果。 */
-    private String qualitySummary(List<Planned> plan) {
-        StringBuilder out = new StringBuilder();
-        for (Planned step : plan) {
-            if (step.kind() == Kind.DELETE || step.content() == null) {
-                continue;
-            }
-            String path = step.target() == null ? paths.display(step.file()) : paths.display(step.target());
-            String summary = CodeQualityCheck.summary(paths.root(), path, step.before(), step.content());
-            if (summary.isEmpty()) {
-                continue;
-            }
-            if (!out.isEmpty()) {
-                out.append("\n\n");
-            }
-            out.append(summary);
-        }
-        return out.toString();
     }
 
     private List<Planned> plan(List<Operation> operations) throws IOException {

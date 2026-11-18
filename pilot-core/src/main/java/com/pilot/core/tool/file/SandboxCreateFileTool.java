@@ -2,7 +2,6 @@ package com.pilot.core.tool.file;
 
 import java.nio.file.Path;
 
-import com.pilot.core.quality.CodeQualityCheck;
 import com.pilot.core.tool.ReadGuard;
 import com.pilot.core.tool.SandboxSink;
 import com.pilot.core.workspace.PathValidator;
@@ -35,9 +34,7 @@ public final class SandboxCreateFileTool extends CreateFileOperation {
             sandbox.record(paths.display(file), null, content);
             // 刚创建的文件视为已读：后续 edit_file 不会被「先读后改」拦截
             reads.observed(file);
-            String written = "已提交到沙箱 " + paths.display(file) + "（新文件，" + (int)content.lines().count() + " 行）";
-            String quality = CodeQualityCheck.summary(paths.root(), paths.display(file), null, content);
-            return quality.isEmpty() ? written : written + "\n\n" + quality;
+            return "已提交到沙箱 " + paths.display(file) + "（新文件，" + (int)content.lines().count() + " 行）";
         } catch (RuntimeException e) {
             return "ERROR: 提交沙箱失败: " + e.getMessage();
         }

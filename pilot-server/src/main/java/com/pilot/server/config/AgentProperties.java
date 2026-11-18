@@ -24,13 +24,15 @@ import com.pilot.core.permission.PermissionMode;
  * @param directMaxOutputTokens 普通执行累计输出的高位事故熔断
  * @param directMaxActiveMillis 普通执行模型活跃时间的高位事故熔断
  * @param directMaxInvestigationTools 兼容旧配置的高位调查诊断值；运行时不据此拒绝读取/搜索
+ * @param lintGateEnabled      收尾时是否运行当前仓库的 lint。默认开启，设为 false 可做对照
  */
 @ConfigurationProperties(prefix = "pilot.agent")
 public record AgentProperties(String workspace, PermissionMode permissionMode, int maxSteps, Integer repeatRemindAt,
     Integer repeatAbortAt, int approvalTimeoutSeconds, int runThreads, Integer maxPlanContinues,
     Integer contextMaxChars, Boolean completionChecks, Boolean goalModeEnabled, Integer directMaxRequests,
     Long directMaxInputTokens, Long directMaxOutputTokens, Long directMaxActiveMillis,
-    Integer directMaxInvestigationTools, Long goalMaxInputTokens, Long goalMaxOutputTokens, Long goalMaxActiveMillis) {
+    Integer directMaxInvestigationTools, Long goalMaxInputTokens, Long goalMaxOutputTokens, Long goalMaxActiveMillis,
+    Boolean lintGateEnabled) {
     private static final int DEFAULT_MAX_STEPS = 1_000;
     private static final long DEFAULT_MAX_INPUT_TOKENS = 50_000_000L;
     private static final long DEFAULT_MAX_OUTPUT_TOKENS = 2_000_000L;
@@ -39,13 +41,13 @@ public record AgentProperties(String workspace, PermissionMode permissionMode, i
     public AgentProperties(String workspace, PermissionMode mode, int steps, Integer remind, Integer abort, int timeout,
         int threads, Integer continues, Integer chars, Boolean checks) {
         this(workspace, mode, steps, remind, abort, timeout, threads, continues, chars, checks, false, null, null, null,
-            null, null, null, null, null);
+            null, null, null, null, null, null);
     }
 
     public AgentProperties(String workspace, PermissionMode mode, int steps, Integer remind, Integer abort, int timeout,
         int threads, Integer continues, Integer chars, Boolean checks, Boolean goals) {
         this(workspace, mode, steps, remind, abort, timeout, threads, continues, chars, checks, goals, null, null, null,
-            null, null, null, null, null);
+            null, null, null, null, null, null);
     }
 
     public boolean goalModeEnabledValue() {
@@ -98,6 +100,16 @@ public record AgentProperties(String workspace, PermissionMode permissionMode, i
             : goalMaxOutputTokens;
         goalMaxActiveMillis = goalMaxActiveMillis == null || goalMaxActiveMillis < 60_000 ? DEFAULT_MAX_ACTIVE_MILLIS
             : goalMaxActiveMillis;
+        // 默认开启。显式 false 才关闭，方便同一套样例做开/关对照。
+        if (lintGateEnabled == null) {
+            String flag = System.getProperty("pilot.agent.lint-gate-enabled");
+            lintGateEnabled = flag == null || flag.isBlank() || !"false".equalsIgnoreCase(flag.strip());
+        }
+    }
+
+    /** 收尾 lint 默认开启。 */
+    public boolean lintGateEnabledValue() {
+        return !Boolean.FALSE.equals(lintGateEnabled);
     }
 
     /** 通用收尾提醒门默认开启，与实际验证状态和 Goal 独立核验分别处理。 */

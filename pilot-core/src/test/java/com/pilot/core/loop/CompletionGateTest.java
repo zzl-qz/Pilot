@@ -5,19 +5,23 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
+import com.pilot.core.lint.LintGate;
+import com.pilot.core.lint.LintRunner;
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.prompt.PromptLibrary;
-import com.pilot.core.quality.CodeQualityCheck;
 import com.pilot.core.quality.IndependentCodeReviewer;
+import com.pilot.core.quality.TextChange;
 
 class CompletionGateTest {
     private static final PromptLibrary PROMPTS = PromptLibrary.standard();
@@ -294,30 +298,52 @@ class CompletionGateTest {
     }
 
     @Test
-    void newMagicValueAsksForReuseOnceBeforeVerification() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复订单状态");
-        Map<String, CodeQualityCheck.TextChange> changes = Map.of("src/main/Order.java",
-            new CodeQualityCheck.TextChange("class Order {}\n", "class Order {\n    int timeout = 86400;\n}\n"));
+    void lintFindingsAreReturnedBeforeVerificationAndStopAfterTwoNudges() throws Exception {
+        Path root = Files.createTempDirectory("lint-gate");
+        Files.writeString(root.resolve("package.json"), "{\"scripts\":{\"lint\":\"node lint.js\"}}");
+        LintRunner runner = (workspace, command, timeout) -> new LintRunner.LintResult(1,
+            "src/main/Order.java:2 error 魔法值 86400\n", false, true);
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复订单状态", new LintGate(true, runner));
+        Map<String, TextChange> changes = Map.of("src/main/Order.java",
+            new TextChange("class Order {}\n", "class Order {\n    int timeout = 86400;\n}\n"));
 
         CompletionGate.Nudge first =
-            gate.evaluate(Set.of("src/main/Order.java"), List.of(), List.of(), List.of(), false, changes);
+            gate.evaluate(Set.of("src/main/Order.java"), List.of(), List.of(), List.of(), false, changes, root, null);
         CompletionGate.Nudge second =
-            gate.evaluate(Set.of("src/main/Order.java"), List.of(), List.of(), List.of(), false, changes);
+            gate.evaluate(Set.of("src/main/Order.java"), List.of(), List.of(), List.of(), false, changes, root, null);
+        CompletionGate.Nudge third =
+            gate.evaluate(Set.of("src/main/Order.java"), List.of(), List.of(), List.of(), false, changes, root, null);
 
         assertNotNull(first);
-        assertTrue(first.reason().contains("魔法值"), first.reason());
+        assertTrue(first.reason().contains("lint"), first.reason());
         assertTrue(first.prompt().contains("86400"), first.prompt());
         assertNotNull(second);
-        assertTrue(second.reason().contains("未验证"), second.reason());
+        assertTrue(second.reason().contains("lint"), second.reason());
+        assertNotNull(third);
+        assertTrue(third.reason().contains("未验证"), third.reason());
+    }
+
+    @Test
+    void lintSwitchOffDoesNotBlockOnTheSameFinding() {
+        LintRunner runner = (workspace, command, timeout) -> {
+            throw new AssertionError("开关关闭时不应执行 lint");
+        };
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复订单状态", new LintGate(false, runner));
+
+        CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/main/Order.java"), List.of(), List.of(), List.of(),
+            false, Map.of(), Path.of("."), null);
+
+        assertNotNull(nudge);
+        assertTrue(nudge.reason().contains("未验证"), nudge.reason());
     }
 
     @Test
     void refactoringAfterPassingTestRequiresFreshVerificationSoBehaviorCannotBreakSilently() {
         CompletionGate gate = new CompletionGate(PROMPTS, true, "实现订单与退款服务");
         Set<String> changed = Set.of("src/main/OrderService.java", "src/main/RefundService.java");
-        Map<String, CodeQualityCheck.TextChange> cleanChanges =
-            Map.of("src/main/OrderService.java", new CodeQualityCheck.TextChange(null, "class OrderService {}\n"),
-                "src/main/RefundService.java", new CodeQualityCheck.TextChange(null, "class RefundService {}\n"));
+        Map<String, TextChange> cleanChanges =
+            Map.of("src/main/OrderService.java", new TextChange(null, "class OrderService {}\n"),
+                "src/main/RefundService.java", new TextChange(null, "class RefundService {}\n"));
 
         // 第一步：写代码并跑通测试
         gate.recordOutcome(changed, List.of());
@@ -367,8 +393,8 @@ class CompletionGateTest {
     @Test
     void boundaryHardeningGoalRequiresBoundaryTestsAndReverificationBoundedToOnce() {
         CompletionGate gate = new CompletionGate(PROMPTS, true, "完善字符串解析器的边界情况与鲁棒性");
-        Map<String, CodeQualityCheck.TextChange> cleanChanges = Map.of("src/main/Parser.java",
-            new CodeQualityCheck.TextChange("class Parser {}\n", "class Parser { int parse() { return 0; } }\n"));
+        Map<String, TextChange> cleanChanges = Map.of("src/main/Parser.java",
+            new TextChange("class Parser {}\n", "class Parser { int parse() { return 0; } }\n"));
 
         gate.recordOutcome(List.of("src/main/Parser.java"), List.of());
         gate.recordOutcome(List.of(), List.of("mvnw test → exit 0"));

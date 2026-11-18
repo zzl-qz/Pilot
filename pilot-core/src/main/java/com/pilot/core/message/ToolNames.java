@@ -14,8 +14,6 @@ public final class ToolNames {
     public static final String LIST_DIR = "list_dir";
     public static final String GLOB_FILES = "glob_files";
     public static final String SEARCH_TEXT = "search_text";
-    public static final String AUDIT_CODEBASE = "audit_codebase";
-
     public static final String EDIT_FILE = "edit_file";
     public static final String CREATE_FILE = "create_file";
     public static final String APPLY_PATCH = "apply_patch";

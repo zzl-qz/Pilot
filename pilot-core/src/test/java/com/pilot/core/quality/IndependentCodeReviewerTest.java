@@ -16,7 +16,6 @@ import org.junit.jupiter.api.io.TempDir;
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelResponse;
-import com.pilot.core.quality.CodeQualityCheck.TextChange;
 
 class IndependentCodeReviewerTest {
     @TempDir

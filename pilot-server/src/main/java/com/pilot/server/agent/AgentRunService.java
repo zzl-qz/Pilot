@@ -45,6 +45,8 @@ import com.pilot.core.event.RunFailureCode;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.event.RunUsageUpdated;
 import com.pilot.core.event.SessionEvent;
+import com.pilot.core.lint.LintGate;
+import com.pilot.core.lint.ProjectLint;
 import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.loop.ContextCompactor;
 import com.pilot.core.message.Attachment;
@@ -61,7 +63,6 @@ import com.pilot.core.permission.PermissionGate;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.plan.PlanSink;
 import com.pilot.core.prompt.PromptLibrary;
-import com.pilot.core.quality.CodeAssetIndex;
 import com.pilot.core.quality.IndependentCodeReviewer;
 import com.pilot.core.quality.WorkspaceTexts;
 import com.pilot.core.session.ConversationRepository;
@@ -1163,9 +1164,8 @@ public class AgentRunService implements RunStarter {
      * 命令保留：git 只读子命令在内置白名单里，写命令照旧走权限门。
      */
     private ToolRegistry reviewTools(String workspace) {
-        AgentScope scope =
-            AgentScope.readOnly(List.of(), List.of()).withTools(List.of("read_*", "list_*", "glob_*", "search_*",
-                ToolNames.AUDIT_CODEBASE, ToolNames.RUN_COMMAND, ToolNames.WEB_SEARCH, ToolNames.WEB_FETCH), List.of());
+        AgentScope scope = AgentScope.readOnly(List.of(), List.of()).withTools(List.of("read_*", "list_*", "glob_*",
+            "search_*", ToolNames.RUN_COMMAND, ToolNames.WEB_SEARCH, ToolNames.WEB_FETCH), List.of());
         return toolFactory.registryForScope(workspace, scope, com.pilot.core.tool.SandboxSink.rejectAll());
     }
 
@@ -1241,19 +1241,28 @@ public class AgentRunService implements RunStarter {
         }
         try {
             return PROMPTS.render("context/repository", Map.of("tree", workspaceTree(root), "git", gitState(root),
-                "build", buildHint(root), "assets", codeAssets(root))).strip();
+                "build", buildHint(root), "lint", lintNote(root))).strip();
         } catch (RuntimeException e) {
             log.debug("生成仓库摘要失败", e);
             return "";
         }
     }
 
-    private static String codeAssets(Path root) {
+    private String lintNote(Path root) {
+        if (!properties.lintGateEnabledValue()) {
+            return "已关闭（pilot.agent.lint-gate-enabled=false），本次不跑规范检查";
+        }
         try {
-            String assets = CodeAssetIndex.summarize(root);
-            return assets.isBlank() ? "（未发现可复用的公共代码；新增前仍须 search_text 确认）" : assets;
+            ProjectLint lint = ProjectLint.discover(root);
+            if (lint.status() == ProjectLint.Status.DISABLED) {
+                return "工作区 .pilot/settings.json 把 quality.enabled 设为 false";
+            }
+            if (!lint.ready()) {
+                return "未发现 lint 命令。可在 .pilot/settings.json 写 quality.command";
+            }
+            return lint.source() + "：`" + lint.command() + "`";
         } catch (RuntimeException e) {
-            return "（公共代码索引不可用；新增前用 search_text 确认）";
+            return "lint 发现失败，收尾时会再试一次";
         }
     }
 
@@ -1460,8 +1469,7 @@ public class AgentRunService implements RunStarter {
                 properties.goalMaxInputTokens(), properties.goalMaxOutputTokens(), properties.goalMaxActiveMillis())
             : null;
         if (goalPolicy != null) {
-            goalPolicy.withCommandLookup(id -> commandTasks.get(sessionId, id))
-                .withOriginalTexts(snapshots::originalText);
+            goalPolicy.withCommandLookup(id -> commandTasks.get(sessionId, id));
             goalPolicy.withAvailableTools(availableTools)
                 .withUpdates(state -> sink.accept(new com.pilot.core.event.ExecutionUpdated(state.mode(), state.phase(),
                     state.requests(), state.reason(), state.gap())));
@@ -1507,6 +1515,7 @@ public class AgentRunService implements RunStarter {
             .withCompletionClaim(() -> claimCompletion(sessionId, handle)).withRestoredPaths(snapshots::restoredPaths)
             .withQualityWorkspace(resolvedWorkspace)
             .withQualityTexts(snapshots::originalText, path -> WorkspaceTexts.read(resolvedWorkspace, path))
+            .withLintGate(properties.lintGateEnabledValue() ? LintGate.enabled() : LintGate.disabled())
             .withIndependentCodeReviewer(review.active() ? null
                 : new IndependentCodeReviewer(measuredMain, resolvedWorkspace, handle.cancelled::get))
             // 编辑后自动格式化/lint 之类交给 .pilot/settings.json，不再占用模型注意力
