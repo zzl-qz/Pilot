@@ -17,6 +17,8 @@ public final class ToolResults {
     public static final String RESULT_UNKNOWN = "ERROR: 结果未确认";
     /** 命令跑完了，但没能完整记下它改了哪些文件。 */
     public static final String CHANGE_TRACKING_INCOMPLETE = "ERROR: 命令已结束，但无法完整确认其工作区变更";
+    /** 命令前的变更基线没建立起来，但命令仍会执行；这只是一条降级警告。 */
+    public static final String CHANGE_TRACKING_UNAVAILABLE = "WARN: 未能建立命令前文件基线，命令仍会执行；本轮的改动不会进入差异/回滚追踪";
     /** 被运行策略或中断信号跳过，工具没有执行。 */
     public static final String SKIPPED = "SKIPPED:";
 

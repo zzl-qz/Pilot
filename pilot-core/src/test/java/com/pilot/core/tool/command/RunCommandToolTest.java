@@ -298,6 +298,42 @@ class RunCommandToolTest {
         assertEquals(List.of("mvn", "-q", "test"), RunCommandTool.tokenize("  mvn   -q  test  "));
     }
 
+    @Test
+    void runsCommandEvenWhenChangeBaselineCannotBeEstablished() throws Exception {
+        CommandChangeTracker broken = new CommandChangeTracker() {
+            @Override
+            public Handle begin(Path root) {
+                throw new IllegalStateException("测试锁文件占用");
+            }
+
+            @Override
+            public Result finish(Handle handle) {
+                return Result.empty();
+            }
+        };
+        RunCommandTool tool = new RunCommandTool(new PathValidator(workspace), broken);
+
+        ProcessBuilder init = new ProcessBuilder("git", "init");
+        init.directory(workspace.toFile());
+        Assumptions.assumeTrue(init.start().waitFor() == 0, "git init");
+        String result = tool.execute(Map.of("command", "git add .", "timeoutSeconds", 60));
+
+        assertTrue(result.contains("退出码: 0"), result);
+        assertTrue(result.contains("未能建立命令前文件基线"), result);
+        assertTrue(result.contains("测试锁文件占用"), result);
+    }
+
+    @Test
+    void refusesToKillProcessesFromInsideTheAgent() {
+        RunCommandTool tool = tool();
+
+        String broad = tool.execute(Map.of("command", "taskkill /F /IM java.exe"));
+        String nested = tool.execute(Map.of("command", "node -e \"process.kill(process.pid)\""));
+
+        assertTrue(broad.contains("stop_command"), broad);
+        assertTrue(nested.contains("stop_command"), nested);
+    }
+
     private RunCommandTool tool() {
         return new RunCommandTool(new PathValidator(workspace));
     }

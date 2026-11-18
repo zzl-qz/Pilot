@@ -59,9 +59,13 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
     private static final int MAX_COMMAND_FILES = 100_000;
     private static final long MAX_COMMAND_HASH_BYTES = 64L * 1024 * 1024;
     private static final long MAX_COMMAND_BACKUP_BYTES = 128L * 1024 * 1024;
+    /** 命令前基线是 best-effort：超过这个时间就降级，不能把整条命令拖死。 */
+    private static final long COMMAND_BASELINE_BUDGET_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
     private static final Set<String> COMMAND_IGNORED_DIRECTORIES =
         Set.of(".git", ".pilot", ".gradle", ".idea", ".vscode", ".next", ".nuxt", "node_modules", "target", "build",
-            "dist", "out", "coverage", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".venv", "venv");
+            "dist", "out", "coverage", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".venv", "venv",
+            // 高频变动的工具缓存/浏览器 profile：命令前基线不需要为它们付出失败风险。
+            ".analysis", ".cache", ".turbo", ".parcel-cache", ".pnpm-store", ".yarn", "profiles");
 
     private final ObjectMapper mapper;
     private final Path root;
@@ -212,7 +216,8 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         Path directory = commandTrackingDirectory(context.runId, id);
         try {
             Files.createDirectories(directory);
-            CommandBaseline baseline = commandInventory(normalized, directory.resolve("files"), true);
+            long deadline = System.nanoTime() + COMMAND_BASELINE_BUDGET_NANOS;
+            CommandBaseline baseline = commandInventory(normalized, directory.resolve("files"), true, deadline);
             Files.writeString(directory.resolve("baseline.json"), mapper.writeValueAsString(baseline));
             return new CommandChangeTracker.Handle(context.runId, id);
         } catch (IOException | RuntimeException e) {
@@ -223,8 +228,14 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
             if (e instanceof RuntimeException runtime) {
                 throw runtime;
             }
-            throw new UncheckedIOException("建立命令前文件基线失败", (IOException)e);
+            throw new UncheckedIOException("建立命令前文件基线失败：" + describe(e), (IOException)e);
         }
+    }
+
+    /** 错误信息必须带异常类型与消息，否则调用方只能看到一句“失败”，无法定位是锁文件、超时还是路径。 */
+    private static String describe(Exception error) {
+        String message = error.getMessage();
+        return error.getClass().getSimpleName() + (message == null || message.isBlank() ? "" : ": " + message);
     }
 
     /** Recognize platform path aliases without rewriting the snapshot's lexical workspace root. */
@@ -260,7 +271,7 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         try {
             CommandBaseline baseline = mapper.readValue(Files.readString(baselineFile), CommandBaseline.class);
             Path workspace = Path.of(baseline.workspace()).toAbsolutePath().normalize();
-            CommandBaseline after = commandInventory(workspace, null, false);
+            CommandBaseline after = commandInventory(workspace, null, false, 0);
             Set<String> names = new LinkedHashSet<>(baseline.files().keySet());
             names.addAll(after.files().keySet());
             List<String> changed = names.stream()
@@ -295,7 +306,8 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         }
     }
 
-    private CommandBaseline commandInventory(Path workspace, Path backupRoot, boolean backup) throws IOException {
+    private CommandBaseline commandInventory(Path workspace, Path backupRoot, boolean backup, long deadlineNanos)
+        throws IOException {
         LinkedHashMap<String, CommandFile> files = new LinkedHashMap<>();
         int[] count = {0};
         long[] backedUpBytes = {0L};
@@ -315,7 +327,10 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
                 if (!attributes.isRegularFile() || Files.isSymbolicLink(file)) {
                     return FileVisitResult.CONTINUE;
                 }
-                if (++count[0] > MAX_COMMAND_FILES) {
+                if (deadlineNanos > 0 && (++count[0] & 0x7F) == 0 && System.nanoTime() > deadlineNanos) {
+                    throw new IOException("命令前基线超过时间预算，已降级");
+                }
+                if (count[0] > MAX_COMMAND_FILES) {
                     throw new IOException("工作区可跟踪文件超过上限 " + MAX_COMMAND_FILES);
                 }
                 String relative = workspace.relativize(file).toString().replace('\\', '/');

@@ -202,10 +202,17 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         }
         Prepared prepared = preparation.prepared();
         CommandChangeTracker.Handle tracking;
+        String trackingWarning = "";
         try {
             tracking = prepared.trackChanges() ? changes.begin(paths.root()) : CommandChangeTracker.Handle.none();
         } catch (RuntimeException e) {
-            return ToolResult.text("ERROR: 无法建立命令前文件基线，命令未执行：" + redact(String.valueOf(e.getMessage())));
+            // 基线是 best-effort 的旁路记录，不是命令执行的前置条件。
+            // 建立失败时命令照常执行，只把「本轮改动未纳入追踪」告诉模型和界面；
+            // 真正的错误原因保留在警告里，避免只看到一句“命令未执行”。
+            tracking = CommandChangeTracker.Handle.none();
+            String cause =
+                e.getMessage() == null || e.getMessage().isBlank() ? e.getClass().getSimpleName() : e.getMessage();
+            trackingWarning = ToolResults.CHANGE_TRACKING_UNAVAILABLE + "（" + redact(cause) + "）";
         }
 
         String text;
@@ -220,7 +227,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             terminal = managed.terminal();
         }
         if (!terminal || !tracking.active()) {
-            return ToolResult.text(text);
+            return ToolResult.text(withTrackingWarning(text, trackingWarning));
         }
         CommandChangeTracker.Result result;
         try {
@@ -231,7 +238,14 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         if (!result.complete()) {
             text = ToolResults.CHANGE_TRACKING_INCOMPLETE + "；不得据此宣称验证通过：" + result.warning() + "\n" + text;
         }
-        return new ToolResult(text, result.changedPaths(), List.of());
+        return new ToolResult(withTrackingWarning(text, trackingWarning), result.changedPaths(), List.of());
+    }
+
+    private static String withTrackingWarning(String text, String warning) {
+        if (warning == null || warning.isBlank()) {
+            return text;
+        }
+        return text + "\n\n" + warning;
     }
 
     private Preparation prepare(Map<String, Object> args) {
@@ -418,6 +432,10 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         }
         if (executable.contains("/") || executable.contains("\\")) {
             return SegmentCheck.error("只接受白名单内的裸命令名或标准构建 wrapper，不接受路径: " + tokens.get(0));
+        }
+        String selfProtection = SelfProtection.check(tokens);
+        if (selfProtection != null) {
+            return SegmentCheck.error(selfProtection);
         }
         if (!CommandPolicy.knownExecutable(executable)) {
             return SegmentCheck

@@ -30,6 +30,7 @@ import com.pilot.core.model.ContextComposition.Source;
  * <pre>
  * prompts/system/base.md            身份、边界、意图判定
  * prompts/system/workflow.md        调研、计划、编辑、验证
+ * prompts/system/operations.md      进程、端口、自修改与故障处理
  * prompts/system/tools.md           工具选择策略（跨工具约束）
  * prompts/system/skills.md          技能目录段（requires: use_skill，{{skills}} 为目录数据）
  * prompts/system/tools-spawn.md     独立调研工具指导（requires: spawn_agent）
@@ -80,7 +81,7 @@ public final class PromptLibrary {
      * （代码声明优先于 md 头部 frontmatter）。新增段落取区间空隙值。
      */
     private static final List<SystemSection> SYSTEM_SECTIONS = List.of(new SystemSection("system/base", 0),
-        new SystemSection("system/workflow", 100),
+        new SystemSection("system/workflow", 100), new SystemSection("system/operations", 120),
         new SystemSection("system/deliverables", 150, Set.of("publish_artifact")),
         new SystemSection("system/tools", 200), new SystemSection("system/skills", 250, Set.of(ToolNames.USE_SKILL)),
         new SystemSection("system/tools-spawn", 300, Set.of(ToolNames.SPAWN_AGENT)),

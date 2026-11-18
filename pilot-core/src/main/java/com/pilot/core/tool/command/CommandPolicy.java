@@ -23,7 +23,9 @@ import com.pilot.core.workspace.PathValidator;
 final class CommandPolicy {
     /** 只读的查看类工具：不改任何文件。 */
     static final Set<String> INSPECTION = Set.of("ls", "cat", "head", "tail", "wc", "rg", "grep", "find", "tree", "pwd",
-        "stat", "file", "du", "diff", "sort", "uniq", "which", "echo");
+        "stat", "file", "du", "diff", "sort", "uniq", "which", "echo",
+        // 端口/进程观察：用于发现端口占用、确认自己启动的后台任务，不负责杀进程。
+        "netstat", "lsof", "ss", "tasklist");
     /** 会写文件的基础工具：变更由命令前后快照追踪，路径同样限定在工作区内。 */
     static final Set<String> FILE_MUTATORS = Set.of("mkdir", "touch", "cp", "mv");
     /** 构建、测试、运行时与本机服务探测。 */
