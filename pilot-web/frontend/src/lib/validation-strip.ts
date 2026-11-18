@@ -28,9 +28,10 @@ const HIDDEN: StripView = { visible: false, label: '', tone: 'muted', detail: ''
  *
  * @param view    `/api/sessions/{id}/validation` 的返回；未加载时为 null
  * @param hasRun  当前会话是否已经跑过至少一轮（没跑过就别摆一条「未验证」吓人）
+ * @param running 这一轮还在跑。跑完之前没有验证结论，不能把「还没验」说成「未验证」。
  */
-export function stripView(view: S.DiagnosticsControllerValidationView | null | undefined, hasRun: boolean): StripView {
-  if (!hasRun) return HIDDEN;
+export function stripView(view: S.DiagnosticsControllerValidationView | null | undefined, hasRun: boolean, running = false): StripView {
+  if (running || !hasRun) return HIDDEN;
   if (!view?.report) {
     // 还没拿到结论时不要显示「未验证」：那会把「正在加载」说成「没有证据」。
     return HIDDEN;

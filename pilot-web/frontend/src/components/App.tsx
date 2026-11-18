@@ -7,6 +7,7 @@ import { Button } from '@astryxdesign/core/Button';
 import { Dialog } from '@astryxdesign/core/Dialog';
 import { TextInput } from '@astryxdesign/core/TextInput';
 import { useStore } from '../store.js';
+import { formatClock } from '../thread-utils.js';
 import { NavigationRail } from './NavigationRail.jsx';
 import { Icon } from './Icon.jsx';
 import { Sidebar } from './Sidebar.jsx';
@@ -446,7 +447,7 @@ function RunStatus() {
     : phase === '就绪' ? '就绪，可以发送新消息' : phase;
   return <span id="run-state" className={`run-state state-${tone}`} data-tone={tone} title={detail}>
     <span className="run-state-label" role="status">{label}</span>
-    {running && runStartedAt ? <span className="run-state-time" aria-hidden="true">{Math.round((now - runStartedAt) / 1000)}s</span> : null}
+    {running && runStartedAt ? <span className="run-state-time" aria-hidden="true">{formatClock(Math.round((now - runStartedAt) / 1000))}</span> : null}
   </span>;
 }
 

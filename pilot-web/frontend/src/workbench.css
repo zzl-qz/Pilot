@@ -499,9 +499,19 @@ html[data-theme] .agents-dock-head .queue-toggle { margin-left: auto; }
 html[data-theme] .agents-chip { color: var(--muted); background: var(--panel-2); }
 html[data-theme] .agents-chip:hover { background: var(--ui-hover); color: var(--ink); }
 html[data-theme] .turn-stats-detail { min-width: 0; }
-html[data-theme] .turn-stats-detail .turn-stats { opacity: 1; font-size: 12px; gap: 8px 16px; padding: 8px 0; margin: 0; }
-html[data-theme] .turn-stats-detail .turn-stat b { font-family: var(--sans); font-variant-numeric: tabular-nums; color: var(--ink-2); }
-html[data-theme] .turn-stats-detail .turn-stat-note { width: 100%; margin: 0; color: var(--muted); }
+html[data-theme] .turn-stats-detail .turn-stats {
+  opacity: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+  gap: 12px 16px;
+  padding: 10px 0 4px;
+  margin: 0;
+  font-size: 12px;
+}
+html[data-theme] .turn-stats-detail .turn-stat { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+html[data-theme] .turn-stats-detail .turn-stat > span { color: var(--muted); font-size: 11px; }
+html[data-theme] .turn-stats-detail .turn-stat b { font-family: var(--sans); font-weight: 560; font-variant-numeric: tabular-nums; color: var(--ink); font-size: 13px; }
+html[data-theme] .turn-stats-detail .turn-stat-note { grid-column: 1 / -1; width: auto; margin: 0; color: var(--muted); line-height: 1.5; }
 @media (max-width: 640px) {
   html[data-theme] .agent-group > .agent-group-head, html[data-theme] .agent-group .agent-head, html[data-theme] .agents-dock-head { min-height: 44px; }
   html[data-theme] .agent-group .agent-head .tool-group-count { display: none; }

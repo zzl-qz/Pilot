@@ -14,7 +14,7 @@ setMarkdownNotifier((text) => {
 import('./store.js').then(({ useStore }) => {
   setMarkdownContext({
     getWorkspace: () => useStore.getState().workspace,
-    openFile: (path) => useStore.getState().openPreview(path)
+    openFile: (path, line) => useStore.getState().openPreview(path, line)
   });
 });
 

@@ -22,6 +22,7 @@ export function ProjectEditor() {
   const [folders, setFolders] = useState((editor?.folders ?? project?.folders ?? []).join('\n'));
   const [constraints, setConstraints] = useState('');
   const [agentsLocked, setAgentsLocked] = useState(false);
+  const [agentsMaxChars, setAgentsMaxChars] = useState<number>();
   const [agentsReady, setAgentsReady] = useState(!editor?.id);
   const [editingAgents, setEditingAgents] = useState(!editor?.id);
   const [busy, setBusy] = useState('');
@@ -44,6 +45,7 @@ export function ProjectEditor() {
       const text = file?.text || '';
       setConstraints(text);
       setAgentsLocked(Boolean(file?.truncated));
+      setAgentsMaxChars(file?.maxChars);
       setEditingAgents(!text.trim());
       setAgentsReady(true);
     }).catch(failure => {
@@ -147,7 +149,7 @@ export function ProjectEditor() {
         </div>
         {editingAgents || !constraints.trim() ? (
           <textarea id="project-constraints" aria-labelledby="project-constraints-label" value={constraints}
-            readOnly={agentsLocked} maxLength={8000}
+            readOnly={agentsLocked} maxLength={agentsMaxChars}
             disabled={Boolean(busy) || (Boolean(editor?.id) && !agentsReady)}
             placeholder={'用平时说话的方式写，保存后会在文件夹根目录创建 AGENTS.md。\n\n# 必须遵守\n- 金额计算必须调用 Money.round'}
             onChange={event => setConstraints(event.target.value)} />
@@ -157,7 +159,7 @@ export function ProjectEditor() {
           </div>
         )}
         <p className="project-folder-help">只认第一个文件夹根目录的 AGENTS.md。这里没有这份文件就不算有约定。写好后保存，会自动创建。</p>
-        {agentsLocked && <p className="pilot-inline-status" role="status">这份文件超过 8000 字。模型只能看到前 8000 字。这里不保存，避免把后面截掉。请直接在仓库里改短。</p>}
+        {agentsLocked && <p className="pilot-inline-status" role="status">这份文件超过模型读取上限（{agentsMaxChars} 字）。这里只预览前缀，请在仓库里编辑。</p>}
       </div>
       <section className="project-folders-section" aria-labelledby="project-folders-label">
         <div className="project-folders-heading">

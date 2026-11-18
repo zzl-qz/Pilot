@@ -1,6 +1,6 @@
 import { statusLetter } from './diff-format.js';
 import type { ChangeFile } from '../../types/core.js';
-import { useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../../store.js';
 import { writeClipboard } from '../../lib/clipboard.js';
 import { sortChangeFiles, splitPath, statusKind } from '../../lib/changes.js';
@@ -13,6 +13,8 @@ export function PreviewPanel() {
   const path = useStore((state) => state.ui.previewPath);
   const data = useStore((state) => state._previewData);
   const loading = useStore((state) => state._previewLoading);
+  const line = useStore((state) => state._previewLine);
+  const request = useStore((state) => state._previewRequest);
   const report = useStore((state) => state.changeReport);
   const [wrap, setWrap] = useState(false);
 
@@ -20,7 +22,18 @@ export function PreviewPanel() {
   const isMarkdown = /\.(md|markdown|mdx)$/i.test(path || '');
   const isTabular = /\.(csv|tsv)$/i.test(path || '');
   const content = data?.content || '';
-  const lineCount = content ? content.split('\n').length : 0;
+  const lines = useMemo(() => content ? content.split(/\r\n|\r|\n/) : [], [content]);
+  const target = line && line <= lines.length ? line : null;
+  const source = useRef<HTMLPreElement>(null);
+  const highlighted = useRef<HTMLSpanElement>(null);
+
+  useLayoutEffect(() => {
+    const row = highlighted.current;
+    const pane = source.current;
+    if (row && pane) {
+      pane.scrollTop += row.getBoundingClientRect().top - pane.getBoundingClientRect().top - pane.clientHeight / 3;
+    }
+  }, [loading, request, target, wrap]);
 
   const copy = async () => {
     if (!content) {
@@ -33,6 +46,27 @@ export function PreviewPanel() {
       useStore.getState().showNotice('复制失败，请手动选择内容');
     }
   };
+
+  function renderContent() {
+    if (!data || loading) return null;
+    if (data.binary) return <p className="panel-empty">（二进制文件，无法预览）</p>;
+    const preClass = `preview-body${wrap ? '' : ' is-nowrap'}`;
+    if (line && content) {
+      return <pre ref={source} id="preview-body" className={`${preClass} preview-source`}>
+        {lines.map((text, index) => {
+          const number = index + 1;
+          const selected = number === target;
+          return <span key={number} ref={selected ? highlighted : undefined} data-line={number}
+            aria-current={selected ? 'location' : undefined} className="preview-source-line">{text || '\u200b'}</span>;
+        })}
+        {data.truncated && '\n…（内容过长，已截断）'}
+      </pre>;
+    }
+    const text = data.truncated ? `${content}\n\n…（内容过长，已截断）` : (content || '（空文件）');
+    if (isMarkdown) return <div className="bubble preview-markdown"><MarkdownBody text={text} /></div>;
+    if (isTabular) return <StructuredDocumentView text={content} filename={data.path || path} />;
+    return <pre id="preview-body" className={preClass}>{text}</pre>;
+  }
 
   return (
     <div id="panel-preview" className={`panel${data && !data.binary ? ' has-content' : ''}`}>
@@ -65,30 +99,17 @@ export function PreviewPanel() {
       {data && !data.binary && (
         <div className="preview-meta">
           <span className="preview-meta-path" title={data.path || path}>{data.path || path}</span>
-          <span className="preview-meta-item">{lineCount} 行</span>
+          <span className="preview-meta-item">{lines.length} 行</span>
           <span className="preview-meta-item">{formatBytes(data.size)}</span>
           {isMarkdown && <span className="preview-meta-tag">Markdown</span>}
           {data.truncated && <span className="preview-meta-tag is-warn">已截断</span>}
+          {line && <span className={`preview-meta-tag${target ? '' : ' is-warn'}`}>
+            {target ? `第 ${target} 行` : `第 ${line} 行不在预览范围内`}
+          </span>}
         </div>
       )}
       {loading && <p className="panel-empty">读取中…</p>}
-      {!loading && data && (
-        data.binary
-          ? <p className="panel-empty">（二进制文件，无法预览）</p>
-          : (isMarkdown
-            ? (
-              <div className="bubble preview-markdown">
-                <MarkdownBody text={data.truncated ? `${content}\n\n…（内容过长，已截断）` : (content || '（空文件）')} />
-              </div>
-            )
-            : isTabular
-              ? <StructuredDocumentView text={content} filename={data.path || path} />
-              : (
-                <pre id="preview-body" className={`preview-body${wrap ? '' : ' is-nowrap'}`}>
-                  {data.truncated ? `${content}\n…（内容过长，已截断）` : (content || '（空文件）')}
-                </pre>
-              ))
-      )}
+      {renderContent()}
       {!loading && !data && (
         <div className="preview-empty">
           <p>选一个改动文件直接预览，或在上面输入路径。</p>

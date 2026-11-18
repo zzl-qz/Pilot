@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -43,6 +44,14 @@ class ModelCapacityTest {
             .validateProtocol(List.of(Message.assistant("", List.of(a, b)), Message.tool("a", "A"))));
         assertThrows(IllegalArgumentException.class,
             () -> RequestBudget.validateProtocol(List.of(Message.assistant("", List.of(a, a)))));
+        var broken = new ArrayList<Message>();
+        broken.add(Message.assistant("", List.of(a, b)));
+        broken.add(Message.tool("a", "A"));
+        broken.add(Message.user("继续"));
+        RequestBudget.closeDanglingToolCalls(broken);
+        RequestBudget.validateProtocol(broken);
+        assertEquals("tool", broken.get(2).role());
+        assertEquals("b", broken.get(2).toolCallId());
     }
 
     /** 兼容网关把输出上限误解成「要写满」时，能整条参数关掉并对照验证。 */

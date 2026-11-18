@@ -662,6 +662,7 @@ export interface ProjectControllerAgentsFile {
   folder: string;
   text: string;
   truncated: boolean;
+  maxChars: number;
 }
 
 /** RecoveryReportService.java / Snapshot */

@@ -11,6 +11,7 @@ const output=await mkdtemp(join(tmpdir(),'pilot-workbench-style-'));
 const entry=`.workbench-style-${process.pid}.html`,file=join(root,entry);
 const fixture=`<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Pilot 工作台</title><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
 import React from 'react';import {createRoot} from 'react-dom/client';import App from '/src/components/App.jsx';import {useStore} from '/src/store.js';import {api} from '/src/api.js';
+import {setMarkdownContext} from '/src/lib/markdown-render.js';
 import '/src/styles.css';import '/src/shell-vanilla.css';import '/src/styles-addendum.css';import '/src/workbench.css';
 window.store=useStore;window.api=api;document.documentElement.dataset.theme='dark';document.documentElement.dataset.accent='sky';
 for(const k of Object.keys(api))if(typeof api[k]==='function')api[k]=async()=>({});
@@ -27,6 +28,12 @@ if(new URLSearchParams(location.search).has('review')){
  useStore.setState({changeReport:report,lastRunId:'r2'});
  useStore.getState().setUi({sidebarOpen:innerWidth>960,inspectorOpen:true,inspectorTab:'changes',changeView:'src/workspace.ts'});
 }
+if(new URLSearchParams(location.search).has('citation')){
+ setMarkdownContext({getWorkspace:()=>useStore.getState().workspace,openFile:(path,line)=>useStore.getState().openPreview(path,line)});
+ const reply={...rows[1].reply,text:'[查看校验](/workspace/pilot/src/example.ts:120) · [另一处](/workspace/pilot/src/example.ts:35) · [越界](/workspace/pilot/src/example.ts:999) · [整个文件](/workspace/pilot/src/example.ts)'};
+ useStore.setState(state=>({thread:{...state.thread,rows:rows.map((row,i)=>i===1?{...row,reply}:row)}}));
+ api.file=async(_session,path)=>({path,size:4096,binary:false,truncated:false,content:Array.from({length:180},(_,i)=>'const line'+(i+1)+' = '+(i+1)+';').join('\\r\\n')});
+}
 createRoot(document.getElementById('root')).render(React.createElement(App));
 </script></body></html>`;
 try{await writeFile(file,fixture);await build({root,build:{outDir:output,emptyOutDir:false,rollupOptions:{input:file}}});}finally{await rm(file,{force:true});}
@@ -37,6 +44,24 @@ let browser,electron;
 async function run(page,name){
  page.setDefaultTimeout(7000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.route('**/api/**',route=>route.fulfill({json:{}}));
+ await page.setViewportSize({width:1440,height:900});
+ await page.goto(url+'?citation');
+ for(const [label,line] of [['查看校验',120],['另一处',35]]){
+  await page.locator('.file-ref').filter({hasText:label}).click();
+  const row=page.locator(`[data-line="${line}"][aria-current="location"]`);
+  await row.waitFor();
+  assert.equal((await row.innerText()).trim(),`const line${line} = ${line};`);
+  assert.ok(await row.evaluate(el=>{
+   const pane=el.closest('pre'),view=pane.getBoundingClientRect(),target=el.getBoundingClientRect();
+   return pane.scrollTop>0 && target.top>=view.top && target.bottom<=view.bottom && getComputedStyle(el).backgroundColor!==getComputedStyle(el.previousElementSibling).backgroundColor;
+  }),`第 ${line} 行应滚入可视区并高亮`);
+ }
+ await page.locator('.file-ref').filter({hasText:'越界'}).click();
+ await page.getByText('第 999 行不在预览范围内').waitFor();
+ assert.equal(await page.locator('.preview-source-line[aria-current]').count(),0);
+ await page.locator('.file-ref').filter({hasText:'整个文件'}).click();
+ await page.locator('#preview-body:not(.preview-source)').waitFor();
+
  for(const theme of ['dark','light'])for(const width of [1440,768,390]){
   await page.setViewportSize({width,height:900});await page.goto(url);await page.locator('.msg-assistant').last().waitFor();
   await page.evaluate(theme=>store.getState().setTheme(theme),theme);

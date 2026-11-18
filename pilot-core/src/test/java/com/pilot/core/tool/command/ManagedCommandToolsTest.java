@@ -155,6 +155,69 @@ class ManagedCommandToolsTest {
     }
 
     @Test
+    void silentForegroundCommandMovesToBackgroundWithoutBeingKilled() throws Exception {
+        try (CommandTaskManager manager = manager()) {
+            RunCommandTool run = run(manager);
+            run.silenceLimitMs = 400;
+            long started = System.nanoTime();
+            String result = run.execute(Map.of("command", command("wait"), "timeoutSeconds", 30));
+            long tookMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+            assertTrue(tookMs < 5_000, result);
+            assertTrue(result.contains("已转到后台"), result);
+            assertTrue(result.contains("没有新输出"), result);
+            CommandTaskManager.Task task = manager.list(SESSION).getFirst();
+            assertTrue(task.background(), result);
+            assertEquals("RUNNING", task.status());
+            Files.writeString(workspace.resolve("release"), "go");
+            String done =
+                new CommandStatusTool(manager, SESSION).execute(Map.of("taskId", task.taskId(), "waitSeconds", 5));
+            assertTrue(done.contains("状态: COMPLETED"), done);
+        }
+    }
+
+    @Test
+    void quickNonZeroExitIsDescribedAsABadInvocation() {
+        try (CommandTaskManager manager = manager()) {
+            String result = run(manager).execute(Map.of("command", command("failure")));
+            assertTrue(result.contains("调用方式不对"), result);
+            assertTrue(result.contains("状态: FAILED"), result);
+        }
+    }
+
+    @Test
+    void statusReturnsWithinTheBudgetWhenChangeTrackingIsSlow() throws Exception {
+        class SlowChanges implements CommandChangeTracker {
+            @Override
+            public Handle begin(Path root) {
+                return new Handle("run", "slow");
+            }
+
+            @Override
+            public Result finish(Handle handle) {
+                try {
+                    Thread.sleep(8_000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return Result.empty();
+            }
+        }
+        try (CommandTaskManager manager = manager()) {
+            RunCommandTool run = new RunCommandTool(new PathValidator(workspace), manager, SESSION, new SlowChanges());
+            run.execute(Map.of("command", command("wait"), "background", true));
+            Files.writeString(workspace.resolve("release"), "go");
+            CommandTaskManager.Task task = manager.list(SESSION).getFirst();
+            long started = System.nanoTime();
+            String result = new CommandStatusTool(manager, SESSION, new SlowChanges())
+                .execute(Map.of("taskId", task.taskId(), "waitSeconds", 5));
+            long tookMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+            assertTrue(tookMs < 7_000, result);
+            assertTrue(result.contains("变更核对超过 5 秒"), result);
+            assertTrue(result.contains("状态: COMPLETED") || result.contains("状态: RUNNING"), result);
+        }
+    }
+
+    @Test
     void explicitBackgroundTimeoutIsHonoredAndCannotPassVerification() {
         try (CommandTaskManager manager = manager()) {
             run(manager).execute(Map.of("command", command("wait"), "background", true, "timeoutSeconds", 1));

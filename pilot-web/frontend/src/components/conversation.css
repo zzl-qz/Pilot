@@ -140,7 +140,7 @@ html[data-theme] .conversation-thread .conversation-tool-line,
 .conversation-tool-line > :first-child { flex: none; width: 7px; }
 .conversation-tool-line[aria-expanded="true"] > .tool-group-chevron { transform: rotate(90deg); }
 .conversation-tool-name { flex: none; max-width: 26%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.conversation-tool-state { display: inline-flex; flex: none; align-items: center; gap: 4px; color: var(--muted); white-space: nowrap; font-size: 12px; }
+.conversation-tool-state { display: inline-flex; flex: none; align-items: center; gap: 4px; color: var(--muted); white-space: nowrap; font-size: 12px; font-variant-numeric: tabular-nums; }
 .conversation-tool-state > .ui-icon { width: 12px; height: 12px; }
 html[data-theme] .conversation-thread :is(.conversation-tool-line, .conversation-agent-tool) .tool-args {
   color: var(--muted);

@@ -12,14 +12,13 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import com.pilot.core.prompt.PromptLibrary;
+import com.pilot.server.workspace.ProjectRulesFile;
 
 /**
  * 项目约定只认工作区根目录的 AGENTS.md。上层目录、用户目录和其他文件名读到也不算。
  * 记忆仍沿祖先目录和 ~/.pilot 加载，和约定不是一条通道。
  */
 final class ProjectRuleLoader {
-    private static final List<String> NAMES = List.of("AGENTS.md");
-    private static final int MAX_FILE_CHARS = 8_000;
     /** 记忆与约定是两种内容：记忆是沉淀事实，预算独立，避免互相挤占。 */
     private static final List<String> MEMORY_NAMES = List.of("MEMORY.md");
     private static final int MAX_MEMORY_CHARS = 4_000;
@@ -31,12 +30,22 @@ final class ProjectRuleLoader {
         if (workspace == null) {
             return "";
         }
-        Rule rule = firstRule(workspace.toAbsolutePath().normalize(), NAMES, MAX_FILE_CHARS, "约定文件过长，已截断");
-        if (rule == null) {
+        Path file = ProjectRulesFile.path(workspace);
+        ProjectRulesFile.Preview preview;
+        try {
+            preview = ProjectRulesFile.read(file);
+        } catch (IOException ignored) {
+            // 不可读的约定不阻断对话。
             return "";
         }
-        return prompts.render("system/project-rules", Map.of("source", rule.path().toString(), "rules", rule.content()))
-            .strip();
+        String text = preview.text().strip();
+        if (text.isEmpty()) {
+            return "";
+        }
+        if (preview.truncated()) {
+            text += "\n…（约定文件过长，已截断）";
+        }
+        return prompts.render("system/project-rules", Map.of("source", file.toString(), "rules", text)).strip();
     }
 
     /**

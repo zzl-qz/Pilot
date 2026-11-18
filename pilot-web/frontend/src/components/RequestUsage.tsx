@@ -22,7 +22,7 @@ export function RequestList({ reports = [] }: { reports?: RequestReport[] }) {
       <summary>
         <span className="request-group-title">{REQUEST_PURPOSES[group.purpose] || '其他'}请求 <span className="request-count">{group.reports.length} 次</span></span>
         {group.failed > 0 && <Badge className="request-failure" variant="error" label={group.failed + " 次失败"} />}
-        <span className="request-cost">{group.pricedRequests ? `≈ ${totalCost(group)}${group.pricedRequests < group.reports.length ? ' · 部分' : ''}` : '未计价'}</span>
+        <span className="request-cost">{group.pricedRequests ? `≈ ${totalCost(group)}${group.pricedRequests < group.reports.length ? ' · 部分有价' : ''}` : '未返回单价'}</span>
       </summary>
       {group.purpose === 'subagent' && <p className="request-note request-group-note">同一子智能体可多次请求模型，此处按请求计数。</p>}
       <RequestRows reports={group.reports} />
@@ -40,7 +40,7 @@ function RequestRows({ reports }: { reports: RequestReport[] }) {
       <details className="request-item">
         <summary><span className="request-number">第 {reports.length - index} 次</span><span className="request-identity" title={report.model}>{report.model || '模型未提供'}</span>
           {report.status === 'failed' && <Badge className="request-failure" variant="error" label="请求失败" />}
-          <span className="request-cost">{report.cost?.total != null ? '≈ ' : ''}{formatCost(report.cost?.total, report.cost?.currency)}</span></summary>
+          <span className="request-cost">{report.cost?.total != null ? `≈ ${formatCost(report.cost.total, report.cost.currency)}` : ''}</span></summary>
         <dl className="request-values">
           <div><dt>输入 / 输出</dt><dd>{report.usage?.exact ? '' : '≈ '}{formatTokens(report.usage?.inputTokens)} / {formatTokens(report.usage?.outputTokens)} tokens</dd></div>
           <div><dt>缓存命中</dt><dd>{formatCache(report.usage)}{report.usage?.cacheReadObserved ? ` · ${formatTokens(report.usage.cachedInputTokens)} tokens` : ' · 端点未提供'}</dd></div>

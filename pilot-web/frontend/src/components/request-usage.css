@@ -77,6 +77,7 @@
 .request-group[open] > summary::before, .request-item[open] > summary::before { transform: rotate(45deg); }
 .request-group > summary:hover, .request-item > summary:hover { background: var(--ui-hover); }
 .request-group-title { flex: 1; min-width: 0; }
+.request-cost:empty { display: none; }
 .request-count { color: var(--muted); white-space: nowrap; margin-left: 4px; }
 .request-group-note { padding: 2px 4px 8px 20px; }
 .request-list { max-height: 320px; overflow: auto; overscroll-behavior: contain; margin: 0; padding: 0 4px 0 16px; list-style: none; }

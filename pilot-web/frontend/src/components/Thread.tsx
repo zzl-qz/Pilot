@@ -19,13 +19,13 @@ import { api, apiFetch } from '../api.js';
 import { historyPrefetchDistance } from '../lib/history.js';
 import { MarkdownBody } from './MarkdownBody.jsx';
 import { StructuredDocumentView, isStructuredDocumentFormat } from './StructuredDocumentView.jsx';
-import { TOOL_STATUS_TITLES, toolArgsText, toolLabel } from '../lib/tool-meta.js';
+import { TOOL_STATUS_TITLES, formatLatency, toolArgsText, toolLabel } from '../lib/tool-meta.js';
 import { agentMeta, agentTitle, manifestFacts, splitSubagentResult, summarizeAgents, agentStatusLabel } from '../lib/agents.js';
 import { splitAttachmentMarkers, layoutMessageParts, attachmentUrl, isImageAttachment, fileBadge, formatBytes } from '../lib/attachments.js';
 import { splitPath } from '../lib/changes.js';
 import { parseDiff } from '../lib/diff.js';
 import { writeClipboard } from '../lib/clipboard.js';
-import { formatCount, formatTime } from '../thread-utils.js';
+import { formatClock, formatCount, formatTime } from '../thread-utils.js';
 import { messagePeek } from '../lib/side-chat.js';
 import { Icon } from './Icon.jsx';
 import './conversation.css';
@@ -630,7 +630,7 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
   const running = tool.status === 'run';
   useSecondTick(running);
   const seconds = running ? elapsedSeconds(tool.startedAt) : 0;
-  const meta = tool.meta === '未返回结果' ? '' : (tool.meta || '');
+  const meta = formatLatency(tool.meta === '未返回结果' ? '' : (tool.meta || ''));
   const args = toolArgsText(tool.name, tool.args);
   const status = TOOL_STATUS_TITLES[tool.status] || '状态未知';
   const Header = body ? 'button' : 'div';
@@ -644,7 +644,7 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
         <span className={'conversation-tool-state is-' + tool.status} title={status}>
           {running ? <Spinner size="sm" shade="subtle" aria-hidden="true" />
             : tool.status === 'ok' ? <Icon name="check" /> : <Icon name="info" />}
-          {running && seconds >= 3 ? '执行中 ' + seconds + 's' : status.split('：')[0]}
+          {running && seconds >= 3 ? formatClock(seconds) : status.split('：')[0]}
         </span>
         {meta && !running && <span className="tool-meta" title={meta}>{meta}</span>}
       </Header>
@@ -778,12 +778,18 @@ const CopyControl = memo(function CopyControl({ text, label }: { text: string; l
 });
 
 const TurnStats = memo(function TurnStats({ stats, reports, agentCount }: { stats: RunUsage | null; reports?: RequestReport[]; agentCount: number }) {
-  const running = Boolean(stats?.startedAt) && !stats?.finishedAt;
-  useSecondTick(running);
+  const liveRunId = useStore(state => state.running ? state.runId : null);
+  const runStartedAt = useStore(state => state.runStartedAt);
+  const live = Boolean(liveRunId) && (!stats?.runId || stats.runId === liveRunId);
+  useSecondTick(live || (Boolean(stats?.startedAt) && !stats?.finishedAt));
   if (!stats) {
     return null;
   }
-  const elapsed = stats.startedAt ? elapsedSeconds(stats.startedAt, stats.finishedAt) : null;
+  const clockStart = live && runStartedAt
+    ? Math.min(stats.startedAt || runStartedAt, runStartedAt)
+    : stats.startedAt;
+  const elapsed = clockStart ? elapsedSeconds(clockStart, live ? null : stats.finishedAt) : null;
+  const elapsedLabel = elapsed == null ? '' : formatClock(elapsed);
   // 没有模型实测用量时是估算值，加 ≈（旧版 formatTokenCount 的 exact 语义）
   const mark = stats.exact === false ? '≈' : '';
   const limit = Number(stats.contextLimit) || 0;
@@ -791,9 +797,20 @@ const TurnStats = memo(function TurnStats({ stats, reports, agentCount }: { stat
   const crowded = limit > 0 && used / limit >= 0.85;
   // 估算路径没有缓存观测：显示「—」，不能把「没观测」读成「没命中」
   const cacheLabel = formatCache(stats.details);
+  const priced = stats.details?.pricedRequests ?? 0;
+  const requests = stats.details?.requests ?? stats.modelRequests ?? 0;
+  let priceNote: string;
+  if (!stats.details) {
+    priceNote = '这是较早的记录，没有缓存和单价。';
+  } else if (priced === 0) {
+    priceNote = '端点没有返回单价，费用先空着。token 和缓存仍然有效。';
+  } else {
+    const incomplete = priced < requests ? '，合计不完整' : '';
+    priceNote = `含压缩与子代理。可计价 ${priced}/${requests} 次${incomplete}。`;
+  }
   return (
-    <details className="turn-stats-detail"><summary>{elapsed != null ? `${elapsed}s · ` : ''}用量详情</summary><div className="turn-stats">
-      {elapsed != null && <span className="turn-stat"><span>耗时</span><b>{elapsed}s</b></span>}
+    <details className="turn-stats-detail"><summary>{elapsedLabel ? `${elapsedLabel} · ` : ''}用量详情</summary><div className="turn-stats">
+      {elapsedLabel && <span className="turn-stat"><span>耗时</span><b>{elapsedLabel}</b></span>}
       <span className="turn-stat"><span>模型请求</span><b>{stats.modelRequests == null ? '—' : stats.modelRequests + ' 次'}</b></span>
       {agentCount > 0 && <span className="turn-stat"><span>子智能体</span><b>{agentCount} 个</b></span>}
       <span className="turn-stat" title={String(stats.inputTokens ?? '')}><span>输入</span><b>{mark}{formatCount(stats.inputTokens)}</b></span>
@@ -804,8 +821,8 @@ const TurnStats = memo(function TurnStats({ stats, reports, agentCount }: { stat
       <span className={`turn-stat is-context${crowded ? ' is-hot' : ''}`} title={String(stats.contextTokens ?? '')}>
         <span>上下文</span><b>{formatCount(stats.contextTokens)}</b>
       </span>
-      <span className="turn-stat"><span>费用估算</span><b>{totalCost(stats.details)}</b></span>
-      <span className="turn-stat-note">{stats.details ? `含压缩与子代理 · 可计价 ${stats.details.pricedRequests}/${stats.details.requests} 次` : '旧记录未提供完整缓存与计价数据'}</span>
+      <span className="turn-stat"><span>费用估算</span><b>{priced > 0 ? totalCost(stats.details) : '未返回'}</b></span>
+      <span className="turn-stat-note">{priceNote}</span>
     </div>{(reports?.length || 0) > 0 && <RequestList reports={reports} />}</details>
   );
 });
@@ -842,9 +859,9 @@ function planStatusLabel(status: string) {
   const labels: Record<string, string> = {
     completed: '已完成', done: '已完成',
     in_progress: '进行中', doing: '进行中', running: '进行中',
-    failed: '受阻', pending: '等待'
+    failed: '受阻', pending: '未开始'
   };
-  return labels[status] || '等待';
+  return labels[status] || '未开始';
 }
 
 function CompactionCard({ row }: { row: CompactionRow }) {

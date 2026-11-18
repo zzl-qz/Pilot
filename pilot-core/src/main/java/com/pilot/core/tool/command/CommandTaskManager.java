@@ -162,6 +162,37 @@ public final class CommandTaskManager implements AutoCloseable {
         return entry.task;
     }
 
+    /** 距离最近一次新输出过了多久。还没有任何输出时，从进程启动算起。 */
+    public long quietMillis(String sessionId, String taskId) {
+        Entry entry = owned(sessionId, taskId);
+        if (entry == null) {
+            return 0;
+        }
+        long mark;
+        synchronized (entry.logLock) {
+            mark = entry.lastOutputNanos > 0 ? entry.lastOutputNanos : entry.startedNanos;
+        }
+        return TimeUnit.NANOSECONDS.toMillis(Math.max(0, System.nanoTime() - mark));
+    }
+
+    /** 前台等到该放手时调用：进程继续跑，只是不再占着这一轮。 */
+    public void markBackground(String sessionId, String taskId) {
+        Entry entry = owned(sessionId, taskId);
+        if (entry == null) {
+            return;
+        }
+        synchronized (entry) {
+            Task current = entry.task;
+            if (current.background() || !running(current)) {
+                return;
+            }
+            publish(entry,
+                new Task(current.taskId(), current.sessionId(), current.command(), current.workdir(), current.status(),
+                    current.pid(), current.exitCode(), current.startedAt(), current.finishedAt(), true,
+                    current.timeoutSeconds(), current.reason(), current.changeTracking()));
+        }
+    }
+
     public Task get(String sessionId, String taskId) {
         Entry entry = owned(sessionId, taskId);
         return entry == null ? null : entry.task;
@@ -349,6 +380,7 @@ public final class CommandTaskManager implements AutoCloseable {
                     StandardOpenOption.APPEND);
                 entry.logBytes += bytes;
                 entry.logPoints += kept.codePointCount(0, kept.length());
+                entry.lastOutputNanos = System.nanoTime();
             }
             if (end < output.length()) {
                 requestStop(entry, CommandTaskStatus.OUTPUT_LIMIT, "命令输出达到上限 " + outputLimit + " 字节，已终止进程树");
@@ -625,6 +657,8 @@ public final class CommandTaskManager implements AutoCloseable {
         private long stoppingAt;
         private long logBytes;
         private long logPoints;
+        private final long startedNanos = System.nanoTime();
+        private long lastOutputNanos;
         private Process process;
         private Future<?> reader;
 

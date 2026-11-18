@@ -440,6 +440,7 @@ public final class AgentLoop {
         Objects.requireNonNull(events, "events must not be null");
         Objects.requireNonNull(checkpoint, "checkpoint must not be null");
         List<Message> messages = seed(history);
+        RequestBudget.closeDanglingToolCalls(messages);
         if (messages.size() <= 1) {
             throw new IllegalArgumentException("history is empty, nothing to resume");
         }
@@ -631,7 +632,12 @@ public final class AgentLoop {
                             if (executionPolicy != null) {
                                 executionPolicy.beforeTool(call);
                             }
-                            outcome = toolExecutor.execute(call, events, startGuard);
+                            try {
+                                outcome = toolExecutor.execute(call, events, startGuard);
+                            } catch (RuntimeException e) {
+                                outcome = new ToolExecutor.Outcome(call.name(), ToolResults.skipped("工具执行被中断，没有写回结果。"),
+                                    null, null);
+                            }
                         }
                         stepOutcomes.add(outcome);
                         recordToolOutcome(call, outcome, changedFiles, checks, messages);
@@ -863,7 +869,13 @@ public final class AgentLoop {
                 }
             }
             for (int index = 0; index < calls.size(); index++) {
-                ToolExecutor.Outcome outcome = futures.get(index).join();
+                ToolExecutor.Outcome outcome;
+                try {
+                    outcome = futures.get(index).join();
+                } catch (RuntimeException e) {
+                    outcome = new ToolExecutor.Outcome(calls.get(index).name(), ToolResults.skipped("工具执行被中断，没有写回结果。"),
+                        null, null);
+                }
                 stepOutcomes.add(outcome);
                 recordToolOutcome(calls.get(index), outcome, changedFiles, checks, messages);
             }
@@ -1191,6 +1203,7 @@ public final class AgentLoop {
                 retainedGuidance = RuntimeGuidance.merge(retainedGuidance, runtimeGuidance.render(policyGuidance));
                 // 阶段性纠偏属于运行时上下文，只进入当前请求的 system 消息；下一次请求会
                 // 重新构造 system，checkpoint/conversation 也从不保存它。
+                RequestBudget.closeDanglingToolCalls(messages);
                 List<Message> request = requestMessages(messages, retainedGuidance);
                 RequestBudget.Assessment admission =
                     RequestBudget.assessRequest(request, tools.definitions(), contextLimit());

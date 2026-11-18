@@ -71,6 +71,7 @@ export interface StoreData extends Omit<ReducerState, 'ui'> {
   changeReport: S.ChangeServiceChangeReport | null; changesState: string; runChanges: S.ChangeServiceRunChangeReport | null;
   composerApi: ComposerBridge | null; ui: UiState;
   _previewRequest?: number; _previewData?: S.SessionFilesControllerFileResponse | null; _previewLoading?: boolean;
+  _previewLine?: number | null;
   _changesRequest?: number; _reconnectAttempt?: number; _editTarget?: number | null;
 }
 type StrictOptions = { strict?: boolean };
@@ -110,7 +111,7 @@ export interface StoreActions {
   openWorktree(branch?: string): Promise<void>; handoffWorktree(): Promise<void>;
   decideSandbox(id: string, action: string, candidateHash?: string): Promise<boolean>;
   loadChanges(options?: StrictOptions): Promise<void>; restoreChanges(paths: string[] | null, all?: boolean): Promise<ApiResults['restoreChanges'] | null>;
-  rollbackRun(id: string): Promise<void>; createBranch(name: string): Promise<{ ok: boolean; error?: string }>; openPreview(path: string): Promise<void>;
+  rollbackRun(id: string): Promise<void>; createBranch(name: string): Promise<{ ok: boolean; error?: string }>; openPreview(path: string, line?: number | null): Promise<void>;
   loadCommandTasks(): Promise<void>; loadCommandLog(task: CommandTask): Promise<void>; stopCommand(task: CommandTask): Promise<void>;
   renameSession(title: string, id?: string | null): Promise<boolean>; updateSessionPreferences(id: string, values: { pinned?: boolean; unread?: boolean }): Promise<boolean>;
   archiveSession(id: string, archived?: boolean): Promise<boolean>; deleteSession(id: string): Promise<boolean>; regenerate(): Promise<void>;

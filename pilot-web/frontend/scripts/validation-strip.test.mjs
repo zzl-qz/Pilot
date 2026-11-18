@@ -17,6 +17,11 @@ test('没跑过或还没加载时不显示，避免把空状态说成没有证�
   assert.equal(stripView(null, true).visible, false);
 });
 
+test('这一轮还在跑时不显示验证结论', () => {
+  const sv = stripView(view({ current: false, code: 'no_evidence', reason: '还没有任何校验证据', latest: null }), true, true);
+  assert.equal(sv.visible, false);
+});
+
 test('通过且有当前证据时显示已验证，不要求重新验证', () => {
   const sv = stripView(view({ current: true, code: 'ok', reason: '', latest: evidence() }), true);
   assert.equal(sv.visible, true);

@@ -30,15 +30,18 @@
   font: inherit;
   cursor: pointer;
 }
-.thread-nav-tick { display: flex; align-items: center; height: 16px; padding: 0 7px; }
+.thread-nav-tick { display: flex; align-items: center; justify-content: flex-start; height: 12px; padding: 0 8px; }
 .thread-nav-tick span {
   display: block;
-  width: 7px;
-  height: 2px;
-  background: var(--muted);
+  width: calc(5px + var(--reach, 0) * 13px);
+  height: 1.5px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--ink) calc(24% + var(--reach, 0) * 68%), transparent);
+  transition: width 150ms cubic-bezier(.22, .8, .3, 1), background-color 150ms ease;
 }
-.thread-nav-tick.is-saved span { width: 13px; background: var(--ink-2); }
-.thread-nav-tick:is(.is-current, :hover, :focus-visible) span { width: 18px; background: var(--ink); }
+.thread-nav-tick.is-saved span { width: calc(8px + var(--reach, 0) * 10px); }
+.thread-nav-tick.is-current span { background: var(--ink); }
+.thread-nav-tick:focus-visible span { width: calc(14px + var(--reach, 0) * 4px); background: var(--ink); }
 .thread-nav-tick:focus-visible, .thread-nav-jump:focus-visible, .thread-nav-preview :focus-visible {
   outline: 2px solid var(--ink);
   outline-offset: -2px;
@@ -59,6 +62,14 @@
   padding: 12px;
   max-height: min(190px, calc(100vh - 24px));
   overflow: auto;
+  animation: thread-nav-preview-in 140ms cubic-bezier(.22, .8, .3, 1);
+}
+@keyframes thread-nav-preview-in {
+  from { opacity: 0; transform: translateX(-4px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .thread-nav-tick span, .thread-nav-preview { transition: none; animation: none; }
 }
 .thread-nav-preview > div { display: flex; gap: 8px; align-items: start; }
 .thread-nav-preview-title {

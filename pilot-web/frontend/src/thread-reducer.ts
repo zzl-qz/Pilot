@@ -472,7 +472,17 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
         break;
       }
       if (!draft.runUsage || (event.runId && draft.runUsage.runId && event.runId !== draft.runUsage.runId)) {
-        draft.runUsage = { runId: event.runId || draft.runId, startedAt: eventTimestamp(event), finishedAt: null };
+        draft.runUsage = {
+          runId: event.runId || draft.runId,
+          startedAt: draft.running && draft.runStartedAt ? draft.runStartedAt : eventTimestamp(event),
+          finishedAt: null
+        };
+      }
+      if (draft.running) {
+        draft.runUsage.finishedAt = null;
+        if (draft.runStartedAt && (!draft.runUsage.startedAt || draft.runUsage.startedAt > draft.runStartedAt)) {
+          draft.runUsage.startedAt = draft.runStartedAt;
+        }
       }
       Object.assign(draft.runUsage, {
         modelRequests: Number(payload.modelRequests || 0),

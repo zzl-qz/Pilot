@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store.js';
+import { runPhase } from '../lib/interaction.js';
+import { formatClock } from '../thread-utils.js';
 import { REVERIFY_TEXT, stripView } from '../lib/validation-strip.js';
 import './verification-strip.css';
 
@@ -10,18 +12,23 @@ import './verification-strip.css';
  * 用户永远看不到；放在这里，每轮结束都能一眼看到当前结论、依据和下一步动作。
  *
  * <p>没有会话、或还没跑过任何一轮时不显示——空会话上摆一条「未验证」只会变成噪音。
+ * 这一轮还在跑时也不显示结论，只说当前在做什么。结论要等这一轮停下来才有。
  */
 export function VerificationStrip() {
   const sessionId = useStore(state => state.sessionId);
   const validation = useStore(state => state.validation);
   const hasRun = useStore(state => state.hasRun);
+  const running = useStore(state => state.running);
   const [open, setOpen] = useState(false);
 
   // 换会话时收起：展开状态跟内容走，不跟着组件实例走。
   useEffect(() => { setOpen(false); }, [sessionId]);
 
-  const view = stripView(validation, hasRun);
-  if (!sessionId || !view.visible) return null;
+  if (!sessionId) return null;
+  if (running) return <RunningStatus />;
+
+  const view = stripView(validation, hasRun, running);
+  if (!view.visible) return null;
 
   return (
     <section id="verification-strip" className="verification-strip" data-tone={view.tone} aria-label="验证结论">
@@ -46,4 +53,34 @@ export function VerificationStrip() {
       )}
     </section>
   );
+}
+
+/** 任务还在跑：只报当前动作，不给验证结论，也不提供「重新验证」。 */
+function RunningStatus() {
+  const phase = useStore(runPhase);
+  const startedAt = useStore(state => state.runStartedAt);
+  const detail = useStore(state => currentAction(state.thread));
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setTick(value => value + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const clock = startedAt ? formatClock(Math.round((Date.now() - startedAt) / 1000)) : '';
+  const text = detail ? `${phase} · ${detail}` : phase;
+  return (
+    <section id="verification-strip" className="verification-strip" data-tone="running" aria-label="任务状态">
+      <div className="verification-strip-row">
+        {clock && <span className="verification-strip-badge">{clock}</span>}
+        <span className="verification-strip-detail" title={text}>{text}</span>
+      </div>
+    </section>
+  );
+}
+
+function currentAction(thread: { rows?: { type?: string; tools?: { status?: string; args?: string }[] }[] } | null | undefined) {
+  const turn = [...(thread?.rows || [])].reverse().find(row => row.type === 'turn');
+  const tool = [...(turn?.tools || [])].reverse().find(item => item.status === 'run');
+  const args = String(tool?.args || '').replace(/\s+/g, ' ').trim();
+  if (!args) return '';
+  return args.length > 72 ? `${args.slice(0, 72)}…` : args;
 }

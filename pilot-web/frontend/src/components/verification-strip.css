@@ -19,6 +19,7 @@
 .verification-strip[data-tone='stale'] { border-inline-start-color: var(--warn, #bf853c); }
 .verification-strip[data-tone='error'] { border-inline-start-color: var(--err, #b73535); }
 .verification-strip[data-tone='muted'] { border-inline-start-color: var(--muted, #8a8a8a); }
+.verification-strip[data-tone='running'] { border-inline-start-color: var(--accent, #7b8cff); }
 
 .verification-strip-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .verification-strip-badge {
@@ -33,6 +34,7 @@
 .verification-strip[data-tone='stale'] .verification-strip-badge { color: var(--warn, #bf853c); }
 .verification-strip[data-tone='error'] .verification-strip-badge { color: var(--err, #b73535); }
 .verification-strip[data-tone='muted'] .verification-strip-badge { color: var(--muted, #8a8a8a); }
+.verification-strip[data-tone='running'] .verification-strip-badge { color: var(--accent, #7b8cff); }
 
 .verification-strip-detail { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .verification-strip-actions { flex: none; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }

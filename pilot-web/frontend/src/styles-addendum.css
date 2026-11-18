@@ -1664,6 +1664,25 @@ html[data-theme] .tab-dot.is-pulse { animation: pulse 1.4s ease-in-out infinite;
 .preview-meta-tag { flex: none; padding: 0 5px; border-radius: 4px; background: var(--panel-2); color: var(--muted); }
 .preview-meta-tag.is-warn { color: var(--warn); }
 .preview-body.is-nowrap { white-space: pre; overflow-x: auto; }
+.preview-source-line {
+  display: block;
+  min-width: 100%;
+  padding-inline: 6px;
+}
+.preview-source.is-nowrap .preview-source-line { width: max-content; }
+.preview-source-line::before {
+  content: attr(data-line);
+  display: inline-block;
+  min-width: 4ch;
+  margin-inline-end: 12px;
+  color: var(--muted);
+  text-align: right;
+  user-select: none;
+}
+.preview-source-line[aria-current="location"] {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  box-shadow: inset 2px 0 var(--muted);
+}
 .preview-wrap { height: 24px; padding: 0 8px; font-size: 11px; }
 .preview-markdown {
   flex: 1;

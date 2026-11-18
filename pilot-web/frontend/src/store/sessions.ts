@@ -27,6 +27,7 @@ export function emptyMirror(): MirrorState {
 export function resetFilePreview(draft: StoreState) {
   draft._previewRequest = (draft._previewRequest || 0) + 1;
   draft._previewData = null;
+  draft._previewLine = null;
   draft._previewLoading = false;
   draft.ui.previewPath = '';
 }

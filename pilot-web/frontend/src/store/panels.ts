@@ -109,13 +109,14 @@ export function createPanelActions({ set, get }: StoreContext): StoreSlice<'load
         return { ok: false, error: '创建分支失败：' + errorInfo(error).message };
       }
     },
-    async openPreview(path) {
+    async openPreview(path, line) {
       const { sessionId, workspace, sessionEpoch } = get();
       const target = String(path || '').trim();
       if ((!sessionId && !workspace) || !target) return;
       const request = (get()._previewRequest || 0) + 1;
       set((draft) => {
         draft._previewRequest = request;
+        draft._previewLine = line && Number.isSafeInteger(line) && line > 0 ? line : null;
         draft.ui.previewPath = target;
         draft.ui.inspectorTab = 'preview';
         draft.ui.inspectorOpen = true;

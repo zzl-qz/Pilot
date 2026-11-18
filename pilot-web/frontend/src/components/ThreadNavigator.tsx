@@ -143,7 +143,7 @@ function Navigation({ session, rows, scrollRef, contentRef, stopFollowing, befor
     clearTimeout(closeTimer.current);
     const rect = el.getBoundingClientRect();
     const width = Math.min(350, window.innerWidth - 24);
-    setPeek({ entry, source: el, left: Math.min(rect.right + 6, window.innerWidth - width - 12), top: Math.max(12, Math.min(rect.top - 30, window.innerHeight - 205)), width });
+    setPeek({ entry, source: el, left: Math.min(rect.right + 10, window.innerWidth - width - 12), top: Math.max(12, Math.min(rect.top - 6, window.innerHeight - 205)), width });
   }
   function laterClose() {
     clearTimeout(closeTimer.current);
@@ -211,6 +211,24 @@ function Navigation({ session, rows, scrollRef, contentRef, stopFollowing, befor
       if (useStore.getState().sessionId === session && token === operation.current) useStore.getState().showNotice(`定位消息失败：${errorInfo(error).message}`);
     } finally { if (token === operation.current) setJumping(null); }
   }
+  function paintWave(track: HTMLElement, clientY: number | null) {
+    const buttons = [...track.querySelectorAll<HTMLButtonElement>('.thread-nav-tick')];
+    for (const button of buttons) {
+      let reach = 0;
+      if (clientY != null) {
+        const rect = button.getBoundingClientRect();
+        const distance = Math.abs(clientY - (rect.top + rect.height / 2));
+        reach = Math.max(0, 1 - distance / 44);
+      }
+      if (button.classList.contains('is-current')) reach = Math.max(reach, 0.62);
+      if (button === document.activeElement) reach = Math.max(reach, 0.9);
+      button.style.setProperty('--reach', reach.toFixed(3));
+    }
+  }
+  useEffect(() => {
+    const track = root.current?.querySelector<HTMLElement>('.thread-nav-track');
+    if (track) paintWave(track, null);
+  }, [active, identities]);
   function move(event: React.KeyboardEvent, index: number) {
     const buttons = [...(root.current?.querySelectorAll<HTMLElement>('.thread-nav-tick') || [])];
     let next;
@@ -239,7 +257,9 @@ function Navigation({ session, rows, scrollRef, contentRef, stopFollowing, befor
           if (panel) closePanel(true);
           else { clearTimeout(closeTimer.current); setPanel(true); setPeek(null); }
         }} />
-      <div className="thread-nav-track" onMouseLeave={laterClose}>
+      <div className="thread-nav-track"
+        onPointerMove={event => paintWave(event.currentTarget, event.clientY)}
+        onPointerLeave={event => { paintWave(event.currentTarget, null); laterClose(); }}>
         {entries.map((entry, index) => (
           <button key={entry.id} type="button"
             className={'thread-nav-tick' + (active === entry.id ? ' is-current' : '') + (saved.has(entry.id) ? ' is-saved' : '')}

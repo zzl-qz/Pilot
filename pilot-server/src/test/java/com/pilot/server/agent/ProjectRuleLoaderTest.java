@@ -4,13 +4,17 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.pilot.core.prompt.PromptLibrary;
+import com.pilot.server.workspace.ProjectRulesFile;
 
 class ProjectRuleLoaderTest {
     @TempDir
@@ -43,6 +47,34 @@ class ProjectRuleLoaderTest {
 
         assertTrue(rules.contains("约定文件过长，已截断"));
         assertTrue(rules.length() < 9_000);
+    }
+
+    @Test
+    void editorAndPromptIgnoreSymlinkedRules() throws IOException {
+        Path other = Files.writeString(root.resolve("other.md"), "不应注入");
+        Path file = ProjectRulesFile.path(root);
+        try {
+            Files.createSymbolicLink(file, other);
+        } catch (UnsupportedOperationException | FileSystemException e) {
+            Assumptions.assumeTrue(false, "当前系统不能创建符号链接: " + e);
+        }
+        assertTrue(ProjectRulesFile.read(file).text().isEmpty());
+        assertTrue(ProjectRuleLoader.load(root, PromptLibrary.classpathOnly()).isEmpty());
+    }
+
+    @Test
+    void stripsBomAndDoesNotSplitEmojiAtLimit() throws IOException {
+        Path file = ProjectRulesFile.path(root);
+        String prefix = "A".repeat(ProjectRulesFile.MAX_CHARS - 1);
+        Files.writeString(file, "\uFEFF" + prefix + "B");
+        var exact = ProjectRulesFile.read(file);
+        Assertions.assertEquals(prefix + "B", exact.text());
+        assertFalse(exact.truncated());
+
+        Files.writeString(file, "\uFEFF" + prefix + "😀");
+        var clipped = ProjectRulesFile.read(file);
+        Assertions.assertEquals(prefix, clipped.text());
+        assertTrue(clipped.truncated());
     }
 
     // ---- 记忆注入：独立于约定的通道 ----

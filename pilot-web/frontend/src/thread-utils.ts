@@ -38,6 +38,18 @@ export function formatTime(value: unknown) {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
+/** 跑了多久：45 秒写成 0:45，两分半写成 2:31。 */
+export function formatClock(seconds: number) {
+  const whole = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor(whole / 60) % 60;
+  const rest = String(whole % 60).padStart(2, '0');
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${rest}`;
+  }
+  return `${minutes}:${rest}`;
+}
+
 export function sameUserInput(left: unknown, right: unknown) {
   return String(left || '').replace(/\s+/g, ' ').trim() === String(right || '').replace(/\s+/g, ' ').trim();
 }

@@ -28,7 +28,6 @@ function toolLabel(name: string) {
   return TOOL_LABELS[name] || name || '操作';
 }
 
-/** 行里只留人能读的那一段：命令显示命令本身，文件类显示路径。 */
 function toolArgsText(name: string, args: unknown) {
   const raw = String(args || '').trim();
   if (!raw) return '';
@@ -37,10 +36,27 @@ function toolArgsText(name: string, args: unknown) {
     return match ? match[1].trim() : '';
   };
   if (name === 'run_command') return field('command') || raw;
+  if (name === 'browser') {
+    const action = field('action');
+    const url = field('url');
+    if (action === 'navigate' && url) return url.replace(/^https?:\/\//, '');
+    return action || raw.replace(/^\{|\}$/g, '');
+  }
   if (name === 'read_file' || name === 'edit_file' || name === 'create_file' || name === 'list_dir' || name === 'search_text' || name === 'glob_files') {
     return field('path') || field('query') || raw;
   }
   return raw.replace(/^\{|\}$/g, '');
+}
+
+/** 1 毫秒这种完成时间不占一行；再长的收成 61ms 或 1.2s。 */
+function formatLatency(meta: string) {
+  const match = String(meta || '').trim().match(/^(\d+(?:\.\d+)?)\s*ms$/i);
+  if (!match) return meta;
+  const ms = Number(match[1]);
+  if (!Number.isFinite(ms) || ms < 10) return '';
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const seconds = ms / 1000;
+  return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
 }
 
 /**
@@ -69,4 +85,4 @@ const TOOL_ICONS: Record<string, string> = {
 };
 
 
-export { eventTimestamp, toolLabel, toolArgsText, TOOL_STATUS_TITLES, TOOL_ICONS };
+export { eventTimestamp, toolLabel, toolArgsText, formatLatency, TOOL_STATUS_TITLES, TOOL_ICONS };

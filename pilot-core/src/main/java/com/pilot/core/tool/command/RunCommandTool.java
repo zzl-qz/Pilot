@@ -62,6 +62,9 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     private static final int HEAD_CHARS = 4_000;
     private static final long DEFAULT_TIMEOUT_MS = 120_000L;
     private static final long MAX_TIMEOUT_MS = 600_000L;
+    /** 测试里改短，生产用 ForegroundPace 的默认值。 */
+    long silenceLimitMs = ForegroundPace.SILENCE_LIMIT_MS;
+    long holdLimitMs = ForegroundPace.HOLD_LIMIT_MS;
 
     private final PathValidator paths;
     private final CommandTaskManager commandTasks;
@@ -584,10 +587,23 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         if (background && CommandToolSupport.running(task)) {
             return new ManagedRun(CommandToolSupport.render(task), false);
         }
+        boolean longCommand = ForegroundPace.expectsLong(String.join(" ", displayTokens));
+        long heldFrom = System.nanoTime();
         try {
             while (CommandToolSupport.running(task)) {
                 Thread.sleep(50);
                 task = commandTasks.get(sessionId, taskId);
+                if (!CommandToolSupport.running(task)) {
+                    break;
+                }
+                long heldMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - heldFrom);
+                ForegroundPace.Release release = ForegroundPace.release(longCommand,
+                    commandTasks.quietMillis(sessionId, taskId), heldMs, silenceLimitMs, holdLimitMs);
+                if (release != ForegroundPace.Release.NONE) {
+                    commandTasks.markBackground(sessionId, taskId);
+                    task = commandTasks.get(sessionId, taskId);
+                    return new ManagedRun(handoff(task, release), false);
+                }
             }
         } catch (InterruptedException e) {
             commandTasks.stop(sessionId, taskId);
@@ -607,12 +623,32 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             return new ManagedRun("ERROR: 命令记录已清理，无法确认最终结果：" + taskId, true);
         }
         CommandTaskManager.LogChunk chunk = commandTasks.logs(sessionId, taskId, 0, MAX_OUTPUT_CHARS);
-        String rendered = CommandToolSupport.render(task);
+        String rendered = quickFailure(task) + CommandToolSupport.render(task);
         if (chunk != null) {
             rendered += "\n输出:\n" + chunk.text()
                 + (chunk.truncated() || !chunk.eof() ? "\n… 后续日志使用 command_logs，offset=" + chunk.nextOffset() : "");
         }
         return new ManagedRun(launch.label() + "\n" + rendered, true);
+    }
+
+    private static String handoff(CommandTaskManager.Task task, ForegroundPace.Release release) {
+        String reason = release == ForegroundPace.Release.SILENT
+            ? "这条命令已经有一段时间没有新输出，不像测试或构建那种正常变慢。已转到后台，没有杀掉。" + "先用 command_logs 看它停在哪，再用 command_status 确认。不要再启动一条同样的命令。"
+            : "前台已经等了 2 分钟，命令还在跑，已转到后台。到设置的时限才会停。" + "用 command_status 看结果，不要再启动一条同样的命令。";
+        return reason + "\n" + CommandToolSupport.render(task);
+    }
+
+    /** 几秒内就非 0 退出，多半是命令写错，不要让模型把它当成还在跑的长任务。 */
+    private static String quickFailure(CommandTaskManager.Task task) {
+        if (task == null || task.exitCode() == null || task.exitCode() == 0 || task.startedAt() == null
+            || task.finishedAt() == null) {
+            return "";
+        }
+        long took = java.time.Duration.between(task.startedAt(), task.finishedAt()).toMillis();
+        if (took < 0 || took > ForegroundPace.QUICK_FAIL_MS) {
+            return "";
+        }
+        return "这条命令很快就失败了，多半是调用方式不对。先根据下面的错误改命令，不要当成还在运行。\n";
     }
 
     private String run(List<String> command, List<String> displayTokens, Path workdir, long timeoutMs) {

@@ -3,7 +3,10 @@ package com.pilot.core.tool.command;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.message.ToolNames;
@@ -56,10 +59,14 @@ public final class CommandStatusTool implements Tool, ProducesCheck {
         if (id == null) {
             return ToolResult.text("ERROR: 缺少参数 taskId");
         }
+        long budgetEnd = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         try {
             long wait = CommandToolSupport.integerArg(args, "waitSeconds", 0, 0, 5);
             CommandTaskManager.Task task = tasks.get(sessionId, id);
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(wait);
+            if (deadline > budgetEnd) {
+                deadline = budgetEnd;
+            }
             while (CommandToolSupport.running(task) && System.nanoTime() < deadline) {
                 Thread.sleep(50);
                 task = tasks.get(sessionId, id);
@@ -69,11 +76,20 @@ public final class CommandStatusTool implements Tool, ProducesCheck {
                 || !task.changeTracking().active()) {
                 return ToolResult.text(rendered);
             }
+            long leftNanos = budgetEnd - System.nanoTime();
+            if (leftNanos < TimeUnit.MILLISECONDS.toNanos(50)) {
+                return ToolResult.text(rendered + "\n变更核对超过 5 秒还没结束，这次不把结果算作验证。");
+            }
             CommandChangeTracker.Result result;
+            CommandTaskManager.Task finished = task;
             try {
-                result = changes.finish(task.changeTracking());
-            } catch (RuntimeException e) {
-                result = new CommandChangeTracker.Result(List.of(), false, String.valueOf(e.getMessage()));
+                result = CompletableFuture.supplyAsync(() -> changes.finish(finished.changeTracking())).get(leftNanos,
+                    TimeUnit.NANOSECONDS);
+            } catch (TimeoutException e) {
+                return ToolResult.text(rendered + "\n变更核对超过 5 秒还没结束，这次不把结果算作验证。");
+            } catch (ExecutionException e) {
+                Throwable cause = e.getCause() == null ? e : e.getCause();
+                result = new CommandChangeTracker.Result(List.of(), false, String.valueOf(cause.getMessage()));
             }
             if (!result.complete()) {
                 rendered = ToolResults.CHANGE_TRACKING_INCOMPLETE + "；不得据此宣称验证通过：" + result.warning() + "\n" + rendered;
