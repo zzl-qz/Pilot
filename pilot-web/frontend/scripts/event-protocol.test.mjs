@@ -35,6 +35,13 @@ const cases = [
   ['approval.resolved', { callId: 'c', decision: 'APPROVED' }, [start, approval], state => { assert.equal(state.pendingApprovals.c, undefined); assert.equal(turn(state).tools[0].status, 'run'); }],
   ['tool.completed', { callId: 'c', resultSummary: '内容', latencyMs: 10 }, [start, tool], state => { assert.equal(turn(state).tools[0].status, 'ok'); assert.equal(turn(state).tools[0].body, '内容'); }],
   ['run.failed', { code: 'MODEL_ERROR', message: '失败', retryable: false }, [start, tool], state => { assert.equal(state.lastOutcome, 'MODEL_ERROR'); assert.equal(turn(state).tools[0].status, 'interrupted'); }],
+  ['run.ended', { outcome: 'PARTIAL', code: 'TASK_INCOMPLETE', summary: '部分交付', changedFiles: ['a.ts'], checks: [], planDone: 1, planTotal: 3, openSteps: ['验证'], blockedSteps: [], nextActions: ['继续'], resumable: true }, [start], state => {
+    const row = state.thread.rows.at(-1);
+    assert.equal(state.lastOutcome, 'PARTIAL');
+    assert.equal(row.title, '本轮部分交付');
+    assert.equal(row.changedFiles[0].path, 'a.ts');
+    assert.equal(row.resumable, true);
+  }],
   ['run.cancelled', { reason: '取消' }, [start], state => { assert.equal(state.running, false); assert.equal(state.thread.rows.at(-1).title, '运行已取消'); }],
   ['run.completed', { summary: '完成', changedFiles: [], checks: [] }, [start], state => { assert.equal(state.lastOutcome, 'completed'); assert.equal(state.thread.rows.at(-1).title, '执行结束'); }]
 ];

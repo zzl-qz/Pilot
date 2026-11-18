@@ -253,6 +253,30 @@ function appendRunResult(draft: ReducerState, event: Extract<EventEnvelope, { ty
   } else if (event.type === 'run.cancelled') {
     Object.assign(result, { tone: 'warn', title: '运行已取消', detail: event.payload?.reason || null, resumable: true });
     status = '取消';
+  } else if (event.type === 'run.ended') {
+    // 部分交付/阻塞/等用户：不是失败，卡片必须带改动与下一步。
+    const ended = event.payload;
+    const outcome = String(ended.outcome || 'PARTIAL');
+    const blocked = outcome === 'BLOCKED';
+    const partial = outcome === 'PARTIAL';
+    const title = blocked ? '任务遇到阻塞'
+      : outcome === 'NEED_INPUT' ? '等待补充信息'
+      : outcome === 'WAITING' ? '等待外部事件'
+      : outcome === 'BUDGET_LIMITED' ? '本轮已达预算'
+      : outcome === 'NO_PROGRESS' ? '暂无有效进展'
+      : outcome === 'REVIEW_UNAVAILABLE' ? '核验暂不可用'
+      : outcome === 'VERIFICATION_FAILED' ? '验证未通过'
+      : partial ? '本轮部分交付' : '本轮结束';
+    Object.assign(result, {
+      tone: 'warn',
+      title,
+      detail: ended.summary || null,
+      changedFiles: (ended.changedFiles || []).map(path => ({ path })),
+      resumable: ended.resumable !== false
+    });
+    status = result.resumable ? '可继续' : '结束';
+    draft.lastOutcome = outcome;
+    if (result.resumable) attention = 'attention';
   } else {
     const code = String(event.payload?.code || '');
     const failure = classifyRunFailure(code);
@@ -726,6 +750,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
 
     case 'run.completed':
     case 'run.failed':
+    case 'run.ended':
     case 'run.cancelled':
       appendRunResult(draft, event, live);
       break;

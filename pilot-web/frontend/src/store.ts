@@ -258,8 +258,11 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     applyTheme(get().ui.themeMode, get().ui.accent);
     get().loadSkills();
     try {
-      await api.health();
+      const health = await api.health() as { frontendStale?: boolean } | null;
       set((draft) => { draft.ui.connection = { status: 'ok', text: '已连接' }; });
+      if (health?.frontendStale) {
+        get().showNotice('界面资源不是最新构建：请运行 npm --prefix pilot-web/frontend run build 后刷新。');
+      }
     } catch {
       set((draft) => { draft.ui.connection = { status: 'error', text: '无法连接后端' }; });
     }

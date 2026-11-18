@@ -1,6 +1,10 @@
 package com.pilot.server.settings;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
+import java.util.stream.Stream;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,6 +24,8 @@ import lombok.RequiredArgsConstructor;
 @RequestMapping("/api/health")
 @RequiredArgsConstructor
 public class HealthController {
+    private static volatile Boolean frontendStale;
+
     private final AgentProperties agentProperties;
     private final ModelSettings modelSettings;
     private final PermissionSettings permissionSettings;
@@ -30,10 +36,46 @@ public class HealthController {
         ToolRegistry registry = toolRegistry.getIfAvailable();
         List<String> tools = registry == null ? List.of() : registry.tools().stream().map(Tool::name).toList();
         return new HealthResponse("ok", modelSettings.snapshot().model(), tools, permissionSettings.mode().name(),
-            agentProperties.workspace());
+            agentProperties.workspace(), frontendStale());
+    }
+
+    /**
+     * 源码明显新于已构建的 static 资源时提示界面。
+     *
+     * <p>这只在仓库内运行（能找到 frontend/src）时有意义；打包后的桌面端没有源码，直接返回 false。
+     * 结果缓存一次，健康检查不应每次遍历整棵源码树。
+     */
+    private static boolean frontendStale() {
+        Boolean cached = frontendStale;
+        if (cached != null) {
+            return cached;
+        }
+        boolean stale = computeFrontendStale();
+        frontendStale = stale;
+        return stale;
+    }
+
+    private static boolean computeFrontendStale() {
+        Path root = Path.of(System.getProperty("user.dir"));
+        Path source = root.resolve("pilot-web/frontend/src");
+        Path assets = root.resolve("pilot-web/src/main/resources/static/assets");
+        if (!Files.isDirectory(source) || !Files.isDirectory(assets)) {
+            return false;
+        }
+        try {
+            return newest(source) > newest(assets) + 2_000L;
+        } catch (IOException | RuntimeException e) {
+            return false;
+        }
+    }
+
+    private static long newest(Path directory) throws IOException {
+        try (Stream<Path> paths = Files.walk(directory)) {
+            return paths.filter(Files::isRegularFile).mapToLong(path -> path.toFile().lastModified()).max().orElse(0L);
+        }
     }
 
     public record HealthResponse(String status, String model, List<String> tools, String permissionMode,
-        String workspace) {
+        String workspace, boolean frontendStale) {
     }
 }

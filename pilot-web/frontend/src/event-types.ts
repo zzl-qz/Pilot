@@ -24,6 +24,7 @@ export const EVENT_TYPES = [
   'approval.resolved',
   'tool.completed',
   'run.failed',
+  'run.ended',
   'run.cancelled',
   'run.completed'
 ] as const;

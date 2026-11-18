@@ -861,10 +861,13 @@ const PlanCard = memo(function PlanCard({ row }: { row: PlanRow }) {
       </summary>
       <ol className="plan-list">
         {items.map((item, index) => (
-          <li key={index} className="plan-item">
+          <li key={index} className={`plan-item${item.status === 'blocked' ? ' is-blocked' : ''}${item.status === 'skipped' ? ' is-skipped' : ''}`}>
             <span className="plan-index">{index + 1}</span>
-            <span className="plan-text">{item.step || item.text || ''}</span>
+            <span className="plan-text" title={item.note || undefined}>{item.step || item.text || ''}</span>
             <span className={`plan-status is-${item.status || 'pending'}`}>{planStatusLabel(item.status)}</span>
+            {item.note && (
+              <span className="plan-note">{item.note}</span>
+            )}
           </li>
         ))}
       </ol>
@@ -877,6 +880,7 @@ function planStatusLabel(status: string) {
   const labels: Record<string, string> = {
     completed: '已完成', done: '已完成',
     in_progress: '进行中', doing: '进行中', running: '进行中',
+    blocked: '已阻塞', skipped: '已跳过',
     failed: '受阻', pending: '未开始'
   };
   return labels[status] || '未开始';

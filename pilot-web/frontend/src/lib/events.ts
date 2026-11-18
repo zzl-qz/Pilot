@@ -18,7 +18,7 @@ export function isEphemeral(type: string) {
   return EPHEMERAL_EVENTS.has(type);
 }
 
-export const RUN_END_EVENTS = ['run.completed', 'run.failed', 'run.cancelled'] as const;
+export const RUN_END_EVENTS = ['run.completed', 'run.failed', 'run.ended', 'run.cancelled'] as const;
 
 export function isRunEnd(type: string | undefined): type is typeof RUN_END_EVENTS[number] {
   return RUN_END_EVENTS.some(event => event === type);
@@ -58,16 +58,16 @@ export function applyRule(event: { type: string; sequence?: number } | null | un
  * 界面上要显示成暂停而不是红色错误。
  */
 export function classifyRunFailure(code: unknown) {
-  const value = String(code || '');
+  const value = String(code || '').toUpperCase();
   const cancelled = value === 'CANCELLED';
   const paused = value === 'MAX_STEPS' || value === 'PAUSED';
   const interrupted = value === 'INTERRUPTED';
   const blocked = value === 'BLOCKED';
-  const budgetLimited = value === 'BUDGET_LIMITED';
-  // 计划没做完不是崩溃：进度还在，用户接着说一句就能继续。
-  const incomplete = value === 'TASK_INCOMPLETE';
-  const outcome = ['WAITING', 'NEED_INPUT', 'UNVERIFIED', 'NO_PROGRESS', 'REVIEW_UNAVAILABLE']
-    .includes(value) ? value : '';
+  const budgetLimited = value === 'BUDGET_LIMITED' || value === 'BUDGET_EXHAUSTED';
+  // 计划没做完/验证没跑完不是崩溃：进度还在，用户接着说一句就能继续。
+  const incomplete = value === 'TASK_INCOMPLETE' || value === 'PARTIAL';
+  const outcome = ['WAITING', 'NEED_INPUT', 'UNVERIFIED', 'NO_PROGRESS', 'REVIEW_UNAVAILABLE',
+    'VERIFICATION_FAILED'].includes(value) ? value : '';
   return {
     cancelled,
     paused,

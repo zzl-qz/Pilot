@@ -628,12 +628,14 @@ export interface MultiAgentControllerSandboxManifestReport {
 export interface PlanItem {
   step: string;
   status: string;
+  note?: string;
 }
 
 /** PlanUpdated.java / PlanItemPayload */
 export interface PlanUpdatedPlanItemPayload {
   step: string;
   status: string;
+  note?: string;
 }
 
 /** PlanUpdated.java / PlanUpdated */
@@ -836,6 +838,21 @@ export interface RunFailed {
   code: string;
   message: string;
   retryable: boolean;
+}
+
+/** RunEnded.java / 非失败终态：部分交付、阻塞、等待用户等。 */
+export interface RunEnded {
+  outcome: string;
+  code: string;
+  summary: string;
+  changedFiles: string[];
+  checks: string[];
+  planDone: number;
+  planTotal: number;
+  openSteps: string[];
+  blockedSteps: string[];
+  nextActions: string[];
+  resumable: boolean;
 }
 
 /** RunMetrics.java / Snapshot */

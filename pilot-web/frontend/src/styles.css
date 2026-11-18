@@ -2565,6 +2565,7 @@ body {
 .plan-list { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; }
 .plan-item {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 9px;
   padding: 5px 6px;
@@ -2597,6 +2598,10 @@ body {
   background: currentColor;
   animation: pulse 1.4s ease-in-out infinite;
 }
+.plan-item.is-blocked .plan-text { color: var(--err); }
+.plan-item.is-blocked .plan-status { background: rgba(240, 90, 90, 0.12); color: var(--err); }
+.plan-item.is-skipped .plan-text { color: var(--dim); text-decoration: line-through; text-decoration-color: #39404f; }
+.plan-note { flex-basis: 100%; margin: 0 0 2px 24px; color: var(--dim); font-size: 11.5px; }
 .plan-item.is-pending .plan-text { color: var(--muted); }
 .plan-item.is-pending .plan-status { background: var(--panel-3); color: var(--dim); }
 
