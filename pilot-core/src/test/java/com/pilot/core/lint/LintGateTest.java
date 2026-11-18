@@ -26,7 +26,7 @@ class LintGateTest {
         Files.writeString(root.resolve("pnpm-lock.yaml"), "");
         ProjectLint lint = ProjectLint.discover(root);
         assertEquals(ProjectLint.Status.READY, lint.status());
-        assertEquals("pnpm run lint -- {files}", lint.command());
+        assertEquals("eslint . {files}", lint.command());
 
         Files.createDirectories(root.resolve(".pilot"));
         Files.writeString(root.resolve(".pilot/settings.json"),
@@ -36,7 +36,7 @@ class LintGateTest {
         assertEquals(15, explicit.timeoutSeconds());
 
         Files.writeString(root.resolve(".pilot/settings.json"), "{\"quality\":{\"enabled\":false}}");
-        assertEquals(ProjectLint.Status.DISABLED, ProjectLint.discover(root).status());
+        assertEquals("eslint . {files}", ProjectLint.discover(root).command());
     }
 
     @Test
@@ -69,15 +69,6 @@ class LintGateTest {
         assertTrue(failed.prompt().contains("86400"), failed.prompt());
         assertEquals(1, calls.get());
 
-        Files.createDirectories(root.resolve(".pilot"));
-        Files.writeString(root.resolve(".pilot/settings.json"),
-            "{\"quality\":{\"command\":\"node lint.js src/app.js src/legacy.js\"}}");
-        LintGate.LintAssessment filtered = on.assess(root, List.of("src/app.js"));
-        assertEquals(LintGate.LintAssessment.Kind.FINDINGS, filtered.kind());
-        assertTrue(filtered.prompt().contains("src/app.js:1"), filtered.prompt());
-        assertFalse(filtered.prompt().contains("src/legacy.js:"), filtered.prompt());
-        assertEquals(2, calls.get());
-
         LintRunner forbidden = (workspace, command, timeout) -> {
             throw new AssertionError("开关关闭时不应启动检查进程");
         };
@@ -88,7 +79,29 @@ class LintGateTest {
         Files.writeString(root.resolve("src/app.js"), "export const timeout = TIMEOUT_MS;\n");
         LintGate.LintAssessment clean = on.assess(root, List.of("src/app.js"));
         assertEquals(LintGate.LintAssessment.Kind.CLEAN, clean.kind());
-        assertEquals(3, calls.get());
+        assertEquals(2, calls.get());
+    }
+
+    @Test
+    void modelCannotTurnOffOrReplaceTheLintCommand() throws Exception {
+        writeSample();
+        AtomicInteger calls = new AtomicInteger();
+        LintGate gate = new LintGate(true, (workspace, command, timeout) -> {
+            calls.incrementAndGet();
+            return new LintRunner.LintResult(1, "src/app.js:1 error 魔法值 86400\n", false, true);
+        });
+        assertTrue(gate.feedbackAfterEdit(root, List.of("src/app.js")).contains("lint 修正指令"));
+
+        Files.createDirectories(root.resolve(".pilot"));
+        Files.writeString(root.resolve(".pilot/settings.json"),
+            "{\"quality\":{\"enabled\":false,\"command\":\"exit 0\"}}");
+        Files.writeString(root.resolve("package.json"), "{\"scripts\":{\"lint\":\"exit 0\"}}");
+        Files.writeString(root.resolve("lint.js"), "process.exit(0);\n");
+        int before = calls.get();
+        LintGate.LintAssessment blocked = gate.assess(root, List.of("src/app.js"));
+        assertEquals(LintGate.LintAssessment.Kind.BLOCKED, blocked.kind());
+        assertTrue(blocked.prompt().contains("被改过"), blocked.prompt());
+        assertEquals(before, calls.get());
     }
 
     @Test
@@ -101,8 +114,125 @@ class LintGateTest {
             return LintRunner.LintResult.failedToStart("不应该执行");
         });
         LintGate.LintAssessment assessment = gate.assess(root, List.of("src/app.js"));
-        assertEquals(LintGate.LintAssessment.Kind.UNCONFIGURED, assessment.kind());
+        assertEquals(LintGate.LintAssessment.Kind.FINDINGS, assessment.kind());
+        assertTrue(assessment.prompt().contains("内置通用检查"), assessment.prompt());
+        assertTrue(assessment.prompt().contains("86400"), assessment.prompt());
         assertEquals(0, calls.get());
+    }
+
+    @Test
+    void immediateFeedbackSkipsWholeRepositoryCommandsAndStopsOnRepeat() throws Exception {
+        Files.writeString(root.resolve("go.mod"), "module example.com/demo\n\ngo 1.22\n");
+        AtomicInteger calls = new AtomicInteger();
+        LintRunner runner = (workspace, command, timeout) -> {
+            calls.incrementAndGet();
+            return new LintRunner.LintResult(1, "src/app.js:1 error 魔法值 86400\n", false, true);
+        };
+        LintGate gate = new LintGate(true, runner);
+        assertEquals("", gate.feedbackAfterEdit(root, List.of("src/app.js")));
+        assertEquals(0, calls.get());
+
+        Files.writeString(root.resolve("package.json"), "{\"scripts\":{\"lint\":\"node lint.js\"}}");
+        LintGate scoped = new LintGate(true, runner);
+        String first = scoped.feedbackAfterEdit(root, List.of("src/app.js"));
+        assertTrue(first.contains("lint 修正指令"), first);
+        assertTrue(first.contains("src/app.js:1"), first);
+        scoped.feedbackAfterEdit(root, List.of("src/app.js"));
+        LintGate.LintAssessment third = scoped.assess(root, List.of("src/app.js"));
+        assertEquals(LintGate.LintAssessment.Kind.BLOCKED, third.kind());
+        assertTrue(third.prompt().contains("停止"), third.prompt());
+    }
+
+    @Test
+    void newSuppressionIsBlockedAndAnExistingOneIsNot() throws Exception {
+        writeSample();
+        Files.writeString(root.resolve("src/app.js"),
+            "export const timeout = 86400; // eslint-disable-next-line no-magic-numbers\n");
+        LintGate gate =
+            new LintGate(true, (workspace, command, timeout) -> new LintRunner.LintResult(0, "", false, true));
+        gate.setOriginalText(path -> "export const timeout = 1;\n");
+        LintGate.LintAssessment added = gate.assess(root, List.of("src/app.js"));
+        assertEquals(LintGate.LintAssessment.Kind.BLOCKED, added.kind());
+        assertTrue(added.prompt().contains("eslint-disable"), added.prompt());
+
+        LintGate legacy =
+            new LintGate(true, (workspace, command, timeout) -> new LintRunner.LintResult(0, "", false, true));
+        String same = "export const timeout = 1; // eslint-disable-next-line no-magic-numbers\n";
+        Files.writeString(root.resolve("src/app.js"), same);
+        legacy.setOriginalText(path -> same);
+        assertEquals(LintGate.LintAssessment.Kind.CLEAN, legacy.assess(root, List.of("src/app.js")).kind());
+    }
+
+    @Test
+    void editingOnlyTheLintConfigIsStopped() throws Exception {
+        writeSample();
+        LintGate gate =
+            new LintGate(true, (workspace, command, timeout) -> new LintRunner.LintResult(0, "", false, true));
+        gate.lock(root);
+        Files.writeString(root.resolve("ruff.toml"), "[lint]\n");
+        LintGate.LintAssessment assessment = gate.assess(root, List.of("ruff.toml"));
+        assertEquals(LintGate.LintAssessment.Kind.BLOCKED, assessment.kind());
+        assertTrue(assessment.prompt().contains("被改过"), assessment.prompt());
+    }
+
+    @Test
+    void copyIsReportedEvenWhenTheProjectLintIsSilent() throws Exception {
+        writeSample();
+        String before = Files.readString(root.resolve("src/app.js"));
+        String copied = """
+            function buildLabel(orderId, buyer) {
+                const left = orderId ? orderId.trim() : "";
+                const right = buyer ? buyer.trim() : "";
+                if (!left) {
+                    return right;
+                }
+                if (!right) {
+                    return left;
+                }
+                return left + " " + right;
+            }
+            """;
+        String renamed = copied.replace("buildLabel", "buildTitle").replace("left", "first").replace("right", "second")
+            .replace("orderId", "sku").replace("buyer", "name");
+        Files.writeString(root.resolve("src/app.js"), before + "\n" + copied + "\n" + renamed);
+        LintGate gate = new LintGate(true, (workspace, command, timeout) -> new LintRunner.LintResult(0, "", false, true));
+        gate.setOriginalText(path -> "src/app.js".equals(path) ? before : null);
+        LintGate.LintAssessment renamedCopy = gate.assess(root, List.of("src/app.js"));
+        assertEquals(LintGate.LintAssessment.Kind.FINDINGS, renamedCopy.kind());
+        assertTrue(renamedCopy.prompt().contains("换名复制"), renamedCopy.prompt());
+
+        String once = before + "\n" + copied;
+        String twice = once + "\n" + copied;
+        Files.writeString(root.resolve("src/app.js"), twice);
+        LintGate exact = new LintGate(true, (workspace, command, timeout) -> new LintRunner.LintResult(0, "", false, true));
+        exact.setOriginalText(path -> "src/app.js".equals(path) ? once : null);
+        LintGate.LintAssessment pasted = exact.assess(root, List.of("src/app.js"));
+        assertEquals(LintGate.LintAssessment.Kind.FINDINGS, pasted.kind());
+        assertTrue(pasted.prompt().contains("原样复制"), pasted.prompt());
+    }
+
+    @Test
+    void projectLintSilenceIsNotOverriddenByTheBuiltinMagicCheck() throws Exception {
+        writeSample();
+        String before = "export const timeout = 1;\n";
+        Files.writeString(root.resolve("src/app.js"), before + "export const retry = 86400;\n");
+        LintGate gate = new LintGate(true, (workspace, command, timeout) -> new LintRunner.LintResult(0, "", false, true));
+        gate.setOriginalText(path -> "src/app.js".equals(path) ? before : null);
+        LintGate.LintAssessment assessment = gate.assess(root, List.of("src/app.js"));
+        assertEquals(LintGate.LintAssessment.Kind.CLEAN, assessment.kind());
+    }
+
+    @Test
+    void oldLintFindingsOnTheSameFileAreNotTreatedAsTheNewEdit() throws Exception {
+        writeSample();
+        String before = "export const timeout = 1;\n";
+        Files.writeString(root.resolve("src/app.js"), before + "export const retry = 86400;\n");
+        LintGate gate = new LintGate(true, (workspace, command, timeout) -> new LintRunner.LintResult(1,
+            "src/app.js:1 error 旧问题 noNonNullAssertion\n", false, true));
+        gate.setOriginalText(path -> "src/app.js".equals(path) ? before : null);
+        LintGate.LintAssessment assessment = gate.assess(root, List.of("src/app.js"));
+        assertFalse(assessment.prompt().contains("旧问题"), assessment.prompt());
+        assertEquals(LintGate.LintAssessment.Kind.CLEAN, assessment.kind());
     }
 
     @Test

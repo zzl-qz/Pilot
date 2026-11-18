@@ -15,9 +15,15 @@ import tools.jackson.databind.ObjectMapper;
  * 工作区 {@code .pilot/settings.json} 的 quality.command 优先于自动发现。
  */
 public record ProjectLint(Status status, String command, String source, int timeoutSeconds) {
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final List<String> RULE_FILES = List.of(".pilot/settings.json", "biome.json", "biome.jsonc",
+        "eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", "eslint.config.ts", ".eslintrc", ".eslintrc.js",
+        ".eslintrc.cjs", ".eslintrc.json", ".eslintrc.yml", "ruff.toml", ".ruff.toml", "pyproject.toml",
+        ".golangci.yml", ".golangci.yaml", ".golangci.toml", "phpcs.xml", "phpcs.xml.dist", ".rubocop.yml",
+        ".rubocop.yaml", "analysis_options.yaml", "clippy.toml", ".clippy.toml", "deno.json", "deno.jsonc");
     private static final int DEFAULT_TIMEOUT_SECONDS = 60;
     private static final int MAX_TIMEOUT_SECONDS = 180;
+    private static final int DIGEST_CHARS = 20_000;
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     public enum Status {
         READY, UNCONFIGURED, DISABLED
@@ -33,25 +39,71 @@ public record ProjectLint(Status status, String command, String source, int time
         return status == Status.READY && !command.isBlank();
     }
 
+    /** 这次改动是不是在改 lint 自己的配置。模型改这些文件不能当成普通编辑放行。 */
+    public static boolean isProtectedConfig(String path) {
+        if (path == null || path.isBlank()) {
+            return false;
+        }
+        String norm = path.replace('\\', '/');
+        while (norm.startsWith("./")) {
+            norm = norm.substring(2);
+        }
+        String name = norm.substring(norm.lastIndexOf('/') + 1);
+        return RULE_FILES.contains(norm) || RULE_FILES.contains(name);
+    }
+
     public static ProjectLint discover(Path root) {
         if (root == null || !Files.isDirectory(root)) {
             return new ProjectLint(Status.UNCONFIGURED, "", "无工作区", DEFAULT_TIMEOUT_SECONDS);
         }
         Settings settings = readSettings(root.resolve(".pilot").resolve("settings.json"));
-        if (settings.disabled()) {
-            return new ProjectLint(Status.DISABLED, "", ".pilot/settings.json", settings.timeoutSeconds());
-        }
         if (!settings.command().isBlank()) {
-            return new ProjectLint(Status.READY, settings.command(), ".pilot/settings.json quality.command",
-                settings.timeoutSeconds());
+            return freeze(root, new ProjectLint(Status.READY, settings.command(),
+                ".pilot/settings.json quality.command", settings.timeoutSeconds()));
         }
         ProjectLint fromPackage = fromPackageJson(root, settings.timeoutSeconds());
         if (fromPackage != null) {
-            return fromPackage;
+            return freeze(root, fromPackage);
         }
         ProjectLint fromMarker = fromMarker(root, settings.timeoutSeconds());
         return fromMarker != null ? fromMarker
             : new ProjectLint(Status.UNCONFIGURED, "", "根目录没有 lint 清单", settings.timeoutSeconds());
+    }
+
+    /**
+     * 包管理器的 lint 脚本在发现时就展开成脚本正文。
+     * 之后模型改 package.json，也跑不到被换成 exit 0 的那一版。
+     */
+    static ProjectLint freeze(Path root, ProjectLint found) {
+        if (found == null || !found.ready() || root == null) {
+            return found;
+        }
+        String script = scriptBody(root, found.source());
+        if (script.isBlank()) {
+            return found;
+        }
+        String command = script.contains("{files}") ? script : script + " {files}";
+        return new ProjectLint(Status.READY, command, found.source(), found.timeoutSeconds());
+    }
+
+    /** 规则文件和脚本正文的快照。运行中这些内容变了，就视为把检查改掉。 */
+    public static String digest(Path root, ProjectLint lint) {
+        if (root == null || lint == null) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        out.append(lint.command()).append('\n').append(lint.source()).append('\n');
+        out.append("script=").append(scriptBody(root, lint.source())).append('\n');
+        for (String name : RULE_FILES) {
+            out.append(name).append('=').append(readSmall(root.resolve(name))).append('\n');
+        }
+        for (String token : lint.command().split("\\s+")) {
+            if (token.contains("/") || token.endsWith(".js") || token.endsWith(".mjs") || token.endsWith(".cjs")
+                || token.endsWith(".py") || token.endsWith(".sh")) {
+                out.append(token).append('=').append(readSmall(root.resolve(token))).append('\n');
+            }
+        }
+        return out.toString();
     }
 
     /**
@@ -188,6 +240,39 @@ public record ProjectLint(Status status, String command, String source, int time
 
     private static boolean exists(Path root, String name) {
         return Files.isRegularFile(root.resolve(name), LinkOption.NOFOLLOW_LINKS);
+    }
+
+    private static String scriptBody(Path root, String source) {
+        if (source == null || !source.startsWith("package.json scripts.")) {
+            return "";
+        }
+        String name = source.substring("package.json scripts.".length());
+        Path file = root.resolve("package.json");
+        if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
+            return "";
+        }
+        try {
+            Map<?, ?> json = MAPPER.readValue(Files.readAllBytes(file), Map.class);
+            Object scripts = json.get("scripts");
+            if (scripts instanceof Map<?, ?> map) {
+                return text(map.get(name));
+            }
+        } catch (IOException | RuntimeException ignored) {
+            return "";
+        }
+        return "";
+    }
+
+    private static String readSmall(Path file) {
+        if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
+            return "";
+        }
+        try {
+            String text = Files.readString(file);
+            return text.length() <= DIGEST_CHARS ? text : text.substring(0, DIGEST_CHARS);
+        } catch (IOException e) {
+            return "";
+        }
     }
 
     private static Settings readSettings(Path file) {

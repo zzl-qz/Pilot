@@ -45,7 +45,6 @@ import com.pilot.core.event.SubagentFinished;
 import com.pilot.core.event.SubagentStarted;
 import com.pilot.core.event.TaskUpdated;
 import com.pilot.core.event.ToolStarted;
-import com.pilot.core.lint.LintGate;
 import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.loop.Cancellation;
 import com.pilot.core.loop.ContextCompactor;
@@ -645,7 +644,7 @@ public class MultiAgentService {
         Path workspaceRoot = toolFactory.resolve(dispatch.workspace());
         AgentLoop loop = new AgentLoop(budgeted, tools, new PolicyPermissionGate(mode), ApprovalBroker.denyAll(),
             config, cancellation, () -> null, trace)
-            .withLintGate(agent.lintGateEnabledValue() ? LintGate.enabled() : LintGate.disabled())
+            .withLintGate(agent.lintGate())
             .withQualityWorkspace(workspaceRoot).withQualityTexts(path -> WorkspaceTexts.read(workspaceRoot, path),
                 path -> sink.currentText(path, WorkspaceTexts.read(workspaceRoot, path)));
 

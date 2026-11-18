@@ -298,29 +298,42 @@ class CompletionGateTest {
     }
 
     @Test
-    void lintFindingsAreReturnedBeforeVerificationAndStopAfterTwoNudges() throws Exception {
+    void lintFindingsAreRecordedAndDoNotBlockByDefault() throws Exception {
         Path root = Files.createTempDirectory("lint-gate");
         Files.writeString(root.resolve("package.json"), "{\"scripts\":{\"lint\":\"node lint.js\"}}");
-        LintRunner runner = (workspace, command, timeout) -> new LintRunner.LintResult(1,
-            "src/main/Order.java:2 error 魔法值 86400\n", false, true);
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复订单状态", new LintGate(true, runner));
+        LintRunner runner =
+            (workspace, command, timeout) -> new LintRunner.LintResult(1, "src/main/Order.java:2 error 魔法值 86400\n", false,
+                true);
+        LintGate lint = new LintGate(true, runner);
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复订单状态", lint);
         Map<String, TextChange> changes = Map.of("src/main/Order.java",
             new TextChange("class Order {}\n", "class Order {\n    int timeout = 86400;\n}\n"));
 
-        CompletionGate.Nudge first =
-            gate.evaluate(Set.of("src/main/Order.java"), List.of(), List.of(), List.of(), false, changes, root, null);
-        CompletionGate.Nudge second =
-            gate.evaluate(Set.of("src/main/Order.java"), List.of(), List.of(), List.of(), false, changes, root, null);
-        CompletionGate.Nudge third =
+        CompletionGate.Nudge nudge =
             gate.evaluate(Set.of("src/main/Order.java"), List.of(), List.of(), List.of(), false, changes, root, null);
 
-        assertNotNull(first);
-        assertTrue(first.reason().contains("lint"), first.reason());
-        assertTrue(first.prompt().contains("86400"), first.prompt());
-        assertNotNull(second);
-        assertTrue(second.reason().contains("lint"), second.reason());
-        assertNotNull(third);
-        assertTrue(third.reason().contains("未验证"), third.reason());
+        assertNotNull(nudge);
+        assertTrue(!nudge.halt());
+        assertTrue(nudge.reason().contains("未验证"), nudge.reason());
+        assertTrue(lint.releaseNote().contains("86400"), lint.releaseNote());
+    }
+
+    @Test
+    void lintFindingsStopTheTaskWhenPolicySaysStop() throws Exception {
+        Path root = Files.createTempDirectory("lint-gate-stop");
+        Files.writeString(root.resolve("package.json"), "{\"scripts\":{\"lint\":\"node lint.js\"}}");
+        LintRunner runner =
+            (workspace, command, timeout) -> new LintRunner.LintResult(1, "src/main/Order.java:2 error 魔法值 86400\n", false,
+                true);
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复订单状态",
+            new LintGate(true, runner, LintGate.FailurePolicy.STOP));
+
+        CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/main/Order.java"), List.of(), List.of(), List.of(), false,
+            Map.of(), root, null);
+
+        assertNotNull(nudge);
+        assertTrue(nudge.halt(), nudge.reason());
+        assertTrue(nudge.prompt().contains("86400"), nudge.prompt());
     }
 
     @Test
@@ -418,5 +431,72 @@ class CompletionGateTest {
         gate.recordOutcome(List.of(), List.of("mvnw test → exit 0"));
         assertNull(gate.evaluate(withTest, List.of("mvnw test → exit 0"), List.of(), List.of(), true, cleanChanges,
             null, null, "已补齐边界单测并验证通过。"));
+    }
+
+    @Test
+    void retryAsksForAStyleFixOnlyAfterTestsPassAndThenReleases() throws Exception {
+        Path root = Files.createTempDirectory("lint-retry");
+        Files.writeString(root.resolve("package.json"), "{\"scripts\":{\"lint\":\"node lint.js\"}}");
+        LintRunner runner = (workspace, command, timeout) -> new LintRunner.LintResult(1,
+            "src/main/Order.java:2 error 魔法值 86400\n", false, true);
+        LintGate lint = new LintGate(true, runner, LintGate.FailurePolicy.RETRY);
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复订单状态", lint);
+        gate.recordOutcome(List.of(), List.of("mvnw test → exit 0"));
+        Set<String> changed = Set.of("src/main/Order.java");
+        List<String> checks = List.of("mvnw test → exit 0");
+
+        CompletionGate.Nudge first =
+            gate.evaluate(changed, checks, List.of(), List.of(), false, Map.of(), root, null);
+        assertNotNull(first);
+        assertTrue(!first.halt());
+        assertTrue(first.prompt().contains("86400"), first.prompt());
+
+        assertNotNull(gate.evaluate(changed, checks, List.of(), List.of(), false, Map.of(), root, null));
+        CompletionGate.Nudge third =
+            gate.evaluate(changed, checks, List.of(), List.of(), false, Map.of(), root, null);
+        if (third != null) {
+            assertTrue(!third.halt(), third.reason());
+        }
+        assertTrue(lint.releaseNote().contains("到上限"), lint.releaseNote());
+    }
+
+    @Test
+    void retryDoesNotReleaseWhenTheCodeWasNeverVerified() throws Exception {
+        Path root = Files.createTempDirectory("lint-retry-unverified");
+        Files.writeString(root.resolve("package.json"), "{\"scripts\":{\"lint\":\"node lint.js\"}}");
+        LintRunner runner = (workspace, command, timeout) -> new LintRunner.LintResult(1,
+            "src/main/Order.java:2 error 魔法值 86400\n", false, true);
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复订单状态",
+            new LintGate(true, runner, LintGate.FailurePolicy.RETRY));
+
+        Set<String> changed = Set.of("src/main/Order.java");
+        CompletionGate.Nudge first = gate.evaluate(changed, List.of(), List.of(), List.of(), false, Map.of(), root, null);
+        assertNotNull(first);
+        assertTrue(!first.halt());
+        assertTrue(first.reason().contains("未验证"), first.reason());
+
+        gate.evaluate(changed, List.of(), List.of(), List.of(), false, Map.of(), root, null);
+        CompletionGate.Nudge blocked =
+            gate.evaluate(changed, List.of(), List.of(), List.of(), false, Map.of(), root, null);
+        assertNotNull(blocked);
+        assertTrue(blocked.halt(), blocked.reason());
+        assertTrue(blocked.reason().contains("不能放行"), blocked.reason());
+    }
+
+    @Test
+    void retryStillHaltsWhenTheLintRulesAreEdited() throws Exception {
+        Path root = Files.createTempDirectory("lint-retry-tamper");
+        Files.writeString(root.resolve("package.json"), "{\"scripts\":{\"lint\":\"node lint.js\"}}");
+        Files.createDirectories(root.resolve(".pilot"));
+        Files.writeString(root.resolve(".pilot/settings.json"), "{\"quality\":{\"command\":\"exit 0\"}}");
+        LintRunner runner = (workspace, command, timeout) -> new LintRunner.LintResult(0, "", false, true);
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复订单状态",
+            new LintGate(true, runner, LintGate.FailurePolicy.RETRY));
+
+        CompletionGate.Nudge nudge = gate.evaluate(Set.of(".pilot/settings.json"), List.of("mvnw test → exit 0"),
+            List.of(), List.of(), false, Map.of(), root, null);
+        assertNotNull(nudge);
+        assertTrue(nudge.halt(), nudge.reason());
+        assertTrue(nudge.prompt().contains("被改过"), nudge.prompt());
     }
 }

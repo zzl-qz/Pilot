@@ -1,5 +1,6 @@
 package com.pilot.core.loop;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -27,6 +28,7 @@ import com.pilot.core.exec.ExecutionBackends;
 import com.pilot.core.hook.HookCommandTool;
 import com.pilot.core.hook.Hooks;
 import com.pilot.core.hook.Hooks.Result;
+import com.pilot.core.lint.LintGate;
 import com.pilot.core.message.Attachment;
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.permission.PermissionDecision;
@@ -98,7 +100,16 @@ public final class ToolExecutor {
     private final TraceRecorder traceRecorder;
     /** 运行时可替换：AgentLoop 先构造执行器，再按工作区挂上配置好的钩子。 */
     private volatile Hooks hooks;
+    private volatile LintGate lintGate = LintGate.disabled();
+    private volatile Path lintWorkspace;
     private ExecutionBackends.Selection hookExecution;
+
+    /** 写入成功后立刻跑仓库 lint，把修正指令贴进这次工具结果。 */
+    public ToolExecutor withLint(LintGate gate, Path workspace) {
+        this.lintGate = gate == null ? LintGate.disabled() : gate;
+        this.lintWorkspace = workspace;
+        return this;
+    }
 
     public ToolExecutor withHookExecution(ExecutionBackends.Selection execution) {
         this.hookExecution = execution;
@@ -207,6 +218,12 @@ public final class ToolExecutor {
             if (replayed == null && tool.get() instanceof ProducesCheck produces) {
                 nativeCheck = produces.checkSummary(call, result);
                 add(checks, nativeCheck);
+            }
+        }
+        if (invoked.get() && succeeded(result) && !changedPaths.isEmpty()) {
+            String feedback = lintGate.feedbackAfterEdit(lintWorkspace, changedPaths);
+            if (!feedback.isBlank()) {
+                result = result + "\n\n" + feedback;
             }
         }
         remember(call, replayed, result, changedPaths, checks);

@@ -75,8 +75,11 @@ pilot:
     prompt-caching: ${PILOT_MODEL_PROMPT_CACHING:false}
   agent:
     goal-mode-enabled: ${PILOT_AGENT_GOAL_MODE_ENABLED:true}
-    # 收尾时运行当前仓库自己的 lint。默认开启；设为 false 时不做规范检查，用来和开启时对照。
+    # 收尾时运行当前仓库自己的 lint。默认开启；设为 false 时不做规范检查。
     lint-gate-enabled: ${PILOT_AGENT_LINT_GATE_ENABLED:true}
+    # 规范没过时：retry 先改，同一问题到次数上限且测试或构建已通过才放行（默认）。
+    # pass 直接记录并放行。stop 直接终止。改 lint 规则或加抑制注释不会因为次数用尽而放行。
+    lint-on-failure: ${PILOT_AGENT_LINT_ON_FAILURE:retry}
     # 工具能碰到的根目录，默认是进程工作目录。建议显式指到项目根
     workspace: ${PILOT_WORKSPACE:${user.dir}}
     # 单轮步数上限，只当事故熔断。触顶后界面可以继续接着跑

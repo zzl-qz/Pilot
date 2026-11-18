@@ -45,7 +45,6 @@ import com.pilot.core.event.RunFailureCode;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.event.RunUsageUpdated;
 import com.pilot.core.event.SessionEvent;
-import com.pilot.core.lint.LintGate;
 import com.pilot.core.lint.ProjectLint;
 import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.loop.ContextCompactor;
@@ -1254,13 +1253,10 @@ public class AgentRunService implements RunStarter {
         }
         try {
             ProjectLint lint = ProjectLint.discover(root);
-            if (lint.status() == ProjectLint.Status.DISABLED) {
-                return "工作区 .pilot/settings.json 把 quality.enabled 设为 false";
-            }
             if (!lint.ready()) {
-                return "未发现 lint 命令。可在 .pilot/settings.json 写 quality.command";
+                return "未发现仓库自己的 lint。将使用内置通用检查，只看裸数字和重复字符串";
             }
-            return lint.source() + "：`" + lint.command() + "`";
+            return lint.source() + "：`" + lint.command() + "`。运行开始后命令和规则文件会被锁定，模型不能关闭或改掉。";
         } catch (RuntimeException e) {
             return "lint 发现失败，收尾时会再试一次";
         }
@@ -1515,7 +1511,7 @@ public class AgentRunService implements RunStarter {
             .withCompletionClaim(() -> claimCompletion(sessionId, handle)).withRestoredPaths(snapshots::restoredPaths)
             .withQualityWorkspace(resolvedWorkspace)
             .withQualityTexts(snapshots::originalText, path -> WorkspaceTexts.read(resolvedWorkspace, path))
-            .withLintGate(properties.lintGateEnabledValue() ? LintGate.enabled() : LintGate.disabled())
+            .withLintGate(properties.lintGate())
             .withIndependentCodeReviewer(review.active() ? null
                 : new IndependentCodeReviewer(measuredMain, resolvedWorkspace, handle.cancelled::get))
             // 编辑后自动格式化/lint 之类交给 .pilot/settings.json，不再占用模型注意力

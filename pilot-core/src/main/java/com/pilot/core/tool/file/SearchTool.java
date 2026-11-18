@@ -3,10 +3,12 @@ package com.pilot.core.tool.file;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -14,7 +16,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
-import java.util.stream.Stream;
 
 import com.pilot.core.message.ToolNames;
 import com.pilot.core.tool.Tool;
@@ -36,6 +37,8 @@ public final class SearchTool implements Tool.ParallelReadOnly {
     private static final int MAX_LINE_CHARS = 300;
     /** 兜底扫描的时间预算：到点就交出手上已有的匹配，别把整轮对话吊死。 */
     private static final int FALLBACK_BUDGET_SECONDS = 8;
+    /** 没有 rg 时最多看这么多个文件。依赖目录不进入，避免把 node_modules 整棵读一遍。 */
+    private static final int FALLBACK_MAX_FILES = 4_000;
     private static final Set<String> SKIPPED_DIRECTORIES =
         Set.of(".git", ".idea", ".gradle", "target", "build", "node_modules", "out", "dist");
 
@@ -190,30 +193,43 @@ public final class SearchTool implements Tool.ParallelReadOnly {
             return matches;
         }
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(FALLBACK_BUDGET_SECONDS);
-        try (Stream<Path> stream = Files.walk(base)) {
-            Iterator<Path> files = stream.iterator();
-            while (matches.size() <= MAX_MATCHES) {
-                if (System.nanoTime() > deadline) {
-                    break;
-                }
-                Path file;
-                try {
-                    if (!files.hasNext()) {
-                        break;
+        int[] seen = {0};
+        try {
+            Files.walkFileTree(base, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attributes) {
+                    if (System.nanoTime() > deadline || seen[0] > FALLBACK_MAX_FILES) {
+                        return FileVisitResult.TERMINATE;
                     }
-                    file = files.next();
-                } catch (RuntimeException e) {
-                    // 某个子目录没权限时 walk 会抛 UncheckedIOException：放弃剩余部分
-                    break;
+                    if (attributes.isSymbolicLink()) {
+                        return FileVisitResult.SKIP_SUBTREE;
+                    }
+                    if (!dir.equals(base) && (SKIPPED_DIRECTORIES.contains(dir.getFileName().toString())
+                        || !paths.allowsDirectory(dir))) {
+                        return FileVisitResult.SKIP_SUBTREE;
+                    }
+                    return FileVisitResult.CONTINUE;
                 }
-                if (!Files.isRegularFile(file) || inSkippedDirectory(base, file) || !paths.allows(file)) {
-                    continue;
+
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) {
+                    if (System.nanoTime() > deadline || matches.size() > MAX_MATCHES || seen[0]++ > FALLBACK_MAX_FILES) {
+                        return FileVisitResult.TERMINATE;
+                    }
+                    if (attributes.isSymbolicLink() || !paths.allows(file)) {
+                        return FileVisitResult.CONTINUE;
+                    }
+                    if (glob != null && !matchesGlob(base.relativize(file).toString().replace('\\', '/'), glob)) {
+                        return FileVisitResult.CONTINUE;
+                    }
+                    return searchFile(file, pattern, matches) ? FileVisitResult.TERMINATE : FileVisitResult.CONTINUE;
                 }
-                if (glob != null && !matchesGlob(base.relativize(file).toString().replace('\\', '/'), glob)) {
-                    continue;
+
+                @Override
+                public FileVisitResult visitFileFailed(Path file, IOException exception) {
+                    return FileVisitResult.CONTINUE;
                 }
-                searchFile(file, pattern, matches);
-            }
+            });
         } catch (IOException e) {
             return matches;
         }
@@ -238,16 +254,6 @@ public final class SearchTool implements Tool.ParallelReadOnly {
             path = Path.of(path).getFileName().toString();
         }
         return path.matches(regex.toString());
-    }
-
-    private static boolean inSkippedDirectory(Path base, Path file) {
-        Path relative = base.relativize(file);
-        for (Path segment : relative) {
-            if (SKIPPED_DIRECTORIES.contains(segment.toString())) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /** @return 是否因达到上限而提前结束 */

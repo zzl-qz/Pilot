@@ -242,18 +242,22 @@ public final class AgentLoop {
     public AgentLoop withQualityTexts(Function<String, String> originalText, Function<String, String> currentText) {
         originalFileText = Objects.requireNonNull(originalText, "original text reader must not be null");
         currentFileText = Objects.requireNonNull(currentText, "current text reader must not be null");
+        lintGate.setOriginalText(originalFileText);
         return this;
     }
 
     /** 工作区根目录。收尾 lint 在这里发现并执行仓库自己的检查命令。 */
     public AgentLoop withQualityWorkspace(Path workspace) {
         qualityWorkspace = workspace;
+        toolExecutor.withLint(lintGate, qualityWorkspace);
         return this;
     }
 
     /** 收尾 lint 开关。默认开启；进程配置关掉时传入 {@link LintGate#disabled()}。 */
     public AgentLoop withLintGate(LintGate lintGate) {
         this.lintGate = lintGate == null ? LintGate.disabled() : lintGate;
+        this.lintGate.setOriginalText(originalFileText);
+        toolExecutor.withLint(this.lintGate, qualityWorkspace);
         return this;
     }
 
@@ -408,6 +412,7 @@ public final class AgentLoop {
         List<Message> messages = seed(history);
         String goal = userInput.strip();
         this.completionGate = new CompletionGate(PROMPTS, config.completionChecks(), goal, lintGate);
+        lintGate.lock(qualityWorkspace);
         messages.add(Message.user(goal, attachments == null ? List.of() : attachments,
             imagePositions == null ? List.of() : imagePositions));
         return loop(messages, events, checkpoint);
@@ -431,6 +436,7 @@ public final class AgentLoop {
             throw new IllegalArgumentException("history is empty, nothing to resume");
         }
         this.completionGate = new CompletionGate(PROMPTS, config.completionChecks(), goal, lintGate);
+        lintGate.lock(qualityWorkspace);
         this.completionGate.restoreFrom(history);
         return loop(messages, events, checkpoint);
     }
@@ -714,6 +720,12 @@ public final class AgentLoop {
             executionPolicy != null && executionPolicy.independentCompletionReview(changedFiles),
             qualityChanges(changedFiles), qualityWorkspace, independentCodeReviewer, content);
         if (nudge != null) {
+            if (nudge.halt()) {
+                String partial = content + "\n\n规范检查未通过，已停止：" + nudge.reason();
+                messages.set(messages.size() - 1, Message.assistant(partial, List.of()));
+                events.accept(new RunFailed(RunFailureCode.TASK_INCOMPLETE, nudge.reason(), false));
+                return new Result(partial, RunFailureCode.TASK_INCOMPLETE.name(), conversation(messages));
+            }
             runtimeGuidance.add(nudge.prompt());
             events.accept(new RunContinued(nudge.attempt(), nudge.max(), nudge.reason()));
             safeCheckpoint(checkpoint, messages);
@@ -740,6 +752,12 @@ public final class AgentLoop {
         if (applySteering(messages, events, pendingInput.get()) || !completionClaim.getAsBoolean()) {
             safeCheckpoint(checkpoint, messages);
             return null;
+        }
+        String lintNote = lintGate.releaseNote();
+        if (lintNote != null && !lintNote.isBlank() && !lintGate.stopsOnFailure()) {
+            content = content + "\n\n规范检查未通过，已记录并放行：\n" + lintNote;
+            messages.set(messages.size() - 1, Message.assistant(content, List.of()));
+            summary = content;
         }
         if (config.completionChecks() && !openSteps.isEmpty()) {
             String partial = content + "\n\n本轮为部分交付，尚未完成：" + String.join("；", openSteps);

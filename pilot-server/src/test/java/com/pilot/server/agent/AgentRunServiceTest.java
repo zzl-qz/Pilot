@@ -904,7 +904,7 @@ class AgentRunServiceTest {
 
         Fixture(ModelClient model, int maxSteps, boolean goals, int runThreads, PermissionMode mode) {
             AgentProperties properties = new AgentProperties(workspace.toString(), mode, maxSteps, 3, 5, 300,
-                runThreads, 0, 60_000, false, goals, null, null, null, null, null, null, null, null, null);
+                runThreads, 0, 60_000, false, goals, null, null, null, null, null, null, null, null, null, null);
             JsonMapper mapper = JsonMapper.builder().build();
             PilotDataDir dataDir = new PilotDataDir(dataRoot.toString());
             commandTasks = new com.pilot.core.tool.command.CommandTaskManager(dataDir.file("commands"), mapper);

@@ -62,9 +62,6 @@ final class CompletionGate {
     private static final List<String> READ_ONLY_TASK_HINTS =
         List.of("本轮只读", "本次只读", "本任务只读", "仅做只读", "只分析不修改", "不要修改任何仓库文件", "不得修改任何仓库文件", "不要修改任何文件", "不得修改任何文件",
             "do not modify any files", "do not change any files", "do not edit any files", "this task is read-only");
-    /** 仓库 lint 未通过时最多打回两次，避免命令本身跑不起来时死循环。 */
-    private static final int MAX_LINT_PROMPTS = 2;
-    /** 存量重构、性能优化与边界测试硬证据门最多打回一次，杜绝死循环。 */
     private static final int MAX_EVIDENCE_PROMPTS = 1;
     /** 只改这些后缀的文档不算「改了代码」，不强制跑构建。 */
     private static final Set<String> DOC_SUFFIXES = Set.of(".md", ".txt", ".rst", ".adoc");
@@ -74,8 +71,15 @@ final class CompletionGate {
     private static final List<String> RESEARCH_HINTS_EN =
         List.of("explain", "analyze", "analyse", "review", "how does", "why", "walk through");
 
-    /** @param attempt 第几次提醒；{@code max} 是这类提醒的上限 */
-    record Nudge(String prompt, String reason, int attempt, int max) {
+    /**
+     * @param attempt 第几次提醒
+     * @param max     这类提醒的上限
+     * @param halt    为 true 时不再把问题交回模型打补丁，运行标成未完成
+     */
+    record Nudge(String prompt, String reason, int attempt, int max, boolean halt) {
+        Nudge(String prompt, String reason, int attempt, int max) {
+            this(prompt, reason, attempt, max, false);
+        }
     }
 
     private final PromptLibrary prompts;
@@ -87,7 +91,6 @@ final class CompletionGate {
     private int verifyPrompts;
     private int reviewPrompts;
     private int actionPrompts;
-    private int lintPrompts;
     private int evidencePrompts;
     private boolean independentCodeReviewed;
     /** 记录最近一次通过的构建/测试之后是否又改了代码，防止收尾重构改坏原有功能却漏跑验证。 */
@@ -232,13 +235,28 @@ final class CompletionGate {
         if (!changed && !researching) {
             return null;
         }
-        if (changed && lintPrompts < MAX_LINT_PROMPTS) {
-            Path root =
-                workspaceRoot != null ? workspaceRoot : codeReviewer == null ? null : codeReviewer.workspaceRoot();
-            LintGate.LintAssessment lint = lintGate.assess(root, changedFiles);
-            if (lint.needsFix()) {
-                lintPrompts++;
-                return new Nudge(lint.prompt(), lint.reason(), lintPrompts, MAX_LINT_PROMPTS);
+        Path workspace =
+            workspaceRoot != null ? workspaceRoot : codeReviewer == null ? null : codeReviewer.workspaceRoot();
+        if (changed) {
+            boolean verified = hasPassingCheck(checks) && !codeDirtySincePassingCheck;
+            boolean countStyleRound = !lintGate.retriesOnFailure() || verified;
+            LintGate.LintAssessment lint = lintGate.assess(workspace, changedFiles, countStyleRound);
+            if (lint.kind() == LintGate.LintAssessment.Kind.BLOCKED) {
+                return new Nudge(lint.prompt(), lint.reason(), 1, 1, true);
+            }
+            if (lintGate.stopsOnFailure() && (lint.kind() == LintGate.LintAssessment.Kind.FAILED
+                || lint.kind() == LintGate.LintAssessment.Kind.FINDINGS)) {
+                return new Nudge(lint.prompt(), lint.reason(), 1, 1, true);
+            }
+            if (lintGate.retriesOnFailure() && lint.kind() == LintGate.LintAssessment.Kind.FINDINGS && verified
+                && !lint.exhausted()) {
+                return new Nudge(lint.prompt(), lint.reason(), 1, LintGate.SAME_FAILURE_LIMIT, false);
+            }
+            if (lintGate.retriesOnFailure() && !verified && (lint.kind() == LintGate.LintAssessment.Kind.FINDINGS
+                || lint.kind() == LintGate.LintAssessment.Kind.FAILED)) {
+                if (!touchesCode(changedFiles) || verifyPrompts >= MAX_VERIFY_PROMPTS) {
+                    return new Nudge(lint.prompt() + "\n功能还没验证通过，不能放行。", "规范未过且功能未验证，不能放行", 1, 1, true);
+                }
             }
         }
         boolean needsVerify = !hasPassingCheck(checks) || codeDirtySincePassingCheck;
@@ -254,10 +272,8 @@ final class CompletionGate {
             return new Nudge(prompt, reason, verifyPrompts, MAX_VERIFY_PROMPTS);
         }
         if (!readOnlyTask && evidencePrompts < MAX_EVIDENCE_PROMPTS) {
-            Path root =
-                workspaceRoot != null ? workspaceRoot : codeReviewer == null ? null : codeReviewer.workspaceRoot();
             String evidenceIssue =
-                evidenceGate.evaluate(root, changedFiles, qualityChanges, !needsVerify, candidateAnswer);
+                evidenceGate.evaluate(workspace, changedFiles, qualityChanges, !needsVerify, candidateAnswer);
             if (evidenceIssue != null && !evidenceIssue.isBlank()) {
                 evidencePrompts++;
                 return new Nudge(evidenceIssue, "重构/性能/边界硬证据不足，已要求补齐可核验证据", evidencePrompts, MAX_EVIDENCE_PROMPTS);
