@@ -7,12 +7,12 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { artifactDirectory } from './browser-options.mjs';
 
-// 想法挂在右侧「旁白」面板的「记」页签；Composer 的「想法」按钮只负责打开该面板。
+// 独立验证旧会话想法组件，避免全局想法库改版影响旧数据接口的回归覆盖。
 const root = fileURLToPath(new URL('..', import.meta.url));
 const output = await mkdtemp(join(artifactDirectory(), 'pilot-notes-'));
 const entry = `.notes-${process.pid}.html`, file = join(root, entry);
 const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>会话想法</title><link rel="icon" href="data:,"><style>html,body,#root{height:100%;margin:0}#root{display:flex;flex-direction:row;min-height:100%}#shell-main{flex:1;display:flex;flex-direction:column;justify-content:flex-end;min-width:0}#shell-beside{width:360px;border-left:1px solid #333;overflow:auto}</style></head><body><div id="root"></div><script type="module">
-import React from 'react';import {createRoot} from 'react-dom/client';import {Composer} from '/src/components/Composer.jsx';import {BesidePanel} from '/src/components/BesidePanel.jsx';import {UiProvider} from '/src/components/UiProvider.jsx';import {useStore} from '/src/store.js';import {api} from '/src/api.js';
+import React from 'react';import {createRoot} from 'react-dom/client';import {Composer} from '/src/components/Composer.jsx';import {SessionNotes} from '/src/components/SessionNotes.jsx';import {UiProvider} from '/src/components/UiProvider.jsx';import {useStore} from '/src/store.js';import {api} from '/src/api.js';
 import '/src/styles.css';import '/src/shell-vanilla.css';import '/src/styles-addendum.css';import '/src/workbench.css';
 document.documentElement.dataset.theme='dark';window.store=useStore;window.api=api;window.sent=[];window.noteSeq=100;window.failNotes=false;
 for(const name of Object.keys(api))if(typeof api[name]==='function')api[name]=async()=>({});
@@ -32,9 +32,10 @@ useStore.setState({sessionId:'test-a',settingsData:{attachmentLimits:{maxFiles:6
 useStore.getState().loadNotes();
 function Shell(){
   const open=useStore(s=>s.ui.inspectorOpen && s.ui.inspectorTab==='chat');
+  const count=useStore(s=>s.notes.length);
   return React.createElement(React.Fragment,null,
-    React.createElement('div',{id:'shell-main'},React.createElement(Composer)),
-    open?React.createElement('div',{id:'shell-beside'},React.createElement(BesidePanel)):null
+    React.createElement('div',{id:'shell-main'},React.createElement('button',{id:'legacy-notes-trigger','aria-expanded':open,onClick:()=>useStore.getState().setUi({inspectorOpen:true,inspectorTab:'chat'})},'想法 '+count),React.createElement(Composer)),
+    open?React.createElement('div',{id:'shell-beside'},React.createElement(SessionNotes,{embedded:true})):null
   );
 }
 createRoot(document.getElementById('root')).render(React.createElement(UiProvider,null,React.createElement(Shell)));
@@ -49,7 +50,7 @@ const url = `http://127.0.0.1:${server.httpServer.address().port}/${entry}`;
 let browser;
 
 async function openNotes(page) {
-  const chip = page.locator('#notes-chip');
+  const chip = page.locator('#legacy-notes-trigger');
   const panel = page.locator('#notes-menu');
   if (await panel.isVisible().catch(() => false)) return panel;
   await chip.click();
@@ -61,7 +62,7 @@ async function openNotes(page) {
 async function closeNotes(page) {
   await page.evaluate(() => store.getState().setUi({ inspectorOpen: false }));
   await page.locator('#notes-menu').waitFor({ state: 'hidden' });
-  assert.equal(await page.locator('#notes-chip').getAttribute('aria-expanded'), 'false');
+  assert.equal(await page.locator('#legacy-notes-trigger').getAttribute('aria-expanded'), 'false');
 }
 
 async function run(page) {
@@ -69,7 +70,7 @@ async function run(page) {
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(url + '?fresh=1');
-  const chip = page.locator('#notes-chip');
+  const chip = page.locator('#legacy-notes-trigger');
   const panel = page.locator('#notes-menu');
   const input = page.locator('#input-flow');
   await chip.waitFor();

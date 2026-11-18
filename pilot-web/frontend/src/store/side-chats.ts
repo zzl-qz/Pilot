@@ -40,7 +40,6 @@ export function createSideChatActions({ set, get }: StoreContext): StoreSlice<'c
           draft.sideChats.activeId = existing.id;
           draft.ui.inspectorOpen = true;
           draft.ui.inspectorTab = 'chat';
-          draft.ui.besideTab = 'chat';
         });
         writeSideChats(get().sideChats);
         return existing;
@@ -67,7 +66,6 @@ export function createSideChatActions({ set, get }: StoreContext): StoreSlice<'c
               draft.sideChats.activeId = item.id;
               draft.ui.inspectorOpen = true;
               draft.ui.inspectorTab = 'chat';
-              draft.ui.besideTab = 'chat';
             }
           });
           writeSideChats(get().sideChats);
@@ -92,7 +90,6 @@ export function createSideChatActions({ set, get }: StoreContext): StoreSlice<'c
         draft.sideChats.activeId = id;
         draft.ui.inspectorOpen = true;
         draft.ui.inspectorTab = 'chat';
-        draft.ui.besideTab = 'chat';
       });
       writeSideChats(get().sideChats);
     },
@@ -138,7 +135,7 @@ export function createSideChatActions({ set, get }: StoreContext): StoreSlice<'c
       if (state.embeddedSessionId) {
         return;
       }
-      if (state.ui.inspectorOpen && state.ui.inspectorTab === 'chat' && state.ui.besideTab === 'chat') {
+      if (state.ui.inspectorOpen && state.ui.inspectorTab === 'chat') {
         state.setUi({ inspectorOpen: false });
         return;
       }

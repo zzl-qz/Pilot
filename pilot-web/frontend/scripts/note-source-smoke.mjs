@@ -74,7 +74,7 @@ try {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
 
-  // 选中 AI 回复 → 菜单出现「保存为想法」，带上来源序号与角色
+  // 选中 AI 回复 → 菜单打开全局想法库并预填选中文字
   await page.goto(`${base}/__selection`);
   await page.locator('[data-sequence="4"] p').waitFor();
   await page.evaluate(() => {
@@ -88,13 +88,11 @@ try {
   const action = page.getByRole('button', { name: '保存为想法' });
   await action.waitFor();
   await action.click();
-  await page.waitForFunction(() => Boolean(window.store.getState().noteSeed));
-  const seed = await page.evaluate(() => window.store.getState().noteSeed);
-  assert.equal(seed.source.sequence, 4);
-  assert.equal(seed.source.role, 'assistant');
+  await page.waitForFunction(() => window.store.getState().ui.ideasOpen);
+  const seed = await page.evaluate(() => window.store.getState().ui.ideaSeed);
   assert.match(seed.text, /建议补一条并发测试/);
 
-  // 想法面板：预填选中文字、显示来源说明，保存时带 source
+  // 兼容旧会话想法的来源记录
   await page.goto(`${base}/__notes`);
   const input = page.locator('#notes-input');
   await input.waitFor();

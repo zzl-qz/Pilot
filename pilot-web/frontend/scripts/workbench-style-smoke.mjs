@@ -126,7 +126,7 @@ async function run(page,name){
  await page.keyboard.press('Escape');
  await page.getByRole('menu',{name:'更多工具'}).waitFor({state:'hidden'});
  assert.equal(await page.getByRole('button',{name:'更多工具',exact:true}).getAttribute('aria-expanded'),'false','Escape 收起更多工具菜单');
- assert.deepEqual(await page.locator('.inspector-rail [role="tab"]').evaluateAll(items=>items.map(el=>el.getAttribute('aria-label'))), ['成果', '旁白', '变更', '预览', '命令']);
+ assert.deepEqual(await page.locator('.inspector-rail [role="tab"]').evaluateAll(items=>items.map(el=>el.getAttribute('aria-label'))), ['成果', '侧边对话', '变更', '预览', '命令']);
  await page.getByRole('tab',{name:'预览',exact:true}).focus();
  await page.keyboard.press('ArrowDown');
  assert.equal(await page.evaluate(()=>document.activeElement.id),'inspector-tab-commands','向下方向键移动标签焦点');

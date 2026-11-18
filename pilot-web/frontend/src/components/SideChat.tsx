@@ -113,7 +113,7 @@ export function SideChatPanel({ active = true }: { active?: boolean } = {}) {
             <div className="side-chat-empty">
               <p>
                 {sessionId
-                  ? '这条任务还没有侧边对话。在旁白问一句，主线照常跑。'
+                  ? '这条任务还没有侧边对话。可以在这里问一句，主线照常跑。'
                   : '先发一条消息开始任务，再开侧边对话。'}
               </p>
               {sessionId && (
@@ -280,10 +280,8 @@ function SimpleSideChat({ sessionId }: { sessionId: string }) {
                 <div className="bubble"><MarkdownBody text={item.text} /></div>
                 {/* 侧边对话关掉即丢：值得留下的那句要能捞进想法，否则只能靠人再抄一遍。 */}
                 {item.text?.trim() && (
-                  <button type="button" className="side-chat-keep" onClick={async () => {
-                    if (await useStore.getState().addNote(item.text)) {
-                      useStore.getState().setUi({ besideTab: 'notes' });
-                    }
+                  <button type="button" className="side-chat-keep" onClick={() => {
+                    useStore.getState().setUi({ ideasOpen: true, ideaSeed: { text: item.text } });
                   }}>存为想法</button>
                 )}
               </div>
@@ -417,10 +415,7 @@ export function SelectionQuote() {
     setMenu(null);
   };
   const saveAsNote = () => {
-    useStore.getState().openNoteFromSelection({
-      text: menu.text,
-      source: { sequence: menu.sequence, excerpt: menu.text.slice(0, 500), role: menu.role }
-    });
+    useStore.getState().setUi({ ideasOpen: true, ideaSeed: { text: menu.text } });
     setMenu(null);
   };
 

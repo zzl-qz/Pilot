@@ -5,7 +5,7 @@ import { Icon } from './Icon.jsx';
 import { ErrorBoundary } from './ErrorBoundary.jsx';
 import { isCommandActive } from '../lib/command-tasks.js';
 import { supportsAnchoredLayers } from '../lib/theme.js';
-import { BesidePanel } from './BesidePanel.jsx';
+import { SideChatPanel } from './SideChat.jsx';
 import FileWorkbench from './FileWorkbench.js';
 import ResearchPanel from './ResearchPanel.jsx';
 import WorkProductsPanel from './WorkProductsPanel.jsx';
@@ -19,7 +19,7 @@ import { BrowserPanel } from './inspector/BrowserPanel.js';
 
 const TABS = [
   { id: 'products', label: '成果', title: '交付文件、来源与技能审核' },
-  { id: 'chat', label: '旁白', title: '旁白：记下想法，或从当前任务分叉问一句' },
+  { id: 'chat', label: '侧边对话', title: '从当前任务分叉问一句' },
   { id: 'changes', label: '变更', title: '工作区改动：逐个文件看差异、撤销' },
   { id: 'preview', label: '预览', title: '只读预览文件内容' },
   { id: 'commands', label: '命令', title: '命令任务、实时输出与停止' },
@@ -61,7 +61,7 @@ export function Inspector() {
       <div className="inspector-body" id={`inspector-panel-${tab}`} role="tabpanel" aria-labelledby="inspector-title">
         {/* 每个面板单独兜底：某个页签渲染出错时只废掉这一块，别把整页卸载成白屏 */}
         <ErrorBoundary key={tab} name={TABS.find((item) => item.id === tab)?.label || '面板'} onReset={() => useStore.getState().setUi({ inspectorTab: 'activity' })}>
-          {tab === 'chat' && <BesidePanel />}
+          {tab === 'chat' && <SideChatPanel />}
           {tab === 'changes' && <ChangesPanel />}
           {tab === 'preview' && <PreviewPanel />}
           {tab === 'commands' && <CommandsPanel />}

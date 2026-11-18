@@ -25,6 +25,8 @@ export function NavigationRail() {
         onClick={() => open({ searchOpen: true })} />
       <RailButton icon="inbox" label="任务收件箱" active={ui.resultsOpen} count={unread}
         onClick={() => open({ resultsOpen: true, resultTarget: null })} />
+      <RailButton id="nav-ideas" icon="note" label="想法库" active={ui.ideasOpen}
+        onClick={() => open({ ideasOpen: true })} />
     </div>
     <div className="navigation-rail-group navigation-rail-bottom">
       <details className="navigation-rail-more" ref={moreRef} onToggle={event => setMoreOpen(event.currentTarget.open)}

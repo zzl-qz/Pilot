@@ -29,6 +29,7 @@ const Schedules = lazy(() => import('./Schedules.jsx'));
 const RecurringPlans = lazy(() => import('./RecurringPlans.jsx'));
 const MessageSearch = lazy(() => import('./MessageSearch.jsx'));
 const ResultInbox = lazy(() => import('./ResultInbox.jsx'));
+const IdeaLibrary = lazy(() => import('./IdeaLibrary.jsx'));
 const Inspector = lazy(() => import('./Inspector.jsx').then(module => ({ default: module.Inspector })));
 
 /** 应用外壳：左栏 + 主区（topbar / 通知 / 对话 / 输入） + 右侧工作区 + 弹层。 */
@@ -209,7 +210,7 @@ function Workbench() {
       }
       const state = useStore.getState();
       const overlayOpen = Boolean(state.ui.picker || state.ui.projectEditor || state.ui.settingsOpen
-        || state.ui.searchOpen || state.ui.resultsOpen || state.ui.schedulesOpen || state.ui.recurringOpen
+        || state.ui.searchOpen || state.ui.resultsOpen || state.ui.schedulesOpen || state.ui.recurringOpen || state.ui.ideasOpen
         || state.ui.paletteOpen || state.ui.checkpointDialog || state.ui.skillsInstall || state.ui.confirm
         || state.ui.mobileConnectionOpen || state.ui.notificationsOpen || document.querySelector('dialog[open], [aria-modal="true"], [data-workbench-menu-open]'));
       if (overlayOpen) {
@@ -456,6 +457,8 @@ function WorkbenchDialogs({ embedded }: { embedded: boolean }) {
   const results = useStore(state => state.ui.resultsOpen);
   const recurring = useStore(state => state.ui.recurringOpen);
   const search = useStore(state => state.ui.searchOpen);
+  const ideas = useStore(state => state.ui.ideasOpen);
+  const closeIdeas = () => useStore.getState().setUi({ ideasOpen: false, ideaSeed: null });
   useResultUnread(!embedded && !results);
   const setUi = useStore.getState().setUi;
   return <>
@@ -463,6 +466,7 @@ function WorkbenchDialogs({ embedded }: { embedded: boolean }) {
     {results && <DeferredDialog name="任务收件箱" close={() => setUi({ resultsOpen: false, resultTarget: null })}><ResultInbox /></DeferredDialog>}
     {recurring && <DeferredDialog name="周期计划" close={() => setUi({ recurringOpen: false })}><RecurringPlans /></DeferredDialog>}
     {search && <DeferredDialog name="消息搜索" close={() => setUi({ searchOpen: false })}><MessageSearch /></DeferredDialog>}
+    {ideas && <DeferredDialog name="想法库" close={closeIdeas}><IdeaLibrary onClose={closeIdeas} /></DeferredDialog>}
   </>;
 }
 

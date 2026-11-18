@@ -94,12 +94,24 @@ const fixtures = {
     import '/src/styles.css'; import '/src/styles-addendum.css';
     useStore.setState({ init: async () => {}, sessionId: 's1', capabilitiesState: 'ready', notes: [] });
     createRoot(document.getElementById('root')).render(React.createElement(CapabilitiesPanel));`),
-  '/__beside': page('beside', `
-    import { BesidePanel } from '/src/components/BesidePanel.jsx';
+  '/__ideas': page('ideas', `
+    import IdeaLibrary from '/src/components/IdeaLibrary.jsx';
+    import { NavigationRail } from '/src/components/NavigationRail.jsx';
+    import { Inspector } from '/src/components/Inspector.jsx';
     import '/src/styles.css'; import '/src/styles-addendum.css';
-    useStore.setState({ init: async () => {}, sessionId: 's1', notesState: 'ready', notes: ${JSON.stringify(NOTES)},
-      ui: { ...useStore.getState().ui, besideTab: 'notes', inspectorOpen: true, inspectorTab: 'chat' } });
-    createRoot(document.getElementById('root')).render(React.createElement(BesidePanel));`),
+    const setUi = useStore.getState().setUi;
+    useStore.setState({ sessionId: null, currentProjectId: 'a', notesState: 'ready', notes: ${JSON.stringify(NOTES)} });
+    window.switchProject = () => {
+      setUi({ inspectorOpen: false });
+      useStore.setState({ currentProjectId: 'b', sessionId: 'new-in-b' });
+    };
+    function IdeasFixture() {
+      const open = useStore(state => state.ui.ideasOpen);
+      return React.createElement(React.Fragment, null, React.createElement(NavigationRail), React.createElement(Inspector),
+        open && React.createElement(IdeaLibrary, { onClose: () => setUi({ ideasOpen: false }) }));
+    }
+    setUi({ inspectorOpen: true, inspectorTab: 'chat' });
+    createRoot(document.getElementById('root')).render(React.createElement(IdeasFixture));`),
   '/__strip': page('strip', `
     import { VerificationStrip } from '/src/components/VerificationStrip.jsx';
     import '/src/styles.css'; import '/src/styles-addendum.css';
@@ -206,39 +218,41 @@ await check('能力页显示插件总览与钩子状态', async () => {
   await context.close();
 });
 
-// 3. 「旁白」面板：两个页签在，默认停在「记」，点击可切到「问」
-await check('旁白面板两个页签可切换', async () => {
-  const { view, pageErrors, context } = await open('beside', '/__beside');
-  const notesTab = view.getByRole('tab', { name: '记' });
-  const chatTab = view.getByRole('tab', { name: '问' });
-  await notesTab.waitFor();
-  assert.equal(await notesTab.getAttribute('aria-selected'), 'true', '默认应停在「记」');
-  assert.equal(await chatTab.getAttribute('aria-selected'), 'false');
-  // 内嵌后内容要有自己的左右留白：以前这段留白来自浮层外壳，内嵌后没有外壳了。
-  const search = view.locator('#notes-menu .notes-search');
-  await search.waitFor();
-  const box = await search.boundingBox();
-  const panel = await view.locator('#panel-beside').boundingBox();
-  assert.ok(box.x - panel.x >= 8, `搜索区离面板左边至少 8px，实测 ${Math.round(box.x - panel.x)}px`);
-  await chatTab.click();
-  assert.equal(await chatTab.getAttribute('aria-selected'), 'true');
-  assert.equal(await notesTab.getAttribute('aria-selected'), 'false');
-  // 两个页签都保持挂载：切到「问」之后，「记」的内容还在 DOM 里（只是 hidden），草稿不会丢。
-  // 注意用 CSS 定位而不是 getByRole：hidden 的元素不在可访问性树里，按角色找不到。
-  const notesRegion = view.locator('#notes-menu');
-  assert.equal(await notesRegion.count(), 1, '「记」应当仍在挂载状态');
-  assert.equal(await notesRegion.isVisible(), false, '切到「问」后「记」应隐藏');
-  assert.equal(await notesRegion.locator('textarea#notes-input').count(), 1, '隐藏时输入框仍在 DOM 里');
-  // 切回来内容还在
-  await notesTab.click();
-  assert.equal(await notesRegion.isVisible(), true);
-  await view.getByText('把登录提示改成可执行建议').waitFor();
-  // 状态徽标必须一直可见：它藏进悬停才出现的按钮组里，上方筛选器就没有对照物了。
-  const statusChip = view.locator('.note-status[data-status="inbox"]');
-  assert.equal(await statusChip.count(), 1);
-  assert.equal(await statusChip.isVisible(), true, '状态徽标不应依赖悬停');
-  assert.equal(await statusChip.innerText(), '待安排');
-  await view.screenshot({ path: join(output, 'beside.png'), fullPage: true });
+await check('想法库独立于侧边对话，跨项目保存文字与附件', async () => {
+  const { view, pageErrors, context } = await open('ideas', '/__ideas');
+  const dialog = view.getByRole('dialog', { name: '想法库' });
+  const trigger = view.locator('#nav-ideas');
+  await view.getByRole('tab', { name: '侧边对话' }).waitFor();
+  assert.equal(await view.locator('#panel-side-chat #idea-library').count(), 0);
+  await trigger.click();
+  await dialog.getByLabel('想法文字').fill('之后再做的想法');
+  await dialog.getByLabel('想法附件').setInputFiles({ name: '记录.txt', mimeType: 'text/plain', buffer: Buffer.from('附件内容') });
+  await dialog.getByRole('button', { name: '保存想法' }).click();
+  await dialog.getByText('已保存到想法库。').waitFor();
+  await dialog.getByLabel('想法文字').evaluate(input => {
+    const png = atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9T0AAAAASUVORK5CYII=');
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([Uint8Array.from(png, byte => byte.charCodeAt(0))], '截图.png', { type: 'image/png' }));
+    input.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer }));
+  });
+  await dialog.getByRole('button', { name: '保存想法' }).click();
+  await dialog.getByRole('list', { name: '已保存的想法' }).getByRole('img', { name: '截图.png' }).waitFor();
+  await dialog.getByText('查看当前会话的旧想法').click();
+  await dialog.getByRole('button', { name: '复制到想法库' }).click();
+  await dialog.getByText('已复制到想法库。').waitFor();
+  await view.reload();
+  await trigger.click();
+  await dialog.getByText('之后再做的想法').waitFor();
+  await dialog.getByText('把登录提示改成可执行建议').waitFor();
+  await dialog.getByRole('img', { name: '截图.png' }).waitFor();
+  await view.evaluate(() => window.switchProject());
+  const download = view.waitForEvent('download');
+  await dialog.getByRole('link', { name: '记录.txt' }).click();
+  assert.equal((await download).suggestedFilename(), '记录.txt');
+  const row = dialog.locator('.idea-card').filter({ hasText: '之后再做的想法' });
+  await row.getByRole('button', { name: '删除想法' }).click();
+  await row.getByRole('button', { name: '确认删除' }).click();
+  await row.waitFor({ state: 'detached' });
   assert.deepEqual(pageErrors, []);
   await context.close();
 });
