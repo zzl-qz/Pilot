@@ -43,7 +43,7 @@ export const initialUi = (): UiState => ({
   syncError: '',
   lastSyncedAt: 0,
   filesRevision: 0,
-  themeMode: localStorage.getItem('pilot.theme') || 'dark',
+  themeMode: localStorage.getItem('pilot.theme') || 'light',
   accent: localStorage.getItem('pilot.accent') || 'sky',
   sidebarOpen: typeof window.matchMedia === 'function' ? !window.matchMedia('(max-width: 960px)').matches : true,
   inspectorOpen: false,
