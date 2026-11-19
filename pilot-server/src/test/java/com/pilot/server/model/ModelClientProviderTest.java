@@ -13,7 +13,9 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 
+import com.pilot.core.model.MeteredModelClient;
 import com.pilot.core.model.ModelClient;
+import com.pilot.core.model.ModelProfile;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.server.store.InMemorySettingsStore;
 
@@ -29,6 +31,47 @@ class ModelClientProviderTest {
         settings.update(null, "model-b", null);
         assertEquals("model-a", inFlight.chat(List.of(), List.of()).content(), "已发出的请求保持原模型");
         assertEquals("model-b", client.chat(List.of(), List.of()).content(), "后续调用使用新选择");
+    }
+
+    @Test
+    void runningTaskKeepsTheInFlightRequestAndSwitchesOnTheNextOne() throws Exception {
+        ModelSettings settings = new ModelSettings(
+            new ModelProperties("key", "https://example.test/v1", "model-a", List.of()), new InMemorySettingsStore());
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        ModelClient provider = new ModelClientProvider(settings, snapshot -> new ModelClient() {
+            @Override
+            public ModelProfile profile() {
+                return ModelProfile.resolve(null, snapshot.model(), ModelProfile.AUTO, ModelProfile.AUTO, "", null,
+                    null, null, null);
+            }
+
+            @Override
+            public ModelResponse chat(java.util.List<com.pilot.core.message.Message> messages,
+                java.util.List<com.pilot.core.model.ToolDefinition> tools) {
+                if ("model-a".equals(snapshot.model())) {
+                    started.countDown();
+                    try {
+                        assertTrue(release.await(5, TimeUnit.SECONDS));
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+                String text = messages.stream().map(com.pilot.core.message.Message::content)
+                    .reduce("", (left, right) -> left + "\n" + right);
+                return new ModelResponse(snapshot.model() + text, java.util.List.of());
+            }
+        });
+        MeteredModelClient metered = new MeteredModelClient(provider, "run", "main", java.util.List.of(), report -> {
+        });
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var pending = executor.submit(() -> metered.chat(java.util.List.of(), java.util.List.of()).content());
+            assertTrue(started.await(5, TimeUnit.SECONDS));
+            settings.update(null, "model-b", null);
+            release.countDown();
+            assertEquals("model-a", pending.get(5, TimeUnit.SECONDS));
+            assertTrue(metered.chat(java.util.List.of(), java.util.List.of()).content().contains("模型已切换为 model-b"));
+        }
     }
 
     @Test

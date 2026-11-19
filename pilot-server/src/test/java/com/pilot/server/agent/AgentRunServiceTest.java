@@ -503,6 +503,51 @@ class AgentRunServiceTest {
     }
 
     @Test
+    void failedRunKeepsQueueThenContinueSendsItInOrder() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger calls = new AtomicInteger();
+        CopyOnWriteArrayList<String> inputs = new CopyOnWriteArrayList<>();
+        ModelClient model = (messages, tools) -> {
+            if (calls.getAndIncrement() == 0) {
+                entered.countDown();
+                await(release);
+                throw new IllegalArgumentException("invalid model request");
+            }
+            inputs.add(messages.getLast().content());
+            return done();
+        };
+        try (Fixture fixture = new Fixture(model, 8)) {
+            fixture.start();
+            await(entered);
+            assertTrue(fixture.service.followup(fixture.sessionId, "先发这条"));
+            assertTrue(fixture.service.followup(fixture.sessionId, "再发这条"));
+            release.countDown();
+            fixture.awaitFinished("FAILED");
+            assertEquals(List.of("先发这条", "再发这条"), fixture.queue());
+
+            String runId = fixture.service.claimRun(fixture.sessionId).orElseThrow();
+            fixture.service.resume(fixture.sessionId, runId);
+            fixture.awaitFinished("COMPLETED", "COMPLETED", "COMPLETED");
+
+            assertEquals(List.of(), fixture.queue());
+            int first = -1;
+            int second = -1;
+            for (int index = 0; index < inputs.size(); index++) {
+                if (first < 0 && inputs.get(index).contains("先发这条")) {
+                    first = index;
+                }
+                if (inputs.get(index).contains("再发这条")) {
+                    second = index;
+                }
+            }
+            assertTrue(first >= 0 && second > first, inputs.toString());
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
     void injectsRepositoryBriefOncePerSession() throws Exception {
         CopyOnWriteArrayList<List<Message>> requests = new CopyOnWriteArrayList<List<Message>>();
         AtomicInteger calls = new AtomicInteger();

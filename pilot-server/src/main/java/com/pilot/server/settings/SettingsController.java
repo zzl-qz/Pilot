@@ -71,6 +71,10 @@ public class SettingsController {
         try {
             models.update(request.endpoint(), request.model(), request.apiKey(),
                 Boolean.TRUE.equals(request.clearApiKey()));
+            models.updateWindow(request.contextTokens(), request.maxOutputTokens());
+            if (request.childModel() != null) {
+                models.updateChild(request.childModel());
+            }
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         }
@@ -114,12 +118,14 @@ public class SettingsController {
         return new SettingsResponse(permissions.mode().name(),
             Arrays.stream(PermissionMode.values()).map(Enum::name).toList(), snapshot.model(), snapshot.endpoint(),
             snapshot.hasApiKey(), snapshot.maskedApiKey(), models.options(), attachmentLimits.budget(),
-            voiceLimits.budget());
+            voiceLimits.budget(), snapshot.contextTokens(), snapshot.maxOutputTokens(),
+            snapshot.childModel() == null ? "" : snapshot.childModel());
     }
 
     public record SettingsResponse(String permissionMode, List<String> permissionModes, String model,
         String modelEndpoint, boolean modelApiKeySet, String modelApiKeyMasked, List<String> modelOptions,
-        AttachmentLimits.Budget attachmentLimits, VoiceLimits.Budget voiceLimits) {
+        AttachmentLimits.Budget attachmentLimits, VoiceLimits.Budget voiceLimits, Long contextTokens,
+        Integer maxOutputTokens, String childModel) {
     }
 
     public record PermissionRequest(String mode) {
@@ -129,7 +135,8 @@ public class SettingsController {
      * Jackson 3 对「缺失字段 + 基本类型」会按 null 处理并报错，
      * 所以 {@code clearApiKey} 用包装类型，缺省视为不清理。
      */
-    public record ModelRequest(String endpoint, String model, String apiKey, Boolean clearApiKey) {
+    public record ModelRequest(String endpoint, String model, String apiKey, Boolean clearApiKey, Long contextTokens,
+        Integer maxOutputTokens, String childModel) {
     }
 
     /**

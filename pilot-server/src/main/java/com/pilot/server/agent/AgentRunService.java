@@ -170,6 +170,12 @@ public class AgentRunService implements RunStarter {
     private final MultiAgentProperties multiProperties;
     private final com.pilot.server.observability.RunMetrics metrics;
     private final SkillService skills;
+    private com.pilot.server.git.GitWorktrees worktrees;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setWorktrees(com.pilot.server.git.GitWorktrees worktrees) {
+        this.worktrees = worktrees;
+    }
     /** 可恢复调度状态；为空时（测试构造）不做检查点，也不影响执行。 */
     private final RunStateTracker runStates;
     private final com.pilot.server.store.ToolCallJournalFactory journals;
@@ -466,7 +472,9 @@ public class AgentRunService implements RunStarter {
     public ContextStatus contextStatus(String sessionId) {
         List<Message> history = conversations.load(sessionId);
         int used = ContextCompactor.estimateTokens(history);
-        int limit = properties.contextMaxChars();
+        long wire = com.pilot.core.model.ModelCapacity.active().inputBudget();
+        long local = (long)(properties.contextMaxChars() * 0.80);
+        int limit = (int)Math.max(1, Math.min(local, wire));
         return new ContextStatus(history.size(), used, limit, true,
             registry.activeRun(sessionId).isEmpty() && history.size() > 3 && used >= 1_000,
             Math.min(100, Math.round(used * 100f / limit)), segments(history));
@@ -803,10 +811,15 @@ public class AgentRunService implements RunStarter {
             captureResult(sessionId, runId);
             resultCaptured = true;
             continued = maybeAutoContinue(sessionId, runId, status, handle);
-        } catch (RuntimeException e) {
+        } catch (Throwable e) {
             log.error("Run {} 收尾失败", runId, e);
             taskControls.status(sessionId, TaskControlStatus.FAILED);
-            publish(sessionId, runId, new RunFailed(RunFailureCode.INTERNAL_ERROR, "执行失败：" + e.getMessage(), true));
+            String detail = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            publish(sessionId, runId,
+                new RunFailed(RunFailureCode.INTERNAL_ERROR, "执行失败：" + detail, !(e instanceof Error)));
+            if (e instanceof Error error && !(e instanceof StackOverflowError) && !(e instanceof OutOfMemoryError)) {
+                throw error;
+            }
         } finally {
             synchronized (handle) {
                 handle.workerThread = null;
@@ -1426,8 +1439,8 @@ public class AgentRunService implements RunStarter {
     private String execute(String sessionId, String runId, String input, List<Attachment> attachments,
         List<Integer> imagePositions, RunHandle handle, boolean continuation) {
         List<Message> history = conversations.load(sessionId);
-        ModelClient runModel = modelClient.snapshot();
-        Set<com.pilot.core.model.NativeCapability> nativeCapabilities = runModel.nativeCapabilities();
+        // 不在任务开头冻住客户端。MeteredModelClient 每次请求前 snapshot，已进入 chat 的那一次仍用当时的模型。
+        Set<com.pilot.core.model.NativeCapability> nativeCapabilities = modelClient.nativeCapabilities();
         String workspace = sessions.find(sessionId).map(Session::workspace).orElse(null);
         // /review 独立审查模式：只读工具表 + 固定审查协议，写文件与派发工具在本 run 里不存在。
         // 权限语义不变（只读命令照常放行，写命令照旧审批），不新加档位也不影响普通 run。
@@ -1473,9 +1486,9 @@ public class AgentRunService implements RunStarter {
                 publish(sessionId, runId, runUsage.request(report));
             }
         };
-        ModelClient measuredMain = new MeteredModelClient(runModel, sessionId, "main", promptSources, reports);
+        ModelClient measuredMain = new MeteredModelClient(modelClient, sessionId, "main", promptSources, reports);
         ModelClient measuredChild =
-            new MeteredModelClient(runModel, sessionId + ":subagent", "subagent", List.of(), reports);
+            new MeteredModelClient(modelClient, sessionId + ":subagent", "subagent", List.of(), reports);
         AgentLoop.Config config =
             new AgentLoop.Config(properties.maxSteps(), properties.repeatRemindAt(), properties.repeatAbortAt(),
                 promptSources.stream().map(ContextComposition.Source::text)
@@ -1515,8 +1528,30 @@ public class AgentRunService implements RunStarter {
             agentProfiles == null ? AgentProfileCatalog.EMPTY : agentProfiles.catalogFor(workspace);
         // 审查 run 不派子代理：单一视角审到底，也避免派发工具把只读裁剪绕出去。
         if (!review.active()) {
-            tools.register(new SpawnAgentTool(measuredChild, tools, sessionGate, approvals, config,
-                () -> conversations.load(sessionId), sink, handle.cancelled::get, childUsage, profiles));
+            SpawnAgentTool spawnAgent = new SpawnAgentTool(measuredChild, tools, sessionGate, approvals, config,
+                () -> conversations.load(sessionId), sink, handle.cancelled::get, childUsage, profiles);
+            if (modelClient instanceof com.pilot.server.model.ModelClientProvider provider) {
+                spawnAgent.withChildRoute(() -> modelSettings.snapshot().childModel(), provider::clientFor);
+            }
+            if (worktrees != null) {
+                Path base = toolFactory.resolve(workspace);
+                spawnAgent.withCheckouts(base, new com.pilot.server.multi.SubagentCheckouts(ignored -> {
+                    try {
+                        com.pilot.server.git.GitWorktrees.Created created = worktrees.create(base, "");
+                        java.nio.file.Path checkout = java.nio.file.Path.of(created.path());
+                        String diff = String.join("\n", worktrees.preview(checkout).files());
+                        return new com.pilot.server.multi.SubagentCheckouts.Opened(checkout, diff, "");
+                    } catch (RuntimeException failure) {
+                        return new com.pilot.server.multi.SubagentCheckouts.Opened(null, "",
+                            failure.getMessage() == null ? "无法创建独立检出" : failure.getMessage());
+                    }
+                }));
+                spawnAgent.withWorkspaceTools(path -> toolFactory.registryFor(path.toString()), path -> {
+                    com.pilot.server.git.GitWorktrees.Handoff handed = worktrees.handoff(path);
+                    return handed.note();
+                });
+            }
+            tools.register(spawnAgent);
             // 多智能体调度：父 Agent 只能派活，子 Agent 的改动一律进沙箱
             if (multiProperties.enabled()) {
                 tools.register(new DispatchAgentsTool(multiAgent, sessionId, runId, workspace, sink,
@@ -1539,6 +1574,8 @@ public class AgentRunService implements RunStarter {
             .withQualityWorkspace(resolvedWorkspace)
             .withQualityTexts(snapshots::originalText, path -> WorkspaceTexts.read(resolvedWorkspace, path))
             .withLintGate(properties.lintGate())
+            .withScopedRules(paths -> com.pilot.server.agent.ProjectRuleLoader.scoped(resolvedWorkspace, paths,
+                com.pilot.core.prompt.PromptLibrary.standard()))
             .withIndependentCodeReviewer(review.active() ? null
                 : new IndependentCodeReviewer(measuredMain, resolvedWorkspace, handle.cancelled::get))
             // 编辑后自动格式化/lint 之类交给 .pilot/settings.json，不再占用模型注意力
@@ -1897,7 +1934,10 @@ public class AgentRunService implements RunStarter {
     private ToolRegistry sessionTools(String sessionId, String runId, String workspace, PlanSink planSink) {
         ToolRegistry tools = new ToolRegistry();
         toolFactory.registryFor(workspace, planSink).tools().stream()
-            .filter(tool -> !ToolNames.RUN_COMMAND.equals(tool.name())).forEach(tools::register);
+            .filter(tool -> !ToolNames.RUN_COMMAND.equals(tool.name())
+                && !com.pilot.core.tool.EnableToolsTool.NAME.equals(tool.name()))
+            .forEach(tools::register);
+        tools.register(new com.pilot.core.tool.EnableToolsTool(tools));
         tools.register(
             new RunCommandTool(new PathValidator(toolFactory.resolve(workspace)), commandTasks, sessionId, snapshots));
         tools.register(new CommandStatusTool(commandTasks, sessionId, snapshots));

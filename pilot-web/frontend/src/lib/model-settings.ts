@@ -11,14 +11,24 @@ import type { SettingsControllerSettingsResponse } from '../types/server.js';
  * <p>勾选「清除已保存密钥」时必须把 apiKey 置空：否则后端会先看到显式 key
  * 再看到 clear 标记，语义容易含糊。clearApiKey 单独为 true 才是唯一信号。
  */
-export function buildModelUpdate({ model, endpoint, apiKey, clearKey }: { model?: string; endpoint?: string; apiKey?: string; clearKey?: boolean } = {}) {
+export function buildModelUpdate({ model, endpoint, apiKey, clearKey, contextTokens, maxOutputTokens, childModel }: { model?: string; endpoint?: string; apiKey?: string; clearKey?: boolean; contextTokens?: string | number | null; maxOutputTokens?: string | number | null; childModel?: string } = {}) {
   const clearApiKey = Boolean(clearKey);
-  return {
+  const body: { model: string; endpoint: string; apiKey: string; clearApiKey: boolean; contextTokens?: number; maxOutputTokens?: number; childModel?: string } = {
     model: String(model ?? '').trim(),
     endpoint: String(endpoint ?? '').trim(),
     apiKey: clearApiKey ? '' : String(apiKey ?? '').trim(),
     clearApiKey
   };
+  if (childModel !== undefined) body.childModel = String(childModel).trim();
+  if (contextTokens !== undefined) body.contextTokens = blankWindow(contextTokens);
+  if (maxOutputTokens !== undefined) body.maxOutputTokens = blankWindow(maxOutputTokens);
+  return body;
+}
+
+function blankWindow(value: string | number | null) {
+  if (value == null || String(value).trim() === '') return 0;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 /** 保存成功后的提示文案；clearKey 优先于「密钥已更新」。 */

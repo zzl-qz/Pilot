@@ -74,6 +74,15 @@ public final class ModelClientProvider implements ModelClient {
         return client().chat(messages, tools, text, reasoning);
     }
 
+    /** 用当前端点和密钥换一个模型名。名字为空时仍用主模型。 */
+    public ModelClient clientFor(String model) {
+        ModelSettings.Snapshot current = settings.snapshot();
+        if (model == null || model.isBlank() || model.equals(current.model())) {
+            return client();
+        }
+        return factory.apply(current.withModel(model.strip()));
+    }
+
     /** 当前配置快照，供健康检查与设置接口展示。 */
     public ModelSettings.Snapshot describe() {
         return settings.snapshot();

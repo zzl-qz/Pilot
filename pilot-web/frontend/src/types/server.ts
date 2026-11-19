@@ -1115,6 +1115,9 @@ export interface SettingsControllerModelRequest {
   model: string;
   apiKey: string;
   clearApiKey: boolean;
+  contextTokens?: number | null;
+  maxOutputTokens?: number | null;
+  childModel?: string;
 }
 
 /** SettingsController.java / ModelsRequest */
@@ -1146,6 +1149,9 @@ export interface SettingsControllerSettingsResponse {
   modelApiKeySet: boolean;
   modelApiKeyMasked: string;
   modelOptions: (string)[];
+  contextTokens?: number | null;
+  maxOutputTokens?: number | null;
+  childModel?: string;
 }
 
 /** SkillDraftService.java / Draft */
@@ -1258,6 +1264,8 @@ export interface SubagentFinished {
   agentId: string;
   summary: string;
   ok: boolean;
+  stopReason?: string;
+  partial?: boolean;
 }
 
 /** SubagentStarted.java / SubagentStarted */

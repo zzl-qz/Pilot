@@ -44,6 +44,7 @@ export interface RequestGroup {
 export interface AgentSummary {
   id: string;
   status?: string;
+  stopReason?: string;
   latest?: string;
   conclusion?: string;
 }

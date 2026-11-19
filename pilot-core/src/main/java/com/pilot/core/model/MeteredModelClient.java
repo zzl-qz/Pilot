@@ -1,5 +1,6 @@
 package com.pilot.core.model;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -22,6 +23,7 @@ public final class MeteredModelClient implements ModelClient {
     private final List<ContextComposition.Source> sources;
     private final Consumer<RequestReport> sink;
     private final ConcurrentHashMap<String, Baseline> previous = new ConcurrentHashMap<>();
+    private volatile String previousModel;
 
     private record Baseline(String model, String tools, List<String> messages) {
     }
@@ -100,9 +102,18 @@ public final class MeteredModelClient implements ModelClient {
     private ModelResponse invoke(List<Message> messages, List<ToolDefinition> tools, Consumer<String> text,
         Consumer<String> reasoning, boolean streaming) {
         ModelClient target = delegate.snapshot();
+        String model = target.profile().model();
+        List<Message> outbound = messages;
+        if (model != null && !model.isBlank() && previousModel != null && !previousModel.equals(model)) {
+            outbound = new ArrayList<>(messages);
+            outbound.add(Message.user("模型已切换为 " + model + "。按新模型继续，不要重做已完成的步骤。"));
+        }
+        if (model != null && !model.isBlank()) {
+            previousModel = model;
+        }
         for (int attempt = 0;; attempt++) {
             try {
-                return attempt(target, messages, tools, text, reasoning, streaming);
+                return attempt(target, outbound, tools, text, reasoning, streaming);
             } catch (RuntimeException failure) {
                 if (attempt != 0 || !target.disableRejectedCache(failure)) {
                     throw failure;

@@ -859,13 +859,18 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
       const id = event.payload?.agentId || event.payload?.id;
       const turn = turnWithAgent(draft, id);
       const agent = id ? turn?.agents?.[id] || draft.agents[id] : undefined;
+      const isPartial = Boolean(event.payload?.partial);
+      const isOk = event.payload?.ok !== false;
       if (agent && id) {
-        agent.status = event.payload?.ok === false ? 'failed' : 'done';
+        agent.status = isOk ? 'done' : (isPartial ? 'partial' : 'failed');
+        agent.stopReason = event.payload?.stopReason || '';
         agent.result = event.payload?.result || event.payload?.summary || agent.result || '';
         agent.finishedAt = eventTimestamp(event);
         if (draft.agents[id]) draft.agents[id] = { ...agent };
       }
-      record(draft, event, { kind: 'run', tone: 'ok', status: '完成', title: `子智能体完成 · ${id}`, detail: preview(event.payload?.result || event.payload?.summary || '', 160) });
+      const recordTone = isOk ? 'ok' : (isPartial ? 'warn' : 'err');
+      const recordStatus = isOk ? '完成' : (isPartial ? '阶段交付' : '失败');
+      record(draft, event, { kind: 'run', tone: recordTone, status: recordStatus, title: `子智能体${recordStatus} · ${id}`, detail: preview(event.payload?.result || event.payload?.summary || '', 160) });
       break;
     }
 

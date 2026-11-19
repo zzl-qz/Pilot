@@ -25,6 +25,12 @@ test('可选模型数量与有效 ID 对齐，去重、忽略无效值并保留�
   assert.match(describeModelsFetched({ models: ['gpt-a', ' gpt-a ', '', null] }), /已获取 1 个可用模型/);
 });
 
+test('窗口留空写成 0，填写的数字原样提交', () => {
+  assert.equal(buildModelUpdate({ model: 'gpt', contextTokens: '', maxOutputTokens: '8000' }).contextTokens, 0);
+  assert.equal(buildModelUpdate({ model: 'gpt', contextTokens: '200000', maxOutputTokens: '8000' }).maxOutputTokens, 8000);
+  assert.equal('contextTokens' in buildModelUpdate({ model: 'gpt' }), false);
+});
+
 test('勾选清除时 apiKey 一律置空，避免「填了又清」的歧义', () => {
   assert.deepEqual(
     buildModelUpdate({ model: 'gpt-4o', endpoint: 'https://api.example/v1', apiKey: 'sk-new', clearKey: true }),

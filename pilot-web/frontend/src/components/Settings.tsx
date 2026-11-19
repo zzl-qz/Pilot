@@ -106,7 +106,7 @@ function AppearanceSettings() {
 
 function ModelSettings() {
   const settings = useStore(state => state.settingsData);
-  const { name, endpoint, key, setName, setEndpoint, setKey, saving, feedback, save, clearKey } = useModelForm({ model: settings?.model, endpoint: settings?.modelEndpoint });
+  const { name, endpoint, key, contextTokens, maxOutputTokens, childModel, setName, setEndpoint, setKey, setContextTokens, setMaxOutputTokens, setChildModel, saving, feedback, save, clearKey } = useModelForm({ model: settings?.model, endpoint: settings?.modelEndpoint, contextTokens: settings?.contextTokens, maxOutputTokens: settings?.maxOutputTokens, childModel: settings?.childModel });
   const discovery = useModelDiscovery({ endpoint, apiKey: key });
   const probeStatus = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
@@ -129,6 +129,12 @@ function ModelSettings() {
             isDisabled={saving} hasSpellCheck={false} autoComplete="off" />
           <TextInput id="settings-model-endpoint" label="API 端点" size="lg" width="100%" value={endpoint} onChange={setEndpoint}
             isDisabled={saving} inputMode="url" hasSpellCheck={false} autoComplete="off" />
+          <TextInput id="settings-model-context" label="上下文窗口" size="lg" width="100%" value={contextTokens} onChange={setContextTokens}
+            isDisabled={saving} inputMode="numeric" placeholder="留空使用 128000" />
+          <TextInput id="settings-model-output" label="最大输出" size="lg" width="100%" value={maxOutputTokens} onChange={setMaxOutputTokens}
+            isDisabled={saving} inputMode="numeric" placeholder="留空使用 16000" />
+          <TextInput id="settings-model-child" label="子代理模型" size="lg" width="100%" value={childModel} onChange={setChildModel}
+            isDisabled={saving} hasSpellCheck={false} autoComplete="off" placeholder="留空则子代理使用主模型" />
         </div>
         <TextInput id="settings-model-key" label="API Key" size="lg" width="100%" type="password"
           isDisabled={saving} value={key} onChange={setKey} autoComplete="new-password"

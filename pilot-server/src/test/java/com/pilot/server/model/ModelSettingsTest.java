@@ -56,6 +56,24 @@ class ModelSettingsTest {
     }
 
     @Test
+    void childModelIsOptionalAndDoesNotChangeTheMainModel() {
+        ModelSettings settings = new ModelSettings(defaults, store);
+
+        assertEquals("", settings.snapshot().childModel());
+        settings.updateChild("child-model");
+        assertEquals("child-model", settings.snapshot().childModel());
+        assertEquals("gpt-default", settings.snapshot().model());
+        assertEquals("env-key", settings.snapshot().apiKey());
+
+        ModelSettings restarted = new ModelSettings(defaults, store);
+        assertEquals("child-model", restarted.snapshot().childModel());
+        restarted.updateChild("  ");
+        assertEquals("", restarted.snapshot().childModel());
+        assertEquals("gpt-default", new ModelSettings(defaults, store).snapshot().model());
+        assertEquals("", new ModelSettings(defaults, store).snapshot().childModel());
+    }
+
+    @Test
     void explicitlyClearsApiKeyAndPersistsTheClear() {
         ModelSettings settings = new ModelSettings(defaults, store);
         settings.update(null, null, null, true);
@@ -119,7 +137,8 @@ class ModelSettingsTest {
         settings.update("https://gateway.test/v1", "gpt-new", "sk-1");
 
         assertEquals(1, batches.size(), "一次更新只应有一次批量写入");
-        assertEquals(Set.of("model.endpoint", "model.name", "model.api-key"), batches.get(0).keySet());
+        assertEquals(Set.of("model.endpoint", "model.name", "model.api-key", "model.context-tokens",
+            "model.max-output-tokens", "model.child-name"), batches.get(0).keySet());
         assertEquals("sk-1", batches.get(0).get("model.api-key"));
     }
 

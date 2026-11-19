@@ -8,8 +8,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
@@ -27,6 +33,7 @@ import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ModelUsage;
 import com.pilot.core.model.ToolDefinition;
+import com.pilot.core.multi.AgentProfileCatalog;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PolicyPermissionGate;
 import com.pilot.core.tool.Tool;
@@ -144,8 +151,10 @@ class SpawnAgentToolTest {
         // 构造后的父注册表变化不能渗入子代理。
         parent.register(named("spawn_agent"));
         parent.register(named("late_parent_tool"));
-        assertEquals("isolated\n\n<subagent_result>\nchanged_files: []\nchecks: []\nopen_steps: []\n</subagent_result>",
-            tool.execute(Map.of("task", "inspect")));
+        String isolated = tool.execute(Map.of("task", "inspect"));
+        assertTrue(isolated.startsWith(
+            "isolated\n\n<subagent_result>\nchanged_files: []\nchecks: []\nopen_steps: []\n</subagent_result>"), isolated);
+        assertTrue(isolated.contains("\nagent_id: agent_"), isolated);
 
         assertEquals(Set.of("read_file"), visible.get(0));
         assertFalse(visible.get(0).contains("spawn_agent"));
@@ -192,7 +201,7 @@ class SpawnAgentToolTest {
     }
 
     @Test
-    void usesIndependentEightStepBudgetAndDoesNotForwardChildCompletion() {
+    void usesIndependentStepBudgetAndDoesNotForwardChildCompletion() {
         ToolRegistry tools = new ToolRegistry();
         tools.register(named("probe"));
         AtomicInteger requests = new AtomicInteger();
@@ -207,9 +216,45 @@ class SpawnAgentToolTest {
         String result = tool.execute(Map.of("task", "bounded exploration"));
 
         assertTrue(result.startsWith("ERROR: 子代理未完成：MAX_STEPS"));
-        assertEquals(9, requests.get(), "八次工作请求后仅允许 AgentLoop 的一次无工具收尾请求");
+        assertEquals(SpawnAgentTool.DEFAULT_MAX_SUBAGENT_STEPS + 1, requests.get(),
+            "默认 18 次工作请求后仅允许 AgentLoop 的一次无工具收尾请求");
         assertTrue(events.stream().noneMatch(RunCompleted.class::isInstance), "子 run 的完成事件不能流入父任务状态机");
-        assertTrue(events.stream().anyMatch(event -> event instanceof SubagentFinished finished && !finished.ok()));
+        assertTrue(events.stream().anyMatch(event -> event instanceof SubagentFinished finished && !finished.ok()
+            && !finished.partial() && "MAX_STEPS".equals(finished.stopReason())));
+    }
+
+    @Test
+    void preservesClosingReportWhenSubagentHitsMaxSteps() {
+        ToolRegistry tools = new ToolRegistry();
+        tools.register(named("web_fetch"));
+        AtomicInteger requests = new AtomicInteger();
+        ModelClient client = (request, definitions) -> {
+            int current = requests.incrementAndGet();
+            if (definitions.isEmpty()) {
+                return new ModelResponse("已定位 packages/client/ui-attachment/src/AttachmentRail.tsx:42，使用 64px 横向滚动条。",
+                    List.of());
+            }
+            return new ModelResponse("",
+                List.of(new ToolCall("call-" + current, "web_fetch", Map.of("round", current))));
+        };
+        ArrayList<SessionEvent> events = new ArrayList<>();
+        SpawnAgentTool tool = new SpawnAgentTool(client, tools, new PolicyPermissionGate(PermissionMode.READ_ONLY),
+            ApprovalBroker.denyAll(), new AgentLoop.Config(50, 0, 50, "sys"), List::of, events::add, () -> false,
+            SpawnAgentTool.UsageSink.none(), AgentProfileCatalog.EMPTY, new SpawnAgentTool.Budget(4, 4, 20));
+
+        String result = tool.execute(Map.of("task", "查找附件输入框实现"));
+
+        assertEquals(5, requests.get(), "4 次探索请求 + 1 次无工具收尾总结");
+        assertFalse(result.startsWith("ERROR:"), "带回有效阶段总结时不能以 ERROR 丢弃结论");
+        assertTrue(result.contains("[子代理阶段结算："), result);
+        assertTrue(result.contains("AttachmentRail.tsx:42"), result);
+        assertTrue(result.contains("<subagent_result>"), result);
+        SubagentFinished finished = events.stream().filter(SubagentFinished.class::isInstance)
+            .map(SubagentFinished.class::cast).findFirst().orElseThrow();
+        assertFalse(finished.ok());
+        assertTrue(finished.partial(), "阶段交付必须标成 partial 供前端区分");
+        assertEquals("MAX_STEPS", finished.stopReason());
+        assertTrue(finished.summary().contains("AttachmentRail.tsx:42"));
     }
 
     @Test
@@ -291,13 +336,13 @@ class SpawnAgentToolTest {
                 ApprovalBroker.denyAll(), new AgentLoop.Config(20, 0, 10, "sys"), List::of, event -> {
                 }, () -> false);
 
-        for (int index = 0; index < 4; index++) {
+        for (int index = 0; index < SpawnAgentTool.DEFAULT_MAX_SPAWNS_PER_RUN; index++) {
             assertFalse(tool.execute(Map.of("task", "child-" + index)).startsWith("ERROR"));
         }
-        String denied = tool.execute(Map.of("task", "child-5"));
+        String denied = tool.execute(Map.of("task", "child-over-limit"));
 
-        assertTrue(denied.contains("派生次数已达到 4 次"), denied);
-        assertEquals(4, modelCalls.get(), "被 run 级池拒绝的子任务不能继续调用模型");
+        assertTrue(denied.contains("派生次数已达到 " + SpawnAgentTool.DEFAULT_MAX_SPAWNS_PER_RUN + " 次"), denied);
+        assertEquals(SpawnAgentTool.DEFAULT_MAX_SPAWNS_PER_RUN, modelCalls.get(), "被 run 级池拒绝的子任务不能继续调用模型");
     }
 
     @Test
@@ -317,7 +362,8 @@ class SpawnAgentToolTest {
         tool.execute(Map.of("task", "second bounded child"));
         String third = tool.execute(Map.of("task", "third bounded child"));
 
-        assertEquals(24, actualCalls.get(), "所有 spawn 必须共享同一个父 run 请求池");
+        assertEquals(SpawnAgentTool.DEFAULT_MAX_SUBAGENT_REQUESTS_PER_RUN, actualCalls.get(),
+            "所有 spawn 必须共享同一个父 run 请求池");
         assertTrue(third.startsWith("ERROR: 子代理未完成：MAX_STEPS"), third);
     }
 
@@ -350,6 +396,111 @@ class SpawnAgentToolTest {
         assertEquals(1, requests.get());
         assertEquals(1, reports.get());
         assertEquals(321, inputTokens.get());
+    }
+
+    @Test
+    void resumesReadOnlyAgentWithPriorConclusion() {
+        List<List<Message>> seen = new ArrayList<>();
+        ModelClient client = (messages, definitions) -> {
+            seen.add(List.copyOf(messages));
+            boolean followUp = messages.stream().anyMatch(message -> message.content().contains("第一问结论"));
+            return new ModelResponse(followUp ? "第二问结论" : "第一问结论", List.of());
+        };
+        ArrayList<SessionEvent> events = new ArrayList<>();
+        SpawnAgentTool tool =
+            new SpawnAgentTool(client, new ToolRegistry(), new PolicyPermissionGate(PermissionMode.READ_ONLY),
+                ApprovalBroker.denyAll(), new AgentLoop.Config(5, 3, "你是测试代理"), List::of, events::add, () -> false);
+
+        String first = tool.execute(Map.of("task", "先看入口"));
+        String agentId = events.stream().filter(SubagentStarted.class::isInstance).map(SubagentStarted.class::cast)
+            .findFirst().orElseThrow().agentId();
+        String second = tool.execute(Map.of("task", "再看调用方", "resumeAgentId", agentId));
+
+        assertTrue(first.contains("第一问结论"), first);
+        assertTrue(second.contains("第二问结论"), second);
+        assertTrue(seen.get(1).stream().anyMatch(message -> message.content().contains("第一问结论")));
+        assertTrue(tool.execute(Map.of("task", "没有", "resumeAgentId", "agent_missing")).contains("没有找到"));
+        assertTrue(tool.execute(Map.of("task", "写", "resumeAgentId", agentId, "mode", "write")).contains("只支持只读"));
+    }
+
+    @Test
+    void usesConfiguredModelOrParentModel() {
+        ModelClient parent = (messages, definitions) -> new ModelResponse("parent-model", List.of());
+        ModelClient fast = (messages, definitions) -> new ModelResponse("fast-model", List.of());
+        SpawnAgentTool tool =
+            new SpawnAgentTool(parent, new ToolRegistry(), new PolicyPermissionGate(PermissionMode.READ_ONLY),
+                ApprovalBroker.denyAll(), new AgentLoop.Config(5, 3, "你是测试代理"), List::of, event -> {
+                }, () -> false).withModels(Map.of("flash", fast));
+
+        assertTrue(tool.execute(Map.of("task", "默认")).contains("parent-model"));
+        assertTrue(tool.execute(Map.of("task", "快", "model", "flash")).contains("fast-model"));
+        assertTrue(tool.execute(Map.of("task", "没有", "model", "haiku")).contains("未配置"));
+    }
+
+    @Test
+    void childRouteIsUsedUntilTheCallNamesAModel() {
+        ModelClient parent = (messages, definitions) -> new ModelResponse("parent-model", List.of());
+        ModelClient child = (messages, definitions) -> new ModelResponse("child-route", List.of());
+        ModelClient once = (messages, definitions) -> new ModelResponse("call-model", List.of());
+        AtomicReference<String> route = new AtomicReference<>("");
+        SpawnAgentTool tool =
+            new SpawnAgentTool(parent, new ToolRegistry(), new PolicyPermissionGate(PermissionMode.READ_ONLY),
+                ApprovalBroker.denyAll(), new AgentLoop.Config(5, 3, "你是测试代理"), List::of, event -> {
+                }, () -> false).withModels(Map.of("flash", once)).withChildRoute(route::get, name -> {
+                    if ("child-model".equals(name)) {
+                        return child;
+                    }
+                    return "flash".equals(name) ? once : null;
+                });
+
+        assertTrue(tool.execute(Map.of("task", "继承")).contains("parent-model"));
+        route.set("child-model");
+        assertTrue(tool.execute(Map.of("task", "子路由")).contains("child-route"));
+        assertTrue(tool.execute(Map.of("task", "本次", "model", "flash")).contains("call-model"));
+    }
+
+    @Test
+    void limitsReadOnlySubagentsToFourAtOnce() throws Exception {
+        AtomicInteger inflight = new AtomicInteger();
+        AtomicInteger peak = new AtomicInteger();
+        CountDownLatch entered = new CountDownLatch(4);
+        CountDownLatch release = new CountDownLatch(1);
+        ModelClient client = (messages, definitions) -> {
+            int now = inflight.incrementAndGet();
+            peak.accumulateAndGet(now, Math::max);
+            entered.countDown();
+            try {
+                assertTrue(release.await(5, TimeUnit.SECONDS));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                inflight.decrementAndGet();
+            }
+            return new ModelResponse("ok", List.of());
+        };
+        SpawnAgentTool tool =
+            new SpawnAgentTool(client, new ToolRegistry(), new PolicyPermissionGate(PermissionMode.READ_ONLY),
+                ApprovalBroker.denyAll(), new AgentLoop.Config(5, 3, "你是测试代理"), List::of, event -> {
+                }, () -> false);
+        ExecutorService pool = Executors.newFixedThreadPool(5);
+        try {
+            List<Future<String>> runs = new ArrayList<>();
+            for (int index = 0; index < 5; index++) {
+                int id = index;
+                runs.add(pool.submit(() -> tool.execute(Map.of("task", "查目录 " + id))));
+            }
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            Thread.sleep(150);
+            assertEquals(4, peak.get());
+            assertEquals(4, inflight.get());
+            release.countDown();
+            for (Future<String> run : runs) {
+                assertTrue(run.get(5, TimeUnit.SECONDS).contains("ok"));
+            }
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
     }
 
     private static Tool writing(String name) {

@@ -27,8 +27,27 @@ public class ModelSettings {
     private static final String KEY_ENDPOINT = "model.endpoint";
     private static final String KEY_MODEL = "model.name";
     private static final String KEY_API_KEY = "model.api-key";
+    private static final String KEY_CONTEXT = "model.context-tokens";
+    private static final String KEY_OUTPUT = "model.max-output-tokens";
+    private static final String KEY_CHILD = "model.child-name";
 
-    public record Snapshot(String endpoint, String model, String apiKey) {
+    public record Snapshot(String endpoint, String model, String apiKey, Long contextTokens, Integer maxOutputTokens,
+        String childModel) {
+        public Snapshot(String endpoint, String model, String apiKey, Long contextTokens, Integer maxOutputTokens) {
+            this(endpoint, model, apiKey, contextTokens, maxOutputTokens, "");
+        }
+
+        public Snapshot(String endpoint, String model, String apiKey) {
+            this(endpoint, model, apiKey, null, null, "");
+        }
+
+        public Snapshot withModel(String name) {
+            return new Snapshot(endpoint, name, apiKey, contextTokens, maxOutputTokens, childModel);
+        }
+
+        public com.pilot.core.model.ModelCapacity capacity() {
+            return com.pilot.core.model.ModelCapacity.of(contextTokens, maxOutputTokens);
+        }
         public boolean hasApiKey() {
             return apiKey != null && !apiKey.isBlank();
         }
@@ -74,7 +93,8 @@ public class ModelSettings {
         String targetEndpoint = blank(endpoint) ? before.endpoint() : endpoint.strip();
         String targetKey = blank(apiKey) ? before.apiKey() : apiKey.strip();
         requireHttpEndpoint(targetEndpoint);
-        return new Snapshot(targetEndpoint, before.model(), targetKey);
+        return new Snapshot(targetEndpoint, before.model(), targetKey, before.contextTokens(), before.maxOutputTokens(),
+            before.childModel());
     }
 
     /** 界面上可选的模型名（不含用户自己填的），供下拉列表使用。 */
@@ -104,8 +124,9 @@ public class ModelSettings {
         String nextKey = clearApiKey ? "" : blank(apiKey) ? before.apiKey() : apiKey.strip();
         requireHttpEndpoint(nextEndpoint);
 
-        Snapshot next = new Snapshot(nextEndpoint, nextModel, nextKey);
-        store.saveAll(Map.of(KEY_ENDPOINT, next.endpoint(), KEY_MODEL, next.model(), KEY_API_KEY, next.apiKey()));
+        Snapshot next = new Snapshot(nextEndpoint, nextModel, nextKey, before.contextTokens(), before.maxOutputTokens(),
+            before.childModel());
+        save(next);
         current = next;
         if (!next.equals(before)) {
             listeners.forEach(listener -> {
@@ -121,11 +142,49 @@ public class ModelSettings {
         return next;
     }
 
+    /** 留空或非正数表示恢复默认窗口；正数写入后，下一次请求按这个容量计算。 */
+    public synchronized Snapshot updateWindow(Long contextTokens, Integer maxOutputTokens) {
+        Snapshot before = current;
+        Long context = contextTokens == null ? before.contextTokens() : contextTokens <= 0 ? null : contextTokens;
+        Integer output = maxOutputTokens == null ? before.maxOutputTokens() : maxOutputTokens <= 0 ? null : maxOutputTokens;
+        Snapshot next = new Snapshot(before.endpoint(), before.model(), before.apiKey(), context, output,
+            before.childModel());
+        save(next);
+        current = next;
+        com.pilot.core.model.ModelCapacity.activate(next.capacity());
+        return next;
+    }
+
+    /** 空白表示清除子代理模型名。null 保持原值。不改主模型、密钥和窗口。 */
+    public synchronized Snapshot updateChild(String childModel) {
+        Snapshot before = current;
+        String nextChild = childModel == null ? before.childModel() : childModel.strip();
+        Snapshot next = new Snapshot(before.endpoint(), before.model(), before.apiKey(), before.contextTokens(),
+            before.maxOutputTokens(), nextChild == null ? "" : nextChild);
+        save(next);
+        current = next;
+        return next;
+    }
+
+    private void save(Snapshot next) {
+        Map<String, String> values = new java.util.LinkedHashMap<>();
+        values.put(KEY_ENDPOINT, next.endpoint());
+        values.put(KEY_MODEL, next.model());
+        values.put(KEY_API_KEY, next.apiKey() == null ? "" : next.apiKey());
+        values.put(KEY_CONTEXT, next.contextTokens() == null ? "" : Long.toString(next.contextTokens()));
+        values.put(KEY_OUTPUT, next.maxOutputTokens() == null ? "" : Integer.toString(next.maxOutputTokens()));
+        values.put(KEY_CHILD, next.childModel() == null ? "" : next.childModel());
+        store.saveAll(values);
+    }
+
     private Snapshot restore(ModelProperties defaults) {
         String endpoint = store.find(KEY_ENDPOINT).orElse(defaults.endpoint());
         String model = store.find(KEY_MODEL).orElse(defaults.model());
         String apiKey = store.find(KEY_API_KEY).orElse(defaults.apiKey());
-        Snapshot restored = new Snapshot(endpoint, model, apiKey == null ? "" : apiKey);
+        String child = store.find(KEY_CHILD).orElse("").strip();
+        Snapshot restored = new Snapshot(endpoint, model, apiKey == null ? "" : apiKey, number(store.find(KEY_CONTEXT)),
+            integer(store.find(KEY_OUTPUT)), child);
+        com.pilot.core.model.ModelCapacity.activate(restored.capacity());
         log.info("模型配置：model={} endpoint={} apiKey={}", restored.model(), restored.endpoint(),
             restored.hasApiKey() ? "已配置" : "未配置（可在界面设置）");
         return restored;
@@ -149,5 +208,25 @@ public class ModelSettings {
 
     private static boolean blank(String value) {
         return value == null || value.isBlank();
+    }
+
+    private static Long number(java.util.Optional<String> text) {
+        if (text.isEmpty() || text.get().isBlank()) {
+            return null;
+        }
+        try {
+            long value = Long.parseLong(text.get().strip());
+            return value > 0 ? value : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static Integer integer(java.util.Optional<String> text) {
+        Long value = number(text);
+        if (value == null || value > Integer.MAX_VALUE) {
+            return null;
+        }
+        return value.intValue();
     }
 }
