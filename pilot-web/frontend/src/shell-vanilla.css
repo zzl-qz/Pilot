@@ -385,7 +385,8 @@ html[data-theme] .turn-stats {
 html[data-theme] .turn-stats[hidden] { display: none; }
 html[data-theme] .turn-stat { display: inline-flex; align-items: baseline; gap: 4px; }
 html[data-theme] .turn-stat b { color: var(--muted); font-family: var(--mono); font-weight: 520; }
-html[data-theme] .turn-stat.is-context.is-hot b { color: var(--warn); }
+html[data-theme] .turn-stat.is-context.is-warn b { color: var(--warn); }
+html[data-theme] .turn-stat.is-context.is-critical b { color: var(--err); }
 html[data-theme] .turn-stat-note { margin-left: auto; color: var(--dim); }
 
 /* Response content is a small document system: prose, evidence, code and notices stay distinct. */

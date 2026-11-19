@@ -188,8 +188,10 @@ public final class ContextCompactor {
             return Outcome.none(beforeChars);
         }
         String pins = ContextPins.capture(messages, end, sourceFingerprint(messages.subList(0, end)));
-        if (pins.length() > SUMMARY_INPUT_CHARS / 2) {
-            return Outcome.none(beforeChars);
+        int pinLimit = SUMMARY_INPUT_CHARS / 2;
+        if (pins.length() > pinLimit) {
+            // 不能只留开头：已读文件列表常常在目标前面，截开头会把用户目标切掉。
+            pins = ContextPins.limit(pins, pinLimit);
         }
         String transcript = pins + "\n" + transcript(messages, 1, end);
         if (transcript.isBlank()) {

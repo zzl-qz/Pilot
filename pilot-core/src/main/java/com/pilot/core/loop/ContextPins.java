@@ -1,5 +1,6 @@
 package com.pilot.core.loop;
 
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -54,5 +55,48 @@ final class ContextPins {
         }
         return MARKER + JSON.writeValueAsString(Map.of("schema_version", 1, "source_sha256", source, "covered_messages",
             end - 1, "user_requests", requests, "evidence_refs", references)) + END;
+    }
+
+    /**
+     * 超长时先丢掉已读引用，再丢掉靠后的请求，第一条用户目标尽量留下。
+     * 解析失败时保留末尾，避免只留下开头的已读列表。
+     */
+    static String limit(String pins, int max) {
+        if (pins == null || pins.length() <= max) {
+            return pins == null ? "" : pins;
+        }
+        int start = pins.lastIndexOf(MARKER);
+        int end = pins.endsWith(END) ? pins.length() - END.length() : -1;
+        if (start >= 0 && end > start) {
+            try {
+                var metadata = JSON.readTree(pins.substring(start + MARKER.length(), end));
+                List<String> requests = new ArrayList<>();
+                List<String> references = new ArrayList<>();
+                metadata.path("user_requests").forEach(item -> requests.add(item.asText()));
+                metadata.path("evidence_refs").forEach(item -> references.add(item.asText()));
+                while (references.size() > 0 && rendered(metadata, requests, references).length() > max) {
+                    references.remove(references.size() - 1);
+                }
+                while (requests.size() > 1 && rendered(metadata, requests, references).length() > max) {
+                    requests.remove(requests.size() - 1);
+                }
+                String fitted = rendered(metadata, requests, references);
+                if (fitted.length() <= max) {
+                    return fitted;
+                }
+            } catch (RuntimeException ignored) {
+                // 落到末尾保留。
+            }
+        }
+        String note = "\n…（钉住的上下文过长，已保留末尾的目标）";
+        int keep = Math.max(0, max - note.length());
+        return pins.substring(Math.max(0, pins.length() - keep)) + note;
+    }
+
+    private static String rendered(tools.jackson.databind.JsonNode metadata, List<String> requests,
+        List<String> references) {
+        return MARKER + JSON.writeValueAsString(Map.of("schema_version", metadata.path("schema_version").asInt(1),
+            "source_sha256", metadata.path("source_sha256").asText(""), "covered_messages",
+            metadata.path("covered_messages").asInt(0), "user_requests", requests, "evidence_refs", references)) + END;
     }
 }

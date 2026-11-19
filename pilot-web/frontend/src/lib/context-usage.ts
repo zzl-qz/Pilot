@@ -4,14 +4,14 @@ import type { ContextStatus } from '../types/runtime.js';
  *
  * <p>后端的 {@code ContextStatus} 给的是保守估算：{@code usedTokens / limitTokens}、
  * {@code percent}，以及按角色的记忆构成 {@code segments[{role,messages,chars}]}。
- * 自动收缩的四个水位（55% 换占位符、70% 截断、80% 折叠摘要、97% 硬裁剪）与
+ * 自动收缩的水位与 ContextBudget 对应。界面在 80% 用警告色，92% 用高温色。
  * {@code ContextBudget} 一一对应，界面照着说人话就行。
  */
 
 /** 与 ContextBudget 的 PRE_COMPACT_RATIO 对齐：到这里会折叠成交接摘要。 */
 export const COMPACT_RATIO = 0.8;
-/** 与 ContextBudget 的 DROP_RATIO 对齐：到这里开始硬裁剪最旧的组。 */
-export const DROP_RATIO = 0.97;
+/** 到这里界面用高温色。硬裁剪仍由后端在更高水位处理。 */
+export const HOT_RATIO = 0.92;
 
 const ROLE_LABELS: Record<string, string> = {
   system: '系统提示',
@@ -33,13 +33,20 @@ export function usagePercent(status: ContextStatus | null | undefined) {
   return Math.max(0, Math.min(100, Math.round((used / limit) * 100)));
 }
 
-/** 占用档位：normal 正常、warn 已进入自动折叠区、danger 快要硬裁剪。 */
+/** 占用档位：80% 警告，92% 高温。分母是有效输入预算。 */
 export function usageLevel(percent: unknown) {
   const value = Number(percent) || 0;
-  if (value >= DROP_RATIO * 100) {
+  if (value >= HOT_RATIO * 100) {
     return 'danger';
   }
   return value >= COMPACT_RATIO * 100 ? 'warn' : 'normal';
+}
+
+/** 悬停说明：百分比用的是扣过输出预留和安全余量的预算。 */
+export function usageBudgetTitle(used: unknown, limit: unknown) {
+  const usedText = formatTokens(used);
+  const limitText = formatTokens(limit);
+  return `当前上下文 ${usedText} / 有效输入预算 ${limitText}（已扣除输出预留与安全余量）`;
 }
 
 /** 1.2k / 128k / 1.1M；未知返回 —。 */
