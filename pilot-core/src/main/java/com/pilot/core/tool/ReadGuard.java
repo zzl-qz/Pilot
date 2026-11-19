@@ -42,6 +42,14 @@ public interface ReadGuard {
     }
 
     /**
+     * 这一轮还能不能继续只读查看。读文件、搜索、翻历史都算。写出新内容后重新计数。
+     * 默认不限制。
+     */
+    default boolean deliverInspection() {
+        return true;
+    }
+
+    /**
      * 观察之后文件有没有被别的进程改过。默认视为没变，测试用的全放行实现不用记版本。
      */
     default boolean isFresh(Path file) {

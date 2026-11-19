@@ -21,10 +21,13 @@ public final class ReadTracker implements ReadGuard {
 
     /** 同一文件完整交出正文的次数。再多就是在换行号重读。 */
     public static final int MAX_DELIVERIES = 3;
+    /** 一次运行里没有任何写入时，只读查看的上限。再查就是在空转。 */
+    public static final int MAX_INSPECTIONS = 16;
 
     private final ConcurrentMap<Path, FileStamp> observed = new ConcurrentHashMap<>();
     private final ConcurrentMap<Path, AtomicInteger> deliveries = new ConcurrentHashMap<>();
     private final AtomicInteger revision = new AtomicInteger();
+    private final AtomicInteger inspections = new AtomicInteger();
 
     @Override
     public void observed(Path file) {
@@ -36,6 +39,7 @@ public final class ReadTracker implements ReadGuard {
         FileStamp previous = observed.put(key, next);
         if (previous != null && !previous.equals(next)) {
             deliveries.remove(key);
+            inspections.set(0);
         }
         if (previous == null || !previous.equals(next)) {
             revision.incrementAndGet();
@@ -49,6 +53,11 @@ public final class ReadTracker implements ReadGuard {
         }
         Path key = file.toAbsolutePath().normalize();
         return deliveries.computeIfAbsent(key, ignored -> new AtomicInteger()).incrementAndGet() <= MAX_DELIVERIES;
+    }
+
+    @Override
+    public boolean deliverInspection() {
+        return inspections.incrementAndGet() <= MAX_INSPECTIONS;
     }
 
     @Override
