@@ -61,6 +61,11 @@ public final class ReadTracker implements ReadGuard {
     }
 
     @Override
+    public void noteWrite() {
+        inspections.set(0);
+    }
+
+    @Override
     public String observationStamp(Path file) {
         if (file == null) {
             return "";

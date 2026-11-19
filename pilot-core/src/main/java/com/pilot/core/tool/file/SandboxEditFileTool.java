@@ -89,6 +89,7 @@ public final class SandboxEditFileTool extends PromptedTool {
             }
             sandbox.record(shown, content, applied.content());
             reads.observed(file);
+            reads.noteWrite();
             return "已提交到沙箱 " + shown + "：替换 " + applied.count() + " 处（" + applied.oldLines() + " 行 → "
                 + applied.newLines() + " 行）";
         } catch (RuntimeException e) {

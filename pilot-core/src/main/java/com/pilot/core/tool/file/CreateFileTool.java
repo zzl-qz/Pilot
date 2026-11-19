@@ -44,6 +44,7 @@ public final class CreateFileTool extends CreateFileOperation implements WritesF
             snapshots.afterWrite(file);
             // 刚创建的文件视为已读：后续 edit_file 不会被「先读后改」拦截
             reads.observed(file);
+            reads.noteWrite();
             int bytes = content.getBytes(StandardCharsets.UTF_8).length;
             return "已创建 " + paths.display(file) + "（" + bytes + " 字节，" + (int)content.lines().count() + " 行）";
         } catch (IOException e) {

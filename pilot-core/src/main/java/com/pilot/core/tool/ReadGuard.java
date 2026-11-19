@@ -49,6 +49,10 @@ public interface ReadGuard {
         return true;
     }
 
+    /** 已经写出新内容，只读查看次数清零，可以再读刚改过的文件。 */
+    default void noteWrite() {
+    }
+
     /**
      * 观察之后文件有没有被别的进程改过。默认视为没变，测试用的全放行实现不用记版本。
      */

@@ -34,6 +34,7 @@ public final class SandboxCreateFileTool extends CreateFileOperation {
             sandbox.record(paths.display(file), null, content);
             // 刚创建的文件视为已读：后续 edit_file 不会被「先读后改」拦截
             reads.observed(file);
+            reads.noteWrite();
             return "已提交到沙箱 " + paths.display(file) + "（新文件，" + (int)content.lines().count() + " 行）";
         } catch (RuntimeException e) {
             return "ERROR: 提交沙箱失败: " + e.getMessage();

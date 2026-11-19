@@ -105,6 +105,7 @@ public final class EditFileTool extends PromptedTool implements WritesFiles {
             Files.writeString(file, applied.content(), StandardCharsets.UTF_8);
             snapshots.afterWrite(file);
             reads.observed(file);
+            reads.noteWrite();
             return "已修改 " + paths.display(file) + "：替换 " + applied.count() + " 处（" + applied.oldLines() + " 行 → "
                 + applied.newLines() + " 行）";
         } catch (IOException e) {

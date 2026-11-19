@@ -325,6 +325,7 @@ public final class ApplyPatchTool extends PromptedTool implements WritesFiles {
                     StandardOpenOption.WRITE);
                 snapshots.afterWrite(step.file());
                 reads.observed(step.file());
+                reads.noteWrite();
             }
             case DELETE -> {
                 snapshots.beforeWrite(step.file());
@@ -336,6 +337,7 @@ public final class ApplyPatchTool extends PromptedTool implements WritesFiles {
                     Files.writeString(step.file(), step.content(), StandardCharsets.UTF_8);
                     snapshots.afterWrite(step.file());
                     reads.observed(step.file());
+                    reads.noteWrite();
                 } else {
                     Files.createDirectories(step.target().getParent());
                     snapshots.beforeWrite(step.file());
@@ -345,6 +347,7 @@ public final class ApplyPatchTool extends PromptedTool implements WritesFiles {
                     Files.delete(step.file());
                     snapshots.afterWrite(step.target());
                     reads.observed(step.target());
+                    reads.noteWrite();
                 }
             }
         }
