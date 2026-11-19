@@ -12,6 +12,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
 import { Icon } from './Icon.jsx';
+import { ImagePreview } from './ImagePreview.jsx';
 import { VoiceInput } from './VoiceInput.jsx';
 import { SubmissionNotice } from './SubmissionNotice.jsx';
 import { MessageQueue } from './MessageQueue.jsx';
@@ -904,14 +905,7 @@ export function Composer() {
         </div>
         <div className="composer-voice-feedback" ref={voiceFeedbackRef} />
       </form>
-      {preview && (
-        <div className="composer-preview" role="dialog" aria-modal="true" aria-label={`${preview.name || '图片'} 预览`}
-          onClick={() => setPreview(null)}>
-          <img src={preview.src} alt={preview.name} onClick={(event) => event.stopPropagation()} />
-          <span className="composer-preview-name">{preview.name}</span>
-          <button type="button" className="composer-preview-close" aria-label="关闭预览" onClick={() => setPreview(null)}>×</button>
-        </div>
-      )}
+      {preview && <ImagePreview name={preview.name} src={preview.src} onClose={() => setPreview(null)} />}
     </div>
   );
 }

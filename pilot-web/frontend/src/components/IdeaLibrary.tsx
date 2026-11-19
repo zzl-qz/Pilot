@@ -99,8 +99,7 @@ export default function IdeaLibrary({ onClose }: { onClose: () => void }) {
     else setError('自动复制不可用，请选中文字手动复制。');
   }
 
-  return <>
-  <Modal id="idea-library" title="想法库" onClose={onClose} width={720} dismissible={!busy} initialFocus="#idea-text">
+  return <Modal id="idea-library" title="想法库" onClose={onClose} width={720} dismissible={!busy} initialFocus="#idea-text">
     <div className="idea-library">
       <p className="idea-hint">跨项目使用。文字和附件保存在当前浏览器或桌面端的本地资料中。</p>
       <form className="idea-form" onSubmit={event => { event.preventDefault(); void save(); }}>
@@ -162,10 +161,10 @@ export default function IdeaLibrary({ onClose }: { onClose: () => void }) {
           }, '复制到想法库失败，请重试。');
         }} />}
       </details>
+      {/* 大图放在弹窗内容里：原生 dialog 在顶层，挂在外面会被它盖住 */}
+      {preview && <ImagePreview name={preview.name} src={preview.src} onClose={() => setPreview(null)} />}
     </div>
-  </Modal>
-  {preview && <ImagePreview name={preview.name} src={preview.src} onClose={() => setPreview(null)} />}
-  </>;
+  </Modal>;
 }
 
 /** 附件卡片：预览在上，名字与大小在下；待保存的缩略图右上角带一个移除按钮。 */
