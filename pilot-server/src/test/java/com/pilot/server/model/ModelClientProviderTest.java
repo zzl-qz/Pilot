@@ -13,10 +13,12 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 
+import com.pilot.core.message.Message;
 import com.pilot.core.model.MeteredModelClient;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelProfile;
 import com.pilot.core.model.ModelResponse;
+import com.pilot.core.model.ToolDefinition;
 import com.pilot.server.store.InMemorySettingsStore;
 
 class ModelClientProviderTest {
@@ -47,8 +49,7 @@ class ModelClientProviderTest {
             }
 
             @Override
-            public ModelResponse chat(java.util.List<com.pilot.core.message.Message> messages,
-                java.util.List<com.pilot.core.model.ToolDefinition> tools) {
+            public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
                 if ("model-a".equals(snapshot.model())) {
                     started.countDown();
                     try {
@@ -57,20 +58,19 @@ class ModelClientProviderTest {
                         Thread.currentThread().interrupt();
                     }
                 }
-                String text = messages.stream().map(com.pilot.core.message.Message::content)
-                    .reduce("", (left, right) -> left + "\n" + right);
-                return new ModelResponse(snapshot.model() + text, java.util.List.of());
+                String text = messages.stream().map(Message::content).reduce("", (left, right) -> left + "\n" + right);
+                return new ModelResponse(snapshot.model() + text, List.of());
             }
         });
-        MeteredModelClient metered = new MeteredModelClient(provider, "run", "main", java.util.List.of(), report -> {
+        MeteredModelClient metered = new MeteredModelClient(provider, "run", "main", List.of(), report -> {
         });
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            var pending = executor.submit(() -> metered.chat(java.util.List.of(), java.util.List.of()).content());
+            var pending = executor.submit(() -> metered.chat(List.of(), List.of()).content());
             assertTrue(started.await(5, TimeUnit.SECONDS));
             settings.update(null, "model-b", null);
             release.countDown();
             assertEquals("model-a", pending.get(5, TimeUnit.SECONDS));
-            assertTrue(metered.chat(java.util.List.of(), java.util.List.of()).content().contains("模型已切换为 model-b"));
+            assertTrue(metered.chat(List.of(), List.of()).content().contains("模型已切换为 model-b"));
         }
     }
 

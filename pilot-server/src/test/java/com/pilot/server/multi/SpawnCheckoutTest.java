@@ -3,6 +3,7 @@ package com.pilot.server.multi;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -10,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -17,9 +19,9 @@ import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.model.ModelResponse;
+import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PolicyPermissionGate;
-import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolRegistry;
 
@@ -55,8 +57,8 @@ class SpawnCheckoutTest {
     void writeSpawnReportsTheCheckout() throws Exception {
         Path checkout = Files.createDirectories(root.resolve("child"));
         Files.writeString(checkout.resolve("New.java"), "class New {}\n");
-        SubagentCheckouts checkouts = new SubagentCheckouts(
-            workspace -> new SubagentCheckouts.Opened(checkout, "New.java", ""));
+        SubagentCheckouts checkouts =
+            new SubagentCheckouts(workspace -> new SubagentCheckouts.Opened(checkout, "New.java", ""));
         SpawnAgentTool tool = tool(new AtomicInteger()).withCheckouts(root.resolve("parent"), checkouts);
         String result = tool.execute(Map.of("task", "改代码", "isolation", "worktree", "mode", "write"));
         assertTrue(result.contains(checkout.toString()), result);
@@ -89,7 +91,7 @@ class SpawnCheckoutTest {
             }, path -> {
                 try {
                     Files.writeString(parent.resolve(path.getFileName() + ".txt"), "交回");
-                } catch (java.io.IOException e) {
+                } catch (IOException e) {
                     throw new IllegalStateException(e);
                 }
                 return "改动已交回原目录";
@@ -134,7 +136,7 @@ class SpawnCheckoutTest {
     }
 
     private static void assertEqualsZero(AtomicInteger opened) {
-        org.junit.jupiter.api.Assertions.assertEquals(0, opened.get());
+        Assertions.assertEquals(0, opened.get());
     }
 
     private SpawnAgentTool tool(AtomicInteger opened) {

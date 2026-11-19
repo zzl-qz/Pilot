@@ -193,11 +193,13 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
         return ToolSchemas.object(
             Map.of("task", ToolSchemas.string("子任务的完整描述，包含目标、范围与期望产出"), "agent",
                 ToolSchemas.string(agentFieldDescription()), "name",
-                ToolSchemas.string("子任务的简短名字（10 字以内，如「统计 Java 文件」），用于界面展示，可省略"), "fork_turns", Map.of("type", "string",
-                    "enum", List.of("none", "all"), "description", "none = 不带父对话（默认，推荐）；all = 带上当前对话记忆"),
-                "isolation", Map.of("type", "string", "enum", List.of("none", "worktree"), "description",
-                    "write 模式可使用 worktree。只读子代理即使传入 worktree 也不会创建检出"), "mode",
-                Map.of("type", "string", "enum", List.of("read", "write"), "description", "默认 read"),
+                ToolSchemas.string("子任务的简短名字（10 字以内，如「统计 Java 文件」），用于界面展示，可省略"), "fork_turns",
+                Map.of("type", "string", "enum", List.of("none", "all"), "description",
+                    "none = 不带父对话（默认，推荐）；all = 带上当前对话记忆"),
+                "isolation",
+                Map.of("type", "string", "enum", List.of("none", "worktree"), "description",
+                    "write 模式可使用 worktree。只读子代理即使传入 worktree 也不会创建检出"),
+                "mode", Map.of("type", "string", "enum", List.of("read", "write"), "description", "默认 read"),
                 "resumeAgentId", ToolSchemas.string("继续同一个只读子代理。不填则新开"), "model",
                 ToolSchemas.string("只读子代理使用的已配置模型。不填则用父模型")),
             List.of("task"));
@@ -256,7 +258,8 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
             }
             if (found == null) {
                 String names = String.join("、", alternateModels.keySet());
-                return ToolResult.text("ERROR: 模型 " + requestedModel + " 未配置（可用：" + (names.isEmpty() ? "仅父模型" : names) + "）");
+                return ToolResult
+                    .text("ERROR: 模型 " + requestedModel + " 未配置（可用：" + (names.isEmpty() ? "仅父模型" : names) + "）");
             }
             chosen = found;
         } else {
@@ -284,7 +287,8 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
         String displayName = args == null || text(args.get("name")).isEmpty() ? agentName : text(args.get("name"));
         String checkoutNote = "";
         Path checkoutPath = null;
-        if ("worktree".equals(text(args == null ? null : args.get("isolation"))) && "write".equals(text(args.get("mode")))) {
+        if ("worktree".equals(text(args == null ? null : args.get("isolation")))
+            && "write".equals(text(args.get("mode")))) {
             if (checkouts == null || checkoutWorkspace == null) {
                 return ToolResult.text("ERROR: 无法创建独立检出。未修改父工作区。");
             }
@@ -293,13 +297,15 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
                 return ToolResult.text("ERROR: " + opened.error());
             }
             checkoutPath = opened.path();
-            checkoutNote = "\n\n独立检出：" + opened.path() + (opened.diff() == null || opened.diff().isBlank() ? "" : "\n" + opened.diff());
+            checkoutNote = "\n\n独立检出：" + opened.path()
+                + (opened.diff() == null || opened.diff().isBlank() ? "" : "\n" + opened.diff());
         }
 
         if (resumeId.isEmpty()) {
             int spawn = runSpawns.incrementAndGet();
             if (spawn > budget.maxSpawnsPerRun()) {
-                return ToolResult.text("ERROR: 本轮子代理派生次数已达到 " + budget.maxSpawnsPerRun() + " 次；请先合并已有结果，由父代理继续执行或阶段交付。");
+                return ToolResult
+                    .text("ERROR: 本轮子代理派生次数已达到 " + budget.maxSpawnsPerRun() + " 次；请先合并已有结果，由父代理继续执行或阶段交付。");
             }
         }
 
@@ -320,8 +326,7 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
                 effectiveConfig, cancelled::getAsBoolean).withExecutionPolicy(artifacts);
             List<Message> context = resumeId.isEmpty() ? (inherit ? history.get() : List.of()) : prior;
             String goal = profile == null ? task : profile.prefixGoal(task);
-            String prompt = resumeId.isEmpty()
-                ? PROMPTS.render("subagent/task", Map.of("task", goal)).strip()
+            String prompt = resumeId.isEmpty() ? PROMPTS.render("subagent/task", Map.of("task", goal)).strip()
                 : "继续同一个只读子任务。历史里已有结论，不要从头重读。新问题：" + goal;
             if (checkoutPath != null) {
                 prompt = prompt + "\n工作目录是独立检出 " + checkoutPath + "，不要改父目录。";
@@ -354,7 +359,8 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
                     checkoutNote = checkoutNote + "\n" + handed;
                 }
             }
-            return new ToolResult(report + agentLine(agentId) + checkoutNote, artifacts.changedPaths(), artifacts.checks());
+            return new ToolResult(report + agentLine(agentId) + checkoutNote, artifacts.changedPaths(),
+                artifacts.checks());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return ToolResult.text("ERROR: 等待子代理空位时被中断");

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
@@ -16,7 +17,7 @@ class CodeDiagnosticsToolTest {
         for (int i = 1; i <= 60; i++) {
             raw.append("src/A.java:").append(i).append(": 错误\n");
         }
-        String result = new CodeDiagnosticsTool(raw::toString).execute(java.util.Map.of());
+        String result = new CodeDiagnosticsTool(raw::toString).execute(Map.of());
         assertTrue(result.contains("src/A.java:1: 错误"), result);
         assertTrue(result.contains("已截断到 50 条"), result);
         assertFalse(result.contains("src/A.java:51:"));

@@ -89,12 +89,13 @@ class AnthropicMessagesModelClientTest {
         server.start();
         try {
             String stored = "先看文件" + AnthropicMessagesModelClient.THINKING_SPLIT + "sig-1";
-            Message previous = Message.assistant("", List.of(new ToolCall("old", "read_file", Map.of("path", "B.java"))),
-                stored);
-            ModelResponse response = client(server, Set.of()).chat(List.of(Message.user("上一问"), previous,
-                Message.tool("old", "内容"), Message.user("这一问"),
-                Message.assistant("", List.of(new ToolCall("use-0", "read_file", Map.of("path", "A.java"))), stored),
-                Message.tool("use-0", "新内容")), List.of());
+            Message previous =
+                Message.assistant("", List.of(new ToolCall("old", "read_file", Map.of("path", "B.java"))), stored);
+            ModelResponse response =
+                client(server, Set.of()).chat(List.of(Message.user("上一问"), previous, Message.tool("old", "内容"),
+                    Message.user("这一问"), Message.assistant("",
+                        List.of(new ToolCall("use-0", "read_file", Map.of("path", "A.java"))), stored),
+                    Message.tool("use-0", "新内容")), List.of());
 
             JsonNode messages = mapper.readTree(requestBody.get()).path("messages");
             assertFalse(messages.get(1).toString().contains("sig-1"));

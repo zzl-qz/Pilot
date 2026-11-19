@@ -1,6 +1,7 @@
 package com.pilot.core.model;
 
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** 显式运行容量策略；不根据模型别名猜测厂商真实窗口。字符内存上限另由上下文策略管理。 */
 public record ModelCapacity(long contextTokens, long inputTokens, int outputTokens, long marginTokens,
@@ -33,8 +34,7 @@ public record ModelCapacity(long contextTokens, long inputTokens, int outputToke
         return new ModelCapacity(context, input, cappedOutput, margin, defaults.imageTokens());
     }
 
-    private static final java.util.concurrent.atomic.AtomicReference<ModelCapacity> ACTIVE =
-        new java.util.concurrent.atomic.AtomicReference<>();
+    private static final AtomicReference<ModelCapacity> ACTIVE = new AtomicReference<>();
 
     /** 当前模型设置覆盖进程默认值。没有设置时用 {@link #configured()}。 */
     public static ModelCapacity active() {

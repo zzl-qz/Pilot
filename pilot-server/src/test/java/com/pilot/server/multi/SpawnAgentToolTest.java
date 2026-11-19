@@ -152,8 +152,10 @@ class SpawnAgentToolTest {
         parent.register(named("spawn_agent"));
         parent.register(named("late_parent_tool"));
         String isolated = tool.execute(Map.of("task", "inspect"));
-        assertTrue(isolated.startsWith(
-            "isolated\n\n<subagent_result>\nchanged_files: []\nchecks: []\nopen_steps: []\n</subagent_result>"), isolated);
+        assertTrue(
+            isolated.startsWith(
+                "isolated\n\n<subagent_result>\nchanged_files: []\nchecks: []\nopen_steps: []\n</subagent_result>"),
+            isolated);
         assertTrue(isolated.contains("\nagent_id: agent_"), isolated);
 
         assertEquals(Set.of("read_file"), visible.get(0));

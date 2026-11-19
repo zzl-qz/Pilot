@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.util.List;
 
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import com.pilot.core.model.ModelCapacity;
@@ -33,6 +34,6 @@ class ModelWindowTest {
     @Test
     void oversizedOutputDoesNotRejectStartup() {
         ModelCapacity capacity = ModelCapacity.of(32_000L, 100_000);
-        org.junit.jupiter.api.Assertions.assertTrue(capacity.outputTokens() < capacity.contextTokens());
+        Assertions.assertTrue(capacity.outputTokens() < capacity.contextTokens());
     }
 }

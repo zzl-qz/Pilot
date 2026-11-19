@@ -43,7 +43,8 @@ class SubagentCheckoutsTest {
 
     @Test
     void fifthCheckoutIsRefused() {
-        SubagentCheckouts checkouts = new SubagentCheckouts(workspace -> new SubagentCheckouts.Opened(root.resolve("c"), "", ""));
+        SubagentCheckouts checkouts =
+            new SubagentCheckouts(workspace -> new SubagentCheckouts.Opened(root.resolve("c"), "", ""));
         for (int i = 0; i < 4; i++) {
             assertTrue(checkouts.acquire(root).ok());
         }
@@ -54,7 +55,8 @@ class SubagentCheckoutsTest {
 
     @Test
     void creationFailureDoesNotOpenAPath() {
-        SubagentCheckouts checkouts = new SubagentCheckouts(workspace -> new SubagentCheckouts.Opened(null, "", "磁盘满了"));
+        SubagentCheckouts checkouts =
+            new SubagentCheckouts(workspace -> new SubagentCheckouts.Opened(null, "", "磁盘满了"));
         SubagentCheckouts.Opened opened = checkouts.acquire(root);
         assertFalse(opened.ok());
         assertTrue(opened.error().contains("未修改父工作区"));

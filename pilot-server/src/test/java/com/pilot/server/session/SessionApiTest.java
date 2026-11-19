@@ -40,6 +40,7 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
 
 import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.event.EventEnvelope;
+import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.message.Message;
 import com.pilot.core.project.ProjectRepository;
@@ -229,7 +230,7 @@ class SessionApiTest {
     @Test
     void exportDoesNotChangeTheSessionAndIncludesTheFailure() throws Exception {
         String sessionId = createSession();
-        sessions.publish(sessionId, "run_export", new com.pilot.core.event.RunFailed("CONTEXT_TOO_LARGE", "停了", false));
+        sessions.publish(sessionId, "run_export", new RunFailed("CONTEXT_TOO_LARGE", "停了", false));
         String before = mvc.perform(get("/api/sessions/" + sessionId)).andExpect(status().isOk()).andReturn()
             .getResponse().getContentAsString();
 

@@ -1,13 +1,16 @@
 package com.pilot.server.model;
 
 import java.net.URI;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
 import org.springframework.stereotype.Component;
 
+import com.pilot.core.model.ModelCapacity;
 import com.pilot.server.store.SettingsStore;
 
 import lombok.extern.slf4j.Slf4j;
@@ -45,9 +48,10 @@ public class ModelSettings {
             return new Snapshot(endpoint, name, apiKey, contextTokens, maxOutputTokens, childModel);
         }
 
-        public com.pilot.core.model.ModelCapacity capacity() {
-            return com.pilot.core.model.ModelCapacity.of(contextTokens, maxOutputTokens);
+        public ModelCapacity capacity() {
+            return ModelCapacity.of(contextTokens, maxOutputTokens);
         }
+
         public boolean hasApiKey() {
             return apiKey != null && !apiKey.isBlank();
         }
@@ -146,12 +150,13 @@ public class ModelSettings {
     public synchronized Snapshot updateWindow(Long contextTokens, Integer maxOutputTokens) {
         Snapshot before = current;
         Long context = contextTokens == null ? before.contextTokens() : contextTokens <= 0 ? null : contextTokens;
-        Integer output = maxOutputTokens == null ? before.maxOutputTokens() : maxOutputTokens <= 0 ? null : maxOutputTokens;
-        Snapshot next = new Snapshot(before.endpoint(), before.model(), before.apiKey(), context, output,
-            before.childModel());
+        Integer output =
+            maxOutputTokens == null ? before.maxOutputTokens() : maxOutputTokens <= 0 ? null : maxOutputTokens;
+        Snapshot next =
+            new Snapshot(before.endpoint(), before.model(), before.apiKey(), context, output, before.childModel());
         save(next);
         current = next;
-        com.pilot.core.model.ModelCapacity.activate(next.capacity());
+        ModelCapacity.activate(next.capacity());
         return next;
     }
 
@@ -167,7 +172,7 @@ public class ModelSettings {
     }
 
     private void save(Snapshot next) {
-        Map<String, String> values = new java.util.LinkedHashMap<>();
+        Map<String, String> values = new LinkedHashMap<>();
         values.put(KEY_ENDPOINT, next.endpoint());
         values.put(KEY_MODEL, next.model());
         values.put(KEY_API_KEY, next.apiKey() == null ? "" : next.apiKey());
@@ -184,7 +189,7 @@ public class ModelSettings {
         String child = store.find(KEY_CHILD).orElse("").strip();
         Snapshot restored = new Snapshot(endpoint, model, apiKey == null ? "" : apiKey, number(store.find(KEY_CONTEXT)),
             integer(store.find(KEY_OUTPUT)), child);
-        com.pilot.core.model.ModelCapacity.activate(restored.capacity());
+        ModelCapacity.activate(restored.capacity());
         log.info("模型配置：model={} endpoint={} apiKey={}", restored.model(), restored.endpoint(),
             restored.hasApiKey() ? "已配置" : "未配置（可在界面设置）");
         return restored;
@@ -210,7 +215,7 @@ public class ModelSettings {
         return value == null || value.isBlank();
     }
 
-    private static Long number(java.util.Optional<String> text) {
+    private static Long number(Optional<String> text) {
         if (text.isEmpty() || text.get().isBlank()) {
             return null;
         }
@@ -222,7 +227,7 @@ public class ModelSettings {
         }
     }
 
-    private static Integer integer(java.util.Optional<String> text) {
+    private static Integer integer(Optional<String> text) {
         Long value = number(text);
         if (value == null || value > Integer.MAX_VALUE) {
             return null;

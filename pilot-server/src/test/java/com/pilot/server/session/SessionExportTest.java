@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunContinued;
 import com.pilot.core.event.RunFailed;
+import com.pilot.core.event.SessionEvent;
 import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.event.ToolStarted;
 import com.pilot.core.message.Message;
@@ -21,7 +22,8 @@ import com.pilot.core.session.SessionStatus;
 class SessionExportTest {
     @Test
     void emptySessionStillExplainsThatThereAreNoMessages() {
-        String text = SessionExport.markdown(session("空的"), List.of(), List.of(), Instant.parse("2026-11-19T04:00:00Z"));
+        String text =
+            SessionExport.markdown(session("空的"), List.of(), List.of(), Instant.parse("2026-11-19T04:00:00Z"));
 
         assertTrue(text.contains("这次会话还没有消息。"), text);
         assertTrue(text.contains("ses_1"), text);
@@ -30,11 +32,11 @@ class SessionExportTest {
     @Test
     void reviewSummaryIncludesFailureAndToolWithoutSecrets() {
         Session session = session("排查 a/b:c");
-        List<EventEnvelope> events = List.of(
-            envelope(1, new RunFailed("CONTEXT_TOO_LARGE", "密钥 sk-abcdefghijklmnopqrstuvwxyz", false)),
-            envelope(2, new RunContinued(1, 2, "上下文超过安全输入预算")),
-            envelope(3, new ToolStarted("call_1", "run_command", "password=hunter2hunter2")),
-            envelope(4, new ToolCompleted("call_1", "退出码 1", 1200)));
+        List<EventEnvelope> events =
+            List.of(envelope(1, new RunFailed("CONTEXT_TOO_LARGE", "密钥 sk-abcdefghijklmnopqrstuvwxyz", false)),
+                envelope(2, new RunContinued(1, 2, "上下文超过安全输入预算")),
+                envelope(3, new ToolStarted("call_1", "run_command", "password=hunter2hunter2")),
+                envelope(4, new ToolCompleted("call_1", "退出码 1", 1200)));
 
         String text = SessionExport.markdown(session, List.of(Message.user("看一下")), events,
             Instant.parse("2026-11-19T04:00:00Z"));
@@ -59,7 +61,7 @@ class SessionExportTest {
         return new Session("ses_1", title, Instant.parse("2026-11-19T00:00:00Z"), SessionStatus.INTERRUPTED, "/work");
     }
 
-    private static EventEnvelope envelope(long sequence, com.pilot.core.event.SessionEvent event) {
+    private static EventEnvelope envelope(long sequence, SessionEvent event) {
         return new EventEnvelope(sequence, Instant.parse("2026-11-19T01:00:00Z"), event.type().wireName(), "ses_1",
             "run_1", event);
     }

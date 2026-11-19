@@ -1,5 +1,6 @@
 package com.pilot.core.tool.code;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -22,7 +23,8 @@ public final class LocalCodeChecker {
     private final Predicate<String> installed;
     private final BiFunction<Path, List<String>, String> runner;
 
-    public LocalCodeChecker(Path workspace, Predicate<String> installed, BiFunction<Path, List<String>, String> runner) {
+    public LocalCodeChecker(Path workspace, Predicate<String> installed,
+        BiFunction<Path, List<String>, String> runner) {
         this.workspace = workspace;
         this.installed = installed == null ? name -> false : installed;
         this.runner = runner == null ? LocalCodeChecker::runProcess : runner;
@@ -45,8 +47,8 @@ public final class LocalCodeChecker {
         if (output == null || output.isBlank()) {
             return "";
         }
-        List<String> lines = output.lines().map(String::strip).filter(line -> LINE.matcher(line).matches())
-            .limit(MAX_LINES).toList();
+        List<String> lines =
+            output.lines().map(String::strip).filter(line -> LINE.matcher(line).matches()).limit(MAX_LINES).toList();
         return String.join("\n", lines);
     }
 
@@ -98,7 +100,7 @@ public final class LocalCodeChecker {
         if (path == null) {
             return false;
         }
-        for (String dir : path.split(java.io.File.pathSeparator)) {
+        for (String dir : path.split(File.pathSeparator)) {
             if (Files.isRegularFile(Path.of(dir, name)) || Files.isRegularFile(Path.of(dir, name + ".exe"))
                 || Files.isRegularFile(Path.of(dir, name + ".cmd"))) {
                 return true;
@@ -109,8 +111,8 @@ public final class LocalCodeChecker {
 
     private static String runProcess(Path directory, List<String> command) {
         try {
-            Process process = new ProcessBuilder(command).directory(directory.toFile()).redirectErrorStream(true)
-                .start();
+            Process process =
+                new ProcessBuilder(command).directory(directory.toFile()).redirectErrorStream(true).start();
             if (!process.waitFor(8, TimeUnit.SECONDS)) {
                 process.destroyForcibly();
                 return "";

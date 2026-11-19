@@ -10,6 +10,7 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 import com.pilot.core.lint.LintGate;
+import com.pilot.core.message.Message;
 import com.pilot.core.prompt.PromptLibrary;
 
 class CompletionBaselineTest {
@@ -26,6 +27,6 @@ class CompletionBaselineTest {
 
     @Test
     void nearFullContextSkipsAnotherNudge() {
-        assertFalse(CompletionPressure.tooFull(List.of(com.pilot.core.message.Message.user("短")), List.of(), 2_000_000));
+        assertFalse(CompletionPressure.tooFull(List.of(Message.user("短")), List.of(), 2_000_000));
     }
 }

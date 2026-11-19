@@ -40,7 +40,8 @@ public final class SessionExport {
         return "pilot-" + safe + "-" + day + ".md";
     }
 
-    public static String markdown(Session session, List<Message> messages, List<EventEnvelope> events, Instant exportedAt) {
+    public static String markdown(Session session, List<Message> messages, List<EventEnvelope> events,
+        Instant exportedAt) {
         StringBuilder out = new StringBuilder();
         String title = session.title() == null || session.title().isBlank() ? "未命名对话" : session.title();
         out.append("# ").append(title).append("\n\n");
@@ -87,7 +88,8 @@ public final class SessionExport {
         }
         if (!continued.isEmpty()) {
             out.append("\n自动处理：\n");
-            continued.forEach((reason, count) -> out.append("- ").append(clip(reason)).append(" × ").append(count).append("\n"));
+            continued.forEach(
+                (reason, count) -> out.append("- ").append(clip(reason)).append(" × ").append(count).append("\n"));
         }
         out.append("\n## 对话\n\n");
         int shown = 0;

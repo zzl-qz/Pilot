@@ -83,8 +83,8 @@ class RunCommandToolTest {
     void rejectsUnquotedShellSyntax() {
         RunCommandTool tool = tool();
 
-        for (String command : List.of("git status `whoami`", "echo $(whoami)", "git status &",
-            "(git status)", "git log < /etc/passwd", "git status ||", "&& git status")) {
+        for (String command : List.of("git status `whoami`", "echo $(whoami)", "git status &", "(git status)",
+            "git log < /etc/passwd", "git status ||", "&& git status")) {
             String result = tool.execute(Map.of("command", command));
             assertTrue(result.startsWith("ERROR: "), command + " -> " + result);
             assertFalse(result.contains("退出码"), command + " -> " + result);

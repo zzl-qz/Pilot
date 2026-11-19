@@ -34,7 +34,8 @@ public final class SubagentCheckouts {
         }
         Opened opened = opener.open(workspace);
         if (opened == null || !opened.ok()) {
-            String error = opened == null || opened.error() == null || opened.error().isBlank() ? "无法创建独立检出" : opened.error();
+            String error =
+                opened == null || opened.error() == null || opened.error().isBlank() ? "无法创建独立检出" : opened.error();
             return new Opened(null, "", error + "。未修改父工作区。");
         }
         open.addLast(opened.path());

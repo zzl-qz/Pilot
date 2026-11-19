@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -21,16 +22,16 @@ class LocalCodeCheckerTest {
     void runsTheInstalledCheckerAndHidesSymbolsWithoutOne() throws Exception {
         Files.writeString(workspace.resolve("tsconfig.json"), "{}");
         Files.writeString(workspace.resolve("App.ts"), "function save() {}\n");
-        LocalCodeChecker checker = new LocalCodeChecker(workspace, "tsc"::equals,
-            (dir, command) -> "App.ts:1: 类型不匹配\nnoise\n");
-        CodeDiagnosticsTool diagnostics = new CodeDiagnosticsTool(() -> checker.available() ? "ready" : "",
-            checker::diagnose);
+        LocalCodeChecker checker =
+            new LocalCodeChecker(workspace, "tsc"::equals, (dir, command) -> "App.ts:1: 类型不匹配\nnoise\n");
+        CodeDiagnosticsTool diagnostics =
+            new CodeDiagnosticsTool(() -> checker.available() ? "ready" : "", checker::diagnose);
         CodeSymbolTool symbols = new CodeSymbolTool(checker::available, checker::outline);
 
         assertTrue(checker.available());
         assertEquals(List.of("tsc", "--noEmit", "--pretty", "false"), commandOf(checker));
-        assertTrue(diagnostics.execute(java.util.Map.of()).contains("App.ts:1: 类型不匹配"));
-        assertTrue(symbols.execute(java.util.Map.of("path", "App.ts")).contains("App.ts:1: save"));
+        assertTrue(diagnostics.execute(Map.of()).contains("App.ts:1: 类型不匹配"));
+        assertTrue(symbols.execute(Map.of("path", "App.ts")).contains("App.ts:1: save"));
 
         LocalCodeChecker missing = new LocalCodeChecker(workspace, name -> false, (dir, command) -> "");
         ToolRegistry registry = new ToolRegistry();

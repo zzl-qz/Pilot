@@ -7,6 +7,7 @@ import java.util.Map;
 
 import com.pilot.core.message.Message;
 
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /** 压缩元数据由程序维护；用户原文及证据引用不交给摘要模型重写。 */
@@ -93,10 +94,11 @@ final class ContextPins {
         return pins.substring(Math.max(0, pins.length() - keep)) + note;
     }
 
-    private static String rendered(tools.jackson.databind.JsonNode metadata, List<String> requests,
-        List<String> references) {
-        return MARKER + JSON.writeValueAsString(Map.of("schema_version", metadata.path("schema_version").asInt(1),
-            "source_sha256", metadata.path("source_sha256").asText(""), "covered_messages",
-            metadata.path("covered_messages").asInt(0), "user_requests", requests, "evidence_refs", references)) + END;
+    private static String rendered(JsonNode metadata, List<String> requests, List<String> references) {
+        return MARKER
+            + JSON.writeValueAsString(Map.of("schema_version", metadata.path("schema_version").asInt(1),
+                "source_sha256", metadata.path("source_sha256").asText(""), "covered_messages",
+                metadata.path("covered_messages").asInt(0), "user_requests", requests, "evidence_refs", references))
+            + END;
     }
 }

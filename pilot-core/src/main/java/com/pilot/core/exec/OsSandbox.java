@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 import com.pilot.core.util.HostOs;
 
@@ -129,8 +130,7 @@ public final class OsSandbox {
         argv.add(temp.toString());
         argv.add("--");
         argv.addAll(command);
-        return new Launch(List.copyOf(argv),
-            "隔离：Windows 受限令牌（写入已限制，工作区与本次私有临时目录可写，读盘和网络仍按系统原样）", true);
+        return new Launch(List.copyOf(argv), "隔离：Windows 受限令牌（写入已限制，工作区与本次私有临时目录可写，读盘和网络仍按系统原样）", true);
     }
 
     static Path windowsRunner() {
@@ -144,7 +144,7 @@ public final class OsSandbox {
     private static int probe(Path runner) throws IOException {
         Process process = new ProcessBuilder(runner.toString(), "--probe").redirectErrorStream(true).start();
         try {
-            if (!process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)) {
+            if (!process.waitFor(5, TimeUnit.SECONDS)) {
                 process.destroyForcibly();
                 return -1;
             }
