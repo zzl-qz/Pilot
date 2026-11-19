@@ -217,6 +217,7 @@ public final class ContextCompactor {
             summary = summary.substring(0, MAX_SUMMARY_CHARS) + "\n…（摘要过长已截断）";
         }
         summary += fileHistory(messages, 1, end);
+        summary += userClues(messages, 1, end, summary);
 
         int covered = end - 1;
         String head = header(covered);
@@ -620,6 +621,32 @@ public final class ContextCompactor {
         appendPaths(output, READ_FILES_START, READ_FILES_END, read);
         appendPaths(output, MODIFIED_FILES_START, MODIFIED_FILES_END, modified);
         return output.toString().stripTrailing();
+    }
+
+    /** 压缩不能把「点的是哪个控件 / 哪一个名字」这句唯一线索折丢。 */
+    private static String userClues(List<Message> messages, int from, int to, String summary) {
+        StringBuilder output = new StringBuilder();
+        int kept = 0;
+        for (int index = from; index < to && index < messages.size() && kept < 6; index++) {
+            Message message = messages.get(index);
+            if (!"user".equals(message.role()) || message.content() == null) {
+                continue;
+            }
+            String text = message.content().replaceAll("\\s+", " ").strip();
+            if (text.isEmpty() || text.startsWith("[上下文交接摘要")) {
+                continue;
+            }
+            if (!text.contains("点击") && !text.contains("控件") && !text.contains("命名") && !text.contains("名字")) {
+                continue;
+            }
+            String clue = text.length() > 180 ? text.substring(0, 180) + "…" : text;
+            if (summary.contains(clue)) {
+                continue;
+            }
+            output.append("\n用户原话线索：").append(clue);
+            kept++;
+        }
+        return output.toString();
     }
 
     private static void inheritedFiles(String summary, Set<String> read, Set<String> modified) {

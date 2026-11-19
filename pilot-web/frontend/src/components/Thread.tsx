@@ -919,8 +919,9 @@ function CompactionCard({ row }: { row: CompactionRow }) {
   return (
     <details className="ctx-card">
       <summary className="ctx-head">
-        {`上下文已压缩 · 折叠 ${row.coveredMessages} 条较早消息 · ${row.charactersBefore} → ${row.charactersAfter}`}
+        较早的对话已折成摘要，点开可以看
       </summary>
+      <p className="ctx-note">折叠了 {row.coveredMessages} 条较早消息。字符数 {row.charactersBefore} → {row.charactersAfter}，这只是内部记账。</p>
       <pre className="ctx-body">{row.summary}</pre>
     </details>
   );
