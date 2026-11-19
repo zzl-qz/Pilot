@@ -2,6 +2,7 @@ package com.pilot.server.session;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -706,6 +707,15 @@ public class SessionController {
      * @param before 只返回序号小于它的历史，便于向上翻页
      * @param after  只返回序号大于它的历史，便于窗口回收后向下翻页
      */
+    @GetMapping(value = "/{id}/export", produces = "text/markdown;charset=UTF-8")
+    public ResponseEntity<String> export(@PathVariable String id) {
+        Session session = requireSession(id);
+        String body = SessionExport.markdown(session, conversations.load(id), sessions.events(id), Instant.now());
+        String name = SessionExport.fileName(session.title(), LocalDate.now());
+        return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION,
+            ContentDisposition.attachment().filename(name, StandardCharsets.UTF_8).build().toString()).body(body);
+    }
+
     @GetMapping("/{id}/history")
     public HistoryResponse history(@PathVariable String id,
         @RequestParam(name = "limit", defaultValue = "60") int limit,

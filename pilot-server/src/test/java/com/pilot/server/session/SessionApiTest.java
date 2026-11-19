@@ -227,6 +227,24 @@ class SessionApiTest {
     Path workspace;
 
     @Test
+    void exportDoesNotChangeTheSessionAndIncludesTheFailure() throws Exception {
+        String sessionId = createSession();
+        sessions.publish(sessionId, "run_export", new com.pilot.core.event.RunFailed("CONTEXT_TOO_LARGE", "停了", false));
+        String before = mvc.perform(get("/api/sessions/" + sessionId)).andExpect(status().isOk()).andReturn()
+            .getResponse().getContentAsString();
+
+        String body = mvc.perform(get("/api/sessions/" + sessionId + "/export")).andExpect(status().isOk())
+            .andExpect(MockMvcResultMatchers.content().contentTypeCompatibleWith("text/markdown")).andReturn()
+            .getResponse().getContentAsString();
+
+        assertTrue(body.contains("CONTEXT_TOO_LARGE"), body);
+        assertTrue(body.contains(sessionId), body);
+        String after = mvc.perform(get("/api/sessions/" + sessionId)).andExpect(status().isOk()).andReturn()
+            .getResponse().getContentAsString();
+        assertEquals(before, after);
+    }
+
+    @Test
     void createSessionAndSendMessageReturnIds() throws Exception {
         String sessionId = createSession();
 

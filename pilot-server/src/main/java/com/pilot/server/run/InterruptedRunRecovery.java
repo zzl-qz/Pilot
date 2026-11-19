@@ -9,6 +9,7 @@ import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.event.RunFailed;
@@ -51,6 +52,12 @@ public class InterruptedRunRecovery implements ApplicationRunner {
     private final SessionService sessions;
     private final RunStateTracker tracker;
     private final RecoveryReportService report;
+    private RunRegistry registry;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void useRegistry(RunRegistry registry) {
+        this.registry = registry;
+    }
 
     /** 兼容测试与无检查点场景。 */
     public InterruptedRunRecovery(RunRepository runs, SessionService sessions) {
@@ -110,6 +117,35 @@ public class InterruptedRunRecovery implements ApplicationRunner {
         }
     }
 
+    /**
+     * 运行期看门狗。启动收敛只跑一次；工作线程中途死掉、又没写终态事件时，界面会一直转圈。
+     * 内存里已经没有这个会话的运行，而且租约也过期了，才补中断。正在跑的任务租约还在，不会被误关。
+     */
+    @Scheduled(fixedDelayString = "${pilot.recovery.watchdog-ms:30000}",
+        initialDelayString = "${pilot.recovery.watchdog-ms:30000}")
+    public void sweepStaleRuns() {
+        if (tracker == null || registry == null
+            || "false".equalsIgnoreCase(System.getProperty("pilot.recovery.watchdog"))) {
+            return;
+        }
+        try {
+            Instant now = Instant.now();
+            for (Session session : sessions.list()) {
+                if (!inFlight(session) || registry.activeRun(session.id()).isPresent()) {
+                    continue;
+                }
+                var checkpoint = tracker.current(session.id());
+                if (checkpoint.isPresent() && checkpoint.get().leaseActive(now)) {
+                    continue;
+                }
+                String runId = checkpoint.map(RunCheckpoint::runId).orElse("run_recovered-" + UUID.randomUUID());
+                closeSession(session.id(), runId, "运行长时间没有心跳，已中断。进度已保存，可点「继续执行」接着跑。");
+            }
+        } catch (RuntimeException e) {
+            log.warn("运行期收敛失败", e);
+        }
+    }
+
     /** 会话有没有「正在进行中」的一轮：只有这种状态才可能被重启打断。 */
     private static boolean inFlight(Session session) {
         if (session.isBlank()) {
@@ -124,8 +160,12 @@ public class InterruptedRunRecovery implements ApplicationRunner {
     }
 
     private void closeSession(String sessionId, String runId) {
+        closeSession(sessionId, runId, MESSAGE);
+    }
+
+    private void closeSession(String sessionId, String runId, String message) {
         try {
-            sessions.publish(sessionId, runId, new RunFailed(RunFailureCode.INTERRUPTED, MESSAGE, true));
+            sessions.publish(sessionId, runId, new RunFailed(RunFailureCode.INTERRUPTED, message, true));
             log.warn("会话 {} 上次运行 {} 未正常结束，已补 run.failed(INTERRUPTED) 收敛为中断", sessionId, runId);
         } catch (RuntimeException e) {
             log.warn("收敛会话 {} 的中断状态失败：{}", sessionId, e.toString());

@@ -62,6 +62,10 @@ class WorkProductsApiTest {
         ToolRegistry main =
             ReflectionTestUtils.invokeMethod(runs, "sessionTools", session, "run", workspace.toString(), sink);
         ToolRegistry review = ReflectionTestUtils.invokeMethod(runs, "reviewTools", workspace.toString());
+        assertTrue(main.find("publish_artifact").isPresent());
+        assertTrue(main.find("propose_skill").isPresent());
+        assertTrue(main.names().contains("enable_tools"));
+        main.enable(List.of("publish_artifact", "propose_skill"));
         assertTrue(main.names().containsAll(List.of("publish_artifact", "propose_skill")));
         assertFalse(review.names().contains("publish_artifact"));
         assertFalse(review.names().contains("propose_skill"));

@@ -111,9 +111,19 @@ class EventCodecNewEventsTest {
     void roundTripsSubagentEvents() {
         SubagentStarted started = new SubagentStarted("agent_1", "盘点入口类");
         SubagentFinished finished = new SubagentFinished("agent_1", "有 3 个入口", true);
+        SubagentFinished partial = new SubagentFinished("agent_2", "阶段结论", false, "MAX_STEPS", true);
 
         assertEquals(started, roundTrip("subagent.started", started));
         assertEquals(finished, roundTrip("subagent.finished", finished));
+        assertEquals(partial, roundTrip("subagent.finished", partial));
+
+        SessionEvent legacy =
+            codec.decode("subagent.finished", "{\"agentId\":\"agent_old\",\"summary\":\"旧结论\",\"ok\":false}");
+        SubagentFinished decodedLegacy = assertInstanceOf(SubagentFinished.class, legacy);
+        assertEquals("agent_old", decodedLegacy.agentId());
+        assertFalse(decodedLegacy.ok());
+        assertFalse(decodedLegacy.partial());
+        assertEquals("", decodedLegacy.stopReason());
     }
 
     @Test
