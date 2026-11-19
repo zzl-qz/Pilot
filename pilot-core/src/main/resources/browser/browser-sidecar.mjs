@@ -19,6 +19,7 @@ import { publicHttps, externalRequestAllowed, externalMutations, requireExternal
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { pathToFileURL } from 'node:url';
 
 // 把 console.* 全部改道到 stderr，避免污染协议通道。
 for (const method of ['log', 'info', 'warn', 'debug']) {
@@ -676,11 +677,14 @@ const SNAPSHOT_SCRIPT = `(limits) => {
   let chars = 0;
   let truncated = false;
   const lines = [];
-  const visible = (el) => {
+  // tree：整棵子树都不画。self：自己没有盒子，但子孙可能是固定定位或撑满视口，必须继续往下走。
+  const concealment = (el) => {
+    if (el.hasAttribute('hidden')) return 'tree';
     const style = getComputedStyle(el);
-    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return 'tree';
     const rect = el.getBoundingClientRect();
-    return rect.width > 0 || rect.height > 0 || el.tagName === 'INPUT';
+    if (rect.width <= 0 && rect.height <= 0 && el.tagName !== 'INPUT') return 'self';
+    return '';
   };
   const clean = (value, max = 120) => {
     const text = String(value || '').replace(/\\s+/g, ' ').trim();
@@ -742,10 +746,12 @@ const SNAPSHOT_SCRIPT = `(limits) => {
     lines.push('  '.repeat(Math.min(depth, 12)) + text);
   };
   const walk = (el, depth) => {
-    if (truncated || SKIP.has(el.tagName.toUpperCase()) || !visible(el)) return;
+    if (!el || truncated || SKIP.has(el.tagName.toUpperCase())) return;
+    const hide = concealment(el);
+    if (hide === 'tree') return;
     const tag = el.tagName.toLowerCase();
     const role = (el.getAttribute('role') || '').toLowerCase();
-    if (interactive(el)) {
+    if (hide !== 'self' && interactive(el)) {
       counter += 1;
       const ref = 'e' + counter;
       el.setAttribute('data-pilot-ref', ref);
@@ -784,7 +790,24 @@ const SNAPSHOT_SCRIPT = `(limits) => {
     for (const child of el.children) walk(child, nestedDepth);
   };
   walk(document.body, 0);
-  return { title: document.title, url: location.href, lines, interactive: counter, truncated };
+  if (counter === 0 && document.body) {
+    const controls = document.querySelectorAll('button, a[href], input, textarea, select, summary, [role="button"], [role="textbox"], [role="link"], [contenteditable="true"]');
+    for (const el of controls) {
+      if (truncated || concealment(el) === 'tree') continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 && rect.height <= 0) continue;
+      counter += 1;
+      const ref = 'e' + counter;
+      el.setAttribute('data-pilot-ref', ref);
+      const name = labelOf(el);
+      push(0, '- ' + (el.getAttribute('role') || el.tagName.toLowerCase()) + (name ? ' ' + JSON.stringify(name) : '')
+        + ' [ref=' + ref + ']');
+    }
+  }
+  const bodyText = document.body ? String(document.body.innerText || '') : '';
+  const freshTask = bodyText.includes('从一个任务开始') || bodyText.includes('尚未选择工作区');
+  return { title: document.title, url: location.href, lines, interactive: counter, truncated,
+    empty: counter === 0, freshTask };
 }`;
 
 // ---- 元素拾取 ------------------------------------------------------------------------------
@@ -849,6 +872,12 @@ async function snapshot(current) {
   const result = await page.evaluate(`(${SNAPSHOT_SCRIPT})`.concat(`(${JSON.stringify({ nodes: MAX_SNAPSHOT_NODES, chars: MAX_SNAPSHOT_CHARS })})`));
   const header = [`页面: ${result.title || '(无标题)'}`, `地址: ${result.url}`,
     `可交互元素: ${result.interactive}（用 [ref=eN] 作为 click/fill 的 ref）`];
+  if (result.empty) {
+    header.push('这个页面没有可点击元素。不要重复打开同一地址做验收；说明缺了什么并结束这一步。');
+  }
+  if (result.freshTask) {
+    header.push('这是没有工作区和附件的新任务页。要验收缩略图或删除，先在页面上选好工作区并放入附件，不要回到源码里把同一文件再读一遍。');
+  }
   return header.concat('', result.lines).join('\n');
 }
 
@@ -1526,6 +1555,12 @@ function enqueue(request) {
   queues.set(key, next.catch(() => {}));
 }
 
+export { SNAPSHOT_SCRIPT };
+
+const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (!invokedDirectly) {
+  // 测试只借用快照脚本，不占用标准输入。
+} else {
 const lines = createInterface({ input: process.stdin });
 lines.on('line', (line) => {
   if (!line.trim()) return;
@@ -1551,3 +1586,4 @@ process.on('unhandledRejection', (error) => {
   process.stderr.write('unhandledRejection: ' + String(error && error.stack ? error.stack : error) + '\n');
 });
 send({ id: 0, ok: true, text: 'ready' });
+}
