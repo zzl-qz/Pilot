@@ -21,7 +21,7 @@ import com.pilot.core.permission.PermissionMode;
  * @param maxPlanContinues      兼容旧配置，默认 0；保留兼容字段；启用完成检查时最多提醒两次
  * @param contextMaxChars       上下文预算（字符估算）。太小会频繁压缩、丢细节，任务做得浅
  * @param completionChecks      通用收尾检查门，默认开启；不决定 Direct 的验证状态，也不关闭 Goal 独立核验
- * @param directMaxRequests     普通执行模型请求的高位事故熔断；不用它判断任务是否完成
+ * @param directMaxRequests     单个普通任务的模型请求收敛上限（默认 120）；继续执行开新一段额度，不用它判断任务是否完成
  * @param directMaxInputTokens  普通执行累计输入的高位事故熔断
  * @param directMaxOutputTokens 普通执行累计输出的高位事故熔断
  * @param directMaxActiveMillis 普通执行模型活跃时间的高位事故熔断
@@ -37,6 +37,8 @@ public record AgentProperties(String workspace, PermissionMode permissionMode, i
     Integer directMaxInvestigationTools, Long goalMaxInputTokens, Long goalMaxOutputTokens, Long goalMaxActiveMillis,
     Boolean lintGateEnabled, String lintOnFailure) {
     private static final int DEFAULT_MAX_STEPS = 1_000;
+    /** 单个普通任务的模型请求收敛上限；继续执行会开新一段额度，不用它判断任务是否完成。 */
+    private static final int DEFAULT_DIRECT_MAX_REQUESTS = 120;
     private static final long DEFAULT_MAX_INPUT_TOKENS = 50_000_000L;
     private static final long DEFAULT_MAX_OUTPUT_TOKENS = 2_000_000L;
     private static final long DEFAULT_MAX_ACTIVE_MILLIS = 8 * 60 * 60_000L;
@@ -87,7 +89,7 @@ public record AgentProperties(String workspace, PermissionMode permissionMode, i
             String flag = System.getProperty("pilot.completion.checks");
             completionChecks = flag == null || flag.isBlank() || "true".equalsIgnoreCase(flag.strip());
         }
-        int directRequests = directMaxRequests == null ? DEFAULT_MAX_STEPS : directMaxRequests;
+        int directRequests = directMaxRequests == null ? DEFAULT_DIRECT_MAX_REQUESTS : directMaxRequests;
         directMaxRequests = directRequests < 4 ? maxSteps : Math.min(directRequests, maxSteps);
         directMaxInputTokens = directMaxInputTokens == null || directMaxInputTokens < 50_000 ? DEFAULT_MAX_INPUT_TOKENS
             : directMaxInputTokens;
