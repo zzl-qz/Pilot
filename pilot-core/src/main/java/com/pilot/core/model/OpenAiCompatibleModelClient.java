@@ -129,7 +129,17 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         ModelCapacity capacity = ModelCapacity.configured();
         RequestBudget.enforce(messages, definitions, capacity);
         Map<String, Object> body = new LinkedHashMap<>();
-        List<Map<String, Object>> items = new ArrayList<>(messages.stream().map(this::messagePayload).toList());
+        int lastUser = -1;
+        for (int i = 0; i < messages.size(); i++) {
+            if ("user".equals(messages.get(i).role())) {
+                lastUser = i;
+            }
+        }
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (int i = 0; i < messages.size(); i++) {
+            // 只有当前用户轮次里的思考要回传。更早的思考留着会占窗口，而且供应商也不再要求。
+            items.add(messagePayload(messages.get(i), i > lastUser));
+        }
         List<Map<String, Object>> tools = definitions == null ? new ArrayList<>()
             : new ArrayList<>(definitions.stream().map(this::toolPayload).map(LinkedHashMap::new).toList());
         body.put("model", model);
@@ -283,7 +293,8 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             throw new ModelClientException(ModelFailureKind.INCOMPLETE, "模型响应缺少有效 finish_reason，未提交本次输出");
         }
         List<ToolCall> calls = usable(finishReason) ? toolCalls(message.get("tool_calls")) : List.of();
-        return new ModelResponse(content, calls, usage(root.get("usage"), messages, content, calls), finishReason);
+        return new ModelResponse(content, calls, usage(root.get("usage"), messages, content, calls), finishReason,
+            text(message.get("reasoning_content")));
     }
 
     @Override
@@ -308,6 +319,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                 }
             }
             StringBuilder content = new StringBuilder();
+            StringBuilder reasoning = new StringBuilder();
             ThinkSplit thoughts = new ThinkSplit();
             LinkedHashMap<Integer, Map<String, Object>> toolParts = new LinkedHashMap<Integer, Map<String, Object>>();
             ModelUsage reportedUsage = null;
@@ -340,9 +352,10 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                         finishReason = ModelResponse.FinishReason.fromWire(finish);
                     }
                     JsonNode delta = choices.get(0).path("delta");
-                    String reasoning = reasoningText(delta);
-                    if (!reasoning.isEmpty()) {
-                        emit(reasoningDelta, reasoning);
+                    String thought = reasoningText(delta);
+                    if (!thought.isEmpty()) {
+                        reasoning.append(thought);
+                        emit(reasoningDelta, thought);
                     }
                     JsonNode text = delta.get("content");
                     if (text != null && text.isString()) {
@@ -401,7 +414,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             }).toList();
             ModelUsage finalUsage =
                 reportedUsage != null ? reportedUsage : estimatedUsage(messages, content.toString(), calls);
-            return new ModelResponse(content.toString(), calls, finalUsage, finishReason);
+            return new ModelResponse(content.toString(), calls, finalUsage, finishReason, reasoning.toString());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new ModelClientException(ModelFailureKind.INTERRUPTED, "模型请求被中断", e);
@@ -417,7 +430,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         return reason == ModelResponse.FinishReason.STOP || reason == ModelResponse.FinishReason.TOOL_CALLS;
     }
 
-    private Map<String, Object> messagePayload(Message message) {
+    private Map<String, Object> messagePayload(Message message, boolean includeReasoning) {
         LinkedHashMap<String, Object> payload = new LinkedHashMap<String, Object>();
         payload.put("role", message.role());
         if (message.hasToolCalls()) {
@@ -433,6 +446,9 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         }
         if (message.toolCallId() != null && !message.toolCallId().isBlank()) {
             payload.put("tool_call_id", message.toolCallId());
+        }
+        if (includeReasoning && message.reasoningContent() != null && !message.reasoningContent().isBlank()) {
+            payload.put("reasoning_content", message.reasoningContent());
         }
         return payload;
     }

@@ -80,11 +80,19 @@ public final class AnthropicMessagesModelClient implements ModelClient {
             default -> throw new ModelClientException(ModelFailureKind.INCOMPLETE, "模型响应缺少有效 stop_reason，未提交本次输出或执行工具");
         };
         StringBuilder text = new StringBuilder();
+        StringBuilder thinking = new StringBuilder();
+        String signature = "";
         List<ToolCall> calls = new ArrayList<>();
         LinkedHashMap<String, String> citations = new LinkedHashMap<>();
         for (JsonNode block : root.path("content")) {
             String type = string(block.get("type"));
-            if ("text".equals(type)) {
+            if ("thinking".equals(type)) {
+                thinking.append(string(block.get("thinking")));
+                String signed = string(block.get("signature"));
+                if (!signed.isBlank()) {
+                    signature = signed;
+                }
+            } else if ("text".equals(type)) {
                 text.append(string(block.get("text")));
                 collectCitations(block.get("citations"), citations);
             } else if ("tool_use".equals(type)
@@ -108,7 +116,8 @@ public final class AnthropicMessagesModelClient implements ModelClient {
             }
         }
         NativeModelCitations.append(text, citations, url -> url.replace("(", "%28").replace(")", "%29"));
-        return new ModelResponse(text.toString(), calls, ModelUsageParser.parse(root.get("usage")), reason);
+        String reasoning = signature.isBlank() ? "" : thinking + THINKING_SPLIT + signature;
+        return new ModelResponse(text.toString(), calls, ModelUsageParser.parse(root.get("usage")), reason, reasoning);
     }
 
     Map<String, Object> requestBody(List<Message> messages, List<ToolDefinition> definitions) {
@@ -133,6 +142,12 @@ public final class AnthropicMessagesModelClient implements ModelClient {
                 conversation.add(Map.of("role", "user", "content", results));
             } else if (message.hasToolCalls()) {
                 List<Map<String, Object>> blocks = new ArrayList<>();
+                if (index > lastUser(messages)) {
+                    Map<String, Object> replay = thinkingBlock(message.reasoningContent());
+                    if (replay != null) {
+                        blocks.add(replay);
+                    }
+                }
                 if (!message.content().isBlank()) {
                     blocks.add(Map.of("type", "text", "text", message.content()));
                 }
@@ -169,6 +184,31 @@ public final class AnthropicMessagesModelClient implements ModelClient {
             body.put("tools", requestTools);
         }
         return body;
+    }
+
+    /** 思考正文和签名用这个分隔，只在当前用户轮次回传。 */
+    static final String THINKING_SPLIT = "\u001e";
+
+    private static int lastUser(List<Message> messages) {
+        int last = -1;
+        for (int index = 0; index < messages.size(); index++) {
+            if ("user".equals(messages.get(index).role())) {
+                last = index;
+            }
+        }
+        return last;
+    }
+
+    private static Map<String, Object> thinkingBlock(String stored) {
+        if (stored == null || stored.isBlank()) {
+            return null;
+        }
+        int split = stored.indexOf(THINKING_SPLIT);
+        if (split <= 0 || split == stored.length() - 1) {
+            return null;
+        }
+        return Map.of("type", "thinking", "thinking", stored.substring(0, split), "signature",
+            stored.substring(split + THINKING_SPLIT.length()));
     }
 
     private Object content(Message message) {

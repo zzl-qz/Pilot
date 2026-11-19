@@ -80,6 +80,33 @@ class AnthropicMessagesModelClientTest {
     }
 
     @Test
+    void replaysThinkingOnlyInsideTheCurrentUserTurn() throws Exception {
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        HttpServer server = server(requestBody,
+            """
+                {"stop_reason":"tool_use","content":[{"type":"thinking","thinking":"先看文件","signature":"sig-1"},{"type":"tool_use","id":"use-1","name":"read_file","input":{"path":"A.java"}}]}
+                """);
+        server.start();
+        try {
+            String stored = "先看文件" + AnthropicMessagesModelClient.THINKING_SPLIT + "sig-1";
+            Message previous = Message.assistant("", List.of(new ToolCall("old", "read_file", Map.of("path", "B.java"))),
+                stored);
+            ModelResponse response = client(server, Set.of()).chat(List.of(Message.user("上一问"), previous,
+                Message.tool("old", "内容"), Message.user("这一问"),
+                Message.assistant("", List.of(new ToolCall("use-0", "read_file", Map.of("path", "A.java"))), stored),
+                Message.tool("use-0", "新内容")), List.of());
+
+            JsonNode messages = mapper.readTree(requestBody.get()).path("messages");
+            assertFalse(messages.get(1).toString().contains("sig-1"));
+            assertEquals("thinking", messages.get(4).path("content").get(0).path("type").asString());
+            assertEquals("sig-1", messages.get(4).path("content").get(0).path("signature").asString());
+            assertTrue(response.reasoningContent().contains("sig-1"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void resolvesAnthropicMessagesEndpoint() {
         assertEquals(URI.create("https://api.anthropic.com/v1/messages"),
             AnthropicMessagesModelClient.resolveEndpoint(URI.create("https://api.anthropic.com/v1")));

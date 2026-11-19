@@ -12,7 +12,7 @@ import java.util.List;
  * @param attachments 需要模型侧二次处理的附件（图片等）；文本附件已内联进 content
  */
 public record Message(String role, String content, List<ToolCall> toolCalls, String toolCallId,
-    List<Attachment> attachments, List<Integer> imagePositions) {
+    List<Attachment> attachments, List<Integer> imagePositions, String reasoningContent) {
     public Message {
         if (role == null || role.isBlank()) {
             throw new IllegalArgumentException("role must not be blank");
@@ -21,6 +21,7 @@ public record Message(String role, String content, List<ToolCall> toolCalls, Str
         toolCalls = toolCalls == null ? List.of() : List.copyOf(toolCalls);
         attachments = attachments == null ? List.of() : List.copyOf(attachments);
         imagePositions = imagePositions == null ? List.of() : List.copyOf(imagePositions);
+        reasoningContent = reasoningContent == null ? "" : reasoningContent;
         long imageCount = attachments.stream().filter(Attachment::image).count();
         if (!imagePositions.isEmpty() && imagePositions.size() != imageCount) {
             throw new IllegalArgumentException("image positions must match image attachments");
@@ -31,16 +32,21 @@ public record Message(String role, String content, List<ToolCall> toolCalls, Str
     }
 
     public Message(String role, String content, List<ToolCall> toolCalls, String toolCallId,
+        List<Attachment> attachments, List<Integer> imagePositions) {
+        this(role, content, toolCalls, toolCallId, attachments, imagePositions, "");
+    }
+
+    public Message(String role, String content, List<ToolCall> toolCalls, String toolCallId,
         List<Attachment> attachments) {
-        this(role, content, toolCalls, toolCallId, attachments, List.of());
+        this(role, content, toolCalls, toolCallId, attachments, List.of(), "");
     }
 
     public Message(String role, String content, List<ToolCall> toolCalls, String toolCallId) {
-        this(role, content, toolCalls, toolCallId, List.of(), List.of());
+        this(role, content, toolCalls, toolCallId, List.of(), List.of(), "");
     }
 
     public Message(String role, String content) {
-        this(role, content, List.of(), null, List.of(), List.of());
+        this(role, content, List.of(), null, List.of(), List.of(), "");
     }
 
     public static Message system(String text) {
@@ -60,7 +66,12 @@ public record Message(String role, String content, List<ToolCall> toolCalls, Str
     }
 
     public static Message assistant(String text, List<ToolCall> toolCalls) {
-        return new Message("assistant", text, toolCalls, null);
+        return assistant(text, toolCalls, "");
+    }
+
+    /** 思考模型在同一次工具调用链里要带回 reasoning_content，新的用户消息之后不再发送。 */
+    public static Message assistant(String text, List<ToolCall> toolCalls, String reasoningContent) {
+        return new Message("assistant", text, toolCalls, null, List.of(), List.of(), reasoningContent);
     }
 
     public static Message tool(String toolCallId, String content) {

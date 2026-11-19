@@ -5,7 +5,8 @@ import java.util.Locale;
 
 import com.pilot.core.message.ToolCall;
 
-public record ModelResponse(String content, List<ToolCall> toolCalls, ModelUsage usage, FinishReason finishReason) {
+public record ModelResponse(String content, List<ToolCall> toolCalls, ModelUsage usage, FinishReason finishReason,
+    String reasoningContent) {
     public enum FinishReason {
         STOP, TOOL_CALLS, LENGTH, CONTENT_FILTER, ERROR, UNKNOWN;
 
@@ -27,6 +28,11 @@ public record ModelResponse(String content, List<ToolCall> toolCalls, ModelUsage
     public ModelResponse {
         usage = usage == null ? ModelUsage.unknown() : usage;
         finishReason = finishReason == null ? FinishReason.UNKNOWN : finishReason;
+        reasoningContent = reasoningContent == null ? "" : reasoningContent;
+    }
+
+    public ModelResponse(String content, List<ToolCall> toolCalls, ModelUsage usage, FinishReason finishReason) {
+        this(content, toolCalls, usage, finishReason, "");
     }
 
     /** 兼容测试和第三方 ModelClient：没有 usage 时由 AgentLoop 做本地估算。 */
