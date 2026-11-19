@@ -177,13 +177,7 @@ public final class LintGate {
     private String addedSuppressions(Path workspace, List<String> sources) {
         StringBuilder out = new StringBuilder();
         for (String path : sources) {
-            String before;
-            try {
-                before = originalText.apply(path);
-            } catch (IllegalStateException noBaseline) {
-                // 续跑时，上一轮写过的文件不在这一轮的写前快照里；没有基线就无从判断是否新增抑制，跳过这一条。
-                continue;
-            }
+            String before = originalOrNull(path);
             String after = readCurrent(workspace, path);
             for (String line : SuppressionScan.added(before, after)) {
                 if (out.length() > 0) {
@@ -235,10 +229,22 @@ public final class LintGate {
         return LintAssessment.builtin(extra);
     }
 
+    /**
+     * 读改动前原文。续跑时上一轮写过的文件不在这一轮的写前快照里，没有基线按「新文件」处理，
+     * 不让收尾检查因为缺一条快照整轮崩掉。
+     */
+    private String originalOrNull(String path) {
+        try {
+            return originalText.apply(path);
+        } catch (IllegalStateException noBaseline) {
+            return null;
+        }
+    }
+
     private String builtinLines(Path workspace, List<String> sources) {
         StringBuilder out = new StringBuilder();
         for (String path : sources) {
-            for (String item : BuiltinLint.scan(path, originalText.apply(path), readCurrent(workspace, path))) {
+            for (String item : BuiltinLint.scan(path, originalOrNull(path), readCurrent(workspace, path))) {
                 if (!out.isEmpty()) {
                     out.append('\n');
                 }
@@ -263,7 +269,7 @@ public final class LintGate {
     private String reuseText(Path workspace, List<String> sources) {
         StringBuilder out = new StringBuilder();
         for (String path : sources) {
-            for (String item : ReuseScan.scan(path, originalText.apply(path), readCurrent(workspace, path),
+            for (String item : ReuseScan.scan(path, originalOrNull(path), readCurrent(workspace, path),
                 siblings(workspace, path))) {
                 if (!out.isEmpty()) {
                     out.append('\n');
@@ -379,7 +385,7 @@ public final class LintGate {
         Map<String, String> addedBody = new HashMap<>();
         boolean scoped = false;
         for (String path : sources) {
-            String before = originalText.apply(path);
+            String before = originalOrNull(path);
             if (before == null) {
                 continue;
             }
