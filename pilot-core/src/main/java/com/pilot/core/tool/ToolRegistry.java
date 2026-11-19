@@ -25,10 +25,10 @@ public final class ToolRegistry {
     /**
      * 低频工具不进每次请求的 schema。模型需要时调用 enable_tools，或直接点名，执行层会当场打开。
      * 名字放在这里，复制到新注册表后仍然生效。
+     * install_skill 和 propose_skill 不放进来：目录为空时模型只能靠它们在同一轮里安装并加载。
      */
-    private static final Set<String> DEFERRED =
-        Set.of("office", "browser", "prepare_runtime", "local_resources", "publish_artifact", "dispatch_agents",
-            "mcp_tools", "mcp_call", "install_skill", "propose_skill", "code_diagnostics");
+    private static final Set<String> DEFERRED = Set.of("office", "browser", "prepare_runtime", "local_resources",
+        "publish_artifact", "dispatch_agents", "mcp_tools", "mcp_call", "code_diagnostics");
     private final ConcurrentMap<String, Tool> tools = new ConcurrentHashMap<>();
     private final Set<String> enabled = ConcurrentHashMap.newKeySet();
 
