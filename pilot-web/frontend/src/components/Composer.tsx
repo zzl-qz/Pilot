@@ -29,8 +29,8 @@ import { resumeBar } from '../lib/queue.js';
 import { toolArgsText, toolLabel } from '../lib/tool-meta.js';
 import { PERMISSION_MODES, normalizePermission, permissionLabel } from '../lib/permission.js';
 import { ModelPicker } from './ModelPicker.jsx';
-import { usageLevel, usagePercent } from '../lib/context-usage.js';
-import { agentStatusLabel, summarizeAgents } from '../lib/agents.js';
+import { usageBudgetTitle, usageLevel, usagePercent } from '../lib/context-usage.js';
+import { agentStatusLabel, agentStatusDotVariant, summarizeAgents } from '../lib/agents.js';
 import './conversation.css';
 
 /** 是否有真正阻止交互的模态弹窗；普通 <dialog open>（非模态）不算。 */
@@ -81,6 +81,8 @@ export function Composer() {
   const contextTriggerRef = useRef<HTMLButtonElement>(null);
   const referenceRequest = useRef(0);
   const inputRef = useRef<ReturnType<typeof createComposerInput> | null>(null);
+  const railRef = useRef<HTMLDivElement>(null);
+  const [preview, setPreview] = useState<{ name: string; src: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [sendAction, setSendAction] = useState({ mode: 'send', stop: false, disabled: true, label: '发送', ariaLabel: '发送任务', title: '发送任务 (Enter)' });
   const [toolbarPanel, setToolbarPanel] = useState<'perm' | 'model' | 'context' | null>(null);
@@ -105,7 +107,7 @@ export function Composer() {
   const [steerPending, setSteerPending] = useState<{ runId: string; text: string; baseline: number } | null>(null);
   const runId = useStore((state) => state.runId);
   const steeredCount = useStore((state) => (state.thread?.rows || []).filter((row) => row.type === 'user' && row.steered).length);
-  const sessionDraftsRef = useRef(new Map<string | null, { html: string; files: Map<string, DraftAttachment> }>());
+  const sessionDraftsRef = useRef(new Map<string | null, { html: string; files: Map<string, DraftAttachment>; attachmentIds: string[] }>());
   const previousSessionRef = useRef(sessionId);
   const snapshotTimer = useRef<number | null>(null);
   const snapshotWarnedRef = useRef(false);
@@ -148,7 +150,9 @@ export function Composer() {
       return undefined;
     }
     const input = createComposerInput(flowRef.current, {
+      rail: railRef.current,
       onRemove: (id) => draftFilesRef.current.delete(id),
+      onPreview: setPreview,
       onChange: () => {
         writeDraft(localStorage, useStore.getState().sessionId, input.getText());
         scheduleSnapshot();
@@ -212,8 +216,9 @@ export function Composer() {
         snapshotTimer.current = null;
         persistSnapshot(previous);
       }
+      // 附件在 rail 里、不在 root 的 innerHTML 内，必须连同文件副本一起存
       sessionDraftsRef.current.set(previous, {
-        html: input.root.innerHTML, files: new Map(draftFilesRef.current)
+        html: input.root.innerHTML, files: new Map(draftFilesRef.current), attachmentIds: input.attachmentIds()
       });
     }
     const saved = sessionDraftsRef.current.get(sessionId);
@@ -224,7 +229,7 @@ export function Composer() {
     if (saved && input) {
       input.root.innerHTML = saved.html;
       draftFilesRef.current = new Map(saved.files);
-      input.notifyChange();
+      input.restoreAttachments((saved.attachmentIds || []).map((id) => saved.files.get(id)).filter((item): item is DraftAttachment => Boolean(item)));
     } else if (stored.snapshot && input) {
       // 刷新/重开工作台：正文、文件、图片和图片位置一起恢复
       draftFilesRef.current = new Map(stored.snapshot.files.map((item) => [item.id, item]));
@@ -756,6 +761,8 @@ export function Composer() {
         onPaste={(event) => void receiveFiles(event, event.clipboardData, 'paste')}
       >
         {dragging && <div className="attachment-drop-overlay" aria-hidden="true">松开以添加文件</div>}
+        {/* 附件单独占一行，排在输入框上方：不挤占正文宽度，缩略图也能整排浏览 */}
+        <div className="composer-attachments" ref={railRef} hidden aria-label="待发送的附件" />
         {pendingFiles > 0 && <div className="attachment-status" role="status">
           正在读取 {pendingFiles} 个附件…
         </div>}
@@ -850,7 +857,7 @@ export function Composer() {
           </div>
           <div className="composer-actions">
             <div className="perm-picker composer-context-picker">
-              <span title="上下文与请求用量"><Button id="context-chip" ref={contextTriggerRef} className={'composer-choice composer-context level-' + usageLevel(usagePercent(contextStatus))}
+              <span title={usageBudgetTitle(contextStatus?.usedTokens, contextStatus?.limitTokens)}><Button id="context-chip" ref={contextTriggerRef} className={'composer-choice composer-context level-' + usageLevel(usagePercent(contextStatus))}
                 size="sm" variant="ghost" label={'上下文用量 ' + contextPercent(contextStatus) + (runUsage?.details ? ' · 缓存命中 ' + formatCache(runUsage.details) : '')}
                 aria-haspopup="dialog" aria-expanded={contextOpen} aria-controls={contextOpen ? 'context-menu' : undefined}
                 icon={<svg className="context-ring" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" opacity=".25" strokeWidth="2" /><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeWidth="2" pathLength="100" strokeDasharray={usagePercent(contextStatus) + ' 100'} transform="rotate(-90 10 10)" /></svg>}
@@ -897,6 +904,14 @@ export function Composer() {
         </div>
         <div className="composer-voice-feedback" ref={voiceFeedbackRef} />
       </form>
+      {preview && (
+        <div className="composer-preview" role="dialog" aria-modal="true" aria-label={`${preview.name || '图片'} 预览`}
+          onClick={() => setPreview(null)}>
+          <img src={preview.src} alt={preview.name} onClick={(event) => event.stopPropagation()} />
+          <span className="composer-preview-name">{preview.name}</span>
+          <button type="button" className="composer-preview-close" aria-label="关闭预览" onClick={() => setPreview(null)}>×</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -999,7 +1014,7 @@ function AgentDock() {
         <ul id="agents-dock-list" className="agents-dock-list">
           {list.map((agent) => (
             <li key={agent.id}>
-              <StatusDot variant={agent.status === 'failed' ? 'error' : agent.status === 'running' ? 'accent' : 'neutral'} label={agentStatusLabel(agent.status)} aria-hidden="true" />
+              <StatusDot variant={agentStatusDotVariant(agent.status || '')} label={agentStatusLabel(agent.status || '')} aria-hidden="true" />
               <span className="agent-name" title={agent.task}>{agent.name || agent.task || agent.id}</span>
               <span className="agent-state">{agentStatusLabel(agent.status)}</span>
             </li>

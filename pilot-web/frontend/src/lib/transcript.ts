@@ -26,6 +26,21 @@ export function buildTranscript({ title, workspace, exportedAt, messages }: { ti
   return lines.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
 }
 
+/** 触发浏览器保存。没有下载能力时返回 false，调用方改走复制。 */
+export function saveTextFile(text: string, fileName: string, doc: Document | null | undefined) {
+  if (!doc || typeof doc.createElement !== 'function' || !doc.body) return false;
+  const link = doc.createElement('a');
+  if (typeof link.download !== 'string') return false;
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }));
+  link.href = url;
+  link.download = fileName;
+  doc.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  return true;
+}
+
 /** 文件名里不能出现的字符替换掉，并限制长度。 */
 export function transcriptFileName(title: unknown, date = new Date()) {
   const safe = String(title || '对话').replace(/[\\/:*?"<>|\s]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || '对话';

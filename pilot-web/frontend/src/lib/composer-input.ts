@@ -4,15 +4,22 @@ import { readTransferFiles, hasFileTransferHint } from './clipboard.js';
 import { fileBadge, formatBytes, isImageAttachment } from './attachments.js';
 
 /**
- * 输入框的编辑器：一个 contenteditable，文字和「芯片」混排。
+ * 输入框的编辑器：一个 contenteditable 放正文和 @ 引用，附件单独排在输入框下方的 rail 里。
  *
- * 芯片有两种：附件（图片缩略图 / 文件徽标，带移除按钮）和 @ 文件引用。它们都是
- * contenteditable=false 的行内元素，退格一次整块删掉；序列化时附件不产生文字，
- * 引用还原成 `@路径`，所以发给服务端的仍然是普通文本，图片只多出各自的插入位置。
+ * 附件以前和正文混排在 contenteditable 里，缩略图会占掉正文横向空间、也不容易整体浏览。
+ * 现在附件芯片放在 `rail`（输入框外、toolbar 之上），正文只留文字和 `@路径` 引用；
+ * 序列化时附件不产生文字，引用还原成 `@路径`，发给服务端的仍然是普通文本。
  *
- * DOM 是唯一的真相：草稿里有哪些附件，就看里面有哪些芯片，不再另存一份会漂移的数组。
+ * DOM 是唯一的真相：草稿里有哪些附件，就看 rail 里有哪些芯片，不再另存一份会漂移的数组。
  */
-export function createComposerInput(root: HTMLElement, { onChange = () => {}, onRemove = () => {} }: { onChange?: () => void; onRemove?: (id: string) => void } = {}) {
+export function createComposerInput(root: HTMLElement, { rail, onChange = () => {}, onRemove = () => {}, onPreview = () => {} }: {
+  rail?: HTMLElement | null;
+  onChange?: () => void;
+  onRemove?: (id: string) => void;
+  onPreview?: (attachment: { name: string; src: string }) => void;
+} = {}) {
+  // 没有传 rail 时退回混排，保证已有调用方和测试仍能工作
+  const tray = rail || root;
   // 不能用 plaintext-only：它会在第一次键入时把 DOM 压平成纯文本，芯片就变成了一串字。
   // 用普通可编辑，粘贴时自己剥掉格式（见下面的 paste 处理）。
   root.contentEditable = 'true';
@@ -61,12 +68,13 @@ export function createComposerInput(root: HTMLElement, { onChange = () => {}, on
   }
 
   function refresh() {
-    const empty = !root.querySelector('[data-chip]') && serialize(root).text === '';
+    const empty = !root.querySelector('[data-chip]') && !tray.querySelector('[data-chip="attachment"]') && serialize(root).text === '';
     if (empty && root.firstChild) {
       // 删空后浏览器常留一个 <br>，会让占位提示不再显示
       root.replaceChildren();
     }
-    root.dataset.empty = String(empty);
+    root.dataset.empty = String(empty && !tray.querySelector('[data-chip="attachment"]'));
+    if (tray !== root) tray.hidden = !tray.querySelector('[data-chip="attachment"]');
   }
 
   function selectionRange() {
@@ -174,13 +182,16 @@ export function createComposerInput(root: HTMLElement, { onChange = () => {}, on
     const isImage = isImageAttachment(item) && item.dataBase64;
     const chip = chipRoot('attachment', { attachmentId: item.id, kind: isImage ? 'image' : 'file' });
     chip.classList.add(isImage ? 'is-image' : 'is-file');
-    chip.title = [item.name, formatBytes(item.size)].filter(Boolean).join(' · ');
+    chip.title = isImage ? `${item.name} · 点击查看大图` : [item.name, formatBytes(item.size)].filter(Boolean).join(' · ');
     if (isImage) {
+      // 缩略图本身就是查看入口：rail 里空间大，点一下直接在弹层里看原图
       const thumb = document.createElement('img');
       thumb.className = 'chip-thumb';
       thumb.src = item.dataBase64;
-      thumb.alt = '';
+      thumb.alt = item.name;
+      thumb.dataset.preview = 'image';
       chip.append(thumb);
+      chip.dataset.previewable = 'true';
     } else {
       chip.append(badge(item.name, item.mimeType));
     }
@@ -188,7 +199,7 @@ export function createComposerInput(root: HTMLElement, { onChange = () => {}, on
     name.className = 'chip-name';
     name.textContent = item.name;
     chip.append(name);
-    if (item.size) {
+    if (item.size && !isImage) {
       const meta = document.createElement('span');
       meta.className = 'chip-meta';
       meta.textContent = formatBytes(item.size);
@@ -215,28 +226,34 @@ export function createComposerInput(root: HTMLElement, { onChange = () => {}, on
     return chip;
   }
 
-  root.addEventListener('click', (event) => {
-    const button = event.target instanceof Element ? event.target.closest('.chip-remove') : null;
-    if (!button) {
+  // 附件芯片在 rail 里，事件挂在 rail 上；未传 rail 时 tray === root，行为不变
+  tray.addEventListener('click', (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+    const button = target.closest('.chip-remove');
+    if (button) {
+      event.preventDefault();
+      const chip = button.closest<HTMLElement>('.flow-chip');
+      if (!chip) return;
+      // 插入芯片时顺带放了一个分隔空格，一起拿掉，免得反复加减后留下一串空格
+      const gap = chip.nextSibling;
+      if (gap && gap.nodeType === Node.TEXT_NODE && gap.nodeValue === ' ') {
+        gap.remove();
+      }
+      const id = chip.dataset.attachmentId;
+      chip.remove();
+      refresh();
+      if (id) onRemove(id);
+      onChange();
       return;
     }
-    event.preventDefault();
-    const chip = button.closest<HTMLElement>('.flow-chip');
-    if (!chip) {
-      return;
+    // 图片缩略图：点芯片看大图，不再需要先下载到本机
+    const tile = target.closest<HTMLElement>('[data-previewable="true"]');
+    const thumb = tile?.querySelector('img');
+    if (tile && thumb) {
+      event.preventDefault();
+      onPreview({ name: thumb.alt || '', src: thumb.src });
     }
-    const id = chip.dataset.attachmentId;
-    // 插入芯片时顺带放了一个分隔空格，一起拿掉，免得反复加减后留下一串空格
-    const gap = chip.nextSibling;
-    if (gap && gap.nodeType === Node.TEXT_NODE && gap.nodeValue === ' ') {
-      gap.remove();
-    }
-    chip.remove();
-    refresh();
-    if (id) {
-      onRemove(id);
-    }
-    onChange();
   }, { signal: listeners.signal });
 
   root.addEventListener('input', () => {
@@ -285,56 +302,43 @@ export function createComposerInput(root: HTMLElement, { onChange = () => {}, on
       return serialize(root).text;
     },
 
-    /** 文字 + 每张图片在文字里的位置（文件芯片不占位置：它们的内容服务端会拼在正文后面）。 */
+    /** 正文 + 图片位置。附件都不在正文里，所以位置恒为空（服务端会把附件排在正文后）。 */
     getDraft() {
-      const { text, positions } = serialize(root);
-      return { text, imagePositions: positions };
+      const { text } = serialize(root);
+      return { text, imagePositions: [] as number[] };
     },
 
     attachmentIds() {
-      return [...root.querySelectorAll<HTMLElement>('[data-chip="attachment"]')].map((chip) => chip.dataset.attachmentId!);
+      return [...tray.querySelectorAll<HTMLElement>('[data-chip="attachment"]')].map((chip) => chip.dataset.attachmentId!);
     },
 
     hasChips() {
-      return Boolean(root.querySelector('[data-chip]'));
+      return Boolean(root.querySelector('[data-chip]') || tray.querySelector('[data-chip="attachment"]'));
     },
 
     /** 整个草稿替换成纯文字，芯片一并清掉。 */
     setText(text: unknown) {
       root.replaceChildren(...(text ? [document.createTextNode(String(text))] : []));
+      tray.querySelectorAll('[data-chip="attachment"]').forEach((chip) => chip.remove());
       refresh();
       onChange();
     },
 
     /**
-     * 恢复草稿：文字、图片芯片按原插入位置、文件芯片按原顺序。
-     * 用于刷新/重开工作台后还原未发送的附件。
+     * 恢复草稿：正文回到输入框，附件按保存顺序回到 rail。
+     * `imagePositions` 只为兼容旧草稿保留，附件不再嵌在正文里。
      */
-    restoreDraft(text: unknown, files: readonly DraftAttachment[], imagePositions: readonly number[]) {
+    restoreDraft(text: unknown, files: readonly DraftAttachment[], _imagePositions: readonly number[]) {
       const value = String(text || '');
       const list = Array.from(files || []);
-      const images = list.filter(item => isImageAttachment(item) && item.dataBase64);
-      const others = list.filter(item => !images.includes(item));
-      const nodes: Node[] = [];
-      let cursor = 0;
-      images.forEach((item, index) => {
-        const raw = Number(imagePositions[index]);
-        const at = Number.isFinite(raw) ? Math.max(cursor, Math.min(value.length, raw)) : value.length;
-        if (at > cursor) {
-          nodes.push(document.createTextNode(value.slice(cursor, at)));
-        }
-        nodes.push(attachmentChip(item));
-        cursor = at;
-      });
-      if (cursor < value.length) {
-        nodes.push(document.createTextNode(value.slice(cursor)));
-      } else if (!nodes.length && value) {
-        nodes.push(document.createTextNode(value));
-      }
-      others.forEach((item) => {
-        nodes.push(attachmentChip(item), document.createTextNode(' '));
-      });
-      root.replaceChildren(...nodes);
+      root.replaceChildren(...(value ? [document.createTextNode(value)] : []));
+      this.restoreAttachments(list);
+    },
+
+    /** 只换 rail 里的附件，不动正文（切会话时正文是 innerHTML，里头还有 @ 引用芯片）。 */
+    restoreAttachments(files: readonly DraftAttachment[]) {
+      tray.querySelectorAll('[data-chip="attachment"]').forEach((chip) => chip.remove());
+      Array.from(files || []).forEach((item) => tray.append(attachmentChip(item)));
       refresh();
       onChange();
     },
@@ -421,15 +425,10 @@ export function createComposerInput(root: HTMLElement, { onChange = () => {}, on
     },
 
     insertAttachments(items: readonly DraftAttachment[]) {
-      const nodes: Node[] = [];
-      items.forEach((item) => {
-        nodes.push(attachmentChip(item), document.createTextNode(' '));
-      });
-      if (nodes.length) {
-        insertAtCaret(nodes);
-        refresh();
-        onChange();
-      }
+      if (!items.length) return;
+      items.forEach((item) => tray.append(attachmentChip(item)));
+      refresh();
+      onChange();
     },
 
     /**

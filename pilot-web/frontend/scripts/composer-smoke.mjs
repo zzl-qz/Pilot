@@ -148,6 +148,15 @@ async function run(page, name) {
   assert.equal(await page.evaluate(()=>sent.at(-1).body.attachments[0].name),'only.txt');
   await transfer('paste','screen.png','image','image/png');
   assert.equal(await page.locator('.chip-thumb').count(),1);
+  // 缩略图本身就是查看入口：点一下在弹层里看原图，不需要先下载
+  const thumbSrc = await page.locator('.chip-thumb').getAttribute('src');
+  await page.locator('.chip-thumb').click();
+  const lightbox = page.locator('.composer-preview');
+  await lightbox.waitFor();
+  assert.equal(await lightbox.locator('img').getAttribute('src'), thumbSrc, '预览显示的就是原图');
+  assert.equal(await chips.count(),1,'预览不能移除附件');
+  await lightbox.getByRole('button',{name:'关闭预览'}).click();
+  await lightbox.waitFor({state:'hidden'});
   await page.locator('.chip-remove').click(); assert.equal(await chips.count(),0);
   // 非图片、非文本的任意文件类型也必须能直接粘贴/拖入并生成文件芯片
   await transfer('paste','archive.bin','\u0000\u0001','application/octet-stream');

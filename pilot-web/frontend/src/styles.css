@@ -4264,6 +4264,127 @@ html[data-theme="light"] .input-flow[data-empty="true"]::before { color: #aeb5c2
 }
 .chip-remove:hover { background: rgba(255, 111, 111, 0.16); color: var(--err); }
 
+/* 附件 rail：排在输入框上方的一条，横向滚动，不挤占正文宽度 */
+.composer-attachments {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin: 0 0 6px;
+  padding: 2px 2px 6px;
+  scrollbar-width: thin;
+}
+.composer-attachments[hidden] { display: none; }
+.composer-attachments::-webkit-scrollbar { height: 6px; }
+.composer-attachments::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 18%, transparent);
+}
+
+/* rail 里的附件芯片：固定 64px 方块，删改统一用右上角的 × */
+.composer-attachments .flow-chip {
+  position: relative;
+  flex: none;
+  width: 64px;
+  height: 64px;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--panel-3);
+}
+.composer-attachments .flow-chip[data-previewable="true"] { cursor: zoom-in; }
+.composer-attachments .flow-chip[data-previewable="true"]:hover .chip-thumb { transform: scale(1.04); }
+.composer-attachments .chip-thumb {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border-radius: 0;
+  transition: transform 0.16s ease;
+}
+/* 非图片附件：居中显示文件名首字符，完整名称放在 title 里 */
+.composer-attachments .flow-chip.is-file {
+  display: grid;
+  place-items: center;
+  gap: 0;
+  padding: 6px;
+}
+.composer-attachments .flow-chip.is-file .chip-name,
+.composer-attachments .flow-chip.is-file .chip-meta { display: none; }
+.composer-attachments .flow-chip.is-file::before {
+  content: none;
+}
+.composer-attachments .flow-chip.is-file .chip-badge {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dim);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+/* × 平时淡出，悬停或键盘聚焦时出现，不碍眼但随时可删 */
+.composer-attachments .chip-remove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(10, 13, 18, 0.72);
+  color: #e7ebf3;
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.14s ease, background 0.14s ease;
+}
+.composer-attachments .flow-chip:hover .chip-remove,
+.composer-attachments .chip-remove:focus-visible { opacity: 1; }
+.composer-attachments .chip-remove:hover { background: var(--err); color: #fff; }
+@media (hover: none) {
+  /* 触屏没有悬停，删除按钮常显 */
+  .composer-attachments .chip-remove { opacity: 1; }
+}
+
+/* 点缩略图看大图：铺满视口、背景压暗，点击任意处关闭 */
+.composer-preview {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  padding: 48px 24px;
+  background: rgba(6, 8, 12, 0.82);
+  backdrop-filter: blur(2px);
+}
+.composer-preview img {
+  max-width: min(100%, 1100px);
+  max-height: calc(100vh - 140px);
+  object-fit: contain;
+  border-radius: 10px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+}
+.composer-preview-name { color: var(--muted); font-size: 12px; }
+.composer-preview-close {
+  position: absolute;
+  top: 18px;
+  right: 20px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: rgba(20, 26, 36, 0.9);
+  color: var(--ink-2);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.composer-preview-close:hover { background: rgba(38, 46, 60, 0.95); color: #fff; }
+
 /* 输入框左下角的「添加文件」按钮 */
 .attach-button {
   flex: none;

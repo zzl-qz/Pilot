@@ -66,6 +66,14 @@ try {
     await page.waitForFunction(() => document.querySelector('#input-flow')?.getAttribute('aria-busy') === 'false');
   };
 
+  const readComposer = () => page.evaluate(() => ({
+    text: window.store.getState().composerApi.getText(),
+    positions: window.store.getState().composerApi.getDraft().imagePositions,
+    // 附件芯片挂在输入框下方的 rail 上，正文里只剩文字，所以位置一栏恒为空
+    placement: [...document.querySelectorAll('[data-chip="attachment"]')]
+      .map(chip => (chip.closest('.composer-attachments') ? 'rail' : 'body'))
+  }));
+
   await input.fill('请检查附件');
   const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z4xkAAAAASUVORK5CYII=';
   await transfer('note.txt', 'hello', 'text/plain');
@@ -79,24 +87,21 @@ try {
   }, png);
   await page.waitForFunction(() => document.querySelectorAll('[data-chip="attachment"]').length === 2);
   await page.waitForFunction(() => localStorage.getItem('pilot.draft.files.draft-a'));
-  const before = await page.evaluate(() => ({
-    text: window.store.getState().composerApi.getText(),
-    positions: window.store.getState().composerApi.getDraft().imagePositions
-  }));
-  assert.equal(before.positions.length, 1, '图片位置应被记录');
+  const before = await readComposer();
+  assert.deepEqual(before.positions, [], '附件不在正文里，图片位置为空');
+  assert.deepEqual(before.placement, ['rail', 'rail'], '附件芯片都在 rail 里');
 
-  // 刷新：正文、文件、图片与位置一起恢复
+  // 刷新：正文、附件与 rail 位置一起恢复
   await page.reload();
   await page.locator('#input-flow').waitFor();
   await page.waitForFunction(() => document.querySelectorAll('[data-chip="attachment"]').length === 2);
-  const after = await page.evaluate(() => ({
-    text: window.store.getState().composerApi.getText(),
-    positions: window.store.getState().composerApi.getDraft().imagePositions
-  }));
+  const after = await readComposer();
+  assert.deepEqual(after.placement, ['rail', 'rail'], '刷新后附件仍在 rail 里');
   assert.equal(after.text.trim(), before.text.trim(), '正文恢复（芯片两侧空白允许差异）');
   assert.deepEqual(after.positions, before.positions);
   assert.equal(await page.locator('.chip-thumb').count(), 1, '图片缩略图恢复');
-  assert.match(await page.locator('[data-chip="attachment"]').last().innerText(), /note\.txt/);
+  // rail 里的方块只露文件类型徽标，完整文件名放在 title 上
+  assert.equal(await page.locator('[data-chip="attachment"][title*="note.txt"]').count(), 1, '文件附件恢复');
 
   // 移除附件后副本清掉（只删附件，不动正文）
   await page.locator('[data-chip="attachment"]').first().locator('.chip-remove').click();

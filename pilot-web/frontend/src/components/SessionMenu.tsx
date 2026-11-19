@@ -7,6 +7,7 @@ import { DropdownMenu, type DropdownMenuItemData, type DropdownMenuOption } from
 import { TextInput } from '@astryxdesign/core/TextInput';
 import type { SessionSummary } from '../types/core.js';
 import { writeClipboard } from '../lib/clipboard.js';
+import { downloadSessionExport, exportFailureMessage } from '../lib/session-export.js';
 import { errorInfo } from '../lib/errors.js';
 import { restoreFocus } from '../lib/interaction.js';
 import { supportsAnchoredLayers } from '../lib/theme.js';
@@ -57,6 +58,17 @@ export function SessionMenu({ session, children, onAction }: {
         setBusy(false);
       }
     };
+    const exportSession = async () => {
+      const source = origin();
+      try {
+        const result = await downloadSessionExport(session.id, title);
+        if (result.mode === 'file') useStore.getState().showNotice('会话已导出。可以把这个文件发给复查的人。');
+        else if (result.mode === 'clipboard') useStore.getState().showNotice('当前环境不能直接保存文件，全文已复制，可以粘贴发给复查的人。');
+        else onAction({ ...source, kind: 'copy', value: result.text });
+      } catch (error) {
+        useStore.getState().showNotice(exportFailureMessage(error));
+      }
+    };
     const copy = async (value: string) => {
       const source = origin();
       if (await writeClipboard(value)) useStore.getState().showNotice('已复制');
@@ -71,6 +83,7 @@ export function SessionMenu({ session, children, onAction }: {
       { type: 'divider' },
       item('复制标题', 'copy', () => void copy(title)),
       item('复制会话 ID', 'copy', () => void copy(session.id)),
+      item('导出会话', 'file', () => void exportSession()),
       { type: 'divider' },
       item(session.archived ? '恢复到列表' : '归档', 'inbox',
         () => void run(() => useStore.getState().archiveSession(session.id, !session.archived))),

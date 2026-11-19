@@ -19,8 +19,8 @@ import { api, apiFetch } from '../api.js';
 import { historyPrefetchDistance } from '../lib/history.js';
 import { MarkdownBody } from './MarkdownBody.jsx';
 import { StructuredDocumentView, isStructuredDocumentFormat } from './StructuredDocumentView.jsx';
-import { TOOL_STATUS_TITLES, formatLatency, toolArgsText, toolLabel } from '../lib/tool-meta.js';
-import { agentMeta, agentTitle, manifestFacts, splitSubagentResult, summarizeAgents, agentStatusLabel } from '../lib/agents.js';
+import { TOOL_STATUS_TITLES, formatLatency, parseAsk, questionChoice, toolArgsText, toolLabel } from '../lib/tool-meta.js';
+import { agentMeta, agentTitle, manifestFacts, splitSubagentResult, summarizeAgents, agentStatusLabel, agentStatusDotVariant } from '../lib/agents.js';
 import { splitAttachmentMarkers, layoutMessageParts, attachmentUrl, isImageAttachment, fileBadge, formatBytes } from '../lib/attachments.js';
 import { parseDiff } from '../lib/diff.js';
 import { writeClipboard } from '../lib/clipboard.js';
@@ -659,9 +659,37 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
         {meta && !running && <span className="tool-meta" title={meta}>{meta}</span>}
       </Header>
       {open && body && <div className="tool-body"><pre tabIndex={0}>{body}</pre></div>}
+      {running && <AskChoices tool={tool} />}
     </div>
   );
 });
+
+function AskChoices({ tool }: { tool: ToolView }) {
+  const ask = tool.name === 'ask_user' ? parseAsk(tool.args) : null;
+  const [custom, setCustom] = useState('');
+  const [sent, setSent] = useState('');
+  if (!ask) return null;
+  const send = (option: string) => {
+    const choice = questionChoice(option, custom);
+    if (!choice || sent) return;
+    const sessionId = useStore.getState().sessionId;
+    if (!sessionId) return;
+    setSent(choice);
+    void api.answerQuestion(sessionId, tool.callId, choice);
+  };
+  return (
+    <div className="arb-options">
+      <p className="arb-summary">{ask.question}</p>
+      {ask.options.map(option => (
+        <Button key={option} size="sm" label={option} isDisabled={Boolean(sent)} onClick={() => send(option)} />
+      ))}
+      <input className="arb-custom" value={custom} placeholder="自己填写" aria-label="自己填写"
+        onChange={event => setCustom(event.target.value)} />
+      <Button size="sm" variant="ghost" label="提交填写" isDisabled={!custom.trim() || Boolean(sent)} onClick={() => send('')} />
+      {sent && <span className="sandbox-decision">已提交：{sent}</span>}
+    </div>
+  );
+}
 
 /** 思考块：思考中自动展开并滚到底，正文出来就收起（旧版 settleReasoning）；摘要带秒数和当前动作。 */
 const ThinkingBlock = memo(function ThinkingBlock({ thinking }: { thinking: Thinking }) {
@@ -735,7 +763,7 @@ const AgentCard = memo(function AgentCard({ agent }: { agent: AgentView }) {
     <details className={`tool-group agent-card is-${status || 'stopped'}`}>
       <summary className="tool-group-head agent-head">
         <span className="tool-group-chevron" aria-hidden="true" />
-        <StatusDot variant={status === 'failed' ? 'error' : status === 'running' ? 'accent' : 'neutral'}
+        <StatusDot variant={agentStatusDotVariant(status)}
           label={agentStatusLabel(status)} aria-hidden="true" />
         <span className="tool-group-label agent-name" title={agent.task}>
           {agent.name || agentTitle(agent.task) || agent.id}
@@ -812,7 +840,8 @@ const TurnStats = memo(function TurnStats({ stats, reports, agentCount }: { stat
   const mark = stats.exact === false ? '≈' : '';
   const limit = Number(stats.contextLimit) || 0;
   const used = Number(stats.contextTokens) || 0;
-  const crowded = limit > 0 && used / limit >= 0.85;
+  const ratio = limit > 0 ? used / limit : 0;
+  const contextTone = ratio >= 0.92 ? ' is-critical' : ratio >= 0.8 ? ' is-warn' : '';
   // 估算路径没有缓存观测：显示「—」，不能把「没观测」读成「没命中」
   const cacheLabel = formatCache(stats.details);
   const priced = stats.details?.pricedRequests ?? 0;
@@ -836,7 +865,7 @@ const TurnStats = memo(function TurnStats({ stats, reports, agentCount }: { stat
       <span className="turn-stat" title={`命中缓存 ${formatCount(stats.cachedInputTokens)} / 总输入 ${formatCount(stats.inputTokens)}`}>
         <span>缓存命中</span><b>{cacheLabel}</b>
       </span>
-      <span className={`turn-stat is-context${crowded ? ' is-hot' : ''}`} title={String(stats.contextTokens ?? '')}>
+      <span className={`turn-stat is-context${contextTone}`} title={`当前上下文 ${used} / 有效输入预算 ${limit}（已扣除输出预留与安全余量）`}>
         <span>上下文</span><b>{formatCount(stats.contextTokens)}</b>
       </span>
       <span className="turn-stat"><span>费用估算</span><b>{priced > 0 ? totalCost(stats.details) : '未返回'}</b></span>

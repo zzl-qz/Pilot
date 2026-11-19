@@ -24,24 +24,40 @@ export function pickOwner<T extends AgentSummary>(agentId: string | null | undef
   return running.length === 1 ? running[0] : null;
 }
 
-/** 一组子智能体的概括：「3 个子智能体 · 2 运行中 · 1 失败」。 */
+/** 一组子智能体的概括：「3 个子智能体 · 2 运行中 · 1 阶段交付 · 1 失败」。 */
 export function summarizeAgents(agents: Iterable<AgentSummary> | null | undefined) {
   const list = [...(agents || [])];
   const count = (status: string) => list.filter((agent) => agent.status === status).length;
   const running = count('running');
+  const partial = count('partial');
   const failed = count('failed');
   const stopped = count('stopped') + count('interrupted');
   const done = count('done');
   const bits = [`${list.length} 个子智能体`];
   if (running) bits.push(`${running} 运行中`);
+  if (partial) bits.push(`${partial} 阶段交付`);
   if (failed) bits.push(`${failed} 失败`);
   if (stopped) bits.push(`${stopped} 已中止`);
   if (list.length && done === list.length) bits.push('全部完成');
-  return { total: list.length, running, failed, stopped, done, text: bits.join(' · ') };
+  return { total: list.length, running, partial, failed, stopped, done, text: bits.join(' · ') };
 }
 
 export function agentStatusLabel(status: string) {
-  return ({ running: '运行中', done: '已完成', failed: '失败', stopped: '已中止', interrupted: '已中止' } as Record<string, string>)[status] || '状态未知';
+  return ({
+    running: '运行中',
+    done: '已完成',
+    partial: '阶段交付',
+    failed: '失败',
+    stopped: '已中止',
+    interrupted: '已中止'
+  } as Record<string, string>)[status] || '状态未知';
+}
+
+export function agentStatusDotVariant(status: string): 'error' | 'warning' | 'accent' | 'neutral' {
+  if (status === 'failed') return 'error';
+  if (status === 'partial') return 'warning';
+  if (status === 'running') return 'accent';
+  return 'neutral';
 }
 
 /** 毫秒 → 「850ms」「12s」「2m 05s」。 */

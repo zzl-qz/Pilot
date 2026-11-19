@@ -207,7 +207,10 @@ await check('成果卡显示验证结论并可重新验证', async () => {
 await check('能力页显示插件总览与钩子状态', async () => {
   const { view, pageErrors, context } = await open('capabilities', '/__capabilities');
   await view.getByText('接入总览').waitFor();
-  const summary = await view.locator('[data-plugin-summary]').innerText();
+  // 面板先渲染标题、能力清单随后到达；等汇总变成「有坏的」再读，否则读到的是空态文案
+  const summaryBox = view.locator('[data-plugin-summary="broken"]');
+  await summaryBox.waitFor();
+  const summary = await summaryBox.innerText();
   assert.match(summary, /1 项会失效/, `总览应先说坏掉的：${summary}`);
   assert.match(summary, /共 2 项/);
   const hooks = view.locator('.cap-section', { hasText: '钩子' });
@@ -227,6 +230,14 @@ await check('想法库独立于侧边对话，跨项目保存文字与附件', a
   await trigger.click();
   await dialog.getByLabel('想法文字').fill('之后再做的想法');
   await dialog.getByLabel('想法附件').setInputFiles({ name: '记录.txt', mimeType: 'text/plain', buffer: Buffer.from('附件内容') });
+  // 待保存附件：卡片上的 × 只移除那一个文件，不碰已输入的文字
+  await dialog.getByLabel('想法附件').setInputFiles({ name: '临时.txt', mimeType: 'text/plain', buffer: Buffer.from('先加上再拿掉') });
+  const pending = dialog.getByRole('list', { name: '待保存附件' });
+  assert.equal(await pending.getByRole('listitem').count(), 2, '两个文件应各占一张卡片');
+  await pending.getByRole('button', { name: '移除 临时.txt' }).click();
+  assert.equal(await pending.getByRole('listitem').count(), 1, '× 应只移除被点的那个附件');
+  assert.equal(await pending.getByText('记录.txt').count(), 1, '没点到的附件要留下');
+  assert.equal(await dialog.getByLabel('想法文字').inputValue(), '之后再做的想法', '移除附件不能清空文字');
   await dialog.getByRole('button', { name: '保存想法' }).click();
   await dialog.getByText('已保存到想法库。').waitFor();
   await dialog.getByLabel('想法文字').evaluate(input => {

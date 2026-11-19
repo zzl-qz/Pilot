@@ -19,8 +19,8 @@ export function NavigationRail() {
   };
   return <nav className="navigation-rail" aria-label="全局功能">
     <div className="navigation-rail-group">
-      <RailButton id="nav-projects" icon="home" label="项目与对话" active={ui.sidebarOpen}
-        onClick={() => open({ sidebarOpen: !ui.sidebarOpen })} />
+      <RailButton id="nav-new-session" icon="plus" label="新任务" hint={shortcut('N')}
+        onClick={() => useStore.getState().startNewSession()} />
       <RailButton id="nav-message-search" icon="search" label="搜索消息与书签" active={ui.searchOpen}
         onClick={() => open({ searchOpen: true })} />
       <RailButton icon="inbox" label="任务收件箱" active={ui.resultsOpen} count={unread}

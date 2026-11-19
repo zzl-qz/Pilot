@@ -107,3 +107,27 @@ test('旧的 interrupted 状态与停止状态均有明确文案', () => {
   assert.equal(agentStatusLabel('interrupted'), '已中止');
   assert.equal(summarizeAgents([{ status: 'interrupted' }, { status: 'stopped' }]).stopped, 2);
 });
+
+test('子任务触顶阶段交付时标为 partial 而不是失败，并汇总为阶段交付', () => {
+  for (const live of [true, false]) {
+    const s = session(live);
+    s.send('run.started', { input: '分析大型仓库结构' });
+    s.send('subagent.started', { agentId: 'agent-p', name: '查 harness 附件 UI', task: '检查附件 UI' });
+    s.send('subagent.finished', {
+      agentId: 'agent-p',
+      ok: false,
+      partial: true,
+      stopReason: 'MAX_STEPS',
+      summary: '[子代理阶段结算：达到探索步数上限]\n\n已定位 AttachmentRail.tsx:42'
+    });
+    assert.equal(s.agent('agent-p').status, 'partial');
+    assert.equal(s.agent('agent-p').stopReason, 'MAX_STEPS');
+    assert.equal(s.state.agents['agent-p'].status, 'partial');
+    assert.equal(agentStatusLabel('partial'), '阶段交付');
+    const summary = summarizeAgents(Object.values(s.state.agents));
+    assert.equal(summary.failed, 0);
+    assert.equal(summary.partial, 1);
+    assert.match(summary.text, /1 阶段交付/);
+    assert.doesNotMatch(summary.text, /失败/);
+  }
+});

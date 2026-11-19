@@ -522,3 +522,33 @@ test('旧技能列表响应不能覆盖安装后刷新或另一个会话', async
     assert.deepEqual(useStore.getState().skills, []);
   } finally { fetchHandler = previousFetch; useStore.setState(saved); }
 });
+
+test('长会话先显示最近一页，向上翻不重复已有事件', async () => {
+  reset();
+  const previousFetch = fetchHandler;
+  fetchHandler = url => {
+    const text = String(url);
+    if (!text.includes('/history')) return Promise.resolve(new Response('{}'));
+    if (text.includes('before=')) {
+      return Promise.resolve(new Response(JSON.stringify({
+        historyRevision: 1, hasMore: false,
+        events: [
+          { type: 'run.started', sessionId: 's', sequence: 1, payload: { input: '更早' } },
+          { type: 'run.started', sessionId: 's', sequence: 2, payload: { input: '最近' } }
+        ]
+      })));
+    }
+    return Promise.resolve(new Response(JSON.stringify({
+      historyRevision: 1, hasMore: true,
+      events: [{ type: 'run.started', sessionId: 's', sequence: 2, payload: { input: '最近' } }]
+    })));
+  };
+  try {
+    const texts = () => useStore.getState().thread.rows.map(row => row.text).filter(Boolean);
+    assert.equal(await useStore.getState().loadHistory(), true);
+    assert.equal(useStore.getState().thread.history.hasMore, true);
+    assert.deepEqual(texts(), ['最近']);
+    assert.equal(await useStore.getState().loadEarlier(), true);
+    assert.deepEqual(texts(), ['更早', '最近']);
+  } finally { fetchHandler = previousFetch; }
+});

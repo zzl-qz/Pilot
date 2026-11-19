@@ -323,22 +323,27 @@ function Workbench() {
         onPointerDown={(event) => startResize('sidebar', event)}
       />
       <header className="topbar">
-        {!embedded && <div className="shell-brand"><span className="logo" aria-hidden="true">P</span><strong>Pilot</strong></div> }
-          {/* 内嵌的 side chat 里侧栏恒为隐藏，切换按钮点了没反应，直接不渲染 */}
-          {!embedded && (
+        {!embedded && (
+          <div className="topbar-leading">
+            <div className="shell-brand">
+              <span className="logo" aria-hidden="true">P</span>
+              <strong>Pilot</strong>
+            </div>
+            {/* 内嵌的 side chat 里侧栏恒为隐藏，切换按钮点了没反应，直接不渲染 */}
             <Button
-              className="workbench-control"
+              className="workbench-control sidebar-toggle-btn"
               id="sidebar-toggle"
-              label="切换侧栏"
+              label={sidebarOpen ? '收起侧栏' : '展开侧栏'}
               icon={<Icon name="sidebar" />}
               isIconOnly
               variant="ghost"
-              tooltip={`切换侧栏 (${shortcut('B')})`}
+              tooltip={`${sidebarOpen ? '收起侧栏' : '展开侧栏'} (${shortcut('B')})`}
               aria-expanded={sidebarOpen}
               aria-controls="sidebar"
               onClick={() => useStore.getState().setUi((ui) => ({ sidebarOpen: !ui.sidebarOpen }))}
             />
-          )}
+          </div>
+        )}
           <div className="crumbs">
             {!embedded && <Button
               id="workspace-name"

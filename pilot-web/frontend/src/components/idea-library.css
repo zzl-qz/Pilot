@@ -14,10 +14,40 @@
 .idea-card { display: grid; gap: 10px; border: 1px solid var(--line); border-radius: 12px; padding: 12px; min-width: 0; }
 .idea-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .idea-files { grid-template-columns: repeat(auto-fill, minmax(min(140px, 100%), 1fr)); }
-.idea-files li { background: var(--panel-2); border-radius: 8px; padding: 8px; min-width: 0; }
-.idea-file { display: grid; gap: 6px; overflow-wrap: anywhere; }
-.idea-file img { display: block; max-width: 100%; width: 100%; height: 100px; object-fit: contain; }
-.idea-file a { color: var(--accent); }
+.idea-files li { background: var(--panel-2); border: 1px solid var(--line-soft); border-radius: 10px; padding: 6px; min-width: 0; }
+.idea-file { position: relative; display: grid; gap: 6px; min-width: 0; }
+.idea-file img, .idea-file-placeholder {
+  box-sizing: border-box;
+  width: 100%; height: 104px; border-radius: 6px; overflow: hidden;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+.idea-file img { display: block; object-fit: contain; }
+.idea-file-placeholder { display: grid; place-items: center; }
+.idea-file-placeholder .chip-badge { min-width: 34px; padding: 3px 6px; font-size: 12px; }
+.idea-file-detail { display: grid; gap: 1px; min-width: 0; padding-inline: 2px; }
+.idea-file-name {
+  overflow: hidden; color: var(--ink-2); font-size: 12px; line-height: 1.35;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.idea-file a.idea-file-name { color: var(--accent); text-decoration: none; }
+.idea-file a.idea-file-name:hover { text-decoration: underline; }
+.idea-file-meta { color: var(--dim); font-size: 11px; }
+/* 移除按钮压在缩略图右上角：不占一行、不挤窄文件名，也不跟「保存想法」抢位置。 */
+.idea-file-remove {
+  position: absolute; top: 4px; right: 4px;
+  display: grid; place-items: center;
+  width: 20px; height: 20px; padding: 0;
+  border: 1px solid color-mix(in srgb, #000 35%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, #000 55%, transparent);
+  color: #f2f2f2; cursor: pointer;
+  opacity: 0.82;
+  transition: background 0.14s ease, opacity 0.14s ease;
+}
+.idea-file-remove .ui-icon { width: 11px; height: 11px; stroke-width: 2; }
+.idea-file-remove:hover { background: var(--err); border-color: var(--err); color: #fff; opacity: 1; }
+.idea-file-remove:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; opacity: 1; }
+.idea-file-remove:disabled { opacity: 0.4; cursor: not-allowed; }
 .idea-legacy { border-top: 1px solid var(--line); padding-top: 10px; }
 .idea-legacy summary { cursor: pointer; }
 .idea-legacy .idea-list { margin-top: 8px; }

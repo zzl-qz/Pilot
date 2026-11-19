@@ -3,7 +3,9 @@ import { Button } from '@astryxdesign/core/Button';
 import { useStore } from '../store.js';
 import { readTransferFiles, writeClipboard } from '../lib/clipboard.js';
 import { attachmentId } from '../lib/attachment-input.js';
+import { fileBadge, formatBytes } from '../lib/attachments.js';
 import { deleteIdea, listIdeas, saveIdea, type Idea } from '../lib/idea-library.js';
+import { Icon } from './Icon.jsx';
 import { Modal } from './Modal.jsx';
 import './idea-library.css';
 
@@ -112,9 +114,8 @@ export default function IdeaLibrary({ onClose }: { onClose: () => void }) {
         }} />
         {files.length > 0 && <ul className="idea-files" aria-label="待保存附件">
           {files.map((file, index) => <li key={`${file.name}:${index}`}>
-            <IdeaFile file={file} />
-            <Button type="button" size="sm" variant="ghost" label={`移除 ${file.name}`} isDisabled={busy}
-              onClick={() => setFiles(current => current.filter((_, i) => i !== index))} />
+            <IdeaFile file={file} disabled={busy}
+              onRemove={() => setFiles(current => current.filter((_, i) => i !== index))} />
           </li>)}
         </ul>}
         <div className="idea-actions">
@@ -160,7 +161,13 @@ export default function IdeaLibrary({ onClose }: { onClose: () => void }) {
   </Modal>;
 }
 
-function IdeaFile({ file, saved = false }: { file: File; saved?: boolean }) {
+/** 附件卡片：预览在上，名字与大小在下；待保存的缩略图右上角带一个移除按钮。 */
+function IdeaFile({ file, saved = false, disabled = false, onRemove }: {
+  file: File;
+  saved?: boolean;
+  disabled?: boolean;
+  onRemove?: () => void;
+}) {
   const [url, setUrl] = useState('');
   const image = IMAGE_TYPES.has(file.type);
   useEffect(() => {
@@ -170,9 +177,20 @@ function IdeaFile({ file, saved = false }: { file: File; saved?: boolean }) {
     return () => URL.revokeObjectURL(objectUrl);
   }, [file, image, saved]);
 
+  const badge = fileBadge(file.name, file.type);
   return <div className="idea-file">
-    {image && url && <img src={url} alt={file.name} loading="lazy" />}
-    {saved && url ? <a href={url} download={file.name}>{file.name}</a> : <span>{file.name}</span>}
+    {image && url
+      ? <img src={url} alt={file.name} loading="lazy" />
+      : <span className="idea-file-placeholder"><span className={`chip-badge ft-${badge.tone}`}>{badge.label}</span></span>}
+    <span className="idea-file-detail">
+      {/* 已保存的附件可以下载，文件名做成链接；大小只在有值时占位，避免空标签撑高卡片 */}
+      {saved && url
+        ? <a className="idea-file-name" href={url} download={file.name} title={file.name}>{file.name}</a>
+        : <span className="idea-file-name" title={file.name}>{file.name}</span>}
+      {file.size > 0 && <span className="idea-file-meta">{formatBytes(file.size)}</span>}
+    </span>
+    {onRemove && <button type="button" className="idea-file-remove" title="移除" aria-label={`移除 ${file.name}`}
+      disabled={disabled} onClick={onRemove}><Icon name="close" /></button>}
   </div>;
 }
 

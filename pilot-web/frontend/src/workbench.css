@@ -493,6 +493,7 @@ html[data-theme] .agent-group .agent-body { padding: 4px 8px 12px; }
 html[data-theme] .agent-group .agent-name { font-weight: 500; }
 html[data-theme] .agent-group .agent-head .tool-group-count { font-family: var(--sans); font-size: 12px; }
 html[data-theme] .agent-state { flex: none; font-size: 12px; color: var(--muted); }
+html[data-theme] .agent-card.is-partial .agent-state { color: var(--warn); }
 html[data-theme] .agent-card.is-failed .agent-state { color: var(--err); }
 html[data-theme] .agents-dock-list { max-height: 180px; overflow: auto; overscroll-behavior: contain; }
 html[data-theme] .agents-dock-head .queue-toggle { margin-left: auto; }
@@ -531,17 +532,31 @@ html[data-theme] .app {
 html[data-theme] .app.sidebar-collapsed { grid-template-columns: var(--navigation-w) 0 minmax(0, 1fr); }
 html[data-theme] .app > .topbar {
   grid-column: 1 / -1; grid-row: 1; height: var(--toolbar-h); min-height: 0;
-  padding: 0 12px; gap: 12px; border-bottom: 1px solid var(--line-soft);
+  padding: 0 12px 0 0; gap: 10px; border-bottom: 1px solid var(--line-soft);
 }
-.shell-brand { display: flex; align-items: center; flex: none; gap: 9px; width: 112px; color: var(--ink); }
-.shell-brand strong { font-size: 14px; font-weight: 600; }
-html[data-theme] .shell-brand .logo { width: 24px; height: 24px; }
+/* 对齐 DSH SidebarRoot .logoRow / HeaderLeadingControls：展开时左侧区域宽度严格等于左栏总宽，开关贴在侧栏右分割线内侧；收起时紧凑连排无死空白。 */
+.topbar-leading {
+  display: flex; align-items: center; justify-content: space-between; flex: none;
+  gap: 8px; height: 100%; padding: 0 8px 0 14px; box-sizing: border-box;
+}
+html[data-theme] .app.sidebar-open:not(.review-expanded) > .topbar .topbar-leading {
+  width: calc(var(--navigation-w) + var(--sidebar-w));
+  background: var(--side-bg);
+  border-right: 1px solid var(--line-soft);
+}
+html[data-theme] .app.sidebar-collapsed > .topbar .topbar-leading,
+html[data-theme] .app.review-expanded > .topbar .topbar-leading {
+  width: auto;
+  padding: 0 4px 0 12px;
+}
+.shell-brand { display: inline-flex; align-items: center; flex: none; gap: 8px; min-width: 0; color: var(--ink); }
+.shell-brand strong { font-size: 14px; font-weight: 600; white-space: nowrap; }
+html[data-theme] .shell-brand .logo { width: 24px; height: 24px; flex: none; }
 html[data-theme] .app > .main { grid-column: 3; grid-row: 2; min-height: 0; }
 html[data-theme] .sidebar.rail { grid-column: 2; grid-row: 2; padding: 10px 8px 0; }
 html[data-theme] .app.sidebar-collapsed .sidebar { visibility: hidden; }
 html[data-theme] .gutter-left { top: var(--toolbar-h); left: calc(var(--navigation-w) + var(--sidebar-w) - 3px); }
 html[data-theme] .crumbs { flex: 1; min-width: 0; }
-html[data-theme] .app.sidebar-open:not(.review-expanded) > .topbar .crumbs { margin-left: max(0px, calc(var(--navigation-w) + var(--sidebar-w) - 160px)); }
 html[data-theme] .crumb-root { display: inline-flex; align-items: center; gap: 7px; font: inherit; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-theme] .crumb-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-theme] .topbar-right { gap: 8px; }
@@ -673,7 +688,8 @@ html[data-theme] .app.side-chat-embedded-app > .main { grid-column: 1; }
   html[data-theme] .app, html[data-theme] .app.sidebar-collapsed, html[data-theme] .app.review-expanded { grid-template-columns: minmax(0, 1fr); }
   html[data-theme] .app > .main, html[data-theme] .app.review-expanded > .main { grid-column: 1; }
   html[data-theme] .app > .topbar { gap: 8px; padding-inline: 10px; }
-  html[data-theme] .app.sidebar-open:not(.review-expanded) > .topbar .crumbs { margin-left: 0; }
+  html[data-theme] .app.sidebar-open:not(.review-expanded) > .topbar .topbar-leading,
+  html[data-theme] .app > .topbar .topbar-leading { width: auto; padding: 0; border-right: 0; gap: 6px; }
   html[data-theme] .app.sidebar-collapsed .sidebar { transform: translateX(calc(-100% - var(--navigation-w))); }
   .shell-brand { width: auto; }
   .shell-brand strong { display: none; }

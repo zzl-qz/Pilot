@@ -24,6 +24,15 @@ html[data-theme="light"] .sidebar.rail {
   background: #f7f8fa;
   border-right: 1px solid #eceff4;
 }
+html[data-theme="light"] .app.sidebar-open:not(.review-expanded) > .topbar .topbar-leading {
+  background: #f7f8fa;
+  border-right-color: #eceff4;
+}
+@media (max-width: 960px) {
+  html[data-theme="light"] .app.sidebar-open:not(.review-expanded) > .topbar .topbar-leading {
+    background: transparent;
+  }
+}
 html[data-theme="light"] .app > .topbar {
   background: #fff;
   border-bottom: 1px solid #f0f2f6;
