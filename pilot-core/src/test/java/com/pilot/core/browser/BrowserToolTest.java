@@ -46,6 +46,8 @@ class BrowserToolTest {
         assertEquals("未检测到 Chrome", registry.unavailable().get("browser"));
 
         backend.availability = Availability.ready();
+        assertTrue(registry.names().isEmpty(), "浏览器默认不占每次请求的参数说明");
+        registry.enable(List.of("browser"));
         assertEquals(Set.of("browser"), registry.names());
     }
 

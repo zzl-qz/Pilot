@@ -322,6 +322,7 @@ class McpToolsTest {
         ToolRegistry registry = new ToolRegistry();
         registry.register(listing);
         registry.register(calling);
+        registry.enable(List.of("mcp_tools", "mcp_call"));
         assertEquals(Set.of("mcp_tools", "mcp_call"), registry.names());
 
         Files.delete(workspace.resolve(".mcp.json"));
