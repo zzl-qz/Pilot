@@ -25,6 +25,7 @@ import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.event.AssistantPreview;
 import com.pilot.core.event.AssistantReasoning;
+import com.pilot.core.event.ContextCompacted;
 import com.pilot.core.event.RunCancelled;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunContinued;
@@ -144,8 +145,24 @@ class AgentLoopTest {
         assertEquals("继续做", result.finalText());
         assertTrue(result.conversation().stream().anyMatch(message -> message.content().contains("交接摘要")),
             "超窗后应先留下交接摘要，而不是只丢历史");
-        assertTrue(events.stream()
-            .anyMatch(event -> event instanceof RunContinued continued && continued.reason().contains("折叠更早的记录")));
+        assertTrue(events.stream().anyMatch(event -> event instanceof ContextCompacted
+            || event instanceof RunContinued continued && continued.reason().contains("折叠")), "超窗后应留下压缩记录");
+    }
+
+    @Test
+    void shavesTheLongestHistoryWhenDroppingGroupsStillMissesTheBudget() {
+        ScriptedModelClient client = new ScriptedModelClient(new ModelResponse("还能继续", List.of()));
+        List<Message> history = new ArrayList<>();
+        history.add(Message.user("较早的说明 " + "字".repeat(2_500)));
+        history.add(Message.assistant("最近的记录 " + "字".repeat(2_500), List.of()));
+        AgentLoop.Config tight = new AgentLoop.Config(2, 0, 3, "系统", List::of, 0, 4_000, false);
+
+        AgentLoop.Result result =
+            new AgentLoop(client, registry(), readOnlyGate(), tight).run("接着做", history, events::add);
+
+        assertFalse(result.failed(), result.finalText());
+        assertEquals("还能继续", result.finalText());
+        assertFalse(client.requests.isEmpty(), "只差一点点预算时应截短历史后继续请求");
     }
 
     @Test
@@ -201,6 +218,177 @@ class AgentLoopTest {
         assertNull(result.failureCode());
         assertEquals(List.of("a.txt", "b.txt"), client.requests.get(1).stream()
             .filter(message -> "tool".equals(message.role())).map(Message::content).toList());
+    }
+
+    @Test
+    void readsAfterAnEditRunTogetherAndStayInCallOrder() {
+        CountDownLatch firstPair = new CountDownLatch(2);
+        CountDownLatch secondPair = new CountDownLatch(2);
+        AtomicBoolean edited = new AtomicBoolean();
+        Tool reader = new Tool() {
+            @Override
+            public String name() {
+                return "read_file";
+            }
+
+            @Override
+            public String description() {
+                return "读取";
+            }
+
+            @Override
+            public Map<String, Object> parameters() {
+                return Map.of("type", "object");
+            }
+
+            @Override
+            public boolean readOnly() {
+                return true;
+            }
+
+            @Override
+            public boolean parallelSafe() {
+                return true;
+            }
+
+            @Override
+            public String execute(Map<String, Object> args) {
+                String path = String.valueOf(args.get("path"));
+                CountDownLatch pair = path.equals("c.txt") || path.equals("d.txt") ? secondPair : firstPair;
+                if (pair == secondPair && !edited.get()) {
+                    return "ERROR: 编辑还没结束";
+                }
+                pair.countDown();
+                try {
+                    return pair.await(2, TimeUnit.SECONDS) ? path : "ERROR: 这一组没有一起执行";
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return "ERROR: 读取被中断";
+                }
+            }
+        };
+        Tool editor = new Tool() {
+            @Override
+            public String name() {
+                return "edit_file";
+            }
+
+            @Override
+            public String description() {
+                return "编辑";
+            }
+
+            @Override
+            public Map<String, Object> parameters() {
+                return Map.of("type", "object");
+            }
+
+            @Override
+            public boolean readOnly() {
+                return false;
+            }
+
+            @Override
+            public String execute(Map<String, Object> args) {
+                edited.set(true);
+                return "edited";
+            }
+        };
+        AtomicBoolean commandRunning = new AtomicBoolean();
+        Tool command = new Tool() {
+            @Override
+            public String name() {
+                return "run_command";
+            }
+
+            @Override
+            public String description() {
+                return "命令";
+            }
+
+            @Override
+            public Map<String, Object> parameters() {
+                return Map.of("type", "object");
+            }
+
+            @Override
+            public boolean readOnly() {
+                return false;
+            }
+
+            @Override
+            public String execute(Map<String, Object> args) {
+                commandRunning.set(true);
+                try {
+                    Thread.sleep(40);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                commandRunning.set(false);
+                return "ran";
+            }
+        };
+        ScriptedModelClient client = new ScriptedModelClient(
+            new ModelResponse("",
+                List.of(new ToolCall("a", "read_file", Map.of("path", "a.txt")),
+                    new ToolCall("b", "read_file", Map.of("path", "b.txt")),
+                    new ToolCall("e", "edit_file", Map.of("path", "a.txt")),
+                    new ToolCall("c", "read_file", Map.of("path", "c.txt")),
+                    new ToolCall("d", "read_file", Map.of("path", "d.txt")))),
+            new ModelResponse("完成", List.of()));
+        AgentLoop loop =
+            new AgentLoop(client, registry(reader, editor), new PolicyPermissionGate(PermissionMode.AUTO), config(8, 3));
+
+        AgentLoop.Result result = loop.run("读改再读", List.of(), events::add);
+
+        assertNull(result.failureCode());
+        assertEquals(List.of("a.txt", "b.txt", "edited", "c.txt", "d.txt"), client.requests.get(1).stream()
+            .filter(message -> "tool".equals(message.role())).map(Message::content).toList());
+
+        AtomicBoolean overlapped = new AtomicBoolean();
+        Tool watchingRead = new Tool() {
+            @Override
+            public String name() {
+                return "read_file";
+            }
+
+            @Override
+            public String description() {
+                return "读取";
+            }
+
+            @Override
+            public Map<String, Object> parameters() {
+                return Map.of("type", "object");
+            }
+
+            @Override
+            public boolean parallelSafe() {
+                return true;
+            }
+
+            @Override
+            public boolean readOnly() {
+                return true;
+            }
+
+            @Override
+            public String execute(Map<String, Object> args) {
+                if (commandRunning.get()) {
+                    overlapped.set(true);
+                }
+                return "seen";
+            }
+        };
+        ScriptedModelClient mixed = new ScriptedModelClient(
+            new ModelResponse("",
+                List.of(new ToolCall("cmd", "run_command", Map.of("command", "echo")),
+                    new ToolCall("read", "read_file", Map.of("path", "a.txt")))),
+            new ModelResponse("完成", List.of()));
+        new AgentLoop(mixed, registry(command, watchingRead), new PolicyPermissionGate(PermissionMode.AUTO), config(8, 3))
+            .run("不要重叠", List.of(),
+            events::add);
+        assertFalse(overlapped.get());
     }
 
     @Test

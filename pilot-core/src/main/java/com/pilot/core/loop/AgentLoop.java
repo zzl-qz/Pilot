@@ -42,6 +42,7 @@ import com.pilot.core.message.Attachment;
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.message.ToolNames;
+import com.pilot.core.model.ModelCapacity;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelFailureKind;
 import com.pilot.core.model.ModelResponse;
@@ -194,7 +195,7 @@ public final class AgentLoop {
     private static final int DEFAULT_CONTEXT_LIMIT = 120_000;
     /** 动态后台状态即使暂时不变也可能稍后完成；给它比普通重复调用更宽的有界观察窗口。 */
     private static final int MIN_DYNAMIC_POLL_ABORT = 8;
-    private static final int MAX_PARALLEL_READS = 8;
+    private static final int MAX_PARALLEL_READS = 10;
     /** 历史里最多保留几条带图片的工具观察；更早的换成文字说明。 */
     private static final int MAX_TOOL_IMAGE_MESSAGES = 3;
     /** 计划未完成时默认自动催模型继续的次数上限。 */
@@ -223,6 +224,8 @@ public final class AgentLoop {
     /** 收尾门：有了目标之后在 run/resume 里创建，一次运行一个。 */
     private CompletionGate completionGate;
     private String projectConstraints = "";
+    private final List<String> touchedPaths = new ArrayList<>();
+    private java.util.function.Function<List<String>, String> scopedRules = paths -> "";
     private ExecutionPolicy executionPolicy;
     private Hooks hooks = Hooks.none();
 
@@ -402,7 +405,7 @@ public final class AgentLoop {
         this.tools = Objects.requireNonNull(tools, "tools must not be null");
         this.permissionGate = Objects.requireNonNull(permissionGate, "permissionGate must not be null");
         this.budget = new ContextBudget(
-            new ContextCompactor(client).withTools(tools::definitions).withContextLimit(this::contextLimit)::compact);
+            new ContextCompactor(client).withTools(tools::definitions).withContextLimit(this::admissionLimit)::compact);
         this.toolExecutor = new ToolExecutor(tools, this.permissionGate,
             Objects.requireNonNull(approvals, "approvals must not be null"), traceRecorder, hooks);
         this.config = Objects.requireNonNull(config, "config must not be null");
@@ -509,6 +512,7 @@ public final class AgentLoop {
                 priorChecks.stream().filter(Objects::nonNull).map(String::strip).filter(check -> !check.isBlank())
                     .forEach(checks::add);
             }
+            completionGate.baseline(List.copyOf(checks));
         }
         UsageTracker usage = new UsageTracker(events);
         DynamicPollTracker dynamicPolls = new DynamicPollTracker(config.repeatRemindAt(), config.repeatAbortAt());
@@ -523,7 +527,7 @@ public final class AgentLoop {
                 }
                 int beforeCompression = messages.size();
                 ContextCompactor.dropStaleToolImages(messages, MAX_TOOL_IMAGE_MESSAGES, observedThroughIndex);
-                budget.apply(messages, contextLimit(), events, observedThroughIndex);
+                budget.apply(messages, admissionLimit(), events, observedThroughIndex);
                 observedThroughIndex = Math.max(0, observedThroughIndex - (beforeCompression - messages.size()));
 
                 if (applySteering(messages, events, pendingInput.get())) {
@@ -563,11 +567,12 @@ public final class AgentLoop {
                         "模型未正常结束（" + response.finishReason() + "），现有进度已保留。");
                 }
                 String content = response.content() == null ? "" : response.content();
+                String reasoning = response.reasoningContent() == null ? "" : response.reasoningContent();
                 List<ToolCall> calls = response.toolCalls() == null ? List.of() : response.toolCalls();
                 Message correction = pendingInput.get();
                 if (hasInput(correction)) {
                     // 模型返回时已经有纠正：旧方案的工具都不执行，补齐协议结果后重新规划。
-                    messages.add(Message.assistant(content, calls));
+                    messages.add(Message.assistant(content, calls, reasoning));
                     skipCalls(messages, calls, 0, "用户已纠正当前任务，请根据新指令重新规划。");
                     applySteering(messages, events, correction);
                     safeCheckpoint(checkpoint, messages);
@@ -578,7 +583,7 @@ public final class AgentLoop {
                 }
                 if (response.finishReason() == ModelResponse.FinishReason.LENGTH) {
                     outputLimitStreak++;
-                    messages.add(Message.assistant(content, calls));
+                    messages.add(Message.assistant(content, calls, reasoning));
                     skipCalls(messages, calls, 0, "模型输出在工具参数完整返回前达到长度上限，本次调用未执行。");
                     if (outputLimitStreak >= 3) {
                         throw new ExecutionPolicy.Stop(RunFailureCode.OUTPUT_LIMIT, "模型连续 3 次达到输出长度上限，已停止自动续写以避免重复消耗。");
@@ -600,49 +605,45 @@ public final class AgentLoop {
                     continue;
                 }
 
-                messages.add(Message.assistant(content, calls));
+                messages.add(Message.assistant(content, calls, reasoning));
 
                 String signature = signature(calls);
                 boolean awaitingDynamicObservation = dynamicPolls.canObserveAgain(signature, calls);
 
                 ArrayList<ToolExecutor.Outcome> stepOutcomes = new ArrayList<ToolExecutor.Outcome>();
                 boolean batchInterrupted = false;
-                if (parallelReadBatch(calls)) {
-                    Message beforeBatch = pendingInput.get();
-                    if (hasInput(beforeBatch)) {
-                        skipCalls(messages, calls, 0, "用户已纠正当前任务，本次调用未执行，请重新规划。");
-                        applySteering(messages, events, beforeBatch);
+                int index = 0;
+                while (index < calls.size() && !batchInterrupted) {
+                    if (cancellation.cancelledBeforeTool()) {
+                        skipCalls(messages, calls, index, "运行已暂停或取消，本次调用未执行。");
+                        return stopForCancellation(messages, events);
+                    }
+                    Message nextCorrection = pendingInput.get();
+                    if (hasInput(nextCorrection)) {
+                        skipCalls(messages, calls, index, "用户已纠正当前任务，本次调用未执行，请重新规划。");
+                        applySteering(messages, events, nextCorrection);
                         lastSignature = null;
                         lastOutcomes = List.of();
                         repeated = 0;
                         batchInterrupted = true;
-                    } else {
-                        ParallelBatch batch = executeParallelReads(calls, context);
+                        break;
+                    }
+                    int group = parallelRun(calls, index);
+                    if (group > 1) {
+                        ParallelBatch batch = executeParallelReads(calls.subList(index, index + group), context);
                         stepOutcomes.addAll(batch.outcomes());
                         if (hasInput(batch.correction())) {
+                            skipCalls(messages, calls, index + group, "用户已纠正当前任务，本次调用未执行，请重新规划。");
                             applySteering(messages, events, batch.correction());
                             lastSignature = null;
                             lastOutcomes = List.of();
                             repeated = 0;
                             batchInterrupted = true;
                         }
+                        index += group;
+                        continue;
                     }
-                } else {
-                    for (int index = 0; index < calls.size(); index++) {
-                        if (cancellation.cancelledBeforeTool()) {
-                            skipCalls(messages, calls, index, "运行已暂停或取消，本次调用未执行。");
-                            return stopForCancellation(messages, events);
-                        }
-                        Message nextCorrection = pendingInput.get();
-                        if (hasInput(nextCorrection)) {
-                            skipCalls(messages, calls, index, "用户已纠正当前任务，本次调用未执行，请重新规划。");
-                            applySteering(messages, events, nextCorrection);
-                            lastSignature = null;
-                            lastOutcomes = List.of();
-                            repeated = 0;
-                            batchInterrupted = true;
-                            break;
-                        }
+                    {
                         ToolCall call = calls.get(index);
                         ToolStartGuard startGuard = new ToolStartGuard();
                         ToolExecutor.Outcome outcome;
@@ -672,6 +673,7 @@ public final class AgentLoop {
                             batchInterrupted = true;
                             break;
                         }
+                        index++;
                     }
                 }
                 flushToolImages(messages);
@@ -758,6 +760,15 @@ public final class AgentLoop {
         CompletionGate.Nudge nudge = completionGate.evaluate(changedFiles, checks, plan, openSteps,
             executionPolicy != null && executionPolicy.independentCompletionReview(changedFiles),
             qualityChanges(changedFiles), qualityWorkspace, independentCodeReviewer, content);
+        if (nudge != null && !nudge.halt() && CompletionPressure.tooFull(messages, tools.definitions(), contextLimit())) {
+            fitHistoryToInputBudget(messages, events, null);
+            if (CompletionPressure.tooFull(messages, tools.definitions(), contextLimit())) {
+                content = content + "\n\n上下文接近上限，已跳过非阻断收尾催办。";
+                messages.set(messages.size() - 1, Message.assistant(content, List.of()));
+                events.accept(new RunContinued(1, 1, "上下文接近上限，已跳过非阻断收尾催办"));
+                nudge = null;
+            }
+        }
         if (nudge != null) {
             if (nudge.halt()) {
                 String partial = content + "\n\n规范检查未通过，已停止：" + nudge.reason();
@@ -968,11 +979,27 @@ public final class AgentLoop {
         return input != null && (!input.content().isBlank() || input.hasAttachments());
     }
 
-    private boolean parallelReadBatch(List<ToolCall> calls) {
-        // 自定义权限门可能有状态或审批副作用；只有内置纯策略门可安全预检并并行。
-        return permissionGate instanceof PolicyPermissionGate && calls.size() > 1 && calls.size() <= MAX_PARALLEL_READS
-            && calls.stream().allMatch(call -> tools.find(call.name())
-                .map(tool -> tool.parallelSafe() && permissionGate.check(call, tool).isAllowed()).orElse(false));
+    /**
+     * 从下标开始，连续可并行的调用有几个。写文件、打补丁和命令返回 1，单独执行。
+     * 路障后面的只读调用会再开一组。自定义权限门不预检，整段退回逐个执行。
+     */
+    private int parallelRun(List<ToolCall> calls, int from) {
+        if (!(permissionGate instanceof PolicyPermissionGate) || !parallelSafe(calls.get(from))) {
+            return 1;
+        }
+        int count = 0;
+        for (int index = from; index < calls.size() && count < MAX_PARALLEL_READS; index++) {
+            if (!parallelSafe(calls.get(index))) {
+                break;
+            }
+            count++;
+        }
+        return count;
+    }
+
+    private boolean parallelSafe(ToolCall call) {
+        return tools.find(call.name())
+            .map(tool -> tool.parallelSafe() && permissionGate.check(call, tool).isAllowed()).orElse(false);
     }
 
     /** 工具产出的图片；等本批 tool 结果全部落进历史后再统一作为一条 user 消息发出。 */
@@ -1010,6 +1037,11 @@ public final class AgentLoop {
             completionGate.recordOutcome(outcome.changedPaths(), outcome.checks());
         }
         changedFiles.addAll(outcome.changedPaths());
+        touchedPaths.addAll(outcome.changedPaths());
+        Object readPath = call.args() == null ? null : call.args().get("path");
+        if (readPath != null && !readPath.toString().isBlank()) {
+            touchedPaths.add(readPath.toString());
+        }
         for (String check : outcome.checks()) {
             if (!checks.contains(check)) {
                 checks.add(check);
@@ -1058,9 +1090,72 @@ public final class AgentLoop {
             }
             observedThroughIndex = Math.min(observedThroughIndex, messages.size());
         }
+        // 只剩最近几组、又没有任何一条长到截断阈值时，整组丢弃会停住。再差一点就中断任务。
+        // 这里改截短最长的历史正文，或去掉最早的工具图片，直到放得下。系统提示不动。
+        shaveUntilFits(messages, guidance);
         if (ContextCompactor.totalChars(messages) < before) {
             events.accept(new RunContinued(1, 1, "上下文超过安全输入预算，已折叠更早的记录并继续"));
         }
+    }
+
+    /**
+     * 分组丢弃已经到保底、单条又不够长到截断阈值时，把最长的历史正文裁短。
+     * 仍放不下就去掉最早的工具图片。系统提示不裁，裁到没处可裁就停。
+     */
+    private void shaveUntilFits(List<Message> messages, String guidance) {
+        int guard = 24;
+        while (guard-- > 0 && !requestFits(messages, guidance)) {
+            int index = longestShrinkable(messages);
+            if (index >= 0) {
+                Message message = messages.get(index);
+                String content = message.content();
+                int keep = Math.max(400, content.length() / 2);
+                int tail = Math.max(120, keep / 3);
+                int head = Math.max(120, keep - tail);
+                if (head + tail >= content.length() - 80) {
+                    index = -1;
+                } else {
+                    String trimmed =
+                        content.substring(0, head) + "\n[中间已截断以留出上下文]\n" + content.substring(content.length() - tail);
+                    messages.set(index, new Message(message.role(), trimmed, message.toolCalls(), message.toolCallId(),
+                        message.attachments(), message.imagePositions()));
+                    continue;
+                }
+            }
+            if (!dropOldestImage(messages)) {
+                return;
+            }
+        }
+    }
+
+    /** 跳过系统提示。正文已经很短时返回 -1，避免把同一条裁到没有信息。 */
+    private static int longestShrinkable(List<Message> messages) {
+        int index = -1;
+        int length = 400;
+        for (int i = 1; i < messages.size(); i++) {
+            Message message = messages.get(i);
+            if ("system".equals(message.role()) || message.content().length() <= length) {
+                continue;
+            }
+            length = message.content().length();
+            index = i;
+        }
+        return index;
+    }
+
+    /** 图片按张计 token，文字裁短不够时先拿掉最早的一张。 */
+    private static boolean dropOldestImage(List<Message> messages) {
+        for (int i = 1; i < messages.size(); i++) {
+            Message message = messages.get(i);
+            boolean image = message.attachments().stream().anyMatch(Attachment::image);
+            if (!image && !message.isToolImages()) {
+                continue;
+            }
+            messages.set(i, new Message(message.role(), message.content() + "\n[图片已从本次请求移除以留出上下文]", message.toolCalls(),
+                message.toolCallId(), List.of(), List.of()));
+            return true;
+        }
+        return false;
     }
 
     /** 系统提示和工具定义本身已经超窗时，折叠历史没有用。 */
@@ -1156,12 +1251,24 @@ public final class AgentLoop {
 
     private List<Message> requestMessages(List<Message> messages, String guidance) {
         refreshTaskContext(messages, guidance);
-        if (guidance == null || guidance.isBlank()) {
+        String rules = scopedRules.apply(List.copyOf(touchedPaths));
+        boolean hasRules = rules != null && !rules.isBlank();
+        if ((guidance == null || guidance.isBlank()) && !hasRules) {
             return List.copyOf(messages);
         }
         List<Message> request = new ArrayList<>(messages);
-        request.add(Message.system("[Runtime guidance; applies only to this request]\n" + guidance.strip()));
+        if (guidance != null && !guidance.isBlank()) {
+            request.add(Message.system("[Runtime guidance; applies only to this request]\n" + guidance.strip()));
+        }
+        if (hasRules) {
+            request.add(Message.system("[路径规则]\n" + rules.strip()));
+        }
         return List.copyOf(request);
+    }
+
+    public AgentLoop withScopedRules(java.util.function.Function<List<String>, String> rules) {
+        this.scopedRules = rules == null ? paths -> "" : rules;
+        return this;
     }
 
     private static void safeCheckpoint(Consumer<List<Message>> checkpoint, List<Message> messages) {
@@ -1208,6 +1315,7 @@ public final class AgentLoop {
         RuntimeGuidance runtimeGuidance) {
         int attempt = 0;
         int repeatAborts = 0;
+        int overflowRetries = 0;
         String retainedGuidance = null;
         AtomicBoolean reasoningPreviewVisible = new AtomicBoolean();
         while (true) {
@@ -1247,6 +1355,13 @@ public final class AgentLoop {
                     request = requestMessages(messages, retainedGuidance);
                     admission = RequestBudget.assessRequest(request, tools.definitions(), contextLimit());
                 }
+                if (!admission.fits() && retainedGuidance != null && !retainedGuidance.isBlank()) {
+                    // 临时纠偏只是这段提示，差一点点时先拿掉它再发，不要为此中断任务。
+                    retainedGuidance = null;
+                    fitHistoryToInputBudget(messages, events, null);
+                    request = requestMessages(messages, null);
+                    admission = RequestBudget.assessRequest(request, tools.definitions(), contextLimit());
+                }
                 if (!admission.fits()) {
                     throw new ExecutionPolicy.Stop(RunFailureCode.CONTEXT_TOO_LARGE,
                         "完整模型请求估算为 " + admission.estimatedInputTokens() + " token，安全输入预算为 " + admission.inputLimit()
@@ -1260,7 +1375,7 @@ public final class AgentLoop {
                 if (reasoningPreviewVisible.getAndSet(false)) {
                     events.accept(AssistantReasoning.discarded());
                 }
-                usage.start(request, contextLimit(), tools.definitions());
+                usage.start(request, admissionLimit(), tools.definitions());
                 ModelResponse response = client.chat(request, tools.definitions(), delta -> {
                     if (delta == null || delta.isEmpty()) {
                         return;
@@ -1339,6 +1454,19 @@ public final class AgentLoop {
                     continue;
                 }
                 ModelFailureKind kind = ModelRetryPolicy.classify(e);
+                if (kind == ModelFailureKind.CONTEXT_OVERFLOW) {
+                    overflowRetries++;
+                    int beforeChars = ContextCompactor.totalChars(messages);
+                    retainedGuidance = null;
+                    fitHistoryToInputBudget(messages, events, null);
+                    boolean shrunk = ContextCompactor.totalChars(messages) < beforeChars;
+                    if (overflowRetries > 2 || !shrunk && !requestFits(messages, null)) {
+                        return new ModelTurn(null, new Result("模型服务端拒绝了超长输入。已尝试收缩历史，仍然放不下。请缩小输入或拆分任务后继续。",
+                            RunFailureCode.CONTEXT_TOO_LARGE.name(), conversation(messages)));
+                    }
+                    events.accept(new RunContinued(overflowRetries, 2, "模型服务端提示上下文超限，已收缩历史并自动重试"));
+                    continue;
+                }
                 if (kind == ModelFailureKind.INTERRUPTED) {
                     // 用户取消已在上面的分支返回。能走到这里说明是外部中断：服务重启、
                     // 容器关停、线程被别的组件打断。按瞬时故障继续重试，
@@ -1398,6 +1526,13 @@ public final class AgentLoop {
     private Result cancel(List<Message> messages, Consumer<SessionEvent> events) {
         events.accept(new RunCancelled("运行已被用户取消。"));
         return new Result(null, RunFailureCode.CANCELLED.name(), conversation(messages));
+    }
+
+    /** 真正会拿去发给模型的输入上限。界面和日常压缩都用这一口径，避免本地 40 万字符预算把 10 万的发送线挡住。 */
+    private int admissionLimit() {
+        long wire = ModelCapacity.configured().inputBudget();
+        long local = (long)(contextLimit() * 0.80);
+        return (int)Math.max(1, Math.min(Integer.MAX_VALUE, Math.min(local, wire)));
     }
 
     private int contextLimit() {
