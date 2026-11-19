@@ -49,5 +49,6 @@ class AskUserToolTest {
         assertTrue(picked.get().contains("我自己写的方案"), picked.get());
         assertFalse(broker.answer("missing", "删除"));
         assertTrue(tool.execute(Map.of("question", "只有一个", "options", List.of("仅此"))).startsWith("ERROR"));
+        assertTrue(tool.execute(Map.of("question", "（占位，稍后用）", "options", List.of("a", "b"))).contains("占位"));
     }
 }

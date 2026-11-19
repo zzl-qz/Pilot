@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.function.Supplier;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,10 +21,8 @@ import com.pilot.core.mcp.McpCallTool;
 import com.pilot.core.mcp.McpManager;
 import com.pilot.core.mcp.McpToolsTool;
 import com.pilot.core.message.ToolNames;
+import com.pilot.core.plan.PlanItem;
 import com.pilot.core.plan.PlanSink;
-import com.pilot.core.tool.code.CodeDiagnosticsTool;
-import com.pilot.core.tool.code.CodeSymbolTool;
-import com.pilot.core.tool.code.LocalCodeChecker;
 import com.pilot.core.tool.AskUserTool;
 import com.pilot.core.tool.EnableToolsTool;
 import com.pilot.core.tool.QuestionBroker;
@@ -36,6 +35,9 @@ import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.UpdatePlanTool;
 import com.pilot.core.tool.WebFetchTool;
 import com.pilot.core.tool.WebSearchTool;
+import com.pilot.core.tool.code.CodeDiagnosticsTool;
+import com.pilot.core.tool.code.CodeSymbolTool;
+import com.pilot.core.tool.code.LocalCodeChecker;
 import com.pilot.core.tool.command.CommandChangeTracker;
 import com.pilot.core.tool.command.PrepareRuntimeTool;
 import com.pilot.core.tool.command.RunCommandTool;
@@ -87,6 +89,8 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
     private Selection execution;
     private ObjectProvider<AttachmentReferences> attachmentReferences;
     private QuestionBroker questions;
+    /** 建工具表时读取已经落库的计划，避免把完成的步骤退回去。 */
+    private final ThreadLocal<Supplier<List<PlanItem>>> plans = ThreadLocal.withInitial(() -> List::of);
 
     @Autowired(required = false)
     public void setExecution(Selection execution) {
@@ -154,6 +158,15 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
      */
     public ToolRegistry registryFor(String workspace, PlanSink planSink) {
         return create(resolve(workspace), planSink);
+    }
+
+    /** 只在构建这一次工具表时有效，用完要清掉。 */
+    public void usePlan(Supplier<List<PlanItem>> current) {
+        if (current == null) {
+            plans.remove();
+        } else {
+            plans.set(current);
+        }
     }
 
     public ToolRegistry defaultRegistry() {
@@ -251,7 +264,7 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
         registry.register(new ApplyPatchTool(validator, snapshots, reads));
         registry.register(new RunCommandTool(validator, commandChanges()));
         if (planSink != null) {
-            registry.register(new UpdatePlanTool(planSink));
+            registry.register(new UpdatePlanTool(planSink, plans.get()));
         }
         LocalCodeChecker code = LocalCodeChecker.installed(root);
         registry.register(new CodeDiagnosticsTool(() -> code.available() ? "ready" : "", code::diagnose));

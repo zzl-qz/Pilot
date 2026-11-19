@@ -1,9 +1,11 @@
 package com.pilot.core.tool;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 import com.pilot.core.message.ToolNames;
 import com.pilot.core.plan.PlanItem;
@@ -19,9 +21,16 @@ import com.pilot.core.plan.PlanSink;
  */
 public final class UpdatePlanTool implements Tool {
     private final PlanSink sink;
+    private final Supplier<List<PlanItem>> current;
 
     public UpdatePlanTool(PlanSink sink) {
+        this(sink, List::of);
+    }
+
+    /** current 提供这次更新之前已经落库的计划，用来保住已完成步骤。 */
+    public UpdatePlanTool(PlanSink sink, Supplier<List<PlanItem>> current) {
         this.sink = Objects.requireNonNull(sink, "sink must not be null");
+        this.current = current == null ? List::of : current;
     }
 
     @Override
@@ -71,6 +80,7 @@ public final class UpdatePlanTool implements Tool {
                 return "ERROR: " + e.getMessage();
             }
         }
+        items = keepCompleted(items);
         long running = items.stream().filter(item -> PlanItem.IN_PROGRESS.equals(item.status())).count();
         if (running > 1) {
             return "ERROR: 同一时间最多一个步骤处于 in_progress，当前有 " + running + " 个";
@@ -88,6 +98,27 @@ public final class UpdatePlanTool implements Tool {
             detail.append('\n');
         }
         return detail.toString();
+    }
+
+    /** 已完成的步骤即使这次换了说法被漏掉，也留在清单前面，不能退回未做。 */
+    private ArrayList<PlanItem> keepCompleted(ArrayList<PlanItem> incoming) {
+        List<PlanItem> previous = current.get();
+        if (previous == null || previous.isEmpty()) {
+            return incoming;
+        }
+        LinkedHashMap<String, PlanItem> kept = new LinkedHashMap<>();
+        for (PlanItem old : previous) {
+            if (old.done()) {
+                kept.put(old.step(), new PlanItem(old.step(), PlanItem.COMPLETED, old.note()));
+            }
+        }
+        ArrayList<PlanItem> merged = new ArrayList<>();
+        for (PlanItem item : incoming) {
+            PlanItem done = kept.remove(item.step());
+            merged.add(done == null ? item : done);
+        }
+        merged.addAll(0, kept.values());
+        return merged;
     }
 
     private static String text(Object value) {

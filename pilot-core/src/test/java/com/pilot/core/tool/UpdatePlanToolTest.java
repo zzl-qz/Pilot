@@ -37,4 +37,22 @@ class UpdatePlanToolTest {
 
         assertTrue(result.contains("note"), result);
     }
+
+    @Test
+    void completedStepsStayCompletedWhenThePlanIsRewritten() {
+        List<PlanItem> saved = new ArrayList<>();
+        UpdatePlanTool tool = new UpdatePlanTool((items, explanation) -> {
+            saved.clear();
+            saved.addAll(items);
+        }, () -> List.copyOf(saved));
+        tool.execute(Map.of("plan", List.of(Map.of("step", "跑检查", "status", PlanItem.COMPLETED),
+            Map.of("step", "浏览器实测", "status", PlanItem.IN_PROGRESS))));
+
+        String rewritten =
+            tool.execute(Map.of("plan", List.of(Map.of("step", "再看一遍源码", "status", PlanItem.IN_PROGRESS))));
+
+        assertTrue(rewritten.contains("[completed] 跑检查"), rewritten);
+        assertTrue(rewritten.contains("[in_progress] 再看一遍源码"), rewritten);
+        assertEquals(PlanItem.COMPLETED, saved.get(0).status());
+    }
 }
