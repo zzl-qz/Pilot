@@ -177,7 +177,13 @@ public final class LintGate {
     private String addedSuppressions(Path workspace, List<String> sources) {
         StringBuilder out = new StringBuilder();
         for (String path : sources) {
-            String before = originalText.apply(path);
+            String before;
+            try {
+                before = originalText.apply(path);
+            } catch (IllegalStateException noBaseline) {
+                // 续跑时，上一轮写过的文件不在这一轮的写前快照里；没有基线就无从判断是否新增抑制，跳过这一条。
+                continue;
+            }
             String after = readCurrent(workspace, path);
             for (String line : SuppressionScan.added(before, after)) {
                 if (out.length() > 0) {

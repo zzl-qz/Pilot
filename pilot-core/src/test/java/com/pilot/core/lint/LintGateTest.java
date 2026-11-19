@@ -170,6 +170,20 @@ class LintGateTest {
     }
 
     @Test
+    void resumeWithoutWriteBeforeSnapshotDoesNotBlockTheTurn() throws Exception {
+        writeSample();
+        Files.writeString(root.resolve("src/app.js"),
+            "export const timeout = 86400; // eslint-disable-next-line no-magic-numbers\n");
+        LintGate gate =
+            new LintGate(true, (workspace, command, timeout) -> new LintRunner.LintResult(0, "", false, true));
+        gate.setOriginalText(path -> {
+            throw new IllegalStateException("缺少写前快照: " + path);
+        });
+        LintGate.LintAssessment assessment = gate.assess(root, List.of("src/app.js"));
+        assertFalse(assessment.kind() == LintGate.LintAssessment.Kind.BLOCKED, assessment.prompt());
+    }
+
+    @Test
     void editingOnlyTheLintConfigIsStopped() throws Exception {
         writeSample();
         LintGate gate =
