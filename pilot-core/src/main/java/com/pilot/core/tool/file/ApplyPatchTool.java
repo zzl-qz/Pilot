@@ -309,6 +309,9 @@ public final class ApplyPatchTool extends PromptedTool implements WritesFiles {
         if (!reads.isObserved(file)) {
             throw new PatchException("本次运行尚未读取过 " + shown + "，无法确认原文。先 read_file 查看当前内容");
         }
+        if (!reads.isFresh(file)) {
+            throw new PatchException("文件 " + shown + " 自上次读取后已被外部修改，请先 read_file 查看最新内容");
+        }
     }
 
     // ---- 落盘 ----

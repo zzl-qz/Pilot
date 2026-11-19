@@ -21,6 +21,13 @@ public interface ReadGuard {
     /** 该文件是否已在本运行观察过。 */
     boolean isObserved(Path file);
 
+    /**
+     * 观察之后文件有没有被别的进程改过。默认视为没变，测试用的全放行实现不用记版本。
+     */
+    default boolean isFresh(Path file) {
+        return true;
+    }
+
     /** 全放行：测试与未装配场景的默认值。 */
     static ReadGuard allowAll() {
         return new ReadGuard() {

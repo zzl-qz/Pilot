@@ -88,6 +88,9 @@ public final class EditFileTool extends PromptedTool implements WritesFiles {
         if (!reads.isObserved(file)) {
             return "ERROR: 本次运行尚未读取过 " + rawPath + "，无法确认原文与行号。先 read_file 查看当前内容，再给出 old_string。";
         }
+        if (!reads.isFresh(file)) {
+            return "ERROR: 文件 " + rawPath + " 自上次读取后已被外部修改，请先 read_file 查看最新内容后再编辑。";
+        }
 
         try {
             String content;
