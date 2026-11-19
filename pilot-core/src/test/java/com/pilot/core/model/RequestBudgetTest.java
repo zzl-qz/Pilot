@@ -1,5 +1,6 @@
 package com.pilot.core.model;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -24,5 +25,17 @@ class RequestBudgetTest {
     @Test
     void allowsSmallRequestBelowSafetyInputWatermark() {
         assertTrue(RequestBudget.assess(List.of(Message.user("hello")), List.of(), 1_000).fits());
+    }
+
+    @Test
+    void safetyMarginIsAppliedOnceAgainstTheActiveModel() {
+        ModelCapacity.activate(ModelCapacity.of(32_000L, 4_000));
+        try {
+            RequestBudget.Assessment assessment =
+                RequestBudget.assessRequest(List.of(Message.user("你好")), List.of(), 2_000_000);
+            assertEquals(20_000L, assessment.inputLimit());
+        } finally {
+            ModelCapacity.activate(null);
+        }
     }
 }

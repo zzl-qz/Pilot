@@ -43,7 +43,31 @@ public final class ModelFailureSignals {
         if (statusCode == 402 || billingOrQuota(body)) {
             return ModelFailureKind.PERMANENT;
         }
+        if (contextOverflow(statusCode, body)) {
+            return ModelFailureKind.CONTEXT_OVERFLOW;
+        }
         return statusCode == 408 || statusCode == 429 || statusCode >= 500 ? ModelFailureKind.TRANSIENT
             : ModelFailureKind.PERMANENT;
+    }
+
+    /**
+     * 各家兼容接口对「输入超过窗口」的说法不一样，但都是 400/413/422，而且重发同一份正文不会变好。
+     */
+    public static boolean contextOverflow(int statusCode, String body) {
+        if (statusCode != 400 && statusCode != 413 && statusCode != 422) {
+            return false;
+        }
+        if (body == null || body.isBlank()) {
+            return false;
+        }
+        String lower = body.toLowerCase(Locale.ROOT);
+        for (String marker : List.of("context_length_exceeded", "maximum context length", "prompt is too long",
+            "too many tokens", "input is too long", "exceeds the context", "context window", "token limit", "上下文超限",
+            "上下文长度")) {
+            if (lower.contains(marker)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

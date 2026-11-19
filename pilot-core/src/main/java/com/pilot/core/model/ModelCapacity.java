@@ -16,6 +16,36 @@ public record ModelCapacity(long contextTokens, long inputTokens, int outputToke
         return Math.min(inputTokens, contextTokens - outputTokens - marginTokens);
     }
 
+    /**
+     * 按本次模型配置组装容量。空的字段回落到进程默认值；输出预留过大时夹到窗口能放下的范围，避免配置写错直接把服务打崩。
+     */
+    public static ModelCapacity of(Long contextTokens, Integer outputTokens) {
+        return of(contextTokens, contextTokens, outputTokens);
+    }
+
+    public static ModelCapacity of(Long contextTokens, Long inputTokens, Integer outputTokens) {
+        ModelCapacity defaults = configured();
+        long context = contextTokens == null || contextTokens < 1 ? defaults.contextTokens() : contextTokens;
+        long input = inputTokens == null || inputTokens < 1 ? defaults.inputTokens() : inputTokens;
+        int output = outputTokens == null || outputTokens < 1 ? defaults.outputTokens() : outputTokens;
+        int cappedOutput = (int)Math.min(output, Math.max(1, context / 2));
+        long margin = Math.min(defaults.marginTokens(), Math.max(0, context - cappedOutput - 1));
+        return new ModelCapacity(context, input, cappedOutput, margin, defaults.imageTokens());
+    }
+
+    private static final java.util.concurrent.atomic.AtomicReference<ModelCapacity> ACTIVE =
+        new java.util.concurrent.atomic.AtomicReference<>();
+
+    /** 当前模型设置覆盖进程默认值。没有设置时用 {@link #configured()}。 */
+    public static ModelCapacity active() {
+        ModelCapacity value = ACTIVE.get();
+        return value == null ? configured() : value;
+    }
+
+    public static void activate(ModelCapacity capacity) {
+        ACTIVE.set(capacity);
+    }
+
     public static ModelCapacity configured() {
         return new ModelCapacity(value("context-tokens", 128000), value("input-tokens", 128000),
             Math.toIntExact(value("output-tokens", 16000)), value("margin-tokens", 8000),

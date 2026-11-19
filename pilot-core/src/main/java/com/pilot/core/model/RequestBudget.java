@@ -35,7 +35,7 @@ public final class RequestBudget {
     /** 同时尊重本地上下文水位和端点容量；后者包含输出预留、协议和图片开销。 */
     public static Assessment assessRequest(List<Message> messages, List<ToolDefinition> tools, int localLimit) {
         Assessment local = assess(messages, tools, localLimit);
-        Assessment wire = assess(messages, tools, ModelCapacity.configured());
+        Assessment wire = assess(messages, tools, ModelCapacity.active());
         long inputLimit = Math.min(local.inputLimit(), wire.inputLimit());
         return new Assessment(wire.estimatedInputTokens(), inputLimit, wire.attachments(),
             wire.estimatedInputTokens() <= inputLimit);

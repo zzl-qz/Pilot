@@ -15,6 +15,10 @@ public enum ModelFailureKind {
     INCOMPLETE(true),
     /** 连上了但服务端暂时性故障（408/429/5xx）：在重试预算内指数退避。 */
     TRANSIENT(true),
+    /**
+     * 服务端明确拒绝「输入太长」。普通重试不会变好，要先收缩历史再发，而且最多试两次。
+     */
+    CONTEXT_OVERFLOW(false),
     /** 鉴权、权限、余额或额度耗尽、模型不支持、请求非法、响应结构非法：重试不会变好，立刻失败。 */
     PERMANENT(false);
 
