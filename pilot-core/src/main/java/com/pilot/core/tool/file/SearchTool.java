@@ -18,19 +18,18 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
 import com.pilot.core.message.ToolNames;
+import com.pilot.core.tool.ReadGuard;
+import com.pilot.core.tool.ReadTracker;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolSchemas;
 import com.pilot.core.tool.ToolSupport;
 import com.pilot.core.util.Texts;
 import com.pilot.core.workspace.PathValidator;
 
-import lombok.RequiredArgsConstructor;
-
 /**
  * 在工作区内按正则搜索文本，返回 {@code 路径:行号: 内容}。
  * 跳过构建产物、依赖目录与二进制文件，结果数量有上限。
  */
-@RequiredArgsConstructor
 public final class SearchTool implements Tool.ParallelReadOnly {
     private static final int MAX_MATCHES = 200;
     private static final long MAX_FILE_BYTES = 1024 * 1024;
@@ -44,6 +43,16 @@ public final class SearchTool implements Tool.ParallelReadOnly {
             "__pycache__", "target", "build", "node_modules", "out", "dist");
 
     private final PathValidator paths;
+    private final ReadGuard reads;
+
+    public SearchTool(PathValidator paths) {
+        this(paths, ReadGuard.allowAll());
+    }
+
+    public SearchTool(PathValidator paths, ReadGuard reads) {
+        this.paths = paths;
+        this.reads = reads == null ? ReadGuard.allowAll() : reads;
+    }
 
     @Override
     public String name() {
@@ -63,6 +72,9 @@ public final class SearchTool implements Tool.ParallelReadOnly {
         String patternText = ToolSupport.stringArg(args, "pattern");
         if (patternText == null) {
             return "ERROR: 缺少参数 pattern";
+        }
+        if (!reads.deliverInspection()) {
+            return "文件未变化，沿用刚才的搜索结果。已经查看了 " + ReadTracker.MAX_INSPECTIONS + " 次代码，还没有修改。不要再搜索，直接编辑文件。";
         }
         Pattern pattern;
         try {

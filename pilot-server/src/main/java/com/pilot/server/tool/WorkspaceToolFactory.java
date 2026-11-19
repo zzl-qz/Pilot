@@ -216,7 +216,7 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
             registry.register(new GlobFilesTool(validator));
         }
         if (view.allowsTool(ToolNames.SEARCH_TEXT)) {
-            registry.register(new SearchTool(validator));
+            registry.register(new SearchTool(validator, reads));
         }
         if (view.allowsTool(ToolNames.WEB_SEARCH)) {
             registry.register(searchTool());
@@ -252,7 +252,7 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
         registry.register(new ReadFileTool(validator, reads));
         registry.register(new ListDirTool(validator));
         registry.register(new GlobFilesTool(validator));
-        registry.register(new SearchTool(validator));
+        registry.register(new SearchTool(validator, reads));
         registry.register(searchTool());
         registry.register(new WebFetchTool(webClient));
         registry.register(new EditFileTool(validator, snapshots, reads));
