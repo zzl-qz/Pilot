@@ -15,6 +15,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.pilot.core.tool.ReadTracker;
+import com.pilot.core.tool.SnapshotSink;
 import com.pilot.core.workspace.PathValidator;
 
 class ReadFileToolTest {
@@ -35,6 +37,47 @@ class ReadFileToolTest {
         String result = tool.execute(Map.of("path", "App.java"));
 
         assertEquals("1 | class App {\n2 |   int x = 1;\n3 | }\n… 显示第 1 到第 3 行，文件共 3 行 …", result);
+    }
+
+    @Test
+    void secondReadOfAnUnchangedFileDoesNotRepeatTheBody() throws IOException {
+        Files.writeString(workspace.resolve("App.java"), "class App {}\n");
+        ReadFileTool tracked = new ReadFileTool(new PathValidator(workspace), new ReadTracker());
+
+        assertTrue(tracked.execute(Map.of("path", "App.java")).contains("class App"));
+        assertTrue(tracked.execute(Map.of("path", "App.java")).contains("未变化"));
+        Files.writeString(workspace.resolve("App.java"), "class Changed {}\n");
+        assertTrue(tracked.execute(Map.of("path", "App.java")).contains("class Changed"));
+    }
+
+    @Test
+    void editInvalidatesTheReadDedup() throws IOException {
+        ReadTracker tracker = new ReadTracker();
+        PathValidator paths = new PathValidator(workspace);
+        ReadFileTool tracked = new ReadFileTool(paths, tracker);
+        EditFileTool editor = new EditFileTool(paths, SnapshotSink.none(), tracker);
+        Files.writeString(workspace.resolve("App.java"), "class App {}\n");
+
+        tracked.execute(Map.of("path", "App.java"));
+        assertTrue(tracked.execute(Map.of("path", "App.java")).contains("未变化"));
+        String edited =
+            editor.execute(Map.of("path", "App.java", "old_string", "class App {}", "new_string", "class Changed {}"));
+        assertFalse(edited.startsWith("ERROR"), edited);
+        assertTrue(tracked.execute(Map.of("path", "App.java")).contains("class Changed"));
+    }
+
+    @Test
+    void fourthLookAtTheSameFileDoesNotReturnAnotherSlice() throws IOException {
+        Files.writeString(workspace.resolve("App.java"), "one\ntwo\nthree\nfour\n");
+        ReadFileTool tracked = new ReadFileTool(new PathValidator(workspace), new ReadTracker());
+
+        assertTrue(tracked.execute(Map.of("path", "App.java", "start_line", 1, "line_count", 1)).contains("one"));
+        assertTrue(tracked.execute(Map.of("path", "App.java", "start_line", 2, "line_count", 1)).contains("two"));
+        assertTrue(tracked.execute(Map.of("path", "App.java", "start_line", 3, "line_count", 1)).contains("three"));
+        String fourth = tracked.execute(Map.of("path", "App.java", "start_line", 4, "line_count", 1));
+
+        assertTrue(fourth.contains("未变化"), fourth);
+        assertFalse(fourth.contains("four"));
     }
 
     @Test

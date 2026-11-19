@@ -22,6 +22,26 @@ public interface ReadGuard {
     boolean isObserved(Path file);
 
     /**
+     * 文件此刻的内容指纹。读不到文件时返回空字符串。和上次读到的指纹相同就可以不再返回全文。
+     */
+    default String observationStamp(Path file) {
+        return "";
+    }
+
+    /** 工作区内容相对命令缓存有没有变过。读过新文件或写入后递增。 */
+    default int revision() {
+        return 0;
+    }
+
+    /**
+     * 这一轮还能不能把文件正文再交给模型。同一文件换行号、改用 cat/sed 都算一次。
+     * 内容被改过之后重新计数。默认不限制。
+     */
+    default boolean deliverRead(Path file) {
+        return true;
+    }
+
+    /**
      * 观察之后文件有没有被别的进程改过。默认视为没变，测试用的全放行实现不用记版本。
      */
     default boolean isFresh(Path file) {

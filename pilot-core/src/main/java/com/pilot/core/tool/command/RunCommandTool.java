@@ -25,6 +25,7 @@ import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.runtime.ExecutablePath;
 import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
 import com.pilot.core.tool.ProducesCheck;
+import com.pilot.core.tool.ReadGuard;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolResult;
 import com.pilot.core.tool.ToolResults;
@@ -70,6 +71,19 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     private final CommandTaskManager commandTasks;
     private final String sessionId;
     private final CommandChangeTracker changes;
+    private ReadGuard reads = ReadGuard.allowAll();
+    /** 只读命令在工作区指纹没变、且仍在有效期内时不再执行。测试可改短。 */
+    long readOnlyCacheTtlMs = 15_000L;
+    private final Map<String, CachedReadOnly> readOnlyAt = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Set<String> LIVE_PROBES = Set.of("curl", "lsof", "ss", "netstat", "ps", "tasklist");
+    private static final Set<String> FILE_DUMPS = Set.of("cat", "nl", "head", "tail", "sed", "bat", "less", "more");
+    private static final Set<String> GIT_HISTORY = Set.of("log", "show", "blame");
+    private static final int MAX_HISTORY_LOOKUPS = 4;
+    private final java.util.concurrent.atomic.AtomicInteger historyLookups =
+        new java.util.concurrent.atomic.AtomicInteger();
+
+    private record CachedReadOnly(int revision, long at) {
+    }
 
     public RunCommandTool(PathValidator paths) {
         this(paths, null, null, CommandChangeTracker.none());
@@ -77,6 +91,12 @@ public final class RunCommandTool implements Tool, ProducesCheck {
 
     public RunCommandTool(PathValidator paths, CommandChangeTracker changes) {
         this(paths, null, null, changes);
+    }
+
+    /** 和读文件共用一份观察记录，文件改过之后只读命令会重新执行。 */
+    public RunCommandTool withReads(ReadGuard reads) {
+        this.reads = reads == null ? ReadGuard.allowAll() : reads;
+        return this;
     }
 
     /** 会话运行使用受托管命令；独立沙箱工具继续使用同步构造器。 */
@@ -210,6 +230,22 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             return ToolResult.text(preparation.error());
         }
         Prepared prepared = preparation.prepared();
+        String raw = ToolSupport.stringArg(args, "command");
+        String cacheKey = raw + "\n" + prepared.workdir();
+        String repeated = repeatedLook(raw);
+        if (repeated != null) {
+            return ToolResult.text(repeated);
+        }
+        if (!prepared.readOnly() || prepared.background()) {
+            readOnlyAt.clear();
+        } else {
+            CachedReadOnly cached = readOnlyAt.get(cacheKey);
+            long age = cached == null ? Long.MAX_VALUE : System.currentTimeMillis() - cached.at();
+            if (cached != null && cached.revision() == reads.revision() && age <= readOnlyCacheTtlMs
+                && cachesReadOnlyCommand(raw)) {
+                return ToolResult.text("与上次相同，未再执行。命令: " + raw);
+            }
+        }
         CommandChangeTracker.Handle tracking;
         String trackingWarning = "";
         try {
@@ -236,6 +272,9 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             text = managed.text();
             terminal = managed.terminal();
         }
+        if (prepared.readOnly() && !prepared.background() && succeeded(text) && cachesReadOnlyCommand(raw)) {
+            readOnlyAt.put(cacheKey, new CachedReadOnly(reads.revision(), System.currentTimeMillis()));
+        }
         if (!terminal || !tracking.active()) {
             return ToolResult.text(withTrackingWarning(text, trackingWarning));
         }
@@ -249,6 +288,70 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             text = ToolResults.CHANGE_TRACKING_INCOMPLETE + "；不得据此宣称验证通过：" + result.warning() + "\n" + text;
         }
         return new ToolResult(withTrackingWarning(text, trackingWarning), result.changedPaths(), List.of());
+    }
+
+    /** 换行号、cat/sed、反复翻 git 历史，都不再把同一份材料送回去。 */
+    private String repeatedLook(String command) {
+        if (command == null || command.isBlank()) {
+            return null;
+        }
+        if (gitHistory(command) && historyLookups.incrementAndGet() > MAX_HISTORY_LOOKUPS) {
+            return "与上次相同，未再执行。命令: " + command + "\n提交历史已经看过，不要再翻 git log、show、blame。根据已有内容修改文件。";
+        }
+        for (Path file : dumpedFiles(command)) {
+            if (!reads.deliverRead(file)) {
+                return "文件未变化，沿用刚才读过的 " + paths.display(file) + "。不要再用 cat、sed、head 重读。根据上文修改，或改看别的文件。";
+            }
+        }
+        return null;
+    }
+
+    private static boolean gitHistory(String command) {
+        String[] tokens = command.strip().split("\\s+");
+        if (tokens.length < 2 || !"git".equals(CommandPolicy.leaf(tokens[0]))) {
+            return false;
+        }
+        return GIT_HISTORY.contains(tokens[1]);
+    }
+
+    private List<Path> dumpedFiles(String command) {
+        String[] tokens = command.strip().split("\\s+");
+        if (tokens.length == 0 || !FILE_DUMPS.contains(CommandPolicy.leaf(tokens[0]))) {
+            return List.of();
+        }
+        List<Path> found = new ArrayList<>();
+        for (String token : tokens) {
+            if (token.startsWith("-") || token.contains("|") || token.contains(";") || token.contains("&")
+                || token.contains(",") || token.contains("*")) {
+                continue;
+            }
+            String cleaned = token.replace("'", "").replace("\"", "");
+            try {
+                Path file = paths.resolve(cleaned);
+                if (Files.isRegularFile(file)) {
+                    found.add(file);
+                }
+            } catch (RuntimeException ignored) {
+                // 不是工作区文件就留给命令自己执行
+            }
+        }
+        return found;
+    }
+
+    /** 端口、进程和网络状态不跟着工作区文件走，不能因为文件没变就跳过。 */
+    static boolean cachesReadOnlyCommand(String command) {
+        if (command == null || command.isBlank()) {
+            return false;
+        }
+        String leaf = CommandPolicy.leaf(command.strip().split("\\s+")[0]);
+        return !LIVE_PROBES.contains(leaf);
+    }
+
+    private static boolean succeeded(String text) {
+        if (text == null || text.startsWith("ERROR:")) {
+            return false;
+        }
+        return text.contains("退出码: 0") || text.contains("状态: COMPLETED");
     }
 
     private static String withTrackingWarning(String text, String warning) {
@@ -344,8 +447,9 @@ public final class RunCommandTool implements Tool, ProducesCheck {
                 return Preparation
                     .error("ERROR: Windows 上 && 与 || 需要 PowerShell 7（pwsh.exe）；" + "请安装 PowerShell 7、改用 ; 连接，或拆成多次调用");
             }
-            return new Preparation(new Prepared(shell, List.of(display), workdir, background, timeoutMs, trackChanges,
-                readOnly, Map.of()), null);
+            return new Preparation(
+                new Prepared(shell, List.of(display), workdir, background, timeoutMs, trackChanges, readOnly, Map.of()),
+                null);
         }
         return new Preparation(new Prepared(List.of("/bin/sh", "-c", script), List.of(display), workdir, background,
             timeoutMs, trackChanges, readOnly, Map.of()), null);
@@ -375,8 +479,8 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             if (WINDOWS) {
                 // 脚本块把环境变量限制在这一段，避免前缀泄漏到后面的命令。
                 out.append("& { ");
-                check.env().forEach((name, value) -> out.append("$env:").append(name).append('=').append(psQuote(value))
-                    .append("; "));
+                check.env().forEach(
+                    (name, value) -> out.append("$env:").append(name).append('=').append(psQuote(value)).append("; "));
                 out.append("& ").append(psQuote(tokens.get(0)));
             } else {
                 check.env().forEach(
@@ -388,7 +492,8 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             }
             if (check.redirect() != null) {
                 out.append(check.append() ? " >> " : " > ");
-                out.append(WINDOWS ? psQuote(check.redirect().toString()) : CommandChain.quote(check.redirect().toString()));
+                out.append(
+                    WINDOWS ? psQuote(check.redirect().toString()) : CommandChain.quote(check.redirect().toString()));
             }
             if (segments.get(i).mergeStderr()) {
                 out.append(" 2>&1");

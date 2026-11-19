@@ -10,9 +10,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import com.pilot.core.message.ToolNames;
 import com.pilot.core.tool.ReadGuard;
+import com.pilot.core.tool.ReadTracker;
 import com.pilot.core.tool.SandboxSink;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolResult;
@@ -30,6 +32,8 @@ public final class ReadFileTool implements Tool.ParallelReadOnly {
     private final PathValidator paths;
     private final ReadGuard reads;
     private final SandboxSink sandbox;
+    /** 同一窗口、同一指纹不再把全文交回去。 */
+    private final ConcurrentHashMap<String, String> slices = new ConcurrentHashMap<>();
 
     public ReadFileTool(PathValidator paths) {
         this(paths, ReadGuard.allowAll());
@@ -37,6 +41,10 @@ public final class ReadFileTool implements Tool.ParallelReadOnly {
 
     public ReadFileTool(PathValidator paths, ReadGuard reads) {
         this(paths, reads, null);
+    }
+
+    public ReadGuard guard() {
+        return reads;
     }
 
     public ReadFileTool(PathValidator paths, ReadGuard reads, SandboxSink sandbox) {
@@ -126,11 +134,23 @@ public final class ReadFileTool implements Tool.ParallelReadOnly {
             if (proposal == null && looksBinary(file)) {
                 return "ERROR: 二进制文件，无法读取: " + rawPath;
             }
+            String window = rawPath + ":" + startLine + ":" + lineCount;
+            String seen = proposal == null ? reads.observationStamp(file) : "";
+            if (!seen.isEmpty() && seen.equals(slices.get(window))) {
+                return "文件未变化，沿用刚才读过的 " + rawPath + "（从第 " + startLine + " 行起，最多 " + lineCount + " 行）。不要再读这一段。";
+            }
+            if (proposal == null && !reads.deliverRead(file)) {
+                return "文件未变化，沿用刚才读过的 " + rawPath + "。同一文件已经读过 " + ReadTracker.MAX_DELIVERIES
+                    + " 次，不要再换行号重读。根据上文修改，或改看别的文件。";
+            }
             ReadResult slice =
                 proposal == null ? readSlice(file, startLine, lineCount) : readText(proposal, startLine, lineCount);
             // 只有实际返回文件行才解锁编辑，越界读取和空文件提示不算观察过内容。
             if (slice.hasLines()) {
                 reads.observed(file);
+                if (proposal == null) {
+                    slices.put(window, reads.observationStamp(file));
+                }
             }
             return slice.text();
         } catch (IOException e) {

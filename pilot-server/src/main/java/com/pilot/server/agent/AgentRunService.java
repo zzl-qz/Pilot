@@ -176,6 +176,7 @@ public class AgentRunService implements RunStarter {
     public void setWorktrees(com.pilot.server.git.GitWorktrees worktrees) {
         this.worktrees = worktrees;
     }
+
     /** 可恢复调度状态；为空时（测试构造）不做检查点，也不影响执行。 */
     private final RunStateTracker runStates;
     private final com.pilot.server.store.ToolCallJournalFactory journals;
@@ -1933,13 +1934,24 @@ public class AgentRunService implements RunStarter {
     /** 会话命令有独立的任务归属；默认和受限子代理工具集不共享这个入口。 */
     private ToolRegistry sessionTools(String sessionId, String runId, String workspace, PlanSink planSink) {
         ToolRegistry tools = new ToolRegistry();
-        toolFactory.registryFor(workspace, planSink).tools().stream()
-            .filter(tool -> !ToolNames.RUN_COMMAND.equals(tool.name())
-                && !com.pilot.core.tool.EnableToolsTool.NAME.equals(tool.name()))
-            .forEach(tools::register);
+        toolFactory.usePlan(() -> plans.load(sessionId));
+        try {
+            toolFactory.registryFor(workspace, planSink).tools().stream()
+                .filter(tool -> !ToolNames.RUN_COMMAND.equals(tool.name())
+                    && !com.pilot.core.tool.EnableToolsTool.NAME.equals(tool.name()))
+                .forEach(tools::register);
+        } finally {
+            toolFactory.usePlan(null);
+        }
         tools.register(new com.pilot.core.tool.EnableToolsTool(tools));
-        tools.register(
-            new RunCommandTool(new PathValidator(toolFactory.resolve(workspace)), commandTasks, sessionId, snapshots));
+        RunCommandTool commands =
+            new RunCommandTool(new PathValidator(toolFactory.resolve(workspace)), commandTasks, sessionId, snapshots);
+        for (com.pilot.core.tool.Tool tool : tools.tools()) {
+            if (tool instanceof com.pilot.core.tool.file.ReadFileTool read) {
+                commands.withReads(read.guard());
+            }
+        }
+        tools.register(commands);
         tools.register(new CommandStatusTool(commandTasks, sessionId, snapshots));
         tools.register(new CommandLogsTool(commandTasks, sessionId));
         tools.register(new StopCommandTool(commandTasks, sessionId));

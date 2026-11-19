@@ -11,6 +11,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** {@link ReadGuard} 的进程内实现：一次 Agent 运行一份。读过的文件记下修改时间、大小和内容指纹，外部改过就拒绝盲写。 */
 public final class ReadTracker implements ReadGuard {
@@ -18,7 +19,12 @@ public final class ReadTracker implements ReadGuard {
     private record FileStamp(long modifiedMillis, long sizeBytes, String digest) {
     }
 
+    /** 同一文件完整交出正文的次数。再多就是在换行号重读。 */
+    public static final int MAX_DELIVERIES = 3;
+
     private final ConcurrentMap<Path, FileStamp> observed = new ConcurrentHashMap<>();
+    private final ConcurrentMap<Path, AtomicInteger> deliveries = new ConcurrentHashMap<>();
+    private final AtomicInteger revision = new AtomicInteger();
 
     @Override
     public void observed(Path file) {
@@ -26,7 +32,40 @@ public final class ReadTracker implements ReadGuard {
             return;
         }
         Path key = file.toAbsolutePath().normalize();
-        observed.put(key, stamp(key));
+        FileStamp next = stamp(key);
+        FileStamp previous = observed.put(key, next);
+        if (previous != null && !previous.equals(next)) {
+            deliveries.remove(key);
+        }
+        if (previous == null || !previous.equals(next)) {
+            revision.incrementAndGet();
+        }
+    }
+
+    @Override
+    public boolean deliverRead(Path file) {
+        if (file == null) {
+            return true;
+        }
+        Path key = file.toAbsolutePath().normalize();
+        return deliveries.computeIfAbsent(key, ignored -> new AtomicInteger()).incrementAndGet() <= MAX_DELIVERIES;
+    }
+
+    @Override
+    public String observationStamp(Path file) {
+        if (file == null) {
+            return "";
+        }
+        FileStamp now = stamp(file.toAbsolutePath().normalize());
+        if (now.modifiedMillis() < 0) {
+            return "";
+        }
+        return now.modifiedMillis() + ":" + now.sizeBytes() + ":" + now.digest();
+    }
+
+    @Override
+    public int revision() {
+        return revision.get();
     }
 
     @Override

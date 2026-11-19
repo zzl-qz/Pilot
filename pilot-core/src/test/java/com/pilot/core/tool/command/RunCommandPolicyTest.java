@@ -19,7 +19,9 @@ import com.pilot.core.message.ToolCall;
 import com.pilot.core.permission.PermissionDecision;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PolicyPermissionGate;
+import com.pilot.core.tool.ReadTracker;
 import com.pilot.core.tool.ToolResult;
+import com.pilot.core.tool.file.ReadFileTool;
 import com.pilot.core.workspace.PathValidator;
 
 /** run_command 的按命令判定：只读放行、审批、拒绝，以及串联命令的执行语义。 */
@@ -160,6 +162,18 @@ class RunCommandPolicyTest {
     }
 
     @Test
+    void repeatedReadOnlyCommandIsNotRunAgain() {
+        Assumptions.assumeFalse(WINDOWS);
+        String first = tool.execute(Map.of("command", "echo same"));
+        assertTrue(first.contains("退出码: 0"), first);
+
+        String second = tool.execute(Map.of("command", "echo same"));
+
+        assertTrue(second.contains("未再执行"), second);
+        assertFalse(second.contains("退出码"));
+    }
+
+    @Test
     void deletingInsideTheWorkspaceRuns() throws Exception {
         Assumptions.assumeFalse(WINDOWS);
         Files.writeString(workspace.resolve("gone.txt"), "x");
@@ -256,5 +270,70 @@ class RunCommandPolicyTest {
 
         assertTrue(result.changedPaths().isEmpty());
         assertTrue(result.text().contains("退出码: 0"), result.text());
+    }
+
+    @Test
+    void liveProbesAreNotCached() {
+        assertFalse(RunCommandTool.cachesReadOnlyCommand("curl -sS http://localhost:5185/"));
+        assertFalse(RunCommandTool.cachesReadOnlyCommand("lsof -nP -iTCP:5185"));
+        assertFalse(RunCommandTool.cachesReadOnlyCommand("ps aux"));
+        assertTrue(RunCommandTool.cachesReadOnlyCommand("git status --porcelain"));
+    }
+
+    @Test
+    void workspaceWriteInvalidatesTheReadOnlyCommandCache() throws Exception {
+        Assumptions.assumeFalse(WINDOWS);
+        ReadTracker tracker = new ReadTracker();
+        RunCommandTool cached = new RunCommandTool(new PathValidator(workspace)).withReads(tracker);
+
+        String first = cached.execute(Map.of("command", "echo same"));
+        assertTrue(first.contains("退出码: 0"), first);
+        Files.writeString(workspace.resolve("note.txt"), "changed");
+        tracker.observed(workspace.resolve("note.txt"));
+        String again = cached.execute(Map.of("command", "echo same"));
+
+        assertTrue(again.contains("退出码: 0"), again);
+        assertFalse(again.contains("未再执行"));
+    }
+
+    @Test
+    void readOnlyCommandCacheExpires() throws Exception {
+        Assumptions.assumeFalse(WINDOWS);
+        tool.readOnlyCacheTtlMs = -1L;
+
+        String first = tool.execute(Map.of("command", "echo same"));
+        String second = tool.execute(Map.of("command", "echo same"));
+
+        assertTrue(first.contains("退出码: 0"), first);
+        assertTrue(second.contains("退出码: 0"), second);
+        assertFalse(second.contains("未再执行"));
+    }
+
+    @Test
+    void catOfAnAlreadyReadFileIsNotPrintedAgain() throws Exception {
+        Assumptions.assumeFalse(WINDOWS);
+        ReadTracker tracker = new ReadTracker();
+        PathValidator validator = new PathValidator(workspace);
+        ReadFileTool reader = new ReadFileTool(validator, tracker);
+        RunCommandTool command = new RunCommandTool(validator).withReads(tracker);
+        Files.writeString(workspace.resolve("App.java"), "one\ntwo\nthree\nfour\n");
+        reader.execute(Map.of("path", "App.java", "start_line", 1, "line_count", 1));
+        reader.execute(Map.of("path", "App.java", "start_line", 2, "line_count", 1));
+        reader.execute(Map.of("path", "App.java", "start_line", 3, "line_count", 1));
+
+        String dumped = command.execute(Map.of("command", "cat -n App.java | sed -n '1,4p'"));
+
+        assertTrue(dumped.contains("未变化"), dumped);
+        assertFalse(dumped.contains("退出码"));
+    }
+
+    @Test
+    void gitHistoryIsNotRereadForever() {
+        Assumptions.assumeFalse(WINDOWS);
+        String last = "";
+        for (int i = 1; i <= 5; i++) {
+            last = tool.execute(Map.of("command", "git log --oneline -" + i));
+        }
+        assertTrue(last.contains("未再执行"), last);
     }
 }
