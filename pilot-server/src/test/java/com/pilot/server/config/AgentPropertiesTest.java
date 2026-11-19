@@ -33,7 +33,7 @@ class AgentPropertiesTest {
 
         assertEquals(PermissionMode.AUTO, properties.permissionMode(), "默认完全放行");
         assertEquals(1_000, properties.maxSteps());
-        assertEquals(120, properties.directMaxRequests());
+        assertEquals(500, properties.directMaxRequests());
         assertEquals(400_000, properties.contextMaxChars());
         assertEquals(0, properties.maxPlanContinues(), "计划不再自动催继续");
         assertTrue(properties.completionChecksEnabled(), "收尾门默认开启");
@@ -43,7 +43,7 @@ class AgentPropertiesTest {
     void directDefaultsKeepTheirOwnFuseWhenMaximumStepsAreIncreased() {
         var defaults = new AgentProperties(".", null, 1500, null, null, 0, 0, null, null, true);
         assertEquals(1_500, defaults.maxSteps());
-        assertEquals(120, defaults.directMaxRequests());
+        assertEquals(500, defaults.directMaxRequests());
         assertTrue(defaults.lintGateEnabledValue());
         var lintOff = new AgentProperties(".", null, 1500, null, null, 0, 0, null, null, true, null, null, null, null,
             null, null, null, null, null, false, null);
