@@ -31,8 +31,9 @@ public final class GlobFilesTool implements Tool.ParallelReadOnly {
     private static final int DEFAULT_LIMIT = 200;
     private static final int MAX_LIMIT = 1000;
     private static final int MAX_VISITED = 8_000;
-    private static final Set<String> SKIPPED_DIRECTORIES = Set.of(".git", ".idea", ".gradle", ".pilot", ".venv",
-        "__pycache__", "target", "build", "node_modules", "out", "dist");
+    private static final Set<String> SKIPPED_DIRECTORIES =
+        Set.of(".git", ".idea", ".gradle", ".pilot", ".next", ".nuxt", ".turbo", ".cache", ".venv", "venv", "coverage",
+            "__pycache__", "target", "build", "node_modules", "out", "dist");
 
     private final PathValidator paths;
 

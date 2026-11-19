@@ -40,7 +40,8 @@ public final class SearchTool implements Tool.ParallelReadOnly {
     /** 没有 rg 时最多看这么多个文件。依赖目录不进入，避免把 node_modules 整棵读一遍。 */
     private static final int FALLBACK_MAX_FILES = 4_000;
     private static final Set<String> SKIPPED_DIRECTORIES =
-        Set.of(".git", ".idea", ".gradle", "target", "build", "node_modules", "out", "dist");
+        Set.of(".git", ".idea", ".gradle", ".pilot", ".next", ".nuxt", ".turbo", ".cache", ".venv", "venv", "coverage",
+            "__pycache__", "target", "build", "node_modules", "out", "dist");
 
     private final PathValidator paths;
 
