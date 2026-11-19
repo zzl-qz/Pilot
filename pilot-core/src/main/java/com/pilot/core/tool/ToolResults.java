@@ -19,6 +19,12 @@ public final class ToolResults {
     public static final String CHANGE_TRACKING_INCOMPLETE = "ERROR: 命令已结束，但无法完整确认其工作区变更";
     /** 命令前的变更基线没建立起来，但命令仍会执行；这只是一条降级警告。 */
     public static final String CHANGE_TRACKING_UNAVAILABLE = "WARN: 未能建立命令前文件基线，命令仍会执行；本轮的改动不会进入差异/回滚追踪";
+    /**
+     * 命令跑完了，但有些文件没进基线（被占用、无权限或临时消失）。
+     * 它们不在追踪范围内，也不能因为追踪不到就当成没改动；这是提示，不是失败。
+     */
+    public static final String CHANGE_TRACKING_PARTIAL =
+        "NOTE: 部分文件没有进入命令前文件基线，其改动不在本轮差异/回滚追踪内，不能据此认为它们没有改动";
     /** 被运行策略或中断信号跳过，工具没有执行。 */
     public static final String SKIPPED = "SKIPPED:";
 

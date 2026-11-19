@@ -59,6 +59,23 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     private static final Pattern EXIT_CODE = Pattern.compile("^退出码: (-?\\d+)", Pattern.MULTILINE);
 
     private static final boolean WINDOWS = HostOs.isWindows();
+    /** Windows 上常见的 Unix 文件命令：没有对应的可执行文件，原样重试不会变好。 */
+    private static final List<String> UNIX_FILE_COMMANDS = List.of("ls", "cat", "head", "tail", "find", "dir");
+    /** 启动失败里代表「可执行文件不存在」的两种写法（Windows 与 POSIX）。 */
+    private static final Pattern MISSING_EXECUTABLE = Pattern.compile("CreateProcess error=2|Cannot run program");
+    /**
+     * Windows PowerShell 5.1 链式脚本里每个管道单元执行后的退出码捕获。必须先置 null 的
+     * {@code $global:LASTEXITCODE}：块内赋值不加 {@code global:} 只会建块内局部变量，原生命令写入的值盖不住，
+     * 而 5.1 里原生命令非 0 退出时 {@code $?} 仍为 True。置 null 后若仍为空，说明命令没启动（找不到可执行文件），
+     * 此时看 {@code $?}。
+     */
+    private static final String EXIT_CODE_CAPTURE =
+        "; $script:pilotCode = if ($null -ne $global:LASTEXITCODE) { $global:LASTEXITCODE }"
+            + " elseif ($?) { 0 } else { 1 }";
+    /** 连续到第几次同类缺失命令时要求换工具。 */
+    private static final int MISSING_COMMAND_ESCALATE_AT = 2;
+    /** 连续缺失文件命令导致的启动失败次数；换成其他失败就清零。 */
+    private int missingCommandFailures;
     private static final int MAX_TOKENS = 64;
     private static final int MAX_OUTPUT_CHARS = 12_000;
     private static final int HEAD_CHARS = 4_000;
@@ -122,7 +139,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     public String description() {
         return PromptLibrary.standard()
             .render("tools/run_command",
-                Map.of("inspection", String.join("/", CommandPolicy.INSPECTION.stream().sorted().toList()),
+                Map.of("inspection", inspectionList(),
                     "development", String.join("/", CommandPolicy.DEVELOPMENT.stream().sorted().toList()), "mutators",
                     String.join("/", CommandPolicy.FILE_MUTATORS.stream().sorted().toList()), "gitReadonly",
                     String.join("/", CommandPolicy.GIT_READONLY.stream().sorted().toList()), "gitWrite",
@@ -130,7 +147,8 @@ public final class RunCommandTool implements Tool, ProducesCheck {
                     commandTasks == null ? "本运行环境仅支持同步执行。"
                         : "background=true 会立即返回任务 ID，适合开发服务器或长测试。后台默认不设超时；显式 timeoutSeconds 最大 600。"
                             + "用 command_status 查询实际状态、command_logs 增量读取日志、stop_command 停止进程树。"
-                            + "启动成功不代表验证通过；测试必须等到完成并检查退出码。"))
+                            + "启动成功不代表验证通过；测试必须等到完成并检查退出码。"
+                            + windowsFileCommandNote()))
             .strip();
     }
 
@@ -287,6 +305,8 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         }
         if (!result.complete()) {
             text = ToolResults.CHANGE_TRACKING_INCOMPLETE + "；不得据此宣称验证通过：" + result.warning() + "\n" + text;
+        } else if (!result.warning().isBlank()) {
+            text = text + "\n\n" + ToolResults.CHANGE_TRACKING_PARTIAL + "（" + result.warning() + "）";
         }
         return new ToolResult(withTrackingWarning(text, trackingWarning), result.changedPaths(), List.of());
     }
@@ -440,19 +460,26 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         }
         // 串联或重定向才进 shell。每段仍用解析出的绝对路径，shell 只负责连接符和已经校验过的重定向。
         List<List<String>> checked = checks.stream().map(SegmentCheck::tokens).toList();
-        String script = script(withWrapperSegments(checked), checks, operators, segments);
         String display = String.join(" ", segmentsDisplay(checked, operators));
         if (WINDOWS) {
-            List<String> shell = windowsShell(script, operators);
+            List<List<String>> resolved = withWrapperSegments(checked);
+            Path pwsh = resolveOnPath("pwsh");
+            Path shell = pwsh != null ? pwsh : resolveOnPath("powershell");
             if (shell == null) {
                 return Preparation
-                    .error("ERROR: Windows 上 && 与 || 需要 PowerShell 7（pwsh.exe）；" + "请安装 PowerShell 7、改用 ; 连接，或拆成多次调用");
+                    .error("ERROR: Windows 上执行命令需要 PowerShell（powershell.exe 或 pwsh.exe），当前都没找到");
             }
-            return new Preparation(
-                new Prepared(shell, List.of(display), workdir, background, timeoutMs, trackChanges, readOnly, Map.of()),
-                null);
+            boolean shortCircuit = operators.contains("&&") || operators.contains("||");
+            String scriptText = shortCircuit
+                ? chainScript(resolved, checks, operators, segments)
+                : script(resolved, checks, operators, segments);
+            List<String> commandLine =
+                List.of(shell.toString(), "-NoProfile", "-NonInteractive", "-Command", scriptText);
+            return new Preparation(new Prepared(commandLine, List.of(display), workdir, background, timeoutMs,
+                trackChanges, readOnly, Map.of()), null);
         }
-        return new Preparation(new Prepared(List.of("/bin/sh", "-c", script), List.of(display), workdir, background,
+        String scriptText = script(withWrapperSegments(checked), checks, operators, segments);
+        return new Preparation(new Prepared(List.of("/bin/sh", "-c", scriptText), List.of(display), workdir, background,
             timeoutMs, trackChanges, readOnly, Map.of()), null);
     }
 
@@ -475,33 +502,82 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             if (i > 0) {
                 out.append(' ').append(operators.get(i - 1)).append(' ');
             }
-            List<String> tokens = resolved.get(i);
-            SegmentCheck check = checks.get(i);
-            if (WINDOWS) {
-                // 脚本块把环境变量限制在这一段，避免前缀泄漏到后面的命令。
-                out.append("& { ");
-                check.env().forEach(
-                    (name, value) -> out.append("$env:").append(name).append('=').append(psQuote(value)).append("; "));
-                out.append("& ").append(psQuote(tokens.get(0)));
-            } else {
-                check.env().forEach(
-                    (name, value) -> out.append(name).append('=').append(CommandChain.quote(value)).append(' '));
-                out.append(CommandChain.quote(tokens.get(0)));
+            out.append(segmentScript(resolved.get(i), checks.get(i), segments.get(i)));
+        }
+        return out.toString();
+    }
+
+    /**
+     * PowerShell 5.1 不认 {@code &&}/{@code ||}，而 7 不能从包裹命令的脚本块可靠地返回原生退出码。
+     * 两个版本统一按左结合改写成判断上一条执行结果的 if 分支。
+     * 跳过不执行的段不会改写 {@code $pilotCode}，所以连续多个连接符仍然是左结合语义（{@code a && b || c}
+     * 在 a 失败时会执行 c）。脚本结尾用 {@code exit $pilotCode} 把最后一段的退出码交回去。
+     */
+    private static String chainScript(List<List<String>> resolved, List<SegmentCheck> checks, List<String> operators,
+        List<CommandChain.Segment> segments) {
+        List<String> units = new ArrayList<>();
+        List<String> gates = new ArrayList<>();
+        StringBuilder unit = new StringBuilder(segmentScript(resolved.get(0), checks.get(0), segments.get(0)));
+        for (int i = 1; i < resolved.size(); i++) {
+            String operator = operators.get(i - 1);
+            String text = segmentScript(resolved.get(i), checks.get(i), segments.get(i));
+            if (operator.equals("|")) {
+                unit.append(" | ").append(text);
+                continue;
             }
-            for (int j = 1; j < tokens.size(); j++) {
-                out.append(' ').append(WINDOWS ? psQuote(tokens.get(j)) : CommandChain.quote(tokens.get(j)));
+            units.add(unit.toString());
+            gates.add(operator);
+            unit = new StringBuilder(text);
+        }
+        units.add(unit.toString());
+        return chainScript(units, gates);
+    }
+
+    /** 把已经转义好的段脚本拼成 PowerShell 5.1 能执行的链式脚本；{@code gates.get(k-1)} 是第 k 段前的连接符。 */
+    static String chainScript(List<String> units, List<String> gates) {
+        StringBuilder out = new StringBuilder("$pilotCode = 0; ");
+        for (int i = 0; i < units.size(); i++) {
+            String gate = i == 0 ? null : gates.get(i - 1);
+            boolean gated = "&&".equals(gate) || "||".equals(gate);
+            if (gated) {
+                out.append("if ($pilotCode ").append(gate.equals("&&") ? "-eq" : "-ne").append(" 0) { ");
             }
-            if (check.redirect() != null) {
-                out.append(check.append() ? " >> " : " > ");
-                out.append(
-                    WINDOWS ? psQuote(check.redirect().toString()) : CommandChain.quote(check.redirect().toString()));
-            }
-            if (segments.get(i).mergeStderr()) {
-                out.append(" 2>&1");
-            }
-            if (WINDOWS) {
+            // 捕获放在管道单元外层：块内的 $? 会恒为 True，而管道里各段并发执行，内层赋值不可靠。
+            out.append("& { $global:LASTEXITCODE = $null; ").append(units.get(i)).append(EXIT_CODE_CAPTURE).append(" }");
+            if (gated) {
                 out.append(" }");
             }
+            out.append("; ");
+        }
+        return out.append("exit $pilotCode").toString();
+    }
+
+    /** 单段命令的脚本文本：Windows 用 PowerShell 引号与脚本块，其他平台用 POSIX 引号。 */
+    private static String segmentScript(List<String> tokens, SegmentCheck check, CommandChain.Segment segment) {
+        StringBuilder out = new StringBuilder();
+        if (WINDOWS) {
+            // 脚本块把环境变量限制在这一段，避免前缀泄漏到后面的命令。
+            out.append("& { ");
+            check.env().forEach(
+                (name, value) -> out.append("$env:").append(name).append('=').append(psQuote(value)).append("; "));
+            out.append("& ").append(psQuote(tokens.get(0)));
+        } else {
+            check.env().forEach(
+                (name, value) -> out.append(name).append('=').append(CommandChain.quote(value)).append(' '));
+            out.append(CommandChain.quote(tokens.get(0)));
+        }
+        for (int j = 1; j < tokens.size(); j++) {
+            out.append(' ').append(WINDOWS ? psQuote(tokens.get(j)) : CommandChain.quote(tokens.get(j)));
+        }
+        if (check.redirect() != null) {
+            out.append(check.append() ? " >> " : " > ");
+            out.append(WINDOWS ? psQuote(check.redirect().toString()) : CommandChain.quote(check.redirect().toString()));
+        }
+        if (segment.mergeStderr()) {
+            out.append(" 2>&1");
+        }
+        if (WINDOWS) {
+            out.append(" }");
         }
         return out.toString();
     }
@@ -509,26 +585,6 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     /** PowerShell 单引号字面量；内部的单引号写成两个。 */
     private static String psQuote(String value) {
         return "'" + value.replace("'", "''") + "'";
-    }
-
-    /**
-     * Windows 上执行链式命令的 shell。优先 PowerShell 7（{@code pwsh} 支持 &&、||、; 和管道），
-     * 回退 Windows PowerShell 5.1（只支持 ; 和管道）。返回 null 表示当前环境无法执行该连接符组合。
-     */
-    private static List<String> windowsShell(String script, List<String> operators) {
-        boolean shortCircuit = operators.contains("&&") || operators.contains("||");
-        Path pwsh = resolveOnPath("pwsh");
-        if (pwsh != null) {
-            return List.of(pwsh.toString(), "-NoProfile", "-NonInteractive", "-Command", script);
-        }
-        if (shortCircuit) {
-            return null;
-        }
-        Path powerShell = resolveOnPath("powershell");
-        if (powerShell != null) {
-            return List.of(powerShell.toString(), "-NoProfile", "-NonInteractive", "-Command", script);
-        }
-        return null;
     }
 
     private static List<String> segmentsDisplay(List<List<String>> segments, List<String> operators) {
@@ -746,7 +802,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             task = commandTasks.start(sessionId, String.join(" ", displayTokens), builder, background, timeoutMs,
                 tracking.active() ? tracking : null);
         } catch (RuntimeException e) {
-            return new ManagedRun("ERROR: 无法启动命令：" + redact(String.valueOf(e.getMessage())), true);
+            return new ManagedRun(launchFailure(command, displayTokens, String.valueOf(e.getMessage())), true);
         }
         String taskId = task.taskId();
         if (background && CommandToolSupport.running(task)) {
@@ -816,6 +872,59 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         return "这条命令很快就失败了，多半是调用方式不对。先根据下面的错误改命令，不要当成还在运行。\n";
     }
 
+    /** 可用命令清单；Windows 上不把 Unix 文件命令写成可用。 */
+    private static String inspectionList() {
+        return String.join("/", CommandPolicy.INSPECTION.stream()
+            .filter(name -> !WINDOWS || !UNIX_FILE_COMMANDS.contains(name))
+            .sorted()
+            .toList());
+    }
+
+    /** Windows 上没有这些 Unix 文件命令，工具描述里直接给出替代工具。 */
+    private static String windowsFileCommandNote() {
+        return WINDOWS ? "Windows 上 ls/cat/head/tail/find/dir 没有对应可执行文件，请改用 list_dir / read_file / search_text。" : "";
+    }
+
+    /** 取命令的叶子名（去掉目录与 .exe 后缀）。 */
+    private static String executableName(String token) {
+        int slash = Math.max(token.lastIndexOf('/'), token.lastIndexOf('\\'));
+        String name = slash >= 0 ? token.substring(slash + 1) : token;
+        return name.endsWith(".exe") ? name.substring(0, name.length() - 4) : name;
+    }
+
+    /** 这次启动失败是不是「Unix 文件命令在当前系统上不存在」。 */
+    static boolean missingFileCommand(String executable, String message) {
+        return UNIX_FILE_COMMANDS.contains(executable) && MISSING_EXECUTABLE.matcher(message).find();
+    }
+
+    /** 缺可执行文件时的纠偏文本；连续第二次起要求换工具，不再原样重试。 */
+    static String launchFailureText(String headline, int consecutiveFailures) {
+        String hint = "Windows 上请改用 list_dir / read_file / search_text，"
+                + "不要再把 " + String.join("/", UNIX_FILE_COMMANDS) + " 当成可用命令。";
+        if (consecutiveFailures >= MISSING_COMMAND_ESCALATE_AT) {
+            hint += "\n同类错误已经连续出现两次：不要原样重试，换文件工具或 PowerShell 等价命令"
+                    + "（Get-ChildItem、Get-Content、Select-String）。";
+        }
+        return headline + "\n" + hint;
+    }
+
+    /**
+     * 启动失败的结果文本。
+     *
+     * <p>Windows 上没有 ls/cat/head/tail/find/dir 这些 Unix 文件命令，
+     * 结果里直接给出替代工具，避免模型拿同一条命令反复重试。
+     */
+    private String launchFailure(List<String> command, List<String> displayTokens, String message) {
+        String headline = "ERROR: 无法启动命令 " + String.join(" ", displayTokens) + "：" + redact(message);
+        String executable = command.isEmpty() ? "" : executableName(command.get(0));
+        if (!missingFileCommand(executable, message)) {
+            missingCommandFailures = 0;
+            return headline;
+        }
+        missingCommandFailures++;
+        return launchFailureText(headline, missingCommandFailures);
+    }
+
     private String run(List<String> command, List<String> displayTokens, Path workdir, long timeoutMs,
         Map<String, String> env) {
         long startedAt = System.nanoTime();
@@ -829,7 +938,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         try {
             process = builder.start();
         } catch (IOException e) {
-            return "ERROR: 无法启动命令 " + String.join(" ", displayTokens) + "：" + e.getMessage();
+            return launchFailure(command, displayTokens, String.valueOf(e.getMessage()));
         }
         try {
             process.getOutputStream().close();

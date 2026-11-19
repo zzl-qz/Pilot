@@ -1319,8 +1319,8 @@ class AgentLoopTest {
             if (calls.incrementAndGet() >= 6) {
                 cancelled.set(true);
             }
-            throw new ModelClientException(ModelFailureKind.NETWORK, "流式模型请求失败（10 ms, model=gpt）：connection reset",
-                new IOException("connection reset"));
+            throw new ModelClientException(ModelFailureKind.NETWORK, "流式模型请求失败（10 ms, model=gpt）：read timed out",
+                new IOException("read timed out"));
         };
         AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(), ApprovalBroker.denyAll(), config(8, 3),
             cancelled::get, () -> null, (call, result, latencyMs) -> {
@@ -1337,6 +1337,75 @@ class AgentLoopTest {
             .map(RunRetrying::delayMs).toList();
         assertTrue(delays.stream().allMatch(delay -> delay > 0 && delay <= 30_000), "指数退避不超过上限: " + delays);
         assertTrue(delays.getLast() > delays.getFirst(), "连续失败应逐步放慢: " + delays);
+    }
+
+    /** 同一端点连续握手失败/断流：3 次就熔断，不能让用户干等完退避预算。 */
+    @Test
+    void stopsRetryingAfterThreeConnectionFailures() {
+        AtomicInteger calls = new AtomicInteger();
+        ModelClient client = (messages, tools) -> {
+            calls.incrementAndGet();
+            throw new ModelClientException(ModelFailureKind.NETWORK, "流式模型请求失败（10 ms, model=gpt）：handshake timeout",
+                new IOException("handshake timeout"));
+        };
+        AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(), ApprovalBroker.denyAll(), config(8, 3),
+            Cancellation.none(), () -> null, (call, result, latencyMs) -> {
+            }, millis -> {
+            }, null);
+
+        AgentLoop.Result result = loop.run("你好", List.of(), events::add);
+
+        assertEquals("MODEL_ERROR", result.failureCode());
+        assertEquals(3, calls.get(), "同一端点连续 3 次连接级失败就熔断，不再等到退避预算耗尽");
+        RunFailed failed =
+            events.stream().filter(RunFailed.class::isInstance).map(RunFailed.class::cast).findFirst().orElseThrow();
+        assertTrue(failed.retryable(), "熔断后进度已保存，可继续执行");
+    }
+
+    /** 无计划的多步任务：提醒一次 update_plan，但不判失败、也不反复催。 */
+    @Test
+    void remindsOnceToUpdatePlanWhenRunHasNoPlan() {
+        ScriptedModelClient client = new ScriptedModelClient(multiStepReplies(7, "按文件逐个看完了。"));
+        AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(), ApprovalBroker.denyAll(), config(12, 3),
+            Cancellation.none(), () -> null, (call, result, latencyMs) -> {
+            }, millis -> {
+            }, null);
+
+        AgentLoop.Result result = loop.run("把这几个文件都看一遍", List.of(), events::add);
+
+        assertNull(result.failureCode());
+        long reminded = client.requests.stream()
+            .filter(request -> request.stream()
+                .anyMatch(message -> "system".equals(message.role()) && message.content().contains("update_plan")))
+            .count();
+        assertEquals(1, reminded, "无计划的多步任务只提醒一次");
+    }
+
+    /** 已经维护过计划的 run 不该收到计划提醒。 */
+    @Test
+    void staysQuietWhenRunAlreadyHasPlan() {
+        ScriptedModelClient client = new ScriptedModelClient(multiStepReplies(7, "按计划看完了。"));
+        List<PlanItem> plan = List.of(new PlanItem("逐个读文件", PlanItem.IN_PROGRESS));
+        AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(),
+            new AgentLoop.Config(12, 0, 3, "你是测试代理", () -> plan, 0, 120_000, false));
+
+        AgentLoop.Result result = loop.run("把这几个文件都看一遍", List.of(), events::add);
+
+        assertNull(result.failureCode());
+        assertTrue(client.requests.stream()
+            .noneMatch(request -> request.stream()
+                .anyMatch(message -> message.content().contains("update_plan"))), "已有计划的任务不该被打扰");
+    }
+
+    /** 多步脚本：每轮只调一次 read_file（路径不同，避免被判成重复调用），最后一轮收尾。 */
+    private static ModelResponse[] multiStepReplies(int steps, String finalText) {
+        List<ModelResponse> replies = new ArrayList<>();
+        for (int i = 0; i < steps; i++) {
+            replies.add(new ModelResponse("",
+                List.of(new ToolCall("call_" + i, "read_file", Map.of("path", "file-" + i + ".txt")))));
+        }
+        replies.add(new ModelResponse(finalText, List.of()));
+        return replies.toArray(ModelResponse[]::new);
     }
 
     @Test

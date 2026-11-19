@@ -328,6 +328,10 @@ public final class AgentLoop {
     private BooleanSupplier completionClaim = () -> true;
     /** 模型失败重试的退避、预算与熔断；可在构造后替换以测试或按配置调参。 */
     private RetryBudget retryBudget = RetryBudget.fromSystemProperties();
+    /** 计划门：长任务前段一直没有 update_plan 时提醒一次。 */
+    private final PlanGate planGate = new PlanGate();
+    /** 同一端点连续连接级失败的次数；成功一次就清零，避免跨故障累积。 */
+    private int connectionFailures;
 
     /** 替换重试治理；替换后从干净状态开始。 */
     public AgentLoop withRetryBudget(RetryBudget budget) {
@@ -520,6 +524,7 @@ public final class AgentLoop {
         }
         UsageTracker usage = new UsageTracker(events);
         DynamicPollTracker dynamicPolls = new DynamicPollTracker(config.repeatRemindAt(), config.repeatAbortAt());
+        planGate.reset();
         RuntimeGuidance runtimeGuidance = new RuntimeGuidance();
         LoopContext context = new LoopContext(messages, events, checkpoint, changedFiles, checks, runtimeGuidance,
             Set.copyOf(changedFiles));
@@ -573,6 +578,7 @@ public final class AgentLoop {
                 String content = response.content() == null ? "" : response.content();
                 String reasoning = response.reasoningContent() == null ? "" : response.reasoningContent();
                 List<ToolCall> calls = response.toolCalls() == null ? List.of() : response.toolCalls();
+                planGate.observeToolCalls(calls.size());
                 Message correction = pendingInput.get();
                 if (hasInput(correction)) {
                     // 模型返回时已经有纠正：旧方案的工具都不执行，补齐协议结果后重新规划。
@@ -1353,6 +1359,10 @@ public final class AgentLoop {
      * 这类重试也不会变好的错误才立刻失败。
      *
      * <p>线程被外部中断（服务重启、关停）既不是用户取消也不是模型故障：清掉中断标记后继续重试。
+     *
+     * <p>唯一的例外是连接级失败：同一端点连续 {@link ModelRetryPolicy#CONNECTION_BREAKER_FAILURES}
+     * 次握手失败、EOF 或连接被重置时直接以 {@code MODEL_ERROR} 停下，不让用户干等退避预算耗尽；
+     * 对话与进度已经保存，修好网络后可以继续。
      */
     private ModelTurn callModel(List<Message> messages, Consumer<SessionEvent> events, UsageTracker usage,
         RuntimeGuidance runtimeGuidance) {
@@ -1384,6 +1394,14 @@ public final class AgentLoop {
                 }
                 // 本地控制提示与 policy guidance 都只属于这次采样。模型请求发生瞬时失败时
                 // retainedGuidance 会沿重试保留；真正拿到响应后才消费。
+                planGate.observeModelRequest();
+                if (!planSnapshot().isEmpty()) {
+                    planGate.markPlanned();
+                }
+                String planReminder = planGate.takeReminder();
+                if (planReminder != null) {
+                    runtimeGuidance.add(planReminder);
+                }
                 retainedGuidance = RuntimeGuidance.merge(retainedGuidance, runtimeGuidance.render(policyGuidance));
                 // 阶段性纠偏属于运行时上下文，只进入当前请求的 system 消息；下一次请求会
                 // 重新构造 system，checkpoint/conversation 也从不保存它。
@@ -1455,6 +1473,7 @@ public final class AgentLoop {
                 observedThroughIndex = messages.size();
                 // 一次成功请求说明端点恢复了，下一次故障重新计算退避与预算
                 retryBudget.reset();
+                connectionFailures = 0;
                 runtimeGuidance.clear();
                 // client 已拿到请求快照；立即还原基础 system，避免当前内存历史也携带一次性提示。
                 refreshTaskContext(messages, null);
@@ -1520,6 +1539,11 @@ public final class AgentLoop {
                 // 永久错误（鉴权、余额、模型不支持、结构非法）重试不会变好，立刻失败
                 if (!kind.retryable()) {
                     throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_ERROR, "模型调用失败：" + Texts.oneLine(reason, 300));
+                }
+                connectionFailures = ModelRetryPolicy.connectionLost(reason) ? connectionFailures + 1 : 0;
+                if (connectionFailures >= ModelRetryPolicy.CONNECTION_BREAKER_FAILURES) {
+                    throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_ERROR,
+                        "同一端点连续 " + connectionFailures + " 次连接级失败（handshake / EOF / connection reset），已停止重试；进度和对话已保存，可继续执行。");
                 }
                 RetryBudget.Decision decision = retryBudget.afterFailure(reason);
                 if (!decision.retry()) {

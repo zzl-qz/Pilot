@@ -37,7 +37,7 @@ jobs:
           node-version: "22"
 
       - name: Source bootstrap boundary tests
-        run: node --test scripts/bootstrap.test.mjs scripts/frontend-deps.test.mjs scripts/quality-rules.test.mjs
+        run: node --test scripts/bootstrap.test.mjs scripts/frontend-deps.test.mjs scripts/quality-rules.test.mjs scripts/run-diagnostics.test.mjs
 
       # 规则目录是唯一事实源，生成的配置必须与它一致；不一致说明有人只改了一边。
       - name: Quality rules catalog in sync

@@ -90,6 +90,7 @@ import com.pilot.server.multi.MultiAgentService;
 import com.pilot.server.multi.SpawnAgentTool;
 import com.pilot.server.run.ExecutionMode;
 import com.pilot.server.run.ExecutionPhase;
+import com.pilot.server.run.EvidenceStatus;
 import com.pilot.server.run.ReviewMode;
 import com.pilot.server.run.RunRegistry;
 import com.pilot.server.run.RunStarter;
@@ -808,10 +809,11 @@ public class AgentRunService implements RunStarter {
         boolean continued = false;
         boolean resultCaptured = false;
         try {
+            BudgetProgress before = BudgetProgress.from(plans.load(sessionId), taskControls.load(sessionId));
             status = execute(sessionId, runId, input, attachments, imagePositions, handle, continuation);
             captureResult(sessionId, runId);
             resultCaptured = true;
-            continued = maybeAutoContinue(sessionId, runId, status, handle);
+            continued = maybeAutoContinue(sessionId, runId, status, handle, before);
         } catch (Throwable e) {
             log.error("Run {} 收尾失败", runId, e);
             taskControls.status(sessionId, TaskControlStatus.FAILED);
@@ -1054,10 +1056,11 @@ public class AgentRunService implements RunStarter {
      * 步数/预算触顶时接上下一轮。普通任务看计划有没有动；目标任务还没核验完就在同一会话里继续。
      *
      * <p>普通任务最多连续 8 次，计划连续两轮没变就停下。
-     * 预算触顶则按 8 个预算段继续，每段重新计数；
-     * 这是长任务的分段推进，不是任务失败。目标任务最多 32 轮。
+     * 普通任务预算触顶时，只有本段留下新进展才自动开下一段；用户仍可手动继续。
+     * 预算最多续 8 段，目标任务步数触顶最多续 32 轮。
      */
-    private boolean maybeAutoContinue(String sessionId, String finishedRunId, String status, RunHandle handle) {
+    private boolean maybeAutoContinue(String sessionId, String finishedRunId, String status, RunHandle handle,
+        BudgetProgress before) {
         boolean budgetLimited = RunFailureCode.BUDGET_LIMITED.is(status);
         if (!RunFailureCode.MAX_STEPS.is(status) && !budgetLimited || handle.cancelled.get()
             || runStates != null && runStates.leaseLost(finishedRunId)) {
@@ -1074,17 +1077,11 @@ public class AgentRunService implements RunStarter {
         }
         TaskControlService.TaskContract current = taskControls.load(sessionId);
         int segments = current == null || current.execution() == null ? 0 : current.execution().budgetSegments();
-        if (budgetLimited && segments >= MAX_BUDGET_SEGMENTS) {
-            autoContinueAttempts.remove(sessionId);
-            autoContinueSignature.remove(sessionId);
-            return false;
-        }
-
         String signature = items.stream().map(item -> item.step() + "=" + item.status())
             .collect(java.util.stream.Collectors.joining("|"));
-        // 预算触顶不等于原地打转：模型可能已经推进了很多步，只是到了分段上限。
-        if (!goalOpen && !budgetLimited && signature.equals(autoContinueSignature.get(sessionId))) {
-            // 普通任务的计划两轮没变，说明模型在原地打转。目标任务以核验阶段为准，计划暂时不动也继续。
+        if (!goalOpen && (budgetLimited ? !BudgetProgress.from(items, current).advancedFrom(before)
+            : signature.equals(autoContinueSignature.get(sessionId)))) {
+            log.info("运行 {} 没有新增进展，停止自动续跑", finishedRunId);
             autoContinueAttempts.remove(sessionId);
             autoContinueSignature.remove(sessionId);
             return false;
@@ -1093,6 +1090,7 @@ public class AgentRunService implements RunStarter {
         int attempt = budgetLimited ? segments + 1 : autoContinueAttempts.merge(sessionId, 1, Integer::sum);
         if (attempt > cap) {
             autoContinueAttempts.remove(sessionId);
+            autoContinueSignature.remove(sessionId);
             return false;
         }
 
@@ -1104,6 +1102,26 @@ public class AgentRunService implements RunStarter {
         publish(sessionId, runId, new RunContinued(attempt, cap, reason));
         launch(sessionId, runId, null, List.of(), true);
         return true;
+    }
+
+    private record BudgetProgress(Set<String> completedSteps, Set<String> changedPaths, Set<List<String>> checks) {
+        static BudgetProgress from(List<PlanItem> plan, TaskControlService.TaskContract task) {
+            Set<String> done = plan.stream().filter(PlanItem::done).map(PlanItem::step).collect(Collectors.toSet());
+            TaskControlService.Execution execution = task == null ? null : task.execution();
+            if (execution == null) return new BudgetProgress(done, Set.of(), Set.of());
+            // 同一个检查对同一份源码得到同样的结果，即使重跑时间、任务 ID 不同，也不算新证据。
+            Set<List<String>> checks = GoalEvidence.latestChecks(execution.evidence()).entrySet().stream()
+                .filter(entry -> WireEnum.in(entry.getValue().status(), EvidenceStatus.SUCCESS,
+                    EvidenceStatus.PERMANENT_FAILURE))
+                .map(entry -> List.of(entry.getKey(), entry.getValue().endVersion(), entry.getValue().status()))
+                .collect(Collectors.toSet());
+            return new BudgetProgress(done, Set.copyOf(execution.changedPaths()), checks);
+        }
+
+        boolean advancedFrom(BudgetProgress before) {
+            return !before.completedSteps.containsAll(completedSteps) || !before.changedPaths.containsAll(changedPaths)
+                || !before.checks.containsAll(checks);
+        }
     }
 
     /** 目标模式且还没核验通过、也不是在等用户时，步数用完不应结束整个任务。 */

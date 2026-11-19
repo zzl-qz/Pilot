@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
 import java.time.Instant;
 import java.util.List;
@@ -396,6 +397,71 @@ class RunSnapshotServiceTest {
         RunSnapshotService.RollbackReport rollback = snapshots.rollback("status_run");
         assertTrue(rollback.failed().isEmpty());
         assertEquals("before", Files.readString(file));
+    }
+
+    /** 单个文件被占用/无权限时只跳过它，其余文件照常进入基线，且结果里说明这些文件没被追踪。 */
+    @Test
+    void unreadableFileIsSkippedWithoutLosingTheRestOfTheBaseline() throws IOException {
+        Path locked = workspace.resolve("data/app.db");
+        Path tracked = workspace.resolve("src/App.java");
+        Files.createDirectories(locked.getParent());
+        Files.writeString(locked, "db-v1");
+        Files.createDirectories(tracked.getParent());
+        Files.writeString(tracked, "class App { }\n");
+        RunSnapshotService lockedService = new RunSnapshotService(JsonMapper.builder().build(), storage) {
+            @Override
+            CommandFile recordCommandFile(Path file, BasicFileAttributes attributes, Path backupTarget,
+                long[] backedUpBytes) throws IOException {
+                if (file.getFileName().toString().equals("app.db")) {
+                    throw new IOException("另一个程序已锁定文件的一部分，进程无法访问。");
+                }
+                return super.recordCommandFile(file, attributes, backupTarget, backedUpBytes);
+            }
+        };
+
+        lockedService.bind("run_locked", workspace);
+        CommandChangeTracker.Handle handle = lockedService.begin(workspace);
+        Files.writeString(tracked, "class App { int value; }\n");
+        Files.writeString(locked, "db-v2");
+        CommandChangeTracker.Result result = lockedService.finish(handle);
+        lockedService.finish();
+        lockedService.clear();
+
+        assertTrue(result.complete(), result.warning());
+        assertEquals(List.of("src/App.java"), result.changedPaths());
+        assertEquals(List.of("M"),
+            lockedService.changes("run_locked").files().stream().map(ChangeService.RunFileChange::status).toList());
+        assertTrue(result.warning().contains("data/app.db"), result.warning());
+        assertTrue(result.warning().contains("没有进入命令前文件基线"), result.warning());
+        assertTrue(result.warning().contains("不能据此认为它们没有改动"), result.warning());
+        assertFalse(result.warning().contains("未能建立命令前文件基线"), result.warning());
+
+        RunSnapshotService.RollbackReport rollback = lockedService.rollback("run_locked");
+        assertTrue(rollback.failed().isEmpty(), rollback.failed().toString());
+        assertEquals("class App { }\n", Files.readString(tracked));
+    }
+
+    @Test
+    void comparesDegradedBaselineWithoutReportingUnchangedFiles() throws IOException {
+        Path unchanged = Files.writeString(workspace.resolve("unchanged.txt"), "before");
+        Path modified = Files.writeString(workspace.resolve("modified.txt"), "before");
+        Path deleted = Files.writeString(workspace.resolve("deleted.txt"), "before");
+        snapshots.bind("run_degraded", workspace);
+        CommandChangeTracker.Handle handle = snapshots.begin(workspace, 0);
+
+        Files.writeString(modified, "larger after");
+        Files.delete(deleted);
+        Files.writeString(workspace.resolve("created.txt"), "new");
+        CommandChangeTracker.Result result = snapshots.finish(handle);
+        snapshots.finish();
+        snapshots.clear();
+
+        assertTrue(result.complete(), result.warning());
+        assertEquals(List.of("created.txt", "deleted.txt", "modified.txt"), result.changedPaths());
+        assertTrue(result.warning().contains("3 个文件仅按大小和修改时间"), result.warning());
+        assertEquals("before", Files.readString(unchanged));
+        assertTrue(snapshots.rollback("run_degraded").failed().contains("modified.txt"),
+            "降级基线没有原始字节，不能用于恢复已修改文件");
     }
 
     private void change(String runId, Path file, String content) throws IOException {

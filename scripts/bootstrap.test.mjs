@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, mkdir, readFile, writeFile, cp, chmod, rm, readdir} from 'node:fs/promises';
+import {mkdtemp, mkdir, readFile, writeFile, cp, chmod, rm, readdir, realpath} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -24,6 +24,8 @@ async function fixture(){
  await mkdir(resolve(source,'..'),{recursive:true});
  await writeFile(source,'public class SourceEnvironment { public static void main(String[] args) throws Exception { java.nio.file.Files.write(java.nio.file.Path.of(System.getenv("PILOT_TEST_CAPTURE")), java.util.List.of(args)); } }');
  const env={...process.env,JAVA_HOME:javaHome||'',PILOT_BOOTSTRAP_DIR:join(directory,'cache'),PILOT_TEST_CAPTURE:join(directory,'capture.txt'),PILOT_OFFLINE:'true',PILOT_FORCE_MANAGED_JAVA:'false',PILOT_START_CHECK_ONLY:'true'};
+ // Windows PowerShell 不应加载父进程 PowerShell 7 的同名模块。
+ if(windows)for(const key of Object.keys(env))if(key.toLowerCase()==='psmodulepath')delete env[key];
  return {directory,env,close:()=>rm(directory,{recursive:true,force:true})};
 }
 function run(command,args,env,cwd){return spawnSync(command,args,{env,cwd,encoding:'utf8',timeout:30000,windowsHide:true});}
@@ -63,14 +65,15 @@ test('Windows 启动逻辑模拟：版本信息在 stderr 时仍能选择 JDK �
   const value='--pilot.data.dir=中文 path & 100%';
   const result=run(powershell,['-NoProfile','-ExecutionPolicy','Bypass','-File',join(f.directory,'scripts/start.ps1'),value],f.env,f.directory);
   assert.equal(result.status,0,detail(result));
-  assert.deepEqual((await readFile(f.env.PILOT_TEST_CAPTURE,'utf8')).trim().split(/\r?\n/),['prepare',f.directory,value]);
+  const [mode,workspace,argument]=(await readFile(f.env.PILOT_TEST_CAPTURE,'utf8')).trim().split(/\r?\n/);
+  assert.deepEqual([mode,await realpath(workspace),argument],['prepare',await realpath(f.directory),value]);
  }finally{await f.close();}
 });
 test('Windows 下载校验失败不会执行包或发布安装目录',{skip:!hasPowerShell},async()=>{
  const f=await fixture();try{
   f.env.PILOT_OFFLINE='false';f.env.PILOT_FORCE_MANAGED_JAVA='true';
   const wrapper=join(f.directory,'bad-download.ps1');
-  await writeFile(wrapper,`function Invoke-WebRequest {param($Uri,$OutFile,$UseBasicParsing,$TimeoutSec,$Proxy) [IO.File]::WriteAllText($OutFile,'tampered')}; & ${quote(join(f.directory,'scripts/start.ps1'))}`);
+  await writeFile(wrapper,`$ErrorActionPreference='Stop'; function Invoke-WebRequest {param($Uri,$OutFile,$UseBasicParsing,$TimeoutSec,$Proxy) [IO.File]::WriteAllText($OutFile,'tampered')}; & (Join-Path $PSScriptRoot 'scripts/start.ps1')`);
   const result=run(powershell,['-NoProfile','-ExecutionPolicy','Bypass','-File',wrapper],f.env,f.directory);
   assert.notEqual(result.status,0);assert.match(detail(result),/checksum failed/i);
   const entries=await readdir(f.env.PILOT_BOOTSTRAP_DIR);assert.equal(entries.some(name=>name.startsWith('jdk25-')||name.startsWith('.jdk25-')),false);
@@ -81,7 +84,7 @@ for(const invalid of ['NotTrusted','wrongPublisher'])test(`微软安装器校验
   const marker=join(f.directory,'should-not-install');
   const signature=invalid==='NotTrusted'?"Status='NotTrusted';SignerCertificate=@{Subject='O=Microsoft Corporation'}":"Status='Valid';SignerCertificate=@{Subject='O=Microsoft Corporation Evil'}";
   const script=`function Get-AuthenticodeSignature {param($FilePath) [pscustomobject]@{${signature}}}; function Start-Process {[IO.File]::WriteAllText(${quote(marker)},'unexpected')}; & ${quote(join(root,'pilot-core/src/main/resources/bootstrap/install-vcredist.ps1'))} -Installer 'fixture.exe'`;
-  const result=run(powershell,['-NoProfile','-Command',script],f.env,f.directory);
+  const result=run(powershell,['-NoProfile','-ExecutionPolicy','Bypass','-Command',script],f.env,f.directory);
   assert.notEqual(result.status,0);await assert.rejects(readFile(marker));
  }finally{await f.close();}
 });
@@ -89,9 +92,9 @@ test('微软安装流程模拟：可信签名、无自动重启、授权拒绝�
  const f=await fixture();try{
   const marker=join(f.directory,'installer-args');
   const script=`function Get-AuthenticodeSignature {param($FilePath) [pscustomobject]@{Status='Valid';SignerCertificate=@{Subject='CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond'}}}; function Start-Process {param($FilePath,$ArgumentList,[switch]$PassThru,[switch]$Wait) [IO.File]::WriteAllLines(${quote(marker)},$ArgumentList); [pscustomobject]@{ExitCode=0}}; & ${quote(join(root,'pilot-core/src/main/resources/bootstrap/install-vcredist.ps1'))} -Installer 'fixture.exe'`;
-  let result=run(powershell,['-NoProfile','-Command',script],f.env,f.directory);assert.equal(result.status,0,detail(result));
+  let result=run(powershell,['-NoProfile','-ExecutionPolicy','Bypass','-Command',script],f.env,f.directory);assert.equal(result.status,0,detail(result));
   assert.deepEqual((await readFile(marker,'utf8')).trim().split(/\r?\n/),['/install','/passive','/norestart']);
-  result=run(powershell,['-NoProfile','-Command',script.replace('[pscustomobject]@{ExitCode=0}',"throw 'UAC cancelled'")],f.env,f.directory);
+  result=run(powershell,['-NoProfile','-ExecutionPolicy','Bypass','-Command',script.replace('[pscustomobject]@{ExitCode=0}',"throw 'UAC cancelled'")],f.env,f.directory);
   assert.notEqual(result.status,0);assert.match(detail(result),/not completed/i);
  }finally{await f.close();}
 });

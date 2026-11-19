@@ -54,6 +54,32 @@ class RunCommandToolTest {
     }
 
     @Test
+    void missingUnixFileCommandPointsAtFileTools() {
+        String text = RunCommandTool.launchFailureText(
+            "ERROR: 无法启动命令 ls：Cannot run program \"ls\": CreateProcess error=2", 1);
+
+        assertTrue(text.contains("list_dir / read_file / search_text"), text);
+        assertFalse(text.contains("不要原样重试"), "第一次不该升级成「不要重试」: " + text);
+    }
+
+    @Test
+    void secondMissingUnixFileCommandAsksToStopRetrying() {
+        String text = RunCommandTool.launchFailureText(
+            "ERROR: 无法启动命令 cat：Cannot run program \"cat\": CreateProcess error=2", 2);
+
+        assertTrue(text.contains("不要原样重试"), text);
+        assertTrue(text.contains("PowerShell 等价命令"), text);
+    }
+
+    @Test
+    void onlyMissingUnixFileCommandsCountAsCorrectable() {
+        assertTrue(RunCommandTool.missingFileCommand("ls",
+            "Cannot run program \"ls\" (in directory \"E:\\work\"): CreateProcess error=2, 系统找不到指定的文件。"));
+        assertFalse(RunCommandTool.missingFileCommand("mvn", "Cannot run program \"mvn\": CreateProcess error=2"));
+        assertFalse(RunCommandTool.missingFileCommand("cat", "Not a directory"));
+    }
+
+    @Test
     void pathCommandIsNotRejectedForItsName() {
         Assumptions.assumeFalse(System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win"));
         RunCommandTool tool = tool();
@@ -77,6 +103,37 @@ class RunCommandToolTest {
 
         String outside = tool.execute(Map.of("command", "echo ok && rm -rf /"));
         assertTrue(outside.startsWith("ERROR: ") && outside.contains("工作区外"), outside);
+    }
+
+    /** 不依赖本机装没装 PowerShell 7：安装与否，&& / || 都必须按语义短路。 */
+    @Test
+    void chainOperatorsKeepTheirMeaningAndNativeExitCode() {
+        RunCommandTool tool = tool();
+        String failure = "node -e \"process.exit(4)\"";
+
+        String stopped = tool.execute(Map.of("command", failure + " && " + marker("skipped.txt")));
+        assertTrue(stopped.contains("退出码: 4"), stopped);
+        assertFalse(Files.exists(workspace.resolve("skipped.txt")), stopped);
+
+        String recovered = tool.execute(Map.of("command", failure + " || " + marker("recovered.txt")));
+        assertTrue(recovered.contains("退出码: 0"), recovered);
+        assertTrue(Files.exists(workspace.resolve("recovered.txt")), recovered);
+
+        String proceeded = tool.execute(Map.of("command", "node -v && " + marker("proceeded.txt")));
+        assertTrue(proceeded.contains("退出码: 0"), proceeded);
+        assertTrue(Files.exists(workspace.resolve("proceeded.txt")), proceeded);
+
+        // 左结合：a 失败时 a && b 被跳过、|| c 仍要执行
+        String fallback = tool.execute(
+            Map.of("command", failure + " && " + marker("never.txt") + " || " + marker("fallback.txt")));
+        assertTrue(fallback.contains("退出码: 0"), fallback);
+        assertFalse(Files.exists(workspace.resolve("never.txt")), fallback);
+        assertTrue(Files.exists(workspace.resolve("fallback.txt")), fallback);
+    }
+
+    /** 用 node 写标记文件，避免依赖本机有没有 Unix 的 touch。 */
+    private static String marker(String name) {
+        return "node -e \"require('fs').writeFileSync('" + name + "','x')\"";
     }
 
     @Test

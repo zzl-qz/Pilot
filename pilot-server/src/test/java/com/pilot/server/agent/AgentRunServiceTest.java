@@ -26,6 +26,8 @@ import java.util.function.Supplier;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.event.AssistantDelta;
@@ -849,6 +851,37 @@ class AgentRunServiceTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void directBudgetContinuesOnlyAfterMakingProgress(boolean completesStep) throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        Fixture[] current = new Fixture[1];
+        ModelClient model = (messages, tools) -> {
+            if (tools.isEmpty() && messages.getLast().content().startsWith("[系统收尾要求]")) {
+                return new ModelResponse("进度已保存", List.of());
+            }
+            if (calls.getAndIncrement() == 0 && completesStep) {
+                current[0].plans.save(current[0].sessionId, List.of(new PlanItem("第一步", PlanItem.COMPLETED),
+                    new PlanItem("仍未完成", PlanItem.PENDING)));
+            }
+            return readFile();
+        };
+        try (Fixture fixture = new Fixture(model, 12, true, 1, PermissionMode.READ_ONLY, 4)) {
+            current[0] = fixture;
+            fixture.plans.save(fixture.sessionId, List.of(new PlanItem("第一步", PlanItem.PENDING),
+                new PlanItem("仍未完成", PlanItem.PENDING)));
+            fixture.start();
+            fixture.awaitFinished("BUDGET_LIMITED");
+            if (completesStep) fixture.awaitFinished("BUDGET_LIMITED");
+
+            assertEquals(completesStep ? 8 : 4, calls.get());
+            assertEquals(completesStep ? 1 : 0, fixture.sessions.events(fixture.sessionId).stream()
+                .filter(event -> event.payload() instanceof RunContinued continued
+                    && continued.reason().startsWith("预算分段继续"))
+                .count());
+        }
+    }
+
     @Test
     void keepsQueueWhenUserCancelsTask() throws Exception {
         CountDownLatch entered = new CountDownLatch(1);
@@ -948,8 +981,14 @@ class AgentRunServiceTest {
         }
 
         Fixture(ModelClient model, int maxSteps, boolean goals, int runThreads, PermissionMode mode) {
+            this(model, maxSteps, goals, runThreads, mode, null);
+        }
+
+        Fixture(ModelClient model, int maxSteps, boolean goals, int runThreads, PermissionMode mode,
+            Integer directMaxRequests) {
             AgentProperties properties = new AgentProperties(workspace.toString(), mode, maxSteps, 3, 5, 300,
-                runThreads, 0, 60_000, false, goals, null, null, null, null, null, null, null, null, null, null);
+                runThreads, 0, 60_000, false, goals, directMaxRequests, null, null, null, null, null, null, null, null,
+                null);
             JsonMapper mapper = JsonMapper.builder().build();
             PilotDataDir dataDir = new PilotDataDir(dataRoot.toString());
             commandTasks = new com.pilot.core.tool.command.CommandTaskManager(dataDir.file("commands"), mapper);

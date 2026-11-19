@@ -59,7 +59,10 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
     private static final int MAX_COMMAND_FILES = 100_000;
     private static final long MAX_COMMAND_HASH_BYTES = 64L * 1024 * 1024;
     private static final long MAX_COMMAND_BACKUP_BYTES = 128L * 1024 * 1024;
-    /** 命令前基线是 best-effort：超过这个时间就降级，不能把整条命令拖死。 */
+    /**
+     * 命令前基线是 best-effort：超过这个时间就降级为“大小+修改时间”指纹，
+     * 不能再把整个基线（连带本轮所有改动）弄没。
+     */
     private static final long COMMAND_BASELINE_BUDGET_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
     private static final Set<String> COMMAND_IGNORED_DIRECTORIES =
         Set.of(".git", ".pilot", ".gradle", ".idea", ".vscode", ".next", ".nuxt", ".turbo", ".cache", "coverage",
@@ -200,6 +203,10 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
 
     @Override
     public synchronized CommandChangeTracker.Handle begin(Path workspace) {
+        return begin(workspace, COMMAND_BASELINE_BUDGET_NANOS);
+    }
+
+    synchronized CommandChangeTracker.Handle begin(Path workspace, long budgetNanos) {
         Context context = current.get();
         if (context == null) {
             return CommandChangeTracker.Handle.none();
@@ -215,8 +222,8 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         Path directory = commandTrackingDirectory(context.runId, id);
         try {
             Files.createDirectories(directory);
-            long deadline = System.nanoTime() + COMMAND_BASELINE_BUDGET_NANOS;
-            CommandBaseline baseline = commandInventory(normalized, directory.resolve("files"), true, deadline);
+            long deadline = System.nanoTime() + budgetNanos;
+            CommandBaseline baseline = commandInventory(normalized, directory.resolve("files"), deadline, Map.of());
             Files.writeString(directory.resolve("baseline.json"), mapper.writeValueAsString(baseline));
             return new CommandChangeTracker.Handle(context.runId, id);
         } catch (IOException | RuntimeException e) {
@@ -270,9 +277,12 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         try {
             CommandBaseline baseline = mapper.readValue(Files.readString(baselineFile), CommandBaseline.class);
             Path workspace = Path.of(baseline.workspace()).toAbsolutePath().normalize();
-            CommandBaseline after = commandInventory(workspace, null, false, 0);
+            CommandBaseline after = commandInventory(workspace, null, 0, baseline.files());
+            Set<String> untracked = new LinkedHashSet<>(baseline.skipped());
+            untracked.addAll(after.skipped());
             Set<String> names = new LinkedHashSet<>(baseline.files().keySet());
             names.addAll(after.files().keySet());
+            names.removeAll(untracked);
             List<String> changed = names.stream()
                 .filter(name -> !Objects.equals(
                     baseline.files().get(name) == null ? null : baseline.files().get(name).hash(),
@@ -291,7 +301,13 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
                 externalChange(workspace.resolve(name),
                     new SnapshotSink.FileSnapshot(before != null, content, before == null ? "" : before.hash()));
             }
-            CommandChangeTracker.Result result = new CommandChangeTracker.Result(changed, true, "");
+            String warning = skippedWarning(untracked);
+            long metadataOnlyFiles = baseline.files().values().stream().filter(CommandFile::metadataOnly).count();
+            if (metadataOnlyFiles > 0) {
+                if (!warning.isBlank()) warning += "；";
+                warning += metadataOnlyFiles + " 个文件仅按大小和修改时间检测变化，未保存原内容，可能漏报同大小、同修改时间的改动。";
+            }
+            CommandChangeTracker.Result result = new CommandChangeTracker.Result(changed, true, warning);
             Files.writeString(resultFile, mapper.writeValueAsString(result));
             return result;
         } catch (IOException | RuntimeException e) {
@@ -305,11 +321,13 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         }
     }
 
-    private CommandBaseline commandInventory(Path workspace, Path backupRoot, boolean backup, long deadlineNanos)
-        throws IOException {
+    private CommandBaseline commandInventory(Path workspace, Path backupRoot, long deadlineNanos,
+        Map<String, CommandFile> beforeFiles) throws IOException {
         LinkedHashMap<String, CommandFile> files = new LinkedHashMap<>();
+        LinkedHashSet<String> skipped = new LinkedHashSet<>();
         int[] count = {0};
         long[] backedUpBytes = {0L};
+        boolean[] degraded = {false};
         Files.walkFileTree(workspace, new SimpleFileVisitor<>() {
             @Override
             public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes) {
@@ -326,32 +344,72 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
                 if (!attributes.isRegularFile() || Files.isSymbolicLink(file)) {
                     return FileVisitResult.CONTINUE;
                 }
-                if (deadlineNanos > 0 && (++count[0] & 0x7F) == 0 && System.nanoTime() > deadlineNanos) {
-                    throw new IOException("命令前基线超过时间预算，已降级");
-                }
+                count[0]++;
                 if (count[0] > MAX_COMMAND_FILES) {
                     throw new IOException("工作区可跟踪文件超过上限 " + MAX_COMMAND_FILES);
                 }
                 String relative = workspace.relativize(file).toString().replace('\\', '/');
-                long size = attributes.size();
-                String hash = size <= MAX_COMMAND_HASH_BYTES ? hashIfRegularFile(file)
-                    : "large:" + size + ":" + attributes.lastModifiedTime().toMillis();
-                boolean copied = false;
-                if (backup && size <= MAX_SNAPSHOT_BYTES && backedUpBytes[0] + size <= MAX_COMMAND_BACKUP_BYTES) {
-                    Path target = backupRoot.resolve(relative).normalize();
-                    if (!target.startsWith(backupRoot.normalize())) {
-                        throw new IOException("非法命令基线路径");
-                    }
-                    Files.createDirectories(target.getParent());
-                    Files.copy(file, target, StandardCopyOption.REPLACE_EXISTING);
-                    backedUpBytes[0] += size;
-                    copied = true;
+                if (!degraded[0] && backupRoot != null && ((count[0] - 1) & 0x1F) == 0
+                    && System.nanoTime() - deadlineNanos >= 0) {
+                    // 超时后不再读内容：改用大小+修改时间指纹，基线仍然完整，只是精度降低。
+                    degraded[0] = true;
                 }
-                files.put(relative, new CommandFile(hash, copied));
+                CommandFile before = beforeFiles.get(relative);
+                // 降级过的路径在命令后也要用元数据；异种指纹比较会把未改动的文件判成改动。
+                if (degraded[0] || (before != null && before.metadataOnly())) {
+                    files.put(relative, new CommandFile("stat:" + attributes.size() + ":"
+                        + attributes.lastModifiedTime().toMillis(), false));
+                    return FileVisitResult.CONTINUE;
+                }
+                Path target = backupRoot == null ? null : backupRoot.resolve(relative).normalize();
+                if (target != null && !target.startsWith(backupRoot.normalize())) {
+                    throw new IOException("非法命令基线路径");
+                }
+                try {
+                    files.put(relative, recordCommandFile(file, attributes, target, backedUpBytes));
+                } catch (IOException e) {
+                    // 被占用、无权限或临时消失的文件不能拖垮整份基线：跳过它，由 finish 明确报告。
+                    skipped.add(relative);
+                }
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFileFailed(Path file, IOException error) throws IOException {
+                if (workspace.equals(file)) throw error;
+                skipped.add(workspace.relativize(file).toString().replace('\\', '/'));
                 return FileVisitResult.CONTINUE;
             }
         });
-        return new CommandBaseline(workspace.toString(), Map.copyOf(files));
+        return new CommandBaseline(workspace.toString(), Map.copyOf(files), List.copyOf(skipped));
+    }
+
+    /** 读取单个文件的基线指纹与备份；读不了就抛 IOException，由调用方跳过而不是放弃整份基线。 */
+    CommandFile recordCommandFile(Path file, BasicFileAttributes attributes, Path backupTarget, long[] backedUpBytes)
+        throws IOException {
+        long size = attributes.size();
+        String hash = size <= MAX_COMMAND_HASH_BYTES ? hashIfRegularFile(file)
+            : "large:" + size + ":" + attributes.lastModifiedTime().toMillis();
+        boolean copied = false;
+        if (backupTarget != null && size <= MAX_SNAPSHOT_BYTES && backedUpBytes[0] + size <= MAX_COMMAND_BACKUP_BYTES) {
+            Files.createDirectories(backupTarget.getParent());
+            Files.copy(file, backupTarget, StandardCopyOption.REPLACE_EXISTING);
+            backedUpBytes[0] += size;
+            copied = true;
+        }
+        return new CommandFile(hash, copied);
+    }
+
+    /** 读不了的文件既不能被当成“没有改动”，也不该让整份基线失败；单独说明它们没进追踪。 */
+    private static String skippedWarning(Set<String> untracked) {
+        if (untracked.isEmpty()) {
+            return "";
+        }
+        List<String> names = untracked.stream().sorted().toList();
+        String sample = String.join("、", names.subList(0, Math.min(5, names.size())));
+        return untracked.size() + " 个文件读不了（被占用、无权限或临时消失），没有进入命令前文件基线，"
+            + "这些文件的改动不在本轮差异/回滚追踪内，不能据此认为它们没有改动：" + sample
+            + (names.size() > 5 ? " 等" : "");
     }
 
     private Path commandTrackingDirectory(String runId, String id) {
@@ -361,13 +419,17 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         return root.resolve(sanitize(runId)).resolve("commands").resolve(id).normalize();
     }
 
-    private record CommandBaseline(String workspace, Map<String, CommandFile> files) {
-        private CommandBaseline {
+    record CommandBaseline(String workspace, Map<String, CommandFile> files, List<String> skipped) {
+        CommandBaseline {
             files = files == null ? Map.of() : Map.copyOf(files);
+            skipped = skipped == null ? List.of() : List.copyOf(skipped);
         }
     }
 
-    private record CommandFile(String hash, boolean backedUp) {
+    record CommandFile(String hash, boolean backedUp) {
+        boolean metadataOnly() {
+            return hash != null && hash.startsWith("stat:");
+        }
     }
 
     /**

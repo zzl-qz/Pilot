@@ -86,6 +86,8 @@ public final class CommandStatusTool implements Tool, ProducesCheck {
             }
             if (!result.complete()) {
                 rendered = ToolResults.CHANGE_TRACKING_INCOMPLETE + "；不得据此宣称验证通过：" + result.warning() + "\n" + rendered;
+            } else if (!result.warning().isBlank()) {
+                rendered = rendered + "\n\n" + ToolResults.CHANGE_TRACKING_PARTIAL + "（" + result.warning() + "）";
             }
             return new ToolResult(rendered, result.changedPaths(), List.of());
         } catch (InterruptedException e) {

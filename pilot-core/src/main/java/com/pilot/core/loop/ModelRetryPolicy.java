@@ -26,7 +26,11 @@ public final class ModelRetryPolicy {
     public static final long RETRY_DELAY_MS = 1_000L;
     /** 单次退避上限，避免长故障时等待过久。 */
     public static final long MAX_RETRY_DELAY_MS = 30_000L;
+    /** 同一端点连续这么多次连接级失败就停止重试，不必等到退避预算耗尽。 */
+    public static final int CONNECTION_BREAKER_FAILURES = 3;
     private static final Pattern HTTP_STATUS = Pattern.compile("HTTP (\\d+)");
+    /** 连接级中断：握手失败、流被对端提前关闭、连接被重置。 */
+    private static final Pattern CONNECTION_LOST = Pattern.compile("(?i)handshake|eof|connection reset");
 
     private ModelRetryPolicy() {
     }
@@ -41,6 +45,16 @@ public final class ModelRetryPolicy {
     /** 这个错误值不值得重试。 */
     public static boolean isTransient(RuntimeException error) {
         return classify(error).retryable();
+    }
+
+    /**
+     * 是不是连接级中断（握手失败、EOF、连接被重置）。
+     *
+     * <p>这类失败通常是端点不可达或链路被掐断，重试同样的请求只会熬满退避预算，
+     * 所以单独计数，连续 {@link #CONNECTION_BREAKER_FAILURES} 次就熔断。
+     */
+    public static boolean connectionLost(String message) {
+        return message != null && CONNECTION_LOST.matcher(message).find();
     }
 
     /**
