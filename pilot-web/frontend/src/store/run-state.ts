@@ -138,7 +138,7 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
         return true;
       } catch (error) {
         if (get().sessionId === sessionId && get().sessionEpoch === sessionEpoch) {
-          get().showNotice('切换队列状态失败：' + errorInfo(error).message);
+          get().showNotice('切换队列状态失败：' + errorInfo(error).message + '。队列状态没有变，可以再试一次。');
         }
         return false;
       } finally {
@@ -208,7 +208,7 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
         return current();
       } catch (error) {
         if (current()) {
-          get().showNotice(failure + errorInfo(error).message);
+          get().showNotice(failure + errorInfo(error).message + '。队列没有变，可以再试一次。');
           await get().loadQueue();
         }
         return false;

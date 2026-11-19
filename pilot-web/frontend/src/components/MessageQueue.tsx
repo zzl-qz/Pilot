@@ -199,7 +199,7 @@ function QueueRow({ entry, index, count, lane, onDragStart, onDragEnd }: {
           });
         }}>移回排队</Button>}
         <Button label="改这条" variant="ghost" size="sm" isDisabled={busy} onClick={edit}>改这条</Button>
-        <Button className="queue-takeback" label="放回输入框" variant="ghost" size="sm"
+        <Button className="queue-takeback" label={takingBack ? '正在放回…' : '放回输入框'} variant="ghost" size="sm"
           isDisabled={busy || takingBack}
           onClick={() => void useStore.getState().takeBackQueueItem(index)} />
         <Button label="删除" variant="ghost" size="sm" isDisabled={busy} onClick={() => void useStore.getState().removeQueueItem(index).then(ok => {
