@@ -89,6 +89,8 @@ final class CompletionGate {
     private final boolean enabled;
     private final String goal;
     private final RefactorEvidenceGate evidenceGate;
+    /** 本轮开始前就已经失败、且之后没有变化的检查。 */
+    private Set<String> baselineChecks = Set.of();
     private final LintGate lintGate;
     private String projectConstraints = "";
     private int planPrompts;
@@ -267,7 +269,7 @@ final class CompletionGate {
                 }
             }
         }
-        boolean needsVerify = !hasPassingCheck(checks) || codeDirtySincePassingCheck;
+        boolean needsVerify = (!hasPassingCheck(checks) || codeDirtySincePassingCheck) && !sameAsBaseline(checks);
         if (changed && touchesCode(changedFiles) && needsVerify && verifyPrompts < MAX_VERIFY_PROMPTS) {
             verifyPrompts++;
             String checkDesc = checks.isEmpty() ? "（本轮没有跑过构建或测试）"
@@ -367,6 +369,14 @@ final class CompletionGate {
             return DOC_SUFFIXES.stream().noneMatch(lower::endsWith)
                 && ASSET_SUFFIXES.stream().noneMatch(lower::endsWith);
         });
+    }
+
+    void baseline(List<String> checks) {
+        baselineChecks = Set.copyOf(checks == null ? List.of() : checks);
+    }
+
+    private boolean sameAsBaseline(List<String> checks) {
+        return !baselineChecks.isEmpty() && baselineChecks.equals(Set.copyOf(checks));
     }
 
     private static boolean hasPassingCheck(List<String> checks) {

@@ -170,8 +170,9 @@ class AgentRunTaskControlTest {
             List<String> currentInput = userInputs(requests.get(1));
             assertTrue(currentInput.contains("立即改查服务端重启后的重连"));
             assertFalse(currentInput.contains("下一件事：整理文档"));
-            assertTrue(requests.get(1).getFirst().content().contains("只改重连逻辑"));
-            assertTrue(requests.get(1).getFirst().content().contains("立即改查服务端重启后的重连"));
+            // 目标/约束/纠正在独立的持久任务上下文消息里，不一定叠在第一条 system 提示上。
+            assertTrue(messagesContain(requests.get(1), "只改重连逻辑"));
+            assertTrue(messagesContain(requests.get(1), "立即改查服务端重启后的重连"));
             correctedRelease.countDown();
             f.finished("COMPLETED", "COMPLETED");
             List<EventEnvelope> events = f.sessions.events(f.id);
@@ -262,10 +263,9 @@ class AgentRunTaskControlTest {
             f.finished("AWAITING_REVIEW");
             assertEquals(original.taskId(), f.tasks.load(f.id).taskId());
             assertEquals("修复断线重连", f.tasks.load(f.id).originalGoal());
-            String resumeContext = requests.getLast().getFirst().content();
-            assertTrue(resumeContext.contains("修复断线重连"));
-            assertTrue(resumeContext.contains("不得修改数据库"));
-            assertTrue(resumeContext.contains("断线后重连测试通过"));
+            assertTrue(messagesContain(requests.getLast(), "修复断线重连"));
+            assertTrue(messagesContain(requests.getLast(), "不得修改数据库"));
+            assertTrue(messagesContain(requests.getLast(), "断线后重连测试通过"));
             assertEquals(List.of("下一件事"), f.service.queued(f.id));
             assertEquals(2, calls.get(), "未验收时不能自动开始下一件事");
             assertTrue(f.service.activeRun(f.id).isEmpty());
@@ -333,7 +333,7 @@ class AgentRunTaskControlTest {
             assertEquals("修复断线重连", task.originalGoal());
             assertEquals(original.corrections(), task.corrections());
             assertEquals(List.of("修复断线重连"), userInputs(requests.getLast()));
-            assertTrue(requests.getLast().getFirst().content().contains("优先检查服务端重启后的重连"));
+            assertTrue(messagesContain(requests.getLast(), "优先检查服务端重启后的重连"));
         }
     }
 
@@ -761,6 +761,11 @@ class AgentRunTaskControlTest {
         return messages.stream().filter(message -> "user".equals(message.role())).map(Message::content)
             .filter(content -> !content.startsWith("## 仓库现状"))
             .filter(content -> !content.contains("[Runtime task context]")).toList();
+    }
+
+    /** 持久任务上下文可能在任意一条消息里，不依赖「第一条就是全部约束」。 */
+    private static boolean messagesContain(List<Message> messages, String needle) {
+        return messages.stream().map(Message::content).anyMatch(content -> content.contains(needle));
     }
 
     private static ModelResponse done() {

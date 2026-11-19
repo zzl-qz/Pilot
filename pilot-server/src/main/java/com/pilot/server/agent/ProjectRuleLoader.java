@@ -39,13 +39,117 @@ final class ProjectRuleLoader {
             return "";
         }
         String text = preview.text().strip();
-        if (text.isEmpty()) {
+        String base = "";
+        if (!text.isEmpty()) {
+            if (preview.truncated()) {
+                text += "\n…（约定文件过长，已截断）";
+            }
+            base = prompts.render("system/project-rules", Map.of("source", file.toString(), "rules", text)).strip();
+        }
+        return join(base, scoped(workspace, List.of(), prompts, false));
+    }
+
+    /** 有 globs 的规则只在本次碰到匹配路径时返回。无 globs 的规则由 {@link #load} 放入基础约定。 */
+    static String scoped(Path workspace, List<String> touched, PromptLibrary prompts) {
+        return scoped(workspace, touched, prompts, true);
+    }
+
+    private static String scoped(Path workspace, List<String> touched, PromptLibrary prompts, boolean matchedOnly) {
+        Path dir = workspace.resolve(".pilot").resolve("rules");
+        if (!Files.isDirectory(dir)) {
             return "";
         }
-        if (preview.truncated()) {
-            text += "\n…（约定文件过长，已截断）";
+        StringBuilder out = new StringBuilder();
+        int total = 0;
+        try (var files = Files.list(dir)) {
+            for (Path file : files.filter(path -> path.getFileName().toString().endsWith(".md")).sorted().toList()) {
+                String content = readLimited(file, 4_000);
+                if (content.isEmpty()) {
+                    continue;
+                }
+                String globs = globs(content);
+                boolean matched = globs.isEmpty() ? !matchedOnly : matches(globs, touched);
+                if (!matched) {
+                    continue;
+                }
+                if (total >= 12_000) {
+                    out.append("\n…（规则总长度已截断）");
+                    break;
+                }
+                int room = Math.min(4_000, 12_000 - total);
+                String body = content.length() > room ? content.substring(0, room) + "\n…（规则文件过长，已截断）" : content;
+                out.append("\n\n").append(body);
+                total += body.length();
+            }
+        } catch (IOException ignored) {
+            return "";
         }
-        return prompts.render("system/project-rules", Map.of("source", file.toString(), "rules", text)).strip();
+        return out.toString().strip();
+    }
+
+    private static String join(String base, String extra) {
+        if (extra == null || extra.isBlank()) {
+            return base;
+        }
+        if (base == null || base.isBlank()) {
+            return extra;
+        }
+        return base + "\n\n" + extra;
+    }
+
+    private static String globs(String content) {
+        for (String line : content.split("\n", 4)) {
+            String stripped = line.strip();
+            if (stripped.startsWith("globs:")) {
+                return stripped.substring("globs:".length()).strip();
+            }
+        }
+        return "";
+    }
+
+    private static boolean matches(String globs, List<String> touched) {
+        if (touched == null || touched.isEmpty()) {
+            return false;
+        }
+        for (String glob : globs.split(",")) {
+            String pattern = glob.strip();
+            if (pattern.isEmpty()) {
+                continue;
+            }
+            String suffix = pattern.startsWith("*.") ? pattern.substring(1) : "";
+            String folder = pattern.replace("/**", "").replace("*", "");
+            for (String path : touched) {
+                String value = path.replace('\\', '/');
+                if (!suffix.isEmpty() && value.endsWith(suffix)) {
+                    return true;
+                }
+                if (!folder.isEmpty() && value.contains(folder)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static String readLimited(Path file, int limit) {
+        try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            char[] buffer = new char[limit + 1];
+            int length = 0;
+            while (length < buffer.length) {
+                int count = reader.read(buffer, length, buffer.length - length);
+                if (count < 0) {
+                    break;
+                }
+                length += count;
+            }
+            String content = new String(buffer, 0, Math.min(length, limit)).strip();
+            if (length > limit) {
+                content += "\n…（规则文件过长，已截断）";
+            }
+            return content;
+        } catch (IOException e) {
+            return "";
+        }
     }
 
     /**

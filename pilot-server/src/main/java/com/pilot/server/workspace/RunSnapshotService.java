@@ -62,10 +62,9 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
     /** 命令前基线是 best-effort：超过这个时间就降级，不能把整条命令拖死。 */
     private static final long COMMAND_BASELINE_BUDGET_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
     private static final Set<String> COMMAND_IGNORED_DIRECTORIES =
-        Set.of(".git", ".pilot", ".gradle", ".idea", ".vscode", ".next", ".nuxt", "node_modules", "target", "build",
-            "dist", "out", "coverage", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".venv", "venv",
-            // 高频变动的工具缓存/浏览器 profile：命令前基线不需要为它们付出失败风险。
-            ".analysis", ".cache", ".turbo", ".parcel-cache", ".pnpm-store", ".yarn", "profiles");
+        Set.of(".git", ".pilot", ".gradle", ".idea", ".vscode", ".next", ".nuxt", ".turbo", ".cache", "coverage",
+            "node_modules", "target", "build", "dist", "out", "__pycache__", ".pytest_cache", ".mypy_cache",
+            ".ruff_cache", ".venv", "venv", ".analysis", ".parcel-cache", ".pnpm-store", ".yarn", "profiles");
 
     private final ObjectMapper mapper;
     private final Path root;
