@@ -21,6 +21,12 @@ import com.pilot.core.mcp.McpManager;
 import com.pilot.core.mcp.McpToolsTool;
 import com.pilot.core.message.ToolNames;
 import com.pilot.core.plan.PlanSink;
+import com.pilot.core.tool.code.CodeDiagnosticsTool;
+import com.pilot.core.tool.code.CodeSymbolTool;
+import com.pilot.core.tool.code.LocalCodeChecker;
+import com.pilot.core.tool.AskUserTool;
+import com.pilot.core.tool.EnableToolsTool;
+import com.pilot.core.tool.QuestionBroker;
 import com.pilot.core.tool.ReadTracker;
 import com.pilot.core.tool.RememberTool;
 import com.pilot.core.tool.SandboxSink;
@@ -80,6 +86,7 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
     private McpManager mcp;
     private Selection execution;
     private ObjectProvider<AttachmentReferences> attachmentReferences;
+    private QuestionBroker questions;
 
     @Autowired(required = false)
     public void setExecution(Selection execution) {
@@ -98,6 +105,11 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
     @Autowired(required = false)
     public void setMcp(McpManager mcp) {
         this.mcp = mcp;
+    }
+
+    @Autowired(required = false)
+    public void setQuestions(QuestionBroker questions) {
+        this.questions = questions;
     }
 
     @Autowired(required = false)
@@ -241,6 +253,13 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
         if (planSink != null) {
             registry.register(new UpdatePlanTool(planSink));
         }
+        LocalCodeChecker code = LocalCodeChecker.installed(root);
+        registry.register(new CodeDiagnosticsTool(() -> code.available() ? "ready" : "", code::diagnose));
+        registry.register(new CodeSymbolTool(code::available, code::outline));
+        if (questions != null) {
+            registry.register(new AskUserTool(questions));
+        }
+        registry.register(new EnableToolsTool(registry));
         return registry;
     }
 

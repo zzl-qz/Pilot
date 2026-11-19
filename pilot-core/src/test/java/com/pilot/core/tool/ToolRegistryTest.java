@@ -93,6 +93,7 @@ class ToolRegistryTest {
         assertTrue(registry.names().isEmpty());
 
         state.set(Availability.ready());
+        registry.enable(List.of("browser"));
 
         assertEquals(Set.of("browser"), registry.names());
         assertTrue(registry.unavailable().isEmpty());

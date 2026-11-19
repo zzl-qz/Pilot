@@ -33,8 +33,26 @@ const TOOL_LABELS: Record<string, string> = {
   dispatch_agents: '派发',
   promote_goal: '提升目标',
   record_research: '记录调研',
-  wait_until: '等待'
+  wait_until: '等待',
+  ask_user: '提问',
+  code_diagnostics: '诊断',
+  code_symbol: '符号'
 };
+
+export function parseAsk(args: string) {
+  const text = String(args || '');
+  if (!text.startsWith('ASK\n')) return null;
+  const body = text.slice(4);
+  const split = body.indexOf('\n');
+  const question = split < 0 ? body : body.slice(0, split);
+  const options = (split < 0 ? '' : body.slice(split + 1)).split('\u001f').filter(Boolean);
+  return options.length >= 2 ? { question, options } : null;
+}
+
+export function questionChoice(option: string, custom: string) {
+  const typed = String(custom || '').trim();
+  return typed || String(option || '').trim();
+}
 
 const BROWSER_ACTIONS: Record<string, string> = {
   navigate: '打开',

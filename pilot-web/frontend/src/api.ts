@@ -180,6 +180,7 @@ export const api = {
   cancelRun: (runId: string) => apiJson<ApiResults['cancelRun']>(`/api/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' }),
   activeRun: (id: string) => apiJson<ApiResults['activeRun']>(`/api/sessions/${encodeURIComponent(id)}/runs/active`),
   approval: (callId: string, approved: boolean) => apiJson<ApiResults['approval']>(`/api/approvals/${encodeURIComponent(callId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ approved }) }),
+  answerQuestion: (id: string, callId: string, choice: string) => apiJson<ApiResults['answerQuestion']>(`/api/sessions/${encodeURIComponent(id)}/questions/${encodeURIComponent(callId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ choice }) }),
   history: (id: string, { limit, before, after }: { limit?: number; before?: number; after?: number } = {}) => {
     const params = new URLSearchParams();
     if (limit) params.set('limit', String(limit));

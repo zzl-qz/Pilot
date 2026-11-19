@@ -29,6 +29,7 @@ import com.pilot.core.hook.HookCommandTool;
 import com.pilot.core.hook.Hooks;
 import com.pilot.core.hook.Hooks.Result;
 import com.pilot.core.lint.LintGate;
+import com.pilot.core.lint.SiblingHints;
 import com.pilot.core.message.Attachment;
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.permission.PermissionDecision;
@@ -37,6 +38,7 @@ import com.pilot.core.permission.PermissionResult;
 import com.pilot.core.tool.Availability;
 import com.pilot.core.tool.ProducesCheck;
 import com.pilot.core.tool.Tool;
+import com.pilot.core.tool.ToolCallScope;
 import com.pilot.core.tool.ToolCallJournal;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.ToolResult;
@@ -102,6 +104,8 @@ public final class ToolExecutor {
     private volatile Hooks hooks;
     private volatile LintGate lintGate = LintGate.disabled();
     private volatile Path lintWorkspace;
+    /** 本轮写入提示：每个文件一次，超过上限就不再扫，避免反复对照把改写拖成循环。 */
+    private final SiblingHints siblingHints = new SiblingHints();
     private ExecutionBackends.Selection hookExecution;
 
     /** 写入成功后立刻跑仓库 lint，把修正指令贴进这次工具结果。 */
@@ -169,6 +173,7 @@ public final class ToolExecutor {
 
         ToolResult execution;
         AtomicBoolean invoked = new AtomicBoolean();
+        tools.enableIfDeferred(call.name());
         Optional<Tool> tool = tools.find(call.name());
         Availability availability = tool.map(ToolRegistry::available).orElse(Availability.ready());
         ToolCallJournal.Recorded replayed = null;
@@ -225,6 +230,8 @@ public final class ToolExecutor {
             if (!feedback.isBlank()) {
                 result = result + "\n\n" + feedback;
             }
+            // 名字对照不是失败，也不计入 lint 打回次数；空结果或已提示过则什么都不加。
+            result = result + siblingHints.note(lintWorkspace, changedPaths);
         }
         remember(call, replayed, result, changedPaths, checks);
 
@@ -442,6 +449,7 @@ public final class ToolExecutor {
     }
 
     private static ToolResult run(Tool tool, ToolCall call) {
+        ToolCallScope.bind(call.callId());
         try {
             Map<String, Object> args = call.args() == null ? Map.of() : call.args();
             ToolResult result = tool.executeResult(args);
@@ -449,6 +457,8 @@ public final class ToolExecutor {
         } catch (RuntimeException e) {
             String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
             return ToolResult.text("ERROR: 工具执行失败：" + reason);
+        } finally {
+            ToolCallScope.clear();
         }
     }
 
@@ -459,6 +469,12 @@ public final class ToolExecutor {
 
     private static String summarizeArgs(ToolCall call) {
         Map<String, Object> args = call.args() == null ? Map.of() : call.args();
+        if ("ask_user".equals(call.name())) {
+            Object options = args.get("options");
+            String joined = options instanceof List<?> list
+                ? list.stream().map(String::valueOf).collect(Collectors.joining("\u001f")) : "";
+            return "ASK\n" + args.getOrDefault("question", "") + "\n" + joined;
+        }
         for (String key : List.of("path", "pattern")) {
             Object value = args.get(key);
             if (value != null) {

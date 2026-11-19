@@ -80,6 +80,7 @@ export interface ApiResults {
   cancelRun: ActionResponse;
   activeRun: S.SessionControllerActiveRunResponse;
   approval: ActionResponse;
+  answerQuestion: { choice: string };
   history: HistoryPage;
   checkpoints: S.CheckpointControllerPreview;
   restoreCheckpoint: S.CheckpointControllerRestoreResponse;

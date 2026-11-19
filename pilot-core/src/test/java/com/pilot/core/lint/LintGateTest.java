@@ -252,6 +252,22 @@ class LintGateTest {
         assertTrue(assessment.needsFix());
     }
 
+    @Test
+    void skipsStaticBuildBundlesSoSelfHostingFrontendBuildNeverBlowsStack() throws Exception {
+        Files.createDirectories(root.resolve("pilot-web/src/main/resources/static/assets"));
+        String hugeMinifiedBundle = "var a=\"" + "x".repeat(120_000) + "\";";
+        Files.writeString(root.resolve("pilot-web/src/main/resources/static/assets/index-C56B2kUi.js"),
+            hugeMinifiedBundle);
+        assertFalse(SourceFiles.isProductionSource("pilot-web/src/main/resources/static/assets/index-C56B2kUi.js"));
+        assertFalse(
+            SourceFiles.isProductionSource("pilot-web/src/main/resources/static/assets/pdf.worker.min-CIqJB0yW.mjs"));
+        assertFalse(SourceFiles.isProductionSource("public/chunk-Ab12Cd34.js"));
+        assertTrue(SourceFiles.isProductionSource("pilot-web/frontend/src/components/App.tsx"));
+        LintGate gate = LintGate.enabled();
+        assertEquals("",
+            gate.feedbackAfterEdit(root, List.of("pilot-web/src/main/resources/static/assets/index-C56B2kUi.js")));
+    }
+
     private void writeSample() throws Exception {
         Files.createDirectories(root.resolve("src"));
         Files.writeString(root.resolve("package.json"), "{\"scripts\":{\"lint\":\"node lint.js\"}}");

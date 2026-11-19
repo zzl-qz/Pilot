@@ -22,7 +22,15 @@ import com.pilot.core.model.ToolDefinition;
  * 即「向模型声明的能力」以运行时实际握手结果为准，而不是以注册为准。
  */
 public final class ToolRegistry {
+    /**
+     * 低频工具不进每次请求的 schema。模型需要时调用 enable_tools，或直接点名，执行层会当场打开。
+     * 名字放在这里，复制到新注册表后仍然生效。
+     */
+    private static final Set<String> DEFERRED =
+        Set.of("office", "browser", "prepare_runtime", "local_resources", "publish_artifact", "dispatch_agents",
+            "mcp_tools", "mcp_call", "install_skill", "propose_skill", "code_diagnostics");
     private final ConcurrentMap<String, Tool> tools = new ConcurrentHashMap<>();
+    private final Set<String> enabled = ConcurrentHashMap.newKeySet();
 
     public void register(Tool tool) {
         Objects.requireNonNull(tool, "tool must not be null");
@@ -48,9 +56,42 @@ public final class ToolRegistry {
         return List.copyOf(result);
     }
 
-    /** 当前可用的工具。 */
+    /** 当前可用、并且已经向模型公开 schema 的工具。 */
     public List<Tool> availableTools() {
-        return tools().stream().filter(tool -> available(tool).available()).toList();
+        return tools().stream().filter(this::listed).toList();
+    }
+
+    /** 把延迟工具加入后续请求。未知名字忽略，避免模型打错一个名字就把整次调用变成失败。 */
+    public List<String> enable(List<String> names) {
+        ArrayList<String> opened = new ArrayList<>();
+        if (names == null) {
+            return List.of();
+        }
+        for (String name : names) {
+            if (name == null || name.isBlank() || !tools.containsKey(name.strip())) {
+                continue;
+            }
+            String key = name.strip();
+            if (DEFERRED.contains(key)) {
+                enabled.add(key);
+                opened.add(key);
+            }
+        }
+        return List.copyOf(opened);
+    }
+
+    /** 模型直接调用了还没公开的延迟工具时，当场打开，这一次调用照常执行。 */
+    public void enableIfDeferred(String name) {
+        if (name != null && DEFERRED.contains(name) && tools.containsKey(name)) {
+            enabled.add(name);
+        }
+    }
+
+    private boolean listed(Tool tool) {
+        if (!available(tool).available()) {
+            return false;
+        }
+        return !DEFERRED.contains(tool.name()) || enabled.contains(tool.name());
     }
 
     /** 已注册但当前不可用的工具及原因，供系统提示词和界面说明缺口。 */

@@ -18,7 +18,8 @@ final class ReuseScan {
     private static final int SHORT_WINDOW = 4;
     private static final int SHORT_TIMES = 3;
     private static final int LINE_TIMES = 4;
-    private static final Pattern STRING = Pattern.compile("\"(?:\\\\.|[^\"\\\\])*\"|'(?:\\\\.|[^'\\\\])*'");
+    private static final Pattern STRING =
+        Pattern.compile("\"(?:\\\\[\\s\\S]|[^\"\\\\])*+\"|'(?:\\\\[\\s\\S]|[^'\\\\])*+'");
     private static final Pattern NUMBER = Pattern.compile("(?<![\\w.])-?\\d+(?:\\.\\d+)?(?![\\w.])");
     private static final Pattern IDENT = Pattern.compile("\\b[A-Za-z_][A-Za-z0-9_]*\\b");
     private static final Set<String> KEEP = Set.of("if", "else", "for", "while", "return", "new", "null", "true",

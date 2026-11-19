@@ -2,6 +2,7 @@ package com.pilot.core.lint;
 
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 import com.pilot.core.util.FileNames;
 
@@ -13,7 +14,9 @@ public final class SourceFiles {
     private static final Set<String> CODE_EXTS = Set.of("java", "kt", "kts", "js", "jsx", "ts", "tsx", "mjs", "cjs",
         "py", "php", "go", "rs", "cs", "cpp", "cc", "c", "h", "swift");
     private static final Set<String> SKIPPED_DIRS = Set.of("test", "tests", "spec", "specs", "__tests__", "fixture",
-        "fixtures", "target", "build", "dist", "out", "node_modules", ".pilot");
+        "fixtures", "target", "build", "dist", "out", "node_modules", ".pilot", "static", "public", "assets");
+    /** Vite / Rollup / Webpack 产出的带内容哈希文件名（如 index-C56B2kUi.js、pdf.worker.min-CIqJB0yW.mjs）。 */
+    private static final Pattern HASHED_BUNDLE = Pattern.compile(".+-[A-Za-z0-9_-]{8}\\.(?:m?js|cjs)$");
 
     private SourceFiles() {
     }
@@ -24,7 +27,13 @@ public final class SourceFiles {
         }
         String norm = path.replace('\\', '/');
         String lower = norm.toLowerCase(Locale.ROOT);
-        if (lower.endsWith(".min.js") || lower.endsWith(".bundle.js") || lower.endsWith(".d.ts")) {
+        if (lower.endsWith(".min.js") || lower.endsWith(".min.mjs") || lower.endsWith(".bundle.js")
+            || lower.endsWith(".d.ts")) {
+            return false;
+        }
+        int slash = norm.lastIndexOf('/');
+        String fileName = slash < 0 ? norm : norm.substring(slash + 1);
+        if (HASHED_BUNDLE.matcher(fileName).matches()) {
             return false;
         }
         if (!CODE_EXTS.contains(FileNames.extension(norm))) {
