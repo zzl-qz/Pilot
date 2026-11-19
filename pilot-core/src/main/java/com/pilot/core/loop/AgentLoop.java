@@ -204,6 +204,8 @@ public final class AgentLoop {
     private static final long RETRY_SLICE_MS = 250L;
     /** 同一轮里允许因复读中止并重试的次数；第二次仍然复读说明不是偶发抖动。 */
     private static final int MAX_REPEAT_ABORTS = 2;
+    /** 同一地址连续这么多次快照都没有可点击元素，就停止验收，不再重开页面。 */
+    private static final int MAX_EMPTY_BROWSER_SNAPSHOTS = 3;
     private static final String REPEAT_GUIDANCE = "上一次回复陷入逐行重复（同一行连续出现多次），已中止。" + "请重新组织答案：不要重复相同句子或列表项，直接推进未完成的部分。";
 
     private final ModelClient client;
@@ -225,7 +227,9 @@ public final class AgentLoop {
     private CompletionGate completionGate;
     private String projectConstraints = "";
     private final List<String> touchedPaths = new ArrayList<>();
-    private java.util.function.Function<List<String>, String> scopedRules = paths -> "";
+    private int emptyBrowserSnapshots;
+    private int idleDedupRounds;
+    private Function<List<String>, String> scopedRules = paths -> "";
     private ExecutionPolicy executionPolicy;
     private Hooks hooks = Hooks.none();
 
@@ -677,6 +681,7 @@ public final class AgentLoop {
                     }
                 }
                 flushToolImages(messages);
+                stopIfObservationWentIdle(stepOutcomes);
                 if (!batchInterrupted) {
                     if (!awaitingDynamicObservation) {
                         List<String> observedResults = stepOutcomes.stream().map(ToolExecutor.Outcome::result).toList();
@@ -760,7 +765,8 @@ public final class AgentLoop {
         CompletionGate.Nudge nudge = completionGate.evaluate(changedFiles, checks, plan, openSteps,
             executionPolicy != null && executionPolicy.independentCompletionReview(changedFiles),
             qualityChanges(changedFiles), qualityWorkspace, independentCodeReviewer, content);
-        if (nudge != null && !nudge.halt() && CompletionPressure.tooFull(messages, tools.definitions(), contextLimit())) {
+        if (nudge != null && !nudge.halt()
+            && CompletionPressure.tooFull(messages, tools.definitions(), contextLimit())) {
             fitHistoryToInputBudget(messages, events, null);
             if (CompletionPressure.tooFull(messages, tools.definitions(), contextLimit())) {
                 content = content + "\n\n上下文接近上限，已跳过非阻断收尾催办。";
@@ -998,8 +1004,8 @@ public final class AgentLoop {
     }
 
     private boolean parallelSafe(ToolCall call) {
-        return tools.find(call.name())
-            .map(tool -> tool.parallelSafe() && permissionGate.check(call, tool).isAllowed()).orElse(false);
+        return tools.find(call.name()).map(tool -> tool.parallelSafe() && permissionGate.check(call, tool).isAllowed())
+            .orElse(false);
     }
 
     /** 工具产出的图片；等本批 tool 结果全部落进历史后再统一作为一条 user 消息发出。 */
@@ -1048,11 +1054,48 @@ public final class AgentLoop {
             }
         }
         messages.add(Message.tool(call.callId(), outcome.result()));
+        stopIfBrowserHasNothingToClick(outcome.result());
         if (!outcome.images().isEmpty()) {
             pendingToolImages.add(new PendingToolImages(call, outcome.images()));
         }
         if (executionPolicy != null) {
             executionPolicy.observed(call, outcome);
+        }
+    }
+
+    /** 快照连续三次都是 0 个可点击元素时停手。读文件、跑检查这种重复不在这里中断。 */
+    private void stopIfBrowserHasNothingToClick(String result) {
+        if (result == null || !result.contains("可交互元素:")) {
+            return;
+        }
+        if (result.contains("可交互元素: 0")) {
+            emptyBrowserSnapshots++;
+            if (emptyBrowserSnapshots >= MAX_EMPTY_BROWSER_SNAPSHOTS) {
+                throw new ExecutionPolicy.Stop(RunFailureCode.NO_PROGRESS,
+                    "浏览器连续 " + emptyBrowserSnapshots + " 次打开的页面都没有可点击元素，验收停在这里。不要重复打开同一地址。");
+            }
+            return;
+        }
+        emptyBrowserSnapshots = 0;
+    }
+
+    /** 连续多轮全都是「没变化」的短结果，说明没有新信息，停下来。 */
+    private void stopIfObservationWentIdle(List<ToolExecutor.Outcome> outcomes) {
+        if (outcomes.isEmpty()) {
+            return;
+        }
+        boolean idle = outcomes.stream().allMatch(outcome -> {
+            String result = outcome.result();
+            return result != null && (result.startsWith("文件未变化") || result.startsWith("与上次相同，未再执行"));
+        });
+        if (!idle) {
+            idleDedupRounds = 0;
+            return;
+        }
+        idleDedupRounds++;
+        if (idleDedupRounds >= 4) {
+            throw new ExecutionPolicy.Stop(RunFailureCode.NO_PROGRESS,
+                "连续 " + idleDedupRounds + " 轮没有新观察，验收停在这里。请直接根据已有信息收尾，或改一个还没试过的做法。");
         }
     }
 
@@ -1266,7 +1309,7 @@ public final class AgentLoop {
         return List.copyOf(request);
     }
 
-    public AgentLoop withScopedRules(java.util.function.Function<List<String>, String> rules) {
+    public AgentLoop withScopedRules(Function<List<String>, String> rules) {
         this.scopedRules = rules == null ? paths -> "" : rules;
         return this;
     }
@@ -1529,8 +1572,8 @@ public final class AgentLoop {
     }
 
     /** 真正会拿去发给模型的输入上限。界面和日常压缩都用这一口径，避免本地 40 万字符预算把 10 万的发送线挡住。 */
-    private int admissionLimit() {
-        long wire = ModelCapacity.configured().inputBudget();
+    int admissionLimit() {
+        long wire = ModelCapacity.active().inputBudget();
         long local = (long)(contextLimit() * 0.80);
         return (int)Math.max(1, Math.min(Integer.MAX_VALUE, Math.min(local, wire)));
     }

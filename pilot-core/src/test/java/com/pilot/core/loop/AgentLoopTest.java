@@ -38,6 +38,7 @@ import com.pilot.core.event.SessionEvent;
 import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
+import com.pilot.core.model.ModelCapacity;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelClientException;
 import com.pilot.core.model.ModelFailureKind;
@@ -328,16 +329,15 @@ class AgentLoopTest {
                 return "ran";
             }
         };
-        ScriptedModelClient client = new ScriptedModelClient(
-            new ModelResponse("",
-                List.of(new ToolCall("a", "read_file", Map.of("path", "a.txt")),
-                    new ToolCall("b", "read_file", Map.of("path", "b.txt")),
-                    new ToolCall("e", "edit_file", Map.of("path", "a.txt")),
-                    new ToolCall("c", "read_file", Map.of("path", "c.txt")),
-                    new ToolCall("d", "read_file", Map.of("path", "d.txt")))),
+        ScriptedModelClient client = new ScriptedModelClient(new ModelResponse("",
+            List.of(new ToolCall("a", "read_file", Map.of("path", "a.txt")),
+                new ToolCall("b", "read_file", Map.of("path", "b.txt")),
+                new ToolCall("e", "edit_file", Map.of("path", "a.txt")),
+                new ToolCall("c", "read_file", Map.of("path", "c.txt")),
+                new ToolCall("d", "read_file", Map.of("path", "d.txt")))),
             new ModelResponse("完成", List.of()));
-        AgentLoop loop =
-            new AgentLoop(client, registry(reader, editor), new PolicyPermissionGate(PermissionMode.AUTO), config(8, 3));
+        AgentLoop loop = new AgentLoop(client, registry(reader, editor), new PolicyPermissionGate(PermissionMode.AUTO),
+            config(8, 3));
 
         AgentLoop.Result result = loop.run("读改再读", List.of(), events::add);
 
@@ -380,14 +380,14 @@ class AgentLoopTest {
                 return "seen";
             }
         };
-        ScriptedModelClient mixed = new ScriptedModelClient(
-            new ModelResponse("",
-                List.of(new ToolCall("cmd", "run_command", Map.of("command", "echo")),
-                    new ToolCall("read", "read_file", Map.of("path", "a.txt")))),
-            new ModelResponse("完成", List.of()));
-        new AgentLoop(mixed, registry(command, watchingRead), new PolicyPermissionGate(PermissionMode.AUTO), config(8, 3))
-            .run("不要重叠", List.of(),
-            events::add);
+        ScriptedModelClient mixed =
+            new ScriptedModelClient(
+                new ModelResponse("",
+                    List.of(new ToolCall("cmd", "run_command", Map.of("command", "echo")),
+                        new ToolCall("read", "read_file", Map.of("path", "a.txt")))),
+                new ModelResponse("完成", List.of()));
+        new AgentLoop(mixed, registry(command, watchingRead), new PolicyPermissionGate(PermissionMode.AUTO),
+            config(8, 3)).run("不要重叠", List.of(), events::add);
         assertFalse(overlapped.get());
     }
 
@@ -541,6 +541,71 @@ class AgentLoopTest {
         assertEquals(6, client.requests.size());
         assertFalse(events.stream().anyMatch(event -> event instanceof RunFailed));
         assertTrue(eventTypes().contains("run.completed"));
+    }
+
+    @Test
+    void stopsWhenTheBrowserPageHasNothingToClickThreeTimes() {
+        String empty = "页面: Pilot\n地址: http://localhost:5185/\n可交互元素: 0（用 [ref=eN] 作为 click/fill 的 ref）";
+        CountingTool tool = new CountingTool("browser", empty);
+        ToolCall call = new ToolCall("b", "browser", Map.of("action", "snapshot"));
+        ScriptedModelClient client =
+            new ScriptedModelClient(new ModelResponse("", List.of(call)), new ModelResponse("", List.of(call)),
+                new ModelResponse("", List.of(call)), new ModelResponse("还要再打开一次", List.of()));
+        AgentLoop loop =
+            new AgentLoop(client, registry(tool), new PolicyPermissionGate(PermissionMode.AUTO), config(8, 3));
+
+        AgentLoop.Result result = loop.run("验收页面", List.of(), events::add);
+
+        assertEquals("NO_PROGRESS", result.failureCode());
+        assertEquals(3, tool.executions.get());
+        assertEquals(3, client.requests.size(), "空页面停止后不再进入收尾催办");
+        assertTrue(result.finalText().contains("没有可点击元素"), result.finalText());
+    }
+
+    @Test
+    void stopsAfterFourRoundsThatOnlyRepeatUnchangedObservations() {
+        CountingTool tool = new CountingTool("read_file", "文件未变化，沿用刚才读过的 a");
+        ToolCall call = new ToolCall("r", "read_file", Map.of("path", "a.txt"));
+        ScriptedModelClient client = new ScriptedModelClient(new ModelResponse("", List.of(call)),
+            new ModelResponse("", List.of(call)), new ModelResponse("", List.of(call)),
+            new ModelResponse("", List.of(call)), new ModelResponse("还要读", List.of()));
+        AgentLoop loop = new AgentLoop(client, registry(tool), readOnlyGate(), config(8, 3));
+
+        AgentLoop.Result result = loop.run("再看一遍", List.of(), events::add);
+
+        assertEquals("NO_PROGRESS", result.failureCode());
+        assertEquals(4, tool.executions.get());
+    }
+
+    @Test
+    void aFreshObservationResetsTheIdleStreak() {
+        SequencedTool tool = new SequencedTool("read_file", "文件未变化，沿用刚才读过的 a", "文件未变化，沿用刚才读过的 a", "文件未变化，沿用刚才读过的 a",
+            "看到新的一行", "文件未变化，沿用刚才读过的 a", "文件未变化，沿用刚才读过的 a", "文件未变化，沿用刚才读过的 a");
+        ToolCall call = new ToolCall("r", "read_file", Map.of("path", "a.txt"));
+        ScriptedModelClient client =
+            new ScriptedModelClient(new ModelResponse("", List.of(call)), new ModelResponse("", List.of(call)),
+                new ModelResponse("", List.of(call)), new ModelResponse("", List.of(call)),
+                new ModelResponse("", List.of(call)), new ModelResponse("", List.of(call)),
+                new ModelResponse("", List.of(call)), new ModelResponse("收尾", List.of()));
+        AgentLoop loop = new AgentLoop(client, registry(tool), readOnlyGate(), config(12, 3));
+
+        AgentLoop.Result result = loop.run("再看一遍", List.of(), events::add);
+
+        assertNull(result.failureCode(), result.finalText());
+        assertEquals("收尾", result.finalText());
+    }
+
+    @Test
+    void admissionLimitFollowsTheActiveModelWindow() {
+        ModelCapacity.activate(ModelCapacity.of(32_000L, 4_000));
+        try {
+            AgentLoop loop = new AgentLoop(new ScriptedModelClient(new ModelResponse("好", List.of())), registry(),
+                readOnlyGate(), config(2, 3));
+            assertEquals(ModelCapacity.active().inputBudget(), loop.admissionLimit());
+            assertTrue(loop.admissionLimit() < 104_000);
+        } finally {
+            ModelCapacity.activate(null);
+        }
     }
 
     /** 渐进提醒：第 3 次起每次相同结果都提醒，但绝不中断。 */

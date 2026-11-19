@@ -1,6 +1,7 @@
 package com.pilot.core.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -224,6 +225,18 @@ class CompletionGateTest {
             gate.evaluate(Set.of("src/A.java"), List.of("mvn -Dlabel=exit_1 test → exit 0"), List.of(), List.of());
         assertNotNull(passed);
         assertTrue(passed.reason().contains("自审"), passed.reason());
+    }
+
+    @Test
+    void passingCheckWithoutALaterEditDoesNotAskToRerun() {
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+
+        CompletionGate.Nudge nudge =
+            gate.evaluate(Set.of("src/A.java"), List.of("mvn test → exit 0"), List.of(), List.of());
+
+        assertNotNull(nudge);
+        assertFalse(nudge.reason().contains("未验证"), nudge.reason());
+        assertTrue(nudge.reason().contains("自审"), nudge.reason());
     }
 
     @Test
