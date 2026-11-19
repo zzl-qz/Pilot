@@ -113,11 +113,13 @@ function InboxDialog({ target }: { target?: string | null }) {
     {listError && <Banner className="results-error" status="error" role="alert" title={listError} description={hasLoaded ? '当前显示上次成功读取的结果。' : '连接恢复后重新加载。'} endContent={<Button label="重新加载结果" isDisabled={busy || loading} onClick={() => { void refresh(); }} />} />}
     {error && <Banner className="results-error" status="error" role="alert" title={error} endContent={<Button label="重新加载详情" isDisabled={busy} onClick={() => { setError(''); setReload(v => v + 1); }} />} />}
     {truncated && <p className="results-note">仅展示最近 500 条结果；更早记录可在原对话查看。</p>}
-    <div className={`results-layout${visible.length ? ' has-results' : ''}${selected ? ' has-detail' : ''}`}>
+    <div className={`results-layout${selected ? ' has-detail' : ''}`}>
       <section className="results-list" aria-label="结果列表" aria-busy={loading}>
         {hasLoaded && !loading && !listError && !visible.length && <EmptyState title={`暂无${filter === 'handled' ? '已处理' : filter === 'unread' ? '未读' : filter === 'pending' ? '待处理' : ''}结果`} description={filter === 'all' ? '任务完成或需要处理时，结果会显示在这里。' : '可以切换到全部查看其他结果。'} isCompact />}
-        {visible.map(row => <button key={row.id} ref={node => { if (node) rowRefs.current.set(row.id, node); else rowRefs.current.delete(row.id); }} className={`result-row${row.id === selected ? ' is-selected' : ''}`} disabled={busy} aria-pressed={row.id === selected} onClick={() => { lastRow.current = row.id; listScroll.current = bodyRef.current?.scrollTop || 0; setSelected(row.id); }}>
-          <span className="result-row-title"><strong>{!row.read && <span className="result-unread" aria-label="未读" />}{row.title || '未命名任务'}</strong><small>{row.summary || '暂无摘要'}</small><small>{row.source === 'SCHEDULE' ? '定时任务' : '对话任务'} · {new Date(row.at).toLocaleString()}</small></span><Badge label={row.handled ? '已处理' : labels[row.state] || row.state} variant={row.state === 'NEEDS_ATTENTION' && !row.handled ? 'warning' : 'neutral'} />
+        {visible.map(row => <button key={row.id} ref={node => { if (node) rowRefs.current.set(row.id, node); else rowRefs.current.delete(row.id); }} className={`result-card${row.id === selected ? ' is-selected' : ''}`} disabled={busy} aria-pressed={row.id === selected} onClick={() => { lastRow.current = row.id; listScroll.current = bodyRef.current?.scrollTop || 0; setSelected(row.id); }}>
+          <span className="result-card-head"><strong className="result-card-title">{!row.read && <span className="result-unread" aria-label="未读" />}{row.title || '未命名任务'}</strong><Badge label={row.handled ? '已处理' : labels[row.state] || row.state} variant={row.state === 'NEEDS_ATTENTION' && !row.handled ? 'warning' : 'neutral'} /></span>
+          <small className="result-card-summary">{row.summary || '暂无摘要'}</small>
+          <small className="result-card-meta">{row.source === 'SCHEDULE' ? '定时任务' : '对话任务'} · {new Date(row.at).toLocaleString()}</small>
         </button>)}
       </section>
       {selected && <section ref={detailRef} className="result-detail" tabIndex={-1} aria-label="结果详情" aria-busy={detailLoading}>
@@ -146,7 +148,6 @@ function InboxDialog({ target }: { target?: string | null }) {
           <h3 id="result-research">开源参考</h3><ResearchRecords records={detail.research} />
         </>}
       </section>}
-      {!selected && visible.length > 0 && <section className="result-detail result-placeholder"><EmptyState title="选择任务查看结果" description="验证记录、文件改动与工作区交回都在详情中。" isCompact /></section>}
     </div>
     </div>
   </Dialog>;

@@ -21,23 +21,26 @@
 .result-detail [data-verification-tone='stale'] .result-verification-badge { color: var(--warn, #bf853c); }
 .result-detail [data-verification-tone='error'] .result-verification-badge { color: var(--err, #b73535); }
 .result-detail [data-verification-tone='muted'] .result-verification-badge { color: var(--color-text-secondary); }
-/* 宽屏为列表与详情分栏，900px 以下切换为单栏阅读。 */
+/* 只列卡片时铺满宽度，选中结果后宽屏分栏、900px 以下切换为单栏阅读。 */
 .results-layout { min-width: 0; }
-.results-layout.has-detail, .results-layout.has-results { display: grid; grid-template-columns: minmax(240px, .8fr) minmax(0, 1.2fr); gap: 24px; }
-.result-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; width: 100%; padding: 16px 12px; text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--color-border); color: var(--color-text-primary); font: inherit; cursor: pointer; border-radius: var(--radius-element); }
-.result-row:hover, .result-row.is-selected { background: var(--color-background-body); }
-.result-row:disabled { cursor: wait; }
-.result-row-title { display: grid; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
-.result-row-title strong { font-weight: 600; }
-.result-row-title small { color: var(--color-text-secondary); font-size: 12px; }
-.result-row .astryx-badge { flex: none; white-space: nowrap; }
+.results-layout.has-detail { display: grid; grid-template-columns: minmax(240px, .8fr) minmax(0, 1.2fr); gap: 24px; }
+/* 列表只放固定尺寸卡片：高度一致，标题与摘要按行截断，正文留在详情里。 */
+.results-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; align-content: start; }
+.results-list > :not(.result-card) { grid-column: 1 / -1; }
+.result-card { display: flex; flex-direction: column; gap: 8px; height: 180px; padding: 14px; text-align: left; background: transparent; border: 1px solid var(--color-border); border-radius: var(--radius-element); color: var(--color-text-primary); font: inherit; cursor: pointer; overflow: hidden; }
+.result-card:hover, .result-card.is-selected { background: var(--color-background-body); }
+.result-card:disabled { cursor: wait; }
+.result-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.result-card-head .astryx-badge { flex: none; white-space: nowrap; }
+.result-card-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; min-width: 0; overflow: hidden; overflow-wrap: anywhere; font-weight: 600; }
+.result-card-summary { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; color: var(--color-text-secondary); font-size: 12px; }
+.result-card-meta { margin-top: auto; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--color-text-secondary); font-size: 12px; }
 .result-unread { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin: 0 8px 2px 0; }
 .result-detail { min-width: 0; padding-left: 24px; border-left: 1px solid var(--color-border); font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
 .result-detail h2 { font-size: 18px; line-height: 1.5; margin: 0 0 8px; }
 .result-detail h3 { font-size: 15px; margin: 24px 0 8px; }
 .result-detail p { margin: 8px 0; }
 .result-detail dd { margin: 0 0 12px; }
-.result-placeholder { display: grid; place-items: center; }
 .result-detail dt, .result-summary { color: var(--color-text-secondary); }
 .result-receipt-actions { margin: 20px 0; }
 .results-back { display: none; }
@@ -61,8 +64,7 @@
 .result-sections { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--color-border); }
 .results-dialog h3[id] { scroll-margin-top: 20px; }
 @media(max-width: 900px) {
-  .results-layout.has-detail, .results-layout.has-results { display: block; }
-  .result-placeholder { display: none; }
+  .results-layout.has-detail { display: block; }
   .results-layout.has-detail .results-list { display: none; }
   .result-detail { border: 0; padding: 0; }
   .results-back { display: inline-flex; margin-bottom: 16px; }
@@ -75,6 +77,6 @@
   .results-close { min-width: 44px; }
   .results-toolbar { align-items: flex-start; }
   .results-toolbar > .results-actions { margin-left: auto; }
-  .result-row { flex-direction: column; padding: 14px 8px; }
-  .result-row-title small { font-size: 13px; }
+  .result-card { padding: 12px; }
+  .result-card-summary { font-size: 13px; }
 }

@@ -51,9 +51,11 @@ async function run(page, name, url) {
     await page.getByRole('button',{name:'结果操作',exact:true}).click();
     await page.getByRole('menuitem',{name:'刷新结果',exact:true}).click();
   }
+  const card = (which = 'first') => page.locator('.result-card')[which]();
+  const openCard = (which = 'first') => card(which).click();
   await page.setViewportSize({width:1440,height:900}); await page.goto(url);
   await page.getByRole('button',{name:/任务收件箱/}).click();
-  await page.locator('.result-row').first().waitFor(); assert.equal(await page.locator('.result-row').count(),2);
+  await card().waitFor(); assert.equal(await page.locator('.result-card').count(),2);
   const menu = page.getByRole('button',{name:'结果操作',exact:true});
   await menu.focus(); await page.keyboard.press('ArrowDown');
   await page.waitForFunction(()=>document.activeElement?.getAttribute('role')==='menuitem'
@@ -64,7 +66,7 @@ async function run(page, name, url) {
   await page.getByRole('radio',{name:'待处理',exact:true}).focus(); await page.keyboard.press('ArrowRight');
   assert.equal(await page.getByRole('radio',{name:'未读',exact:true}).getAttribute('aria-checked'),'true');
   await page.keyboard.press('ArrowLeft');
-  await page.locator('.result-row').first().click();
+  await openCard();
   await page.getByRole('heading',{name:'修复调度恢复并完成验证',exact:true}).waitFor();
   assert.equal(await page.evaluate(()=>rows[0].read),true); assert.equal(await page.evaluate(()=>rows[0].handled),false);
   assert.equal(await page.locator('a[href^="javascript:"]').count(),0);
@@ -73,8 +75,8 @@ async function run(page, name, url) {
   await page.getByRole('button',{name:'标记已读',exact:true}).waitFor(); assert.equal(await page.evaluate(()=>rows[0].read),false);
   await page.getByRole('button',{name:'标记已处理',exact:true}).click();
   await page.getByRole('button',{name:'重新打开',exact:true}).waitFor(); assert.equal(await page.evaluate(()=>rows[0].handled),true);
-  await page.getByRole('radio',{name:'已处理',exact:true}).click(); assert.equal(await page.locator('.result-row').count(),1);
-  await page.locator('.result-row').first().click(); await page.getByRole('button',{name:'重新打开',exact:true}).click();
+  await page.getByRole('radio',{name:'已处理',exact:true}).click(); assert.equal(await page.locator('.result-card').count(),1);
+  await openCard(); await page.getByRole('button',{name:'重新打开',exact:true}).click();
   await page.getByRole('button',{name:'标记已处理',exact:true}).waitFor();
   await page.getByRole('button',{name:'预览交回改动',exact:true}).click(); await page.getByLabel('交回差异',{exact:true}).waitFor();
   assert.equal(await page.evaluate(()=>calls.filter(c=>c.type==='handoff').length),0);
@@ -96,15 +98,15 @@ async function run(page, name, url) {
   await page.waitForFunction(()=>!document.querySelector('.results-error'));
   // A slow result must not replace the newer selection.
   await page.evaluate(()=>{window.pendingDetail=new Promise(resolve=>window.resolveDetail=resolve);});
-  await page.locator('.result-row').first().click(); await page.locator('.result-row').last().click();
+  await openCard(); await openCard('last');
   await page.evaluate(()=>{window.resolveDetail();window.pendingDetail=null;});
   await page.getByRole('heading',{name:'核对跨平台文件行为',exact:true}).waitFor();
   assert.equal(await page.locator('.result-detail h2').innerText(),'核对跨平台文件行为');
   for (const [phase, label] of [['CHECKS_PASSED','记录的检查通过'],['CHECKS_FAILED','检查未通过'],['CHECKS_STALE','验证依据已变化，需重新验证'],['UNVERIFIED','尚未验证'],['COMPLETED','执行已结束'],['FUTURE_PHASE','验证状态未知'],['VERIFIED','目标核验通过']]) {
     await page.evaluate(value => { window.verificationPhase=value; }, phase);
-    await page.locator('.result-row').last().click();
+    await openCard('last');
     await page.getByRole('heading',{name:'核对跨平台文件行为',exact:true}).waitFor();
-    await page.locator('.result-row').first().click();
+    await openCard();
     await page.locator(`[data-verification-phase="${phase}"]`).waitFor();
     assert.equal(await page.locator('[data-verification-phase] .result-verification-badge').innerText(),label);
     if (phase !== 'VERIFIED') assert.equal(await page.getByText('目标核验通过',{exact:true}).count(),0);
@@ -119,7 +121,7 @@ async function run(page, name, url) {
   assert.equal(await page.getByText('0 条结果',{exact:true}).count(),0);
   await page.evaluate(()=>{window.fail=false;});
   await page.getByRole('button',{name:'重新加载结果',exact:true}).click();
-  await page.locator('.result-row').first().waitFor();
+  await card().waitFor();
   assert.equal(await page.locator('.results-error').count(),0);
   await page.getByRole('radio',{name:'已处理',exact:true}).click();
   await page.getByRole('heading',{name:'暂无已处理结果',exact:true}).waitFor();
@@ -131,11 +133,15 @@ async function run(page, name, url) {
     api.results=()=>{if(!first)return original();first=false;return new Promise(resolve=>window.resolveList=()=>resolve({items:[],truncated:false}));};
   });
   await refreshResults();
-  await page.locator('.result-row').first().click();
+  await openCard();
   await page.locator('.result-detail h2').waitFor();
   await page.waitForFunction(()=>document.querySelector('.results-count')?.textContent==='2 条结果');
   await page.evaluate(()=>window.resolveList());
-  assert.equal(await page.locator('.result-row').count(),2,'迟到的空结果被忽略');
+  assert.equal(await page.locator('.result-card').count(),2,'迟到的空结果被忽略');
+  await page.getByRole('button',{name:'关闭任务收件箱',exact:true}).click();
+  await page.getByRole('button',{name:/任务收件箱/}).click();
+  await card().waitFor();
+  await page.waitForFunction(()=>document.querySelector('.results-count')?.textContent==='2 条结果');
 
   // 请求超过轮询周期仍能完成；后台轮询不能反复使正在读取的响应失效。
   await page.evaluate(()=>{
@@ -167,7 +173,7 @@ async function run(page, name, url) {
 
   // 锚点定位不支持时，同一业务动作仍然可直接调用。
   await page.goto(url+'?preview=1&no-anchor=1');
-  await page.locator('.result-row').first().waitFor();
+  await card().waitFor();
   assert.equal(await page.getByRole('button',{name:'结果操作',exact:true}).count(),0);
   await page.evaluate(()=>{window.fail=true;});
   await page.getByRole('button',{name:'刷新结果',exact:true}).click();
@@ -177,25 +183,25 @@ async function run(page, name, url) {
   console.log(`${name}: PASS Astryx keyboard/filter/focus/theme, first-load failure, empty state, late list and capability fallback`);
   for(const width of [1440,768,390]) {
     await page.setViewportSize({width,height:900}); await page.goto(url+'?preview=1');
-    await page.locator('.result-row').first().waitFor();
+    await card().waitFor();
     assert.ok(await page.locator('dialog').evaluate(el=>el.scrollWidth<=el.clientWidth+1));
     await checkDialogLayout(page, {close:'.results-close',header:'.results-header',body:'.results-body'});
     const listBounds=await page.locator('.results-dialog').boundingBox();
-    await page.screenshot({path:join(output,`${name}-${width}-list.png`),animations:'disabled'});
-    await page.locator('.result-row').first().click(); await page.locator('.result-detail h2').waitFor();
+    if(name==='chromium') await page.screenshot({path:join(output,`${name}-${width}-list.png`),animations:'disabled',timeout:20000});
+    await openCard(); await page.locator('.result-detail h2').waitFor();
     assert.ok(await page.locator('dialog').evaluate(el=>el.scrollWidth<=el.clientWidth+1));
     const detailBounds=await page.locator('.results-dialog').boundingBox();
     assert.ok(Math.abs(detailBounds.y-listBounds.y)<1,'详情不改变弹窗位置');
-    await page.screenshot({path:join(output,`${name}-${width}-detail.png`),animations:'disabled'});
+    if(name==='chromium') await page.screenshot({path:join(output,`${name}-${width}-detail.png`),animations:'disabled',timeout:20000});
     if(width<=900){
       await page.getByRole('button',{name:'返回结果列表',exact:true}).click();
-      assert.equal(await page.locator('.result-row').first().evaluate(el=>el===document.activeElement),true,'返回后聚焦原结果');
+      assert.equal(await card().evaluate(el=>el===document.activeElement),true,'返回后聚焦原结果');
     }
   }
   // 未读结果在打开后会自动移出筛选列表；返回时仍须有可见的键盘焦点。
   await page.getByRole('radio',{name:'未读',exact:true}).click();
-  await page.locator('.result-row').first().click();
-  await page.waitForFunction(()=>document.querySelectorAll('.result-row').length===0);
+  await openCard();
+  await page.waitForFunction(()=>document.querySelectorAll('.result-card').length===0);
   await page.getByRole('button',{name:'返回结果列表',exact:true}).click();
   assert.equal(await page.getByRole('radio',{name:'未读',exact:true}).evaluate(el=>el===document.activeElement),true);
   await page.getByRole('radio',{name:'待处理',exact:true}).click();
@@ -207,7 +213,7 @@ async function run(page, name, url) {
     return getComputedStyle(document.querySelector('.results-dialog')).backgroundColor==='rgb(255, 255, 255)'
       && style.backgroundColor==='rgb(255, 255, 255)' && style.color==='rgb(0, 0, 0)';
   });
-  await page.screenshot({path:join(output,`${name}-390-light.png`),animations:'disabled'});
+  if(name==='chromium') await page.screenshot({path:join(output,`${name}-390-light.png`),animations:'disabled',timeout:20000});
   assert.deepEqual(errors,[]); console.log(`${name}: PASS verification-states/receipts/filter/research/handoff/conflict/stale-preview/stale-response/error/responsive`);
   if (process.argv.includes('--production')) {
     const chunk = '**/assets/ResultInbox-*.js';

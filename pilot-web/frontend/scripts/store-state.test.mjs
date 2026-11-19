@@ -552,3 +552,22 @@ test('长会话先显示最近一页，向上翻不重复已有事件', async ()
     assert.deepEqual(texts(), ['更早', '最近']);
   } finally { fetchHandler = previousFetch; }
 });
+
+test('历史回放用已保存的运行差异替换只有路径的占位文件', async () => {
+  reset();
+  const saved = useStore.getState(), { api } = await import('../src/api.js'), original = { ...api };
+  api.history = async () => ({ historyRevision: 1, hasMore: false, events: [
+    { type: 'run.started', sessionId: 's', sequence: 1, runId: 'run_history', payload: { input: '改任务收件箱' } },
+    { type: 'run.ended', sessionId: 's', sequence: 2, runId: 'run_history', payload: {
+      outcome: 'PARTIAL', code: 'TASK_INCOMPLETE', summary: '已编辑文件', changedFiles: ['ResultInbox.tsx']
+    } }
+  ] });
+  api.runChanges = async () => ({ files: [{ path: 'ResultInbox.tsx', added: 39, removed: 34 }] });
+  try {
+    assert.equal(await useStore.getState().loadHistory(), true);
+    await new Promise(resolve => setImmediate(resolve));
+    const result = useStore.getState().thread.rows.find(row => row.type === 'result');
+    assert.equal(result.changedFiles[0].added, 39);
+    assert.equal(result.changedFiles[0].removed, 34);
+  } finally { Object.assign(api, original); useStore.setState(saved); }
+});

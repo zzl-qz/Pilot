@@ -36,7 +36,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
     if (!sessionId) return;
     const jobs: { key: string; runId: string; token: string }[] = [];
     for (const row of get().thread.rows) {
-      if (row.type !== 'result' || (row.changedFiles || []).length) continue;
+      if (row.type !== 'result') continue;
       const runId = row.key.startsWith('result:run_') ? row.key.slice('result:'.length) : '';
       if (!runId) continue;
       const token = `${sessionEpoch}:${row.key}`;
@@ -51,7 +51,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
         if (!files.length) return;
         set((draft) => {
           const row = draft.thread.rows.find((item): item is ResultRow => item.type === 'result' && item.key === job.key);
-          if (!row || (row.changedFiles || []).length) return;
+          if (!row) return;
           row.changedFiles = files;
           row.changedSummary = report?.summary || null;
         });
