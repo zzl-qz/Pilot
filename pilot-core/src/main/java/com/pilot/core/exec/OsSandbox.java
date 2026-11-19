@@ -20,7 +20,8 @@ import com.pilot.core.util.HostOs;
  * {@code .git/config}、{@code hooks}、{@code info} 只读。网络默认放行，因为 Seatbelt 和
  * bubblewrap 都不能按域名放行 Maven Central；要关掉设 {@code PILOT_EXECUTION_COMMAND_NETWORK=false}。
  *
- * <p>Windows 用独立运行器创建写入受限令牌。运行器缺失或探测失败时命令不启动，不退回无限制进程。
+ * <p>Windows 用独立运行器创建写入受限令牌。未配置运行器时与找不到 sandbox-exec/bwrap 一样在本机执行并标明未隔离；
+ * 配置了运行器但缺失或探测失败时命令不启动，不退回无限制进程。
  */
 public final class OsSandbox {
     private static final List<String> CACHE_DIRS = List.of(".m2", ".gradle", ".npm", ".cache", ".cargo", ".nuget");
@@ -103,12 +104,17 @@ public final class OsSandbox {
     }
 
     /**
-     * Windows 写入限制。探测退出码不是 0 时返回空命令，调用方不得启动。
+     * Windows 写入限制。没有配置运行器时在本机执行并标明未隔离，和 macOS/Linux 找不到沙箱工具时一致；
+     * 配置了运行器但探测失败时返回空命令，调用方不得启动。
      * 运行器参数：{@code --probe} 只建令牌；正式启动再带 {@code --workspace}、{@code --temp} 和命令。
      */
     static Launch windows(List<String> command, Path workspace) {
         Path runner = windowsRunner();
-        if (runner == null || !Files.isRegularFile(runner)) {
+        if (runner == null) {
+            return new Launch(List.copyOf(command),
+                "隔离：未启用（Windows 受限令牌运行器未配置，命令在本机执行，写入不受限）", false);
+        }
+        if (!Files.isRegularFile(runner)) {
             return refused("隔离：命令未启动（Windows 写入限制运行器缺失，沙箱未能建立）");
         }
         int status;

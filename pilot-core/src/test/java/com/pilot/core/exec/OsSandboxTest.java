@@ -68,9 +68,25 @@ class OsSandboxTest {
     }
 
     @Test
-    void windowsRefusesWhenTheRunnerIsMissing() {
+    void windowsRunsLocallyWhenNoRunnerIsConfigured() {
         String previous = System.getProperty("pilot.windows.sandbox.runner");
         System.clearProperty("pilot.windows.sandbox.runner");
+        try {
+            OsSandbox.Launch launch = OsSandbox.wrap(List.of("mvn", "-v"), workspace, OsSandbox.Family.WINDOWS, true);
+
+            assertEquals(List.of("mvn", "-v"), launch.command());
+            assertFalse(launch.enforced());
+            assertTrue(launch.label().contains("未启用"), launch.label());
+            assertTrue(launch.label().contains("在本机执行"), launch.label());
+        } finally {
+            restoreRunner(previous);
+        }
+    }
+
+    @Test
+    void windowsRefusesWhenConfiguredRunnerIsMissing() {
+        String previous = System.setProperty("pilot.windows.sandbox.runner",
+            workspace.resolve("missing-runner.exe").toString());
         try {
             OsSandbox.Launch launch = OsSandbox.wrap(List.of("mvn", "-v"), workspace, OsSandbox.Family.WINDOWS, true);
 
