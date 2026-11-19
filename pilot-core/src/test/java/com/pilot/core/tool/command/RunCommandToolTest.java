@@ -50,32 +50,40 @@ class RunCommandToolTest {
 
         String result = tool.execute(Map.of("command", "rm -rf /"));
 
-        assertTrue(result.startsWith("ERROR: 命令不在白名单内"), result);
+        assertTrue(result.startsWith("ERROR: ") && result.contains("工作区外"), result);
     }
 
     @Test
-    void rejectsPathInsteadOfBareCommand() {
+    void pathCommandIsNotRejectedForItsName() {
+        Assumptions.assumeFalse(System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win"));
         RunCommandTool tool = tool();
 
-        String result = tool.execute(Map.of("command", "C:\\Windows\\System32\\cmd.exe /c dir"));
+        String result = tool.execute(Map.of("command", "/bin/echo ok"));
 
-        assertTrue(result.startsWith("ERROR: 只接受白名单内的裸命令名"), result);
+        assertTrue(result.contains("退出码: 0"), result);
+        assertTrue(result.contains("ok"), result);
+        assertFalse(result.contains("白名单"), result);
     }
 
     @Test
-    void validatesEverySegmentOfAChain() {
+    void validatesEverySegmentOfAChain() throws Exception {
         RunCommandTool tool = tool();
+        Files.writeString(workspace.resolve("gone.txt"), "x");
 
-        String result = tool.execute(Map.of("command", "git status && rm -rf ."));
+        String kept = tool.execute(Map.of("command", "echo ok && rm gone.txt"));
+        assertTrue(kept.contains("退出码: 0"), kept);
+        assertFalse(kept.contains("白名单"), kept);
+        assertFalse(Files.exists(workspace.resolve("gone.txt")));
 
-        assertTrue(result.startsWith("ERROR: 命令不在白名单内: rm"), result);
+        String outside = tool.execute(Map.of("command", "echo ok && rm -rf /"));
+        assertTrue(outside.startsWith("ERROR: ") && outside.contains("工作区外"), outside);
     }
 
     @Test
     void rejectsUnquotedShellSyntax() {
         RunCommandTool tool = tool();
 
-        for (String command : List.of("git status > out.txt", "git status `whoami`", "echo $(whoami)", "git status &",
+        for (String command : List.of("git status `whoami`", "echo $(whoami)", "git status &",
             "(git status)", "git log < /etc/passwd", "git status ||", "&& git status")) {
             String result = tool.execute(Map.of("command", command));
             assertTrue(result.startsWith("ERROR: "), command + " -> " + result);

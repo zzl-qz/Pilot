@@ -66,7 +66,8 @@ class RunCommandPolicyTest {
     @Test
     void invalidCommandsPassThroughToReportTheirError() {
         assertTrue(readOnly("rm -rf /"));
-        assertTrue(tool.execute(Map.of("command", "rm -rf /")).startsWith("ERROR: 命令不在白名单内"));
+        String rm = tool.execute(Map.of("command", "rm -rf /"));
+        assertTrue(rm.startsWith("ERROR: ") && rm.contains("工作区外"), rm);
     }
 
     @Test
@@ -119,6 +120,54 @@ class RunCommandPolicyTest {
             assertTrue(result.startsWith("ERROR: ") && result.contains("工作区内"), command + " -> " + result);
         }
         assertFalse(Files.exists(outside.resolve("new.txt")));
+    }
+
+    @Test
+    void safeEnvPrefixRunsAndDangerousPrefixIsRejected() {
+        Assumptions.assumeFalse(WINDOWS);
+        Assumptions.assumeTrue(RunCommandTool.resolveOnPath("node") != null);
+
+        String result = tool.execute(Map.of("command", "NODE_ENV=from-prefix node -p process.env.NODE_ENV"));
+
+        assertTrue(result.contains("退出码: 0"), result);
+        assertTrue(result.contains("from-prefix"), result);
+        assertTrue(tool.execute(Map.of("command", "LD_PRELOAD=/bad.so ls")).contains("LD_PRELOAD"));
+        assertTrue(tool.execute(Map.of("command", "DYLD_INSERT_LIBRARIES=/bad.dylib ls")).contains("DYLD_"));
+        assertTrue(tool.execute(Map.of("command", "PATH=/tmp ls")).contains("PATH"));
+        assertTrue(tool.execute(Map.of("command", "sudo ls")).contains("提权"));
+    }
+
+    @Test
+    void workspaceRedirectWritesAndOutsideRedirectIsRejected() throws Exception {
+        Assumptions.assumeFalse(WINDOWS);
+
+        String inside = tool.execute(Map.of("command", "echo hello > note.txt"));
+        assertTrue(inside.contains("退出码: 0"), inside);
+        assertTrue(Files.readString(workspace.resolve("note.txt")).contains("hello"));
+
+        String outsideFile = outside.resolve("nope.txt").toString().replace("\"", "");
+        String outsideResult = tool.execute(Map.of("command", "echo hi > \"" + outsideFile + "\""));
+        assertTrue(outsideResult.contains("工作区内"), outsideResult);
+        assertFalse(Files.exists(outside.resolve("nope.txt")));
+    }
+
+    @Test
+    void deletingOutsideTheWorkspaceIsRejected() {
+        String result = tool.execute(Map.of("command", "rm \"" + outside.resolve("secret.txt") + "\""));
+
+        assertTrue(result.contains("工作区外"), result);
+        assertFalse(result.contains("白名单"), result);
+    }
+
+    @Test
+    void deletingInsideTheWorkspaceRuns() throws Exception {
+        Assumptions.assumeFalse(WINDOWS);
+        Files.writeString(workspace.resolve("gone.txt"), "x");
+
+        String result = tool.execute(Map.of("command", "rm gone.txt"));
+
+        assertTrue(result.contains("退出码: 0"), result);
+        assertFalse(Files.exists(workspace.resolve("gone.txt")));
     }
 
     @Test

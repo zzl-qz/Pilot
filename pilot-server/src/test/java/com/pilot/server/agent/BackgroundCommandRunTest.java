@@ -78,7 +78,11 @@ class BackgroundCommandRunTest {
                     return new ModelResponse("启动后台命令", List.of(new ToolCall("background-start", "run_command",
                         Map.of("command", command, "background", true))));
                 }
-                assertTrue(messages.getFirst().content().contains("本会话最近的命令任务"));
+                // 上下文前缀稳定后，命令提示不一定在第一条；有 tool 结果且带任务 ID 即可继续收尾。
+                assertTrue(
+                    messages.stream()
+                        .anyMatch(message -> "tool".equals(message.role()) && message.content().contains("cmd_")),
+                    "后台命令启动后，历史里应能看到带任务 ID 的工具结果");
                 return new ModelResponse("后台服务已启动，可在命令面板查看日志和停止。", List.of());
             };
         }

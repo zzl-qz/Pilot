@@ -19,7 +19,7 @@ import com.pilot.core.util.HostOs;
  * {@code .git/config}、{@code hooks}、{@code info} 只读。网络默认放行，因为 Seatbelt 和
  * bubblewrap 都不能按域名放行 Maven Central；要关掉设 {@code PILOT_EXECUTION_COMMAND_NETWORK=false}。
  *
- * <p>Windows 的 MXC 和受限令牌都要原生 API，这个进程创建不了。这时原命令照跑，但结果里标明未隔离。
+ * <p>Windows 用独立运行器创建写入受限令牌。运行器缺失或探测失败时命令不启动，不退回无限制进程。
  */
 public final class OsSandbox {
     private static final List<String> CACHE_DIRS = List.of(".m2", ".gradle", ".npm", ".cache", ".cargo", ".nuget");
@@ -59,7 +59,7 @@ public final class OsSandbox {
         return switch (family) {
             case MAC -> mac(command, root, writable, locked, network);
             case LINUX -> linux(command, root, writable, locked, network);
-            case WINDOWS -> new Launch(List.copyOf(command), "隔离：未启用（Windows 需要 MXC 或受限令牌，当前进程无法创建，命令在本机执行）", false);
+            case WINDOWS -> windows(command, root);
         };
     }
 
@@ -99,6 +99,65 @@ public final class OsSandbox {
         argv.add("--");
         argv.addAll(command);
         return new Launch(List.copyOf(argv), label("macOS Seatbelt", network), true);
+    }
+
+    /**
+     * Windows 写入限制。探测退出码不是 0 时返回空命令，调用方不得启动。
+     * 运行器参数：{@code --probe} 只建令牌；正式启动再带 {@code --workspace}、{@code --temp} 和命令。
+     */
+    static Launch windows(List<String> command, Path workspace) {
+        Path runner = windowsRunner();
+        if (runner == null || !Files.isRegularFile(runner)) {
+            return refused("隔离：命令未启动（Windows 写入限制运行器缺失，沙箱未能建立）");
+        }
+        int status;
+        try {
+            status = probe(runner);
+        } catch (IOException e) {
+            return refused("隔离：命令未启动（Windows 沙箱未能建立：" + e.getMessage() + "）");
+        }
+        if (status != 0) {
+            return refused("隔离：命令未启动（Windows 受限令牌建立失败，沙箱未能建立，退出码 " + status + "）");
+        }
+        Path temp = real(Path.of(System.getProperty("java.io.tmpdir", "/tmp")))
+            .resolve("pilot-sandbox-" + Integer.toUnsignedString(workspace.toString().hashCode()));
+        List<String> argv = new ArrayList<>();
+        argv.add(runner.toString());
+        argv.add("--workspace");
+        argv.add(workspace.toString());
+        argv.add("--temp");
+        argv.add(temp.toString());
+        argv.add("--");
+        argv.addAll(command);
+        return new Launch(List.copyOf(argv),
+            "隔离：Windows 受限令牌（写入已限制，工作区与本次私有临时目录可写，读盘和网络仍按系统原样）", true);
+    }
+
+    static Path windowsRunner() {
+        String configured = System.getProperty("pilot.windows.sandbox.runner", "");
+        if (configured.isBlank()) {
+            return null;
+        }
+        return Path.of(configured);
+    }
+
+    private static int probe(Path runner) throws IOException {
+        Process process = new ProcessBuilder(runner.toString(), "--probe").redirectErrorStream(true).start();
+        try {
+            if (!process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                return -1;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            process.destroyForcibly();
+            return -1;
+        }
+        return process.exitValue();
+    }
+
+    private static Launch refused(String label) {
+        return new Launch(List.of(), label, false);
     }
 
     private static Launch linux(List<String> command, Path workspace, List<Path> writable, List<Path> locked,
@@ -202,7 +261,7 @@ public final class OsSandbox {
     }
 
     private static String label(String backend, boolean network) {
-        return "隔离：" + backend + "（工作区可写，构建缓存可写，.git 配置只读，网络" + (network ? "允许" : "关闭") + "）";
+        return "隔离：已隔离，" + backend + "（工作区可写，构建缓存可写，.git 配置只读，网络" + (network ? "允许" : "关闭") + "）";
     }
 
     private static Path findBwrap(Path workspace) {

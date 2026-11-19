@@ -2,11 +2,14 @@ package com.pilot.core.tool.command;
 
 import java.net.URI;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
 
+import com.pilot.core.exec.EnvironmentSanitizer;
 import com.pilot.core.workspace.PathValidator;
 
 /**
@@ -14,7 +17,7 @@ import com.pilot.core.workspace.PathValidator;
  *
  * <p>判定只看分词后的参数，不执行任何东西。三档结果：
  * <ul>
- *   <li>拒绝：返回错误文本（不在白名单、危险参数、路径越界）；</li>
+ *   <li>拒绝：返回错误文本（提权、越界删除、危险参数、路径越界）；</li>
  *   <li>只读：权限层在任何模式下都放行，且不需要文件变更追踪；</li>
  *   <li>其余：按权限档位审批。</li>
  * </ul>
@@ -23,7 +26,7 @@ import com.pilot.core.workspace.PathValidator;
 final class CommandPolicy {
     /** 只读的查看类工具：不改任何文件。 */
     static final Set<String> INSPECTION = Set.of("ls", "cat", "head", "tail", "wc", "rg", "grep", "find", "tree", "pwd",
-        "stat", "file", "du", "diff", "sort", "uniq", "which", "echo",
+        "stat", "file", "du", "diff", "sort", "uniq", "which", "echo", "jq", "ps", "dirname", "basename",
         // 端口/进程观察：用于发现端口占用、确认自己启动的后台任务，不负责杀进程。
         "netstat", "lsof", "ss", "tasklist");
     /** 会写文件的基础工具：变更由命令前后快照追踪，路径同样限定在工作区内。 */
@@ -58,9 +61,25 @@ final class CommandPolicy {
     private CommandPolicy() {
     }
 
+    /** 策略只看文件名。带路径或 .exe 的命令仍按这个名字做提权、删除和发布判断。 */
+    static String leaf(String executable) {
+        String name = executable.replace('\\', '/');
+        int slash = name.lastIndexOf('/');
+        if (slash >= 0 && slash + 1 < name.length()) {
+            name = name.substring(slash + 1);
+        }
+        String lower = name.toLowerCase(Locale.ROOT);
+        for (String suffix : List.of(".exe", ".cmd", ".bat")) {
+            if (lower.endsWith(suffix) && lower.length() > suffix.length()) {
+                return lower.substring(0, lower.length() - suffix.length());
+            }
+        }
+        return lower;
+    }
+
     static boolean knownExecutable(String executable) {
-        return INSPECTION.contains(executable) || FILE_MUTATORS.contains(executable)
-            || DEVELOPMENT.contains(executable);
+        String leaf = leaf(executable);
+        return INSPECTION.contains(leaf) || FILE_MUTATORS.contains(leaf) || DEVELOPMENT.contains(leaf);
     }
 
     static List<String> allExecutables() {
@@ -69,7 +88,7 @@ final class CommandPolicy {
 
     /** 无论什么档位都不允许的动作：发布、全局安装。返回错误文本，允许时返回 null。 */
     static String forbidden(List<String> tokens) {
-        String executable = tokens.getFirst();
+        String executable = leaf(tokens.getFirst());
         List<String> args = tokens.subList(1, tokens.size());
         if (Set.of("npm", "pnpm", "yarn", "bun", "cargo", "composer", "uv", "pip", "pip3").contains(executable)
             && args.stream().anyMatch(arg -> arg.equals("publish"))) {
@@ -84,7 +103,7 @@ final class CommandPolicy {
 
     /**
      * 完全放行也要先问的动作。对照 Codex：普通 git（含 push、reset）直接跑，
-     * 只把发布包和全局安装留下。强制 rm、sudo 不在命令白名单里，到不了这里。
+     * 只把发布包和全局安装留下。提权和越界删除在 {@link #blocked} 里先拒绝。
      */
     static boolean confirms(List<String> tokens) {
         return forbidden(tokens) != null;
@@ -92,7 +111,7 @@ final class CommandPolicy {
 
     /** 参数中的危险选项与路径越界。返回错误文本，通过时返回 null。 */
     static String arguments(List<String> tokens, Path workdir, PathValidator paths) {
-        String executable = tokens.getFirst();
+        String executable = leaf(tokens.getFirst());
         switch (executable) {
             case "find" -> {
                 for (String token : tokens) {
@@ -141,7 +160,7 @@ final class CommandPolicy {
     }
 
     private static String pathProblem(List<String> tokens, Path workdir, PathValidator paths) {
-        String executable = tokens.getFirst();
+        String executable = leaf(tokens.getFirst());
         boolean searchTool = executable.equals("grep") || executable.equals("rg");
         // grep / rg 的第一个位置参数是正则，不是路径；用 -e/-f 给出模式时则全部位置参数都是路径
         boolean explicitPattern = tokens.stream().anyMatch(token -> token.equals("-e") || token.equals("-f")
@@ -195,7 +214,7 @@ final class CommandPolicy {
 
     /** 命令段是否只读：不改文件、不改仓库状态、不触发网络写入。 */
     static boolean readOnly(List<String> tokens) {
-        String executable = tokens.getFirst();
+        String executable = leaf(tokens.getFirst());
         if (tokens.size() == 2 && INSPECTION_FLAGS.contains(tokens.get(1))) {
             return true;
         }
@@ -303,5 +322,78 @@ final class CommandPolicy {
             }
         }
         return true;
+    }
+
+    /** 命令段开头的 {@code NAME=value}。危险覆盖直接拒绝，其余只保留清洗器允许的名字。 */
+    record Prefix(Map<String, String> env, List<String> tokens, String error) {
+        static Prefix error(String message) {
+            return new Prefix(Map.of(), List.of(), message);
+        }
+    }
+
+    static Prefix prefix(List<String> tokens) {
+        Map<String, String> env = new LinkedHashMap<>();
+        int index = 0;
+        while (index < tokens.size()) {
+            String token = tokens.get(index);
+            int split = token.indexOf('=');
+            if (split <= 0) {
+                break;
+            }
+            String name = token.substring(0, split);
+            if (!name.matches("[A-Za-z_][A-Za-z0-9_]*")) {
+                break;
+            }
+            String problem = unsafeEnv(name);
+            if (problem != null) {
+                return Prefix.error(problem);
+            }
+            env.put(name, token.substring(split + 1));
+            index++;
+        }
+        if (index == 0) {
+            return new Prefix(Map.of(), tokens, null);
+        }
+        if (index == tokens.size()) {
+            return Prefix.error("环境变量前缀后面缺少命令");
+        }
+        return new Prefix(Map.copyOf(env), List.copyOf(tokens.subList(index, tokens.size())), null);
+    }
+
+    private static String unsafeEnv(String name) {
+        String upper = name.toUpperCase(Locale.ROOT);
+        if (upper.equals("PATH") || upper.equals("PATHEXT")) {
+            return "禁止通过命令前缀覆盖 " + name;
+        }
+        if (upper.equals("LD_PRELOAD") || upper.startsWith("DYLD_")) {
+            return "禁止通过命令前缀设置 " + name;
+        }
+        if (!EnvironmentSanitizer.defaults().allowed(name)) {
+            return "不允许通过命令前缀设置 " + name;
+        }
+        return null;
+    }
+
+    /** 提权和越界删除先拒绝，错误原因对着具体动作，不提命令名单。 */
+    static String blocked(List<String> tokens, Path workdir, PathValidator paths) {
+        String executable = leaf(tokens.getFirst());
+        if (Set.of("sudo", "su", "doas", "pkexec", "runas").contains(executable)) {
+            return "禁止提权，请在工作区内直接运行命令";
+        }
+        if (!Set.of("rm", "rmdir", "del", "erase", "unlink").contains(executable)) {
+            return null;
+        }
+        for (int i = 1; i < tokens.size(); i++) {
+            String token = tokens.get(i);
+            if (token.startsWith("-")) {
+                continue;
+            }
+            try {
+                paths.resolve(workdir.resolve(token).toString());
+            } catch (RuntimeException e) {
+                return "禁止删除工作区外的文件：" + token;
+            }
+        }
+        return null;
     }
 }

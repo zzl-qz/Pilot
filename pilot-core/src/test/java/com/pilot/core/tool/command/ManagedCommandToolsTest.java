@@ -301,7 +301,7 @@ class ManagedCommandToolsTest {
             assertTrue(CommandToolSupport.running(manager.get(SESSION, task.taskId())));
             CommandStatusTool status = new CommandStatusTool(manager, SESSION);
             CommandLogsTool logs = new CommandLogsTool(manager, SESSION);
-            assertTrue(status.execute(Map.of("taskId", task.taskId(), "waitSeconds", 6)).startsWith("ERROR:"));
+            assertTrue(status.execute(Map.of("taskId", task.taskId(), "waitSeconds", 61)).startsWith("ERROR:"));
             assertTrue(logs.execute(Map.of("taskId", task.taskId(), "offset", -1)).startsWith("ERROR:"));
             assertTrue(logs.execute(Map.of("taskId", task.taskId(), "limit", 32001)).startsWith("ERROR:"));
             new StopCommandTool(manager, SESSION).execute(Map.of("taskId", task.taskId()));

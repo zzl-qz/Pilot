@@ -42,11 +42,10 @@ public final class CommandStatusTool implements Tool, ProducesCheck {
     }
 
     public Map<String, Object> parameters() {
-        return ToolSchemas
-            .object(
-                Map.of("taskId", ToolSchemas.string("run_command 返回的任务 ID"), "waitSeconds", Map.of("type", "integer",
-                    "minimum", 0, "maximum", 5, "description", "最多等待多少秒再返回，默认 0，最大 5；运行中可用 5 避免频繁轮询")),
-                List.of("taskId"));
+        return ToolSchemas.object(
+            Map.of("taskId", ToolSchemas.string("run_command 返回的任务 ID"), "waitSeconds", Map.of("type", "integer",
+                "minimum", 0, "maximum", 60, "description", "最多等待多少秒再返回，默认 0，最大 60。长测试请一次等 20 到 30 秒，命令提前结束会立刻返回")),
+            List.of("taskId"));
     }
 
     public String execute(Map<String, Object> args) {
@@ -59,16 +58,13 @@ public final class CommandStatusTool implements Tool, ProducesCheck {
         if (id == null) {
             return ToolResult.text("ERROR: 缺少参数 taskId");
         }
-        long budgetEnd = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         try {
-            long wait = CommandToolSupport.integerArg(args, "waitSeconds", 0, 0, 5);
+            // 等待和变更核对分开计时。以前共用 5 秒，长测试每 5 秒就要把模型叫醒一次，核对时间也被等光。
+            long wait = CommandToolSupport.integerArg(args, "waitSeconds", 0, 0, 60);
             CommandTaskManager.Task task = tasks.get(sessionId, id);
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(wait);
-            if (deadline > budgetEnd) {
-                deadline = budgetEnd;
-            }
             while (CommandToolSupport.running(task) && System.nanoTime() < deadline) {
-                Thread.sleep(50);
+                Thread.sleep(100);
                 task = tasks.get(sessionId, id);
             }
             String rendered = CommandToolSupport.render(task);
@@ -76,10 +72,7 @@ public final class CommandStatusTool implements Tool, ProducesCheck {
                 || !task.changeTracking().active()) {
                 return ToolResult.text(rendered);
             }
-            long leftNanos = budgetEnd - System.nanoTime();
-            if (leftNanos < TimeUnit.MILLISECONDS.toNanos(50)) {
-                return ToolResult.text(rendered + "\n变更核对超过 5 秒还没结束，这次不把结果算作验证。");
-            }
+            long leftNanos = TimeUnit.SECONDS.toNanos(5);
             CommandChangeTracker.Result result;
             CommandTaskManager.Task finished = task;
             try {

@@ -11,6 +11,9 @@ class ForegroundPaceTest {
     void buildAndTestCommandsAreAllowedToStayQuiet() {
         assertTrue(ForegroundPace.expectsLong("mvn -q test"));
         assertTrue(ForegroundPace.expectsLong("npm test"));
+        assertTrue(ForegroundPace.expectsLong("npm run test:composer"));
+        assertTrue(ForegroundPace.expectsLong("npx playwright test"));
+        assertTrue(ForegroundPace.expectsLong("vitest run"));
         assertTrue(ForegroundPace.expectsLong("go test ./..."));
         assertFalse(ForegroundPace.expectsLong("mvn -v"));
         assertFalse(ForegroundPace.expectsLong("git status"));

@@ -68,13 +68,61 @@ class OsSandboxTest {
     }
 
     @Test
-    void windowsStaysOnTheHostAndSaysSo() {
-        OsSandbox.Launch launch = OsSandbox.wrap(List.of("mvn", "-v"), workspace, OsSandbox.Family.WINDOWS, true);
+    void windowsRefusesWhenTheRunnerIsMissing() {
+        String previous = System.getProperty("pilot.windows.sandbox.runner");
+        System.clearProperty("pilot.windows.sandbox.runner");
+        try {
+            OsSandbox.Launch launch = OsSandbox.wrap(List.of("mvn", "-v"), workspace, OsSandbox.Family.WINDOWS, true);
 
-        assertEquals(List.of("mvn", "-v"), launch.command());
-        assertFalse(launch.enforced());
-        assertTrue(launch.label().contains("Windows"));
-        assertTrue(launch.label().contains("未启用"));
+            assertTrue(launch.command().isEmpty(), launch.label());
+            assertFalse(launch.enforced());
+            assertTrue(launch.label().contains("命令未启动"), launch.label());
+        } finally {
+            restoreRunner(previous);
+        }
+    }
+
+    @Test
+    void windowsFailingRunnerDoesNotStartTheCommand() throws Exception {
+        Path runner = Files.writeString(workspace.resolve("fail-runner.sh"), "#!/bin/sh\nexit 7\n");
+        assertTrue(runner.toFile().setExecutable(true));
+        String previous = System.setProperty("pilot.windows.sandbox.runner", runner.toString());
+        try {
+            OsSandbox.Launch launch = OsSandbox.wrap(List.of("mvn", "-v"), workspace, OsSandbox.Family.WINDOWS, true);
+
+            assertTrue(launch.command().isEmpty(), launch.label());
+            assertFalse(launch.enforced());
+            assertTrue(launch.label().contains("命令未启动"), launch.label());
+            assertTrue(launch.label().contains("7"), launch.label());
+        } finally {
+            restoreRunner(previous);
+        }
+    }
+
+    @Test
+    void windowsReadyRunnerOnlyStartsBehindTheRestrictedToken() throws Exception {
+        Path runner = Files.writeString(workspace.resolve("ok-runner.sh"), "#!/bin/sh\nexit 0\n");
+        assertTrue(runner.toFile().setExecutable(true));
+        String previous = System.setProperty("pilot.windows.sandbox.runner", runner.toString());
+        try {
+            OsSandbox.Launch launch = OsSandbox.wrap(List.of("mvn", "-v"), workspace, OsSandbox.Family.WINDOWS, true);
+
+            assertTrue(launch.enforced(), launch.label());
+            assertEquals(runner.toString(), launch.command().getFirst());
+            assertTrue(launch.command().contains("--workspace"), launch.command().toString());
+            assertTrue(launch.command().containsAll(List.of("mvn", "-v")), launch.command().toString());
+            assertTrue(launch.label().contains("写入已限制"), launch.label());
+        } finally {
+            restoreRunner(previous);
+        }
+    }
+
+    private static void restoreRunner(String previous) {
+        if (previous == null) {
+            System.clearProperty("pilot.windows.sandbox.runner");
+        } else {
+            System.setProperty("pilot.windows.sandbox.runner", previous);
+        }
     }
 
     @Test
@@ -89,6 +137,7 @@ class OsSandboxTest {
             List.of("/bin/sh", "-c", "echo ok > inside.txt; echo hacked > .git/config; echo no > '" + escape + "'"),
             root);
         assertTrue(launch.enforced(), launch.label());
+        assertTrue(launch.label().contains("已隔离"), launch.label());
 
         Process process =
             new ProcessBuilder(launch.command()).directory(root.toFile()).redirectErrorStream(true).start();

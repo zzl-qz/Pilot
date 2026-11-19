@@ -26,7 +26,9 @@ final class ForegroundPace {
             return true;
         }
         if (text.contains("npm test") || text.contains("pnpm test") || text.contains("yarn test")
-            || text.contains("npm run build") || text.contains("pnpm run build") || text.contains("yarn build")) {
+            || text.contains("npm run test") || text.contains("pnpm run test") || text.contains("npm run build")
+            || text.contains("pnpm run build") || text.contains("yarn build") || text.contains("playwright")
+            || text.contains("vitest") || text.contains("jest") || text.contains("cypress")) {
             return true;
         }
         boolean buildTool = text.contains("mvn") || text.contains("gradle");

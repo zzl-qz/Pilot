@@ -70,6 +70,10 @@ public final class HookCommandTool implements Tool {
         String sandboxLabel = "";
         if (!selected.isolated()) {
             OsSandbox.Launch sandbox = OsSandbox.wrap(request.argv(), command.workspace());
+            if (sandbox.command().isEmpty()) {
+                result = new Hooks.CommandResult("ERROR: " + sandbox.label(), false, false);
+                return result.output();
+            }
             request = new ExecutionRequest(sandbox.command(), request.script(), request.workdir(),
                 request.workspaceRoot(), request.env(), request.network(), request.limits());
             sandboxLabel = "\n" + sandbox.label();

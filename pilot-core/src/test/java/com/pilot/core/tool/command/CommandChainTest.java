@@ -38,7 +38,13 @@ class CommandChainTest {
         assertNull(parsed.error());
         assertTrue(parsed.segments().getFirst().mergeStderr());
         assertEquals(List.of("mvn", "-q", "test"), parsed.segments().getFirst().tokens());
-        assertNotNull(CommandChain.parse("mvn test > log.txt").error());
+        CommandChain.Parsed redirected = CommandChain.parse("mvn test > log.txt");
+        assertNull(redirected.error());
+        assertEquals("log.txt", redirected.segments().getFirst().redirectTo());
+        assertFalse(redirected.segments().getFirst().append());
+        CommandChain.Parsed appended = CommandChain.parse("mvn test >> log.txt");
+        assertNull(appended.error());
+        assertTrue(appended.segments().getFirst().append());
         assertNotNull(CommandChain.parse("mvn test 2> log.txt").error());
         assertNotNull(CommandChain.parse("cat < in.txt").error());
     }
