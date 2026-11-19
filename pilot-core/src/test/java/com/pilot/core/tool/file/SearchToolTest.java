@@ -11,8 +11,6 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-
-import com.pilot.core.tool.ReadTracker;
 import com.pilot.core.workspace.PathValidator;
 
 class SearchToolTest {
@@ -121,16 +119,5 @@ class SearchToolTest {
         String result = tool.execute(Map.of("pattern", "alpha", "path", "../.."));
 
         assertTrue(result.startsWith("ERROR: 路径超出工作区"), result);
-    }
-
-    @Test
-    void searchStopsAfterTheInspectionBudget() {
-        SearchTool limited = new SearchTool(new PathValidator(workspace), new ReadTracker());
-        String last = "";
-        for (int i = 0; i <= ReadTracker.MAX_INSPECTIONS; i++) {
-            last = limited.execute(Map.of("pattern", "alpha"));
-        }
-        assertTrue(last.contains("未变化"), last);
-        assertFalse(last.contains("a.txt:1"), last);
     }
 }

@@ -84,12 +84,9 @@ class ReadFileToolTest {
     void creatingAFileAllowsReadingAgain() throws IOException {
         ReadTracker tracker = new ReadTracker();
         PathValidator paths = new PathValidator(workspace);
-        for (int i = 0; i < ReadTracker.MAX_INSPECTIONS; i++) {
-            tracker.deliverInspection();
-        }
         ReadFileTool tracked = new ReadFileTool(paths, tracker);
         Files.writeString(workspace.resolve("App.java"), "class App {}\n");
-        assertTrue(tracked.execute(Map.of("path", "App.java")).contains("未变化"));
+        assertTrue(tracked.execute(Map.of("path", "App.java")).contains("class App"));
 
         String created = new CreateFileTool(paths, SnapshotSink.none(), tracker)
             .execute(Map.of("path", "New.java", "content", "class New {}\n"));

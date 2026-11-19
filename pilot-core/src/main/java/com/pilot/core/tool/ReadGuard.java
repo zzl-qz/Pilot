@@ -41,14 +41,6 @@ public interface ReadGuard {
         return true;
     }
 
-    /**
-     * 这一轮还能不能继续只读查看。读文件、搜索、翻历史都算。写出新内容后重新计数。
-     * 默认不限制。
-     */
-    default boolean deliverInspection() {
-        return true;
-    }
-
     /** 已经写出新内容，只读查看次数清零，可以再读刚改过的文件。 */
     default void noteWrite() {
     }

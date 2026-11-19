@@ -73,9 +73,6 @@ public final class SearchTool implements Tool.ParallelReadOnly {
         if (patternText == null) {
             return "ERROR: 缺少参数 pattern";
         }
-        if (!reads.deliverInspection()) {
-            return "文件未变化，沿用刚才的搜索结果。已经查看了 " + ReadTracker.MAX_INSPECTIONS + " 次代码，还没有修改。不要再搜索，直接编辑文件。";
-        }
         Pattern pattern;
         try {
             pattern = Pattern.compile(patternText);

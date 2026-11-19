@@ -139,9 +139,6 @@ public final class ReadFileTool implements Tool.ParallelReadOnly {
             if (!seen.isEmpty() && seen.equals(slices.get(window))) {
                 return "文件未变化，沿用刚才读过的 " + rawPath + "（从第 " + startLine + " 行起，最多 " + lineCount + " 行）。不要再读这一段。";
             }
-            if (proposal == null && !reads.deliverInspection()) {
-                return "文件未变化，沿用刚才读过的 " + rawPath + "。已经查看了 " + ReadTracker.MAX_INSPECTIONS + " 次代码，还没有修改。不要再读，直接编辑文件。";
-            }
             if (proposal == null && !reads.deliverRead(file)) {
                 return "文件未变化，沿用刚才读过的 " + rawPath + "。同一文件已经读过 " + ReadTracker.MAX_DELIVERIES
                     + " 次，不要再换行号重读。根据上文修改，或改看别的文件。";

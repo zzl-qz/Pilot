@@ -233,10 +233,6 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         Prepared prepared = preparation.prepared();
         String raw = ToolSupport.stringArg(args, "command");
         String cacheKey = raw + "\n" + prepared.workdir();
-        if (prepared.readOnly() && !prepared.background() && !reads.deliverInspection()) {
-            return ToolResult.text(
-                "与上次相同，未再执行。命令: " + raw + "\n已经查看了 " + ReadTracker.MAX_INSPECTIONS + " 次代码，还没有修改。不要再搜索或重读，直接编辑文件。");
-        }
         String repeated = repeatedLook(raw);
         if (repeated != null) {
             return ToolResult.text(repeated);

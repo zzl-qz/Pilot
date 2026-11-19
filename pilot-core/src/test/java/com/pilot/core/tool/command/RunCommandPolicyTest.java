@@ -336,17 +336,4 @@ class RunCommandPolicyTest {
         }
         assertTrue(last.contains("未再执行"), last);
     }
-
-    @Test
-    void readOnlyCommandsStopAfterTooManyLooksWithoutAWrite() {
-        Assumptions.assumeFalse(WINDOWS);
-        ReadTracker tracker = new ReadTracker();
-        RunCommandTool command = new RunCommandTool(new PathValidator(workspace)).withReads(tracker);
-        String last = "";
-        for (int i = 1; i <= ReadTracker.MAX_INSPECTIONS + 1; i++) {
-            last = command.execute(Map.of("command", "echo step-" + i));
-        }
-        assertTrue(last.contains("未再执行"), last);
-        assertTrue(last.contains("直接编辑"), last);
-    }
 }
