@@ -59,7 +59,7 @@ try {
   tab.on('pageerror', error => errors.push(error.message));
   await tab.goto(url);
 
-  await tab.locator('.queue-text').click();
+  await tab.getByRole('button', { name: '改这条' }).click();
   const editor = tab.locator('#queue-edit textarea[aria-label="编辑排队消息"]');
   await editor.fill('改后的正文');
 
@@ -101,7 +101,7 @@ try {
   assert.equal(await tab.locator('#queue-edit').count(), 0, '保存成功后关闭编辑区');
   assert.ok(!(await tab.evaluate(() => window.notices)).some(text => /已发送、删除或修改/.test(text)));
   // 同一编辑区可填写这一条自己的约束与验收
-  await tab.locator('.queue-text').first().click();
+  await tab.getByRole('button', { name: '改这条' }).first().click();
   await tab.locator('#queue-edit textarea[aria-label="这条排队消息的约束"]').fill('别动 pom\n保留 API');
   await tab.locator('#queue-edit textarea[aria-label="这条排队消息的验收条件"]').fill('覆盖失败路径');
   await tab.getByRole('button', { name: '保存' }).click();
@@ -111,6 +111,20 @@ try {
   assert.deepEqual(requirementsCall.acceptance, ['覆盖失败路径']);
   await tab.waitForFunction(() => document.querySelector('.queue-requirements')?.textContent?.includes('约束 2'));
   assert.match(await tab.locator('.queue-requirements').innerText(), /约束 2 · 验收 1/);
+  // 点正文只展开这一句；改字必须点「改这条」，不能一碰正文就换成约束表单。
+  await tab.evaluate(() => {
+    const long = '把排队区里每一句话都完整露出来，放不下时在这一条里展开全文，不要只靠悬停。'.repeat(3);
+    window.queue = [{ content: long, text: long, attachments: [], imagePositions: [] }];
+    window.revision = 'r4';
+    window.store.setState({ queueEntries: window.queue, queueRevision: 'r4', ui: { ...window.store.getState().ui, queueEdit: null } });
+  });
+  assert.equal(await tab.locator('.queue-text.is-clamped').count(), 1, '长句先收起');
+  await tab.locator('.queue-text').click();
+  assert.equal(await tab.locator('#queue-edit').count(), 0, '点正文只展开，不打开编辑区');
+  assert.equal(await tab.locator('.queue-text.is-clamped').count(), 0, '展开后显示全文');
+  assert.equal(await tab.locator('.queue-item').count(), 1, '展开后仍是同一条');
+  await tab.getByRole('button', { name: '改这条' }).click();
+  await tab.locator('#queue-edit textarea[aria-label="编辑排队消息"]').waitFor();
   assert.deepEqual(errors, []);
   console.log('PASS 队列编辑：目标消失时保留输入、不误改；目标移动后按指纹命中并使用最新版本');
 } finally {

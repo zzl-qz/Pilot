@@ -219,7 +219,7 @@ async function run(page,name,url) {
   await paste();await input.press('Escape');assert.equal(await chips.count(),1,'停止任务保留草稿附件');
   // Queue edit failure / blank / success, then draft remains usable.
   await clear();await page.evaluate(()=>{store.setState({running:false,queueEntries:[{text:'queued'}]});api.queue=async()=>({entries:[{text:'queued'}]});api.updateQueueItem=async()=>{throw Error('offline');};});
-  await page.locator('.queue-text').click();await page.getByLabel('编辑排队消息').fill('changed');await page.locator('#queue-edit').getByText('保存',{exact:true}).click();
+  await page.getByRole('button',{name:'改这条'}).click();await page.getByLabel('编辑排队消息').fill('changed');await page.locator('#queue-edit').getByText('保存',{exact:true}).click();
   assert.equal(await page.getByLabel('编辑排队消息').inputValue(),'changed');
   await page.getByLabel('编辑排队消息').fill(' ');assert.equal(await page.locator('#queue-edit').getByText('保存',{exact:true}).isDisabled(),true);
   await page.getByLabel('编辑排队消息').fill('saved');await page.evaluate(()=>{api.updateQueueItem=async()=>{api.queue=async()=>({items:[]});return {};};});
