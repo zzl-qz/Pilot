@@ -378,11 +378,26 @@ html[data-theme] .usage-card { flex: 1; padding: 0 16px; border: 0; border-radiu
 @media (prefers-reduced-motion: reduce) { .tree-chevron svg { transition: none; } }
 
 /* 消息操作跟随队列行；输入框只保留语音和一个状态主按钮。 */
-html[data-theme] .message-queue { overflow: visible; border-radius: 12px; }
-html[data-theme] .queue-list { margin: 0; padding: 0; list-style: none; max-height: 190px; overflow-y: auto; }
-html[data-theme] .queue-item { align-items: center; min-height: 42px; gap: 8px; }
-html[data-theme] .queue-main { flex: 1; min-width: 0; }
-html[data-theme] .queue-main .queue-text { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+/* 排队正文以这里为准：前面的样式文件还会写省略号和最大高度，后加载的这一份把它们盖掉。 */
+html[data-theme] .message-queue { overflow: visible; border-radius: 12px; max-height: none; }
+html[data-theme] .queue-list { margin: 0; padding: 0; list-style: none; max-height: none; overflow: visible; }
+html[data-theme] .queue-item { align-items: flex-start; min-height: 42px; gap: 8px; flex-wrap: wrap; }
+html[data-theme] .queue-main { flex: 1 1 180px; min-width: 0; }
+html[data-theme] .queue-main .queue-text,
+html[data-theme] .queue-text {
+  display: block; white-space: normal; overflow: visible; text-overflow: unset;
+  -webkit-line-clamp: unset; overflow-wrap: anywhere; font-size: 13px; line-height: 1.45;
+}
+html[data-theme] .queue-text.is-clamped {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden;
+}
+html[data-theme] .queue-expand, html[data-theme] .queue-actions .btn, html[data-theme] .queue-actions button {
+  white-space: normal; min-height: 32px;
+}
+html[data-theme] .queue-actions { flex-wrap: wrap; max-width: 100%; }
+html[data-theme] .queue-lane { border-top: 1px solid var(--line-soft); padding: 8px 10px 4px; }
+html[data-theme] .queue-lane-title { margin: 0; font-size: 13px; font-weight: 600; }
+html[data-theme] .queue-lane-hint, html[data-theme] .queue-block { margin: 4px 0 0; font-size: 12px; line-height: 1.45; color: var(--dim); }
 html[data-theme] .queue-grip { opacity: .7; margin: 0; width: 18px; height: 28px; display: grid; place-items: center; flex: none; padding: 0; border: 0; background: transparent; color: var(--muted); cursor: grab; }
 html[data-theme] .queue-grip svg { width: 14px; height: 14px; }
 html[data-theme] .queue-actions { opacity: 1; display: flex; align-items: center; gap: 2px; }

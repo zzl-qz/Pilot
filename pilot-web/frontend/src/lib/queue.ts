@@ -46,7 +46,7 @@ export function normalizeQueue(data: QueueResponse | null | undefined) {
   return { texts, rows };
 }
 
-/** 排队标题：运行中按顺序发送，停止后保留队列。 */
+/** 会自动发出去的排队标题。0 条不显示，范围外和还不能做的不计入。 */
 export function queueHeader({ count = 0, held = false, waitingReason = '' }: { count?: number; held?: boolean; waitingReason?: string } = {}) {
   const n = Number(count) || 0;
   if (!n) {
@@ -56,6 +56,55 @@ export function queueHeader({ count = 0, held = false, waitingReason = '' }: { c
     title: `${n} 条排队`,
     meta: waitingReason || (held ? '队列已暂停，等待你恢复' : '这轮结束后按顺序发送')
   };
+}
+
+export type QueueLane = 'send' | 'parked' | 'blocked' | 'wrapup';
+
+/** 这句话会不会在本轮结束后自动发给工人。 */
+export function queueLane(text: string | null | undefined): QueueLane {
+  const body = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!body) return 'send';
+  if (body.startsWith('遗留') || body.includes('不在本次范围')) return 'parked';
+  if (isWrapup(body)) return 'wrapup';
+  if (isVagueClick(body) || isVagueName(body)) return 'blocked';
+  return 'send';
+}
+
+/** 还不能做时，写明缺的是按钮还是名字。能发出去的返回空字符串。 */
+export function queueBlockReason(text: string | null | undefined): string {
+  const body = String(text || '').replace(/\s+/g, ' ').trim();
+  if (isVagueClick(body)) return '还不能做：没写点的是哪个按钮，也没写现在怎样、期望怎样。';
+  if (isVagueName(body)) return '还不能做：没写是哪一个名字看起来奇怪，以及希望改成什么。';
+  return '';
+}
+
+/** 去掉「不在本次范围」这句开头，剩下的才能重新进入自动发送。 */
+export function textWithoutParkedMark(text: string): string {
+  return text.replace(/^遗留（不在本次范围）\s*[|｜]?\s*/, '').replace(/^遗留\s*[|｜]?\s*/, '').trim();
+}
+
+function isWrapup(body: string): boolean {
+  const ships = /提交|commit/i.test(body) && /推送|push/i.test(body);
+  const splits = /按功能|拆分多个|多个\s*commit/i.test(body);
+  return ships && (/做完|记得|收尾/.test(body) || splits);
+}
+
+function namesAThing(body: string): boolean {
+  if (/[「『"“'][^」』"”']{1,40}[」』"”']/.test(body)) return true;
+  return /[\u4e00-\u9fa5A-Za-z0-9]{2,16}(按钮|图标|链接|菜单|输入框|弹窗)/.test(body)
+    && !/(这个|那个|这里的?)(按钮|图标|链接|菜单|输入框|弹窗)/.test(body);
+}
+
+function isVagueClick(body: string): boolean {
+  if (!/点击|点了|点一下|点之后|点这里|点这儿/.test(body)) return false;
+  if (!/为啥|为什么|不太行|不对|修复|修一下|怎样|这样/.test(body)) return false;
+  return !namesAThing(body);
+}
+
+function isVagueName(body: string): boolean {
+  if (!/命名|名字|叫法/.test(body)) return false;
+  if (!/奇怪|不对|不好|别扭|改一下|改改/.test(body)) return false;
+  return !namesAThing(body);
 }
 
 /** 输入框上方的继续条。需要补充和可续跑共用一个入口。 */

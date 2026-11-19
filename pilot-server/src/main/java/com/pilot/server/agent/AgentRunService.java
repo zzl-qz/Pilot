@@ -985,9 +985,26 @@ public class AgentRunService implements RunStarter {
         if (queuedMessages.held(sessionId)) {
             return;
         }
-        String raw = queue.peek();
-        if (raw == null) {
+        int pick = -1;
+        int index = 0;
+        for (String candidate : queue) {
+            if (QueueLane.sendsAutomatically(QueuedMessageCodec.decode(candidate).content())) {
+                pick = index;
+                break;
+            }
+            index++;
+        }
+        if (pick < 0) {
             return;
+        }
+        String raw = null;
+        int seen = 0;
+        for (String candidate : queue) {
+            if (seen == pick) {
+                raw = candidate;
+                break;
+            }
+            seen++;
         }
         QueuedMessageCodec.Stored next = QueuedMessageCodec.decode(raw);
         String runId = claimRun(sessionId).orElse(null);
@@ -1005,7 +1022,13 @@ public class AgentRunService implements RunStarter {
             publish(sessionId, runId, new RunFailed(RunFailureCode.QUEUE_START_FAILED, "排队消息启动失败，消息已保留", false));
             throw e;
         }
-        queue.remove();
+        java.util.Iterator<String> remaining = queue.iterator();
+        for (int cursor = 0; cursor <= pick; cursor++) {
+            remaining.next();
+            if (cursor == pick) {
+                remaining.remove();
+            }
+        }
         persistQueue(sessionId, queue);
     }
 

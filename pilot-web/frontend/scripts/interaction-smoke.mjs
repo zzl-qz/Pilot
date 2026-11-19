@@ -208,13 +208,13 @@ async function run(page,name,url) {
   await input.fill('排队要求');await page.locator('#send').click();
   assert.equal(await page.evaluate(()=>calls.filter(c=>c.name==='sendMessage').length),1);
   await page.evaluate(()=>{store.setState({queueEntries:[{text:'按图优化'}],queueRevision:'v1'});api.steerQueueItem=async(...args)=>{calls.push({name:'steerQueueItem',args});};});
-  await page.getByRole('button',{name:'引导这条排队消息'}).click();
+  await page.getByRole('button',{name:'插到当前这轮里做'}).click();
   assert.equal(await page.evaluate(()=>calls.filter(c=>c.name==='steerQueueItem').length),1);
   assert.deepEqual(await page.evaluate(()=>calls.find(c=>c.name==='steerQueueItem').args),['test-a',0,{runId:'run-a',revision:'v1'}]);
   await page.evaluate(()=>{store.setState({queueEntries:[{text:'失败时保留'}],queueRevision:'v2'});api.queue=async()=>({entries:[{content:'失败时保留'}],revision:'v2'});api.steerQueueItem=async()=>{throw Error('任务已结束');};});
-  await page.getByRole('button',{name:'引导这条排队消息'}).click();await page.waitForFunction(()=>!store.getState().queueBusy);
+  await page.getByRole('button',{name:'插到当前这轮里做'}).click();await page.waitForFunction(()=>!store.getState().queueBusy);
   assert.match(await page.locator('.queue-text').innerText(),/失败时保留/);
-  assert.match(await page.locator('#notice').innerText(),/引导未发送/);
+  assert.match(await page.locator('#notice').innerText(),/插到当前这轮失败/);
   await page.evaluate(()=>api.queue=async()=>({items:[]}));
   await paste();await input.press('Escape');assert.equal(await chips.count(),1,'停止任务保留草稿附件');
   // Queue edit failure / blank / success, then draft remains usable.

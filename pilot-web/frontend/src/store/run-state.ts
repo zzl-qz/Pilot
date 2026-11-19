@@ -190,7 +190,7 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
         }
         if (restored.files.length) bridge.insertAttachments?.(restored.files);
         writeDraft(localStorage, sessionId, bridge.getText());
-        get().showNotice('已取回排队消息' + (restored.files.length ? '（含 ' + restored.files.length + ' 个附件）' : '') + '，可继续编辑后发送。');
+        get().showNotice('已放回输入框' + (restored.files.length ? '（含 ' + restored.files.length + ' 个附件）' : '') + '，可继续编辑后发送。');
         return true;
       } finally {
         if (current()) set((draft) => { draft.queueTakingBack = false; });
@@ -220,7 +220,7 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
     async steerQueueItem(index) {
       const { runId, running } = get();
       if (!running || !runId) return false;
-      return get().mutateQueue((id, revision) => api.steerQueueItem(id, index, { runId, revision }), '引导未发送：');
+      return get().mutateQueue((id, revision) => api.steerQueueItem(id, index, { runId, revision }), '插到当前这轮失败：');
     },
     async saveQueueItem(target, text, requirements) {
       if (!text?.trim()) { get().showNotice('排队消息不能为空'); return false; }

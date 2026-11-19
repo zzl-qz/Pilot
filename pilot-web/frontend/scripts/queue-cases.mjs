@@ -12,7 +12,7 @@ export async function checkQueue(page, name, temp) {
     window.guidanceTwo = store.getState().steerQueueItem(0);
   });
   assert.equal(await page.evaluate(() => pendingGuidanceCalls), 1, '并发点击只提交一次');
-  assert.equal(await page.getByRole('button', { name: '引导这条排队消息' }).first().isEnabled(), false);
+  assert.equal(await page.getByRole('button', { name: '插到当前这轮里做' }).first().isEnabled(), false);
   await page.evaluate(async () => { api.queue = async () => ({ entries: [{ content: '之后测试' }], revision: 'two' }); resolveGuidance({}); await Promise.all([guidanceOne, guidanceTwo]); });
   // 旧的读取不能覆盖较新的队列，更不能写入切换后的会话。
   await page.evaluate(() => {
@@ -39,12 +39,10 @@ export async function checkQueue(page, name, temp) {
     await page.setViewportSize({ width, height: 900 });
     if (width <= 960) await page.waitForFunction(() => document.querySelector('#sidebar').getBoundingClientRect().right <= 1);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
-    assert.equal(await page.locator('.queue-actions').first().evaluate(el => getComputedStyle(el).opacity), '1', '引导始终可见');
-    await page.getByRole('button', { name: '更多排队操作' }).first().click();
-    assert.equal(await page.getByRole('button', { name: '上移', exact: true }).isEnabled(), false);
-    const box = await page.locator('.queue-more-menu').boundingBox();
+    assert.equal(await page.locator('.queue-actions').first().evaluate(el => getComputedStyle(el).opacity), '1', '操作始终可见');
+    assert.equal(await page.getByRole('button', { name: '上移', exact: true }).first().isEnabled(), false);
+    const box = await page.getByRole('button', { name: '上移', exact: true }).first().boundingBox();
     assert.ok(box.x >= 0 && box.x + box.width <= width + 1 && box.y >= 0);
-    await page.keyboard.press('Escape'); assert.equal(await page.locator('.queue-more-menu').count(), 0);
     await page.screenshot({ path: join(temp, `${name}-queue-${width}.png`) });
   }
   // 编辑文件消息只改正文；Esc 先关闭编辑器，不停止正在运行的任务。
@@ -55,12 +53,12 @@ export async function checkQueue(page, name, temp) {
     api.queue=async()=>({entries:[{content:window.savedQueueBody?.content || '检查附件\n\n'+queuedFileBlock}],revision:'file2'});
   });
   const cancelled = await page.evaluate(()=>calls.filter(c=>c.name==='cancelRun').length);
-  await page.getByRole('button',{name:'编辑这条排队消息'}).click();
+  await page.getByRole('button',{name:'改这条'}).click();
   assert.equal(await page.getByLabel('编辑排队消息').inputValue(),'检查附件');
   await page.getByLabel('编辑排队消息').press('Escape');
   assert.equal(await page.locator('#queue-edit').count(),0);
   assert.equal(await page.evaluate(()=>calls.filter(c=>c.name==='cancelRun').length),cancelled);
-  await page.getByRole('button',{name:'编辑这条排队消息'}).click();
+  await page.getByRole('button',{name:'改这条'}).click();
   await page.getByLabel('编辑排队消息').fill('新的引导内容');
   await page.locator('#queue-edit').getByRole('button',{name:'保存',exact:true}).click();
   await page.waitForFunction(()=>!store.getState().queueBusy);

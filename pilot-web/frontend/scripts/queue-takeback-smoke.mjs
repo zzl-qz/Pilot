@@ -85,12 +85,12 @@ try {
 
   // 1) 纯文本 + 已有草稿：正文追加到新行，已有附件保留
   await page.evaluate(() => window.setEntries([{ content: '取回的正文', text: '取回的正文', attachments: [], imagePositions: [] }]));
-  await page.getByRole('button', { name: '取回输入框' }).click();
+  await page.getByRole('button', { name: '放回输入框' }).click();
   await page.waitForFunction(() => window.calls.length === 1);
   assert.equal(await page.evaluate(() => window.draftText), '已有草稿\n取回的正文');
   assert.equal(await page.evaluate(() => window.draftFiles.length), 1, '已有附件保留');
   assert.equal(await page.locator('.queue-item').count(), 0);
-  assert.match(await page.evaluate(() => window.notices.at(-1)), /已取回排队消息/);
+  assert.match(await page.evaluate(() => window.notices.at(-1)), /已放回输入框/);
 
   // 2) 带图片：附件芯片带回，正文仍保留
   await page.evaluate(() => {
@@ -102,7 +102,7 @@ try {
       imagePositions: [0]
     }]);
   });
-  await page.getByRole('button', { name: '取回输入框' }).click();
+  await page.getByRole('button', { name: '放回输入框' }).click();
   await page.waitForFunction(() => window.calls.length === 2);
   assert.equal(await page.evaluate(() => window.draftText), '看图');
   assert.deepEqual(await page.evaluate(() => window.draftFiles.map(item => item.name)), ['a.png']);
@@ -117,7 +117,7 @@ try {
       imagePositions: [0]
     }]);
   });
-  await page.getByRole('button', { name: '取回输入框' }).click();
+  await page.getByRole('button', { name: '放回输入框' }).click();
   await page.waitForFunction(() => window.notices.some(text => /仍在队列中/.test(text)));
   assert.equal(await page.evaluate(() => window.calls.length), 2, '读取失败不应删除队列');
   assert.equal(await page.evaluate(() => window.draftText), '保留的草稿');

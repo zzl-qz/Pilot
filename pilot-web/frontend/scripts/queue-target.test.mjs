@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { locateQueueTarget, queueEntryKey, queueHeader } from '../src/lib/queue.js';
+import { locateQueueTarget, queueBlockReason, queueEntryKey, queueHeader, queueLane, textWithoutParkedMark } from '../src/lib/queue.js';
 
 const image = (name) => ({ name, url: `/api/sessions/s/attachments/${name}` });
 const entry = (text, attachments = [], imagePositions = []) => ({ content: text, text, attachments, imagePositions });
@@ -58,4 +58,17 @@ test('队列标题展示服务端等待原因与暂停文案', () => {
   assert.equal(queueHeader({ count: 1, held: true, waitingReason: '等待本轮结束' }).meta, '等待本轮结束');
   assert.equal(queueHeader({ count: 1, held: false, waitingReason: '等待验收' }).meta, '等待验收');
   assert.equal(queueHeader({ count: 0, held: true }), null);
+});
+
+test('范围外、没写对象和收尾提交不会自动发送', () => {
+  assert.equal(queueLane('遗留（不在本次范围） | 能力页仍失败'), 'parked');
+  assert.equal(queueLane('这里点击之后为啥是这样，不太行吧，修复一下'), 'blocked');
+  assert.equal(queueLane('命名有点奇怪'), 'blocked');
+  assert.equal(queueLane('做完记得按照功能拆分多个commit进行提交并推送'), 'wrapup');
+  assert.equal(queueLane('点「关闭预览」之后外层也关了，希望只关大图'), 'send');
+  assert.equal(queueLane('把删除改成一个 x'), 'send');
+  assert.equal(queueLane(''), 'send');
+  assert.match(queueBlockReason('这里点击之后为啥是这样，不太行吧，修复一下'), /哪个按钮/);
+  assert.match(queueBlockReason('命名有点奇怪'), /哪一个名字/);
+  assert.equal(textWithoutParkedMark('遗留（不在本次范围） | 能力页仍失败'), '能力页仍失败');
 });

@@ -1,10 +1,9 @@
 import type { QueueEntry } from '../types/runtime.js';
 import { Button } from '@astryxdesign/core/Button';
-import { IconButton } from '@astryxdesign/core/IconButton';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { splitAttachmentMarkers, joinAttachmentMarkers } from '../lib/attachments.js';
-import { locateQueueTarget, queueEntryKey, queueHeader } from '../lib/queue.js';
+import { locateQueueTarget, queueBlockReason, queueEntryKey, queueHeader, queueLane, textWithoutParkedMark } from '../lib/queue.js';
 import type { QueueEditTarget } from '../types/store.js';
 import { Icon } from './Icon.jsx';
 
@@ -15,9 +14,11 @@ export function MessageQueue() {
   const collapsed = useStore((state) => state.ui.queueCollapsed);
   const queueHeld = useStore((state) => state.queueHeld);
   const queueWaitingReason = useStore((state) => state.queueWaitingReason);
-  const header = queueHeader({ count: entries.length, held: queueHeld, waitingReason: queueWaitingReason });
+  const sendable = entries.filter(entry => queueLane(entry.text ?? entry.content ?? '') === 'send');
+  const header = queueHeader({ count: sendable.length, held: queueHeld, waitingReason: queueWaitingReason });
   // 队列被取空时编辑区还要留着，否则用户没保存的文字会一起消失
-  if (!header && !queueEdit) {
+  const hasSide = entries.some(entry => queueLane(entry.text ?? entry.content ?? '') !== 'send');
+  if (!header && !queueEdit && !hasSide) {
     return null;
   }
   return (
@@ -41,77 +42,95 @@ function QueueList({ entries, queueEdit, collapsed, header, held }: { entries: Q
         <button ref={headRef} type="button" className="queue-head" aria-expanded={!collapsed} onClick={() => useStore.getState().setUi({ queueCollapsed: !collapsed })}>
           <span className="queue-title">{header.title}</span>
           <span className="queue-head-meta">{header.meta}</span>
-          {!!entries.length && <span className="queue-toggle">{collapsed ? '展开' : '收起'}</span>}
+          <span className="queue-toggle">{collapsed ? '展开' : '收起'}</span>
         </button>
-        {!!entries.length && <span className="queue-hold" title={held ? '恢复后若已空闲且验收通过，会立即开始队首' : '暂停只阻止自动开始下一条，当前任务继续执行'}>
-          <Button id="queue-hold" size="sm" variant="ghost" label={held ? '恢复队列' : '暂停队列'}
-            isDisabled={holding} onClick={() => void useStore.getState().setQueueHeld(!held)} />
-        </span>}
+        <span className="queue-hold">
+          <Button id="queue-hold" size="sm" variant="ghost"
+            label={holding ? (held ? '正在恢复…' : '正在暂停…') : (held ? '恢复队列' : '暂停队列')}
+            isDisabled={holding} onClick={() => void useStore.getState().setQueueHeld(!held).then(ok => {
+              if (ok) useStore.getState().showNotice(held ? '队列已恢复。空闲后只会发送上面会做的那几条。' : '队列已暂停，不会自动发送下一条。');
+            })} />
+        </span>
       </div>}
       {orphan && <div className="queue-orphan">
         <p role="status">原来的排队消息已被发送、删除或修改。未保存的输入已保留，可复制后重新选择目标。</p>
         <QueueEditor target={queueEdit!} text="" orphan onClose={closeEditor} />
       </div>}
-      {!collapsed && !!entries.length && (
-        <ol className="queue-list">
-          {entries.map((entry, index) => {
-            const text = entry.text ?? entry.content ?? '';
-            return (
-              <li
-                key={`${index}-${queueEntryKey(entry)}`}
-                className={`queue-item${dragFrom === index ? ' is-dragging' : ''}`}
-                onDragOver={event => {
-                  if (dragFrom == null) return;
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = 'move';
-                }}
-                onDrop={event => {
-                  if (dragFrom == null) return;
-                  event.preventDefault();
-                  setDragFrom(null);
-                  if (dragFrom !== index && !useStore.getState().queueBusy) {
-                    void useStore.getState().moveQueueItem(dragFrom, index);
-                  }
-                }}
-              >
-                {editAt === index ? (
-                  <QueueEditor target={{ index, key: queueEntryKey(entry) }} text={text}
-                    requirements={entry.requirements} onClose={closeEditor} />
-                ) : (
-                  <QueueRow entry={entry} index={index} count={entries.length} onDragStart={() => setDragFrom(index)} onDragEnd={() => setDragFrom(null)} />
-                )}
-              </li>
-            );
-          })}
-        </ol>
-      )}
+      {!collapsed && <QueueGroup entries={entries} lane="send" editAt={editAt} dragFrom={dragFrom} setDragFrom={setDragFrom} closeEditor={closeEditor} />}
+      <QueueGroup entries={entries} lane="blocked" title="还不能做" hint="这些不会自动发出去。写清点的是哪个按钮、或哪一个名字之后，才会进入上面的排队。" editAt={editAt} dragFrom={dragFrom} setDragFrom={setDragFrom} closeEditor={closeEditor} />
+      <QueueGroup entries={entries} lane="parked" title="这次不会执行" hint="范围外的说明留在这里。点「移回排队」之前，不会变成下一条任务。" editAt={editAt} dragFrom={dragFrom} setDragFrom={setDragFrom} closeEditor={closeEditor} />
+      <QueueGroup entries={entries} lane="wrapup" title="这些做完后再提交并推送" hint="这是收尾方式，不和界面修改抢顺序。当前这些功能做完之后再提交。" editAt={editAt} dragFrom={dragFrom} setDragFrom={setDragFrom} closeEditor={closeEditor} />
     </div>
   );
 }
 
-function QueueRow({ entry, index, count, onDragStart, onDragEnd }: { entry: QueueEntry; index: number; count: number; onDragStart: () => void; onDragEnd: () => void }) {
+function QueueGroup({ entries, lane, title, hint, editAt, dragFrom, setDragFrom, closeEditor }: {
+  entries: QueueEntry[]; lane: 'send' | 'blocked' | 'parked' | 'wrapup'; title?: string; hint?: string;
+  editAt: number; dragFrom: number | null; setDragFrom: (index: number | null) => void; closeEditor: () => void }) {
+  const rows = entries.map((entry, index) => ({ entry, index })).filter(row => queueLane(row.entry.text ?? row.entry.content ?? '') === lane);
+  if (!rows.length) return null;
+  return (
+    <section className={`queue-lane is-${lane}`}>
+      {title && <h3 className="queue-lane-title">{title}</h3>}
+      {hint && <p className="queue-lane-hint">{hint}</p>}
+      <ol className="queue-list">
+        {rows.map(({ entry, index }) => {
+          const text = entry.text ?? entry.content ?? '';
+          return (
+            <li
+              key={`${index}-${queueEntryKey(entry)}`}
+              className={`queue-item${dragFrom === index ? ' is-dragging' : ''}`}
+              onDragOver={event => {
+                if (dragFrom == null) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = 'move';
+              }}
+              onDrop={event => {
+                if (dragFrom == null) return;
+                event.preventDefault();
+                setDragFrom(null);
+                if (dragFrom !== index && !useStore.getState().queueBusy) {
+                  void useStore.getState().moveQueueItem(dragFrom, index);
+                }
+              }}
+              onKeyDown={event => {
+                if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+                if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+                event.preventDefault();
+                const next = event.key === 'ArrowUp' ? index - 1 : index + 1;
+                if (next < 0 || next >= entries.length || useStore.getState().queueBusy) return;
+                void useStore.getState().moveQueueItem(index, next);
+              }}
+            >
+              {editAt === index ? (
+                <QueueEditor target={{ index, key: queueEntryKey(entry) }} text={text}
+                  requirements={entry.requirements} onClose={closeEditor} />
+              ) : (
+                <QueueRow entry={entry} index={index} count={entries.length} lane={lane}
+                  onDragStart={() => setDragFrom(index)} onDragEnd={() => setDragFrom(null)} />
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
+function QueueRow({ entry, index, count, lane, onDragStart, onDragEnd }: {
+  entry: QueueEntry; index: number; count: number; lane: 'send' | 'blocked' | 'parked' | 'wrapup';
+  onDragStart: () => void; onDragEnd: () => void }) {
   const running = useStore(state => state.running);
   const busy = useStore(state => state.queueBusy || state.cancelling || state.pausing);
   const takingBack = useStore(state => state.queueTakingBack);
-  const [more, setMore] = useState(false);
-  const moreRef = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    if (!more) return;
-    const close = (event: KeyboardEvent | PointerEvent) => {
-      if (event instanceof KeyboardEvent && (event.key !== 'Escape' || event.isComposing || event.keyCode === 229 || event.defaultPrevented)) return;
-      if (event.type === 'pointerdown' && event.target instanceof Node && moreRef.current?.contains(event.target)) return;
-      if (event.type === 'keydown') { event.preventDefault(); event.stopPropagation(); moreRef.current?.querySelector('button')?.focus(); }
-      setMore(false);
-    };
-    document.addEventListener('pointerdown', close);
-    document.addEventListener('keydown', close, true);
-    return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', close, true); };
-  }, [more]);
+  const [open, setOpen] = useState(false);
   const text = entry.text ?? entry.content ?? '';
   const spoken = splitAttachmentMarkers(text);
   const images = Array.isArray(entry.attachments) ? entry.attachments : [];
   const files = spoken.files || [];
-  const label = spoken.body || (images.length ? '图片' : text);
+  const label = spoken.body || (images.length || files.length ? '这条没有文字，只有附件' : '这条没有文字');
+  const long = spoken.body.length > 80 || spoken.body.includes('\n');
+  const blocked = queueBlockReason(text);
   const constraints = entry.requirements?.constraints || [];
   const acceptance = entry.requirements?.acceptance || [];
   const requirementSummary = constraints.length || acceptance.length
@@ -127,8 +146,8 @@ function QueueRow({ entry, index, count, onDragStart, onDragEnd }: { entry: Queu
         draggable={!busy}
         disabled={busy}
         onDragEnd={onDragEnd}
-        aria-label="拖动调整顺序"
-        title="拖动调整顺序"
+        aria-label="拖动排序"
+        title="拖动排序"
         tabIndex={-1}
         onDragStart={event => {
           event.dataTransfer.setData('application/x-pilot-queue', String(index));
@@ -136,10 +155,22 @@ function QueueRow({ entry, index, count, onDragStart, onDragEnd }: { entry: Queu
           onDragStart();
         }}
       >
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6h8M4 10h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="6" cy="4" r="1.1" fill="currentColor" />
+          <circle cx="10" cy="4" r="1.1" fill="currentColor" />
+          <circle cx="6" cy="8" r="1.1" fill="currentColor" />
+          <circle cx="10" cy="8" r="1.1" fill="currentColor" />
+          <circle cx="6" cy="12" r="1.1" fill="currentColor" />
+          <circle cx="10" cy="12" r="1.1" fill="currentColor" />
+        </svg>
       </button>
       <div className="queue-main">
-        <button type="button" className="queue-text" disabled={busy} title={label} onClick={edit}>{label}</button>
+        <button type="button" className={`queue-text${open || !long ? '' : ' is-clamped'}`} disabled={busy}
+          onClick={() => { if (long) setOpen(value => !value); }}>{label}</button>
+        {long && <button type="button" className="queue-expand" disabled={busy} onClick={() => setOpen(value => !value)}>
+          {open ? '收起全文' : '展开全文'}
+        </button>}
+        {blocked && <p className="queue-block">{blocked}</p>}
         {requirementSummary && <span className="queue-requirements" title={[...constraints, ...acceptance].join('\n')}>{requirementSummary}</span>}
         {(images.length > 0 || files.length > 0) && (
           <span className="attach-strip">
@@ -153,25 +184,31 @@ function QueueRow({ entry, index, count, onDragStart, onDragEnd }: { entry: Queu
         )}
       </div>
       <div className="queue-actions">
-        {running && <Button className="queue-steer-action" label="引导这条排队消息" icon={<Icon name="steer" />}
-          variant="ghost" size="sm" isDisabled={busy} onClick={() => useStore.getState().steerQueueItem(index)}>引导</Button>}
-        <IconButton variant="ghost" size="sm" isDisabled={busy} label="编辑这条排队消息" icon={<Icon name="edit" />}
-          onClick={edit} />
-        <Button className="queue-takeback" label="取回输入框" variant="ghost" size="sm"
+        {running && lane === 'send' && <Button className="queue-steer-action" label="插到当前这轮里做" icon={<Icon name="steer" />}
+          variant="ghost" size="sm" isDisabled={busy} onClick={() => useStore.getState().steerQueueItem(index)}>插到当前这轮里做</Button>}
+        {lane === 'parked' && <Button label="移回排队" variant="ghost" size="sm" isDisabled={busy} onClick={() => {
+          const next = textWithoutParkedMark(text);
+          if (!next) {
+            useStore.getState().showNotice('这条去掉范围外标记后没有正文，没有移回。');
+            return;
+          }
+          void useStore.getState().saveQueueItem({ index, key: queueEntryKey(entry) }, next, entry.requirements
+            ? { constraints: entry.requirements.constraints || [], acceptance: entry.requirements.acceptance || [] }
+            : undefined).then(ok => {
+            if (ok) useStore.getState().showNotice('已移回排队。这轮结束后会按顺序发送。');
+          });
+        }}>移回排队</Button>}
+        <Button label="改这条" variant="ghost" size="sm" isDisabled={busy} onClick={edit}>改这条</Button>
+        <Button className="queue-takeback" label="放回输入框" variant="ghost" size="sm"
           isDisabled={busy || takingBack}
           onClick={() => void useStore.getState().takeBackQueueItem(index)} />
-        <IconButton variant="ghost" size="sm" isDisabled={busy} label="删除这条排队" icon={<Icon name="trash" />}
-          onClick={() => useStore.getState().removeQueueItem(index)} />
-        {count > 1 && <span className="queue-more" ref={moreRef}>
-          <IconButton variant="ghost" size="sm" label="更多排队操作" icon={<Icon name="more" />} aria-expanded={more} isDisabled={busy}
-            onClick={() => setMore(!more)} />
-          {more && <div className="queue-more-menu">
-            <Button label="上移" variant="ghost" size="sm" isDisabled={index === 0 || busy}
-              onClick={() => { setMore(false); useStore.getState().moveQueueItem(index, index - 1); }} />
-            <Button label="下移" variant="ghost" size="sm" isDisabled={index === count - 1 || busy}
-              onClick={() => { setMore(false); useStore.getState().moveQueueItem(index, index + 1); }} />
-          </div>}
-        </span>}
+        <Button label="删除" variant="ghost" size="sm" isDisabled={busy} onClick={() => void useStore.getState().removeQueueItem(index).then(ok => {
+          if (ok) useStore.getState().showNotice('已删除这一条，它不会再被发送。');
+        })}>删除</Button>
+        {count > 1 && <Button label="上移" variant="ghost" size="sm" isDisabled={index === 0 || busy}
+          onClick={() => useStore.getState().moveQueueItem(index, index - 1)}>上移</Button>}
+        {count > 1 && <Button label="下移" variant="ghost" size="sm" isDisabled={index === count - 1 || busy}
+          onClick={() => useStore.getState().moveQueueItem(index, index + 1)}>下移</Button>}
       </div>
     </>
   );
@@ -191,7 +228,7 @@ function QueueEditor({ target, text, requirements, orphan = false, onClose }: {
   const finish = () => { drafts.delete(target.key); onClose(); };
   return (
     <div id="queue-edit" className="queue-edit" onKeyDown={event => {
-      if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
+      if (event.key === 'Escape' && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
         event.preventDefault(); event.stopPropagation(); finish();
       }
     }}>
@@ -208,7 +245,7 @@ function QueueEditor({ target, text, requirements, orphan = false, onClose }: {
           onChange={(event) => setAcceptanceText(event.target.value)} />
       </label>
       <div className="queue-edit-actions">
-        <Button label="保存" size="sm" isLoading={saving} isDisabled={orphan || (!value.trim() && !spoken.files.length)} onClick={async () => {
+        <Button label={saving ? '正在保存…' : '保存'} size="sm" isLoading={saving} isDisabled={orphan || (!value.trim() && !spoken.files.length)} onClick={async () => {
           setSaving(true);
           try {
             const requirements = {
