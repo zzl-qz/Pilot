@@ -99,6 +99,7 @@ class OsSandboxTest {
     }
 
     @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
     void windowsFailingRunnerDoesNotStartTheCommand() throws Exception {
         Path runner = Files.writeString(workspace.resolve("fail-runner.sh"), "#!/bin/sh\nexit 7\n");
         assertTrue(runner.toFile().setExecutable(true));
@@ -116,6 +117,7 @@ class OsSandboxTest {
     }
 
     @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
     void windowsReadyRunnerOnlyStartsBehindTheRestrictedToken() throws Exception {
         Path runner = Files.writeString(workspace.resolve("ok-runner.sh"), "#!/bin/sh\nexit 0\n");
         assertTrue(runner.toFile().setExecutable(true));
