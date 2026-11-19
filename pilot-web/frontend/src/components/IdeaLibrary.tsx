@@ -6,6 +6,7 @@ import { attachmentId } from '../lib/attachment-input.js';
 import { fileBadge, formatBytes } from '../lib/attachments.js';
 import { deleteIdea, listIdeas, saveIdea, type Idea } from '../lib/idea-library.js';
 import { Icon } from './Icon.jsx';
+import { ImagePreview } from './ImagePreview.jsx';
 import { Modal } from './Modal.jsx';
 import './idea-library.css';
 
@@ -26,6 +27,7 @@ export default function IdeaLibrary({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
   const [legacyOpen, setLegacyOpen] = useState(false);
+  const [preview, setPreview] = useState<{ name: string; src: string } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   async function reload() {
@@ -97,7 +99,8 @@ export default function IdeaLibrary({ onClose }: { onClose: () => void }) {
     else setError('自动复制不可用，请选中文字手动复制。');
   }
 
-  return <Modal id="idea-library" title="想法库" onClose={onClose} width={720} dismissible={!busy} initialFocus="#idea-text">
+  return <>
+  <Modal id="idea-library" title="想法库" onClose={onClose} width={720} dismissible={!busy} initialFocus="#idea-text">
     <div className="idea-library">
       <p className="idea-hint">跨项目使用。文字和附件保存在当前浏览器或桌面端的本地资料中。</p>
       <form className="idea-form" onSubmit={event => { event.preventDefault(); void save(); }}>
@@ -114,7 +117,7 @@ export default function IdeaLibrary({ onClose }: { onClose: () => void }) {
         }} />
         {files.length > 0 && <ul className="idea-files" aria-label="待保存附件">
           {files.map((file, index) => <li key={`${file.name}:${index}`}>
-            <IdeaFile file={file} disabled={busy}
+            <IdeaFile file={file} disabled={busy} onOpen={src => setPreview({ name: file.name, src })}
               onRemove={() => setFiles(current => current.filter((_, i) => i !== index))} />
           </li>)}
         </ul>}
@@ -135,7 +138,9 @@ export default function IdeaLibrary({ onClose }: { onClose: () => void }) {
         {ideas.map(idea => <li className="idea-card" key={idea.id}>
           {idea.text && <p className="idea-text">{idea.text}</p>}
           {idea.files.length > 0 && <ul className="idea-files" aria-label="附件">
-            {idea.files.map((file, index) => <li key={`${file.name}:${index}`}><IdeaFile file={file} saved /></li>)}
+            {idea.files.map((file, index) => <li key={`${file.name}:${index}`}>
+              <IdeaFile file={file} saved onOpen={src => setPreview({ name: file.name, src })} />
+            </li>)}
           </ul>}
           <div className="idea-actions">
             {idea.text && <Button size="sm" variant="secondary" label="复制文字" onClick={() => void copy(idea.text)} />}
@@ -158,14 +163,17 @@ export default function IdeaLibrary({ onClose }: { onClose: () => void }) {
         }} />}
       </details>
     </div>
-  </Modal>;
+  </Modal>
+  {preview && <ImagePreview name={preview.name} src={preview.src} onClose={() => setPreview(null)} />}
+  </>;
 }
 
 /** 附件卡片：预览在上，名字与大小在下；待保存的缩略图右上角带一个移除按钮。 */
-function IdeaFile({ file, saved = false, disabled = false, onRemove }: {
+function IdeaFile({ file, saved = false, disabled = false, onOpen, onRemove }: {
   file: File;
   saved?: boolean;
   disabled?: boolean;
+  onOpen?: (src: string) => void;
   onRemove?: () => void;
 }) {
   const [url, setUrl] = useState('');
@@ -180,7 +188,9 @@ function IdeaFile({ file, saved = false, disabled = false, onRemove }: {
   const badge = fileBadge(file.name, file.type);
   return <div className="idea-file">
     {image && url
-      ? <img src={url} alt={file.name} loading="lazy" />
+      // 缩略图就是查看入口：点一下在弹层里看原图，和输入框附件的行为一致
+      ? <button type="button" className="idea-file-thumb" title={`查看 ${file.name}`} aria-label={`查看 ${file.name}`}
+        onClick={() => onOpen?.(url)}><img src={url} alt={file.name} loading="lazy" /></button>
       : <span className="idea-file-placeholder"><span className={`chip-badge ft-${badge.tone}`}>{badge.label}</span></span>}
     <span className="idea-file-detail">
       {/* 已保存的附件可以下载，文件名做成链接；大小只在有值时占位，避免空标签撑高卡片 */}
