@@ -148,9 +148,21 @@ class ToolExecutorJournalTest {
                     });
                 assertEquals(ToolExecutor.OutcomeStatus.EMPTY, outcome.status());
                 assertFalse(outcome.usableEvidence());
-                assertTrue(outcome.result().contains("[工具输出"));
+                assertFalse(outcome.result().contains("read_tool_output"), outcome.result());
             }
         }
+    }
+
+    @Test
+    void longObservationKeepsTheArchivePointer() {
+        RecordingJournal journal = new RecordingJournal();
+        String body = "退出码: 0\n" + "x".repeat(4_000);
+        ToolExecutor.Outcome outcome = executor(new CommandTool(), journal)
+            .execute(new ToolCall("long", "run_command", Map.of("result", body)), event -> {
+            });
+
+        assertTrue(outcome.result().contains("read_tool_output"), outcome.result());
+        assertTrue(journal.observations.get("run_1|long").contains("退出码: 0"));
     }
 
     @Test

@@ -38,8 +38,8 @@ import com.pilot.core.permission.PermissionResult;
 import com.pilot.core.tool.Availability;
 import com.pilot.core.tool.ProducesCheck;
 import com.pilot.core.tool.Tool;
-import com.pilot.core.tool.ToolCallScope;
 import com.pilot.core.tool.ToolCallJournal;
+import com.pilot.core.tool.ToolCallScope;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.ToolResult;
 import com.pilot.core.tool.ToolResults;
@@ -247,8 +247,11 @@ public final class ToolExecutor {
             try {
                 journal.recordObservation(journalRunId, call, result);
                 if (Objects.equals(result, journal.observation(journalRunId, call.callId()).orElse(null))) {
-                    result += "\n[工具输出存档 run_id=" + journalRunId + " call_id=" + call.callId()
-                        + "；使用 read_tool_output 分页读取，禁止重放原操作]";
+                    // 短结果第一屏已经看全，不再提示去读存档。长结果被压缩裁掉时仍靠这句找回原文。
+                    if (result.length() >= 4_000 || result.contains("已截断") || result.contains("后续日志使用")) {
+                        result += "\n[工具输出存档 run_id=" + journalRunId + " call_id=" + call.callId()
+                            + "；使用 read_tool_output 分页读取，禁止重放原操作]";
+                    }
                 } else {
                     result += "\n[工具输出未归档，禁止清理原文]";
                 }
