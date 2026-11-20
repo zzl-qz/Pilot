@@ -6,7 +6,7 @@ import { RequestList } from './RequestUsage.jsx';
 import { formatCache, totalCost } from '../lib/request-usage.js';
 import ThreadNavigator from './ThreadNavigator.jsx';
 import { modifierKey, duplicateResult } from '../lib/interaction.js';
-import React, { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '@astryxdesign/core/Button';
 import { Dialog } from '@astryxdesign/core/Dialog';
@@ -836,6 +836,66 @@ const Turn = memo(function Turn({ row, isLast }: { row: TurnRow; isLast: boolean
   );
 });
 
+const EXPLORE_TOOL_NAMES = new Set(['read_file', 'search_text', 'glob_files', 'list_dir', 'code_symbol']);
+
+type ToolSegment =
+  | { kind: 'item'; tool: ToolView }
+  | { kind: 'cluster'; key: string; tools: ToolView[] };
+
+function isFoldableExploreTool(tool: ToolView, sessionLive: boolean): boolean {
+  if (!EXPLORE_TOOL_NAMES.has(tool.name)) return false;
+  const shown = tool.status === 'run' && !sessionLive ? 'interrupted' : tool.status;
+  return shown === 'ok';
+}
+
+function partitionToolSegments(tools: ToolView[], sessionLive: boolean): ToolSegment[] {
+  const segments: ToolSegment[] = [];
+  let buffer: ToolView[] = [];
+  const flush = () => {
+    if (buffer.length >= 3) {
+      segments.push({ kind: 'cluster', key: `cluster:${buffer[0].callId}`, tools: buffer });
+    } else {
+      for (const item of buffer) segments.push({ kind: 'item', tool: item });
+    }
+    buffer = [];
+  };
+  for (const tool of tools) {
+    if (isFoldableExploreTool(tool, sessionLive)) buffer.push(tool);
+    else {
+      flush();
+      segments.push({ kind: 'item', tool });
+    }
+  }
+  flush();
+  return segments;
+}
+
+const ExploreCluster = memo(function ExploreCluster({ tools }: { tools: ToolView[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const spanSeconds = computeToolSpanSeconds(tools, false);
+  const durationLabel = spanSeconds != null && spanSeconds >= 1 ? formatProcessDuration(spanSeconds) : '';
+  return (
+    <div className={`tool-explore-cluster${expanded ? ' is-open' : ''}`}>
+      <button
+        type="button"
+        className="tool-explore-toggle"
+        aria-expanded={expanded}
+        onClick={() => setExpanded(prev => !prev)}
+      >
+        <span className="tool-explore-badge">探索 {tools.length} 项</span>
+        <span className="tool-explore-summary">{toolCounts(tools)}</span>
+        {durationLabel && <span className="tool-explore-meta">{durationLabel}</span>}
+        <span className="tool-row-chevron" aria-hidden="true"><ProcessChevron /></span>
+      </button>
+      {expanded && (
+        <div className="tool-explore-items">
+          {tools.map(tool => <ToolRow key={tool.callId} tool={tool} />)}
+        </div>
+      )}
+    </div>
+  );
+});
+
 /**
  * 操作组单独 memo：流式输出时只有 reply 在变，tools 数组引用不变，这一整块（可能几十行）
  * 直接跳过比对。默认收起为单行摘要，展开后在固定最大高度内滚动，不把对话拉成无限高度。
@@ -853,6 +913,7 @@ const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] }) {
   const hasActiveAsk = sessionLive && tools.some(tool => tool.status === 'run' && tool.name === 'ask_user' && Boolean(parseAsk(tool.args)));
   const shouldReveal = needsAttention || hasActiveAsk;
   const [open, setOpen] = useState(shouldReveal);
+  const [attentionOnly, setAttentionOnly] = useState(false);
   const autoOpened = useRef(shouldReveal);
   useSecondTick(running > 0);
   // 需要处理（失败/审批/中断/提问）时仅提示一次，不覆盖用户手动收起或展开的选择。
@@ -862,10 +923,26 @@ const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] }) {
       setOpen(true);
     }
   }, [shouldReveal]);
+  const filterAttention = attentionOnly && needsAttention;
+  const visibleTools = filterAttention ? attention : tools;
+  const segments = useMemo(
+    () => (filterAttention ? visibleTools.map(tool => ({ kind: 'item' as const, tool })) : partitionToolSegments(visibleTools, sessionLive)),
+    [filterAttention, visibleTools, sessionLive],
+  );
   const spanSeconds = computeToolSpanSeconds(tools, running > 0);
   const durationLabel = spanSeconds != null && spanSeconds >= 1 ? formatProcessDuration(spanSeconds) : '';
   const activePeek = running > 0 ? summarizeActiveTool(tools) : '';
   const lastTool = tools[tools.length - 1];
+  const toggleAttentionFilter = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!open) {
+      setOpen(true);
+      setAttentionOnly(true);
+    } else {
+      setAttentionOnly(prev => !prev);
+    }
+  };
   return (
     <details
       className={`tool-group conversation-tools${running > 0 ? ' is-live' : ''}`}
@@ -879,10 +956,16 @@ const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] }) {
         <span className="tool-group-count">{toolCounts(tools)}</span>
         {!open && activePeek && <span className="tool-group-peek" title={activePeek}>{activePeek}</span>}
         {needsAttention && (
-          <span className="conversation-tool-attention">
+          <button
+            type="button"
+            className={`conversation-tool-attention${filterAttention ? ' is-active' : ''}`}
+            aria-pressed={filterAttention}
+            title={filterAttention ? '当前仅显示需留意项，点击恢复全部' : '点击仅查看需留意的操作'}
+            onClick={toggleAttentionFilter}
+          >
             <StatusDot variant={failed ? 'error' : 'warning'} label="需要留意" aria-hidden="true" />
-            {attention.length} 项需留意
-          </span>
+            {filterAttention ? `仅看 ${attention.length} 项` : `${attention.length} 项需留意`}
+          </button>
         )}
         <span className="tool-group-chevron" aria-hidden="true"><ProcessChevron /></span>
       </summary>
@@ -890,10 +973,14 @@ const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] }) {
         active={open}
         className="tool-group-list"
         autoFollow={running > 0 && !needsAttention && !hasActiveAsk}
-        followKey={`${tools.length}:${lastTool?.callId ?? ''}:${lastTool?.status ?? ''}`}
+        followKey={`${visibleTools.length}:${lastTool?.callId ?? ''}:${lastTool?.status ?? ''}:${filterAttention ? 'attn' : 'all'}`}
         focusSelector={hasActiveAsk ? '.arb-options' : needsAttention ? '.tool-row.is-attention' : undefined}
       >
-        {tools.map((tool) => <ToolRow key={tool.callId} tool={tool} />)}
+        {segments.map(seg => (
+          seg.kind === 'cluster'
+            ? <ExploreCluster key={seg.key} tools={seg.tools} />
+            : <ToolRow key={seg.tool.callId} tool={seg.tool} />
+        ))}
       </ProcessScrollViewport>
     </details>
   );
