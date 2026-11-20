@@ -16,6 +16,7 @@ export function Sidebar() {
   const sessionId = useStore((state) => state.sessionId);
   const workspace = useStore((state) => state.workspace);
   const connection = useStore((state) => state.ui.connection);
+  const syncError = useStore((state) => state.ui.syncError);
   const sidebarOpen = useStore((state) => state.ui.sidebarOpen);
   const sideChats = useStore((state) => state.sideChats);
   const [query, setQuery] = useState('');
@@ -131,7 +132,7 @@ export function Sidebar() {
 
       <WorkspaceTree />
       <div className="sidebar-foot rail-foot">
-        <div id="connection" className={`conn is-${connection.status}`} role="status">
+        <div id="connection" className={`conn is-${connection.status}`} role="status" title={syncError || connection.text}>
           <span className="dot" aria-hidden="true" />
           <span id="connection-text">{connection.text}</span>
         </div>

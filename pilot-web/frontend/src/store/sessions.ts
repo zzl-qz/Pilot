@@ -120,6 +120,13 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
         if (!Array.isArray(projects)) throw new Error('项目数据格式无效');
         if (request === projectLoadSequence) set((draft) => { draft.projects = projects; });
       } catch (error) {
+        const message = errorInfo(error).message || '读取项目列表失败';
+        if (request === projectLoadSequence) {
+          set((draft) => {
+            draft.ui.syncError = message;
+            draft.ui.connection = { status: 'error', text: message.length > 16 ? '接口访问失败' : message };
+          });
+        }
         if (strict) throw error;
         console.warn('[projects]', error);
       }
@@ -141,11 +148,22 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
           .filter((session) => !sideIds.has(session.id)));
         if (request === sessionLoadSequence) set((draft) => {
           draft.sessions = sessions;
+          draft.ui.syncError = '';
+          if (draft.ui.connection.status === 'error') {
+            draft.ui.connection = { status: 'ok', text: '已连接' };
+          }
           const current = sessions.find(session => session.id === draft.sessionId);
           if (current) draft.sessionTitle = current.title;
         });
         return sessions;
       } catch (error) {
+        const message = errorInfo(error).message || '读取会话列表失败';
+        if (request === sessionLoadSequence) {
+          set((draft) => {
+            draft.ui.syncError = message;
+            draft.ui.connection = { status: 'error', text: message.length > 16 ? '接口访问失败' : message };
+          });
+        }
         if (strict) throw error;
         console.warn('[sessions]', error);
         return [];

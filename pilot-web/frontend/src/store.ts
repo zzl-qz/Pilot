@@ -268,6 +268,9 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     }
     await Promise.all([get().loadProjects(), get().loadSettings()]);
     const sessions = await get().loadSessions();
+    if (get().ui.syncError) {
+      get().showNotice(`无法读取工作区数据：${get().ui.syncError}。请检查访问来源或点击右上角刷新重试。`);
+    }
     // Side chat 内嵌页：只认 URL 里指定的那个会话，不按「第一个历史对话」恢复
     if (embeddedSessionId) {
       await get().activate(embeddedSessionId);
