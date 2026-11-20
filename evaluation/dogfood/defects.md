@@ -22,10 +22,11 @@
 | D-013 | P1 | E 验证缺失 | 流程/循环策略 | 改动工具或规则后未跑全量 `mvn test`，漏改历史断言（如 `8025dfad`/`10a7b2f3` 遗留 4 处单测失配） | `cdbe4aa9` / `43b541ac` | 已固化 `runner-ctl.mjs v1-verify`（全量 `pilot-core,pilot-server` `test` + `spotless:check` + `checkstyle:check` + `quality-gate.mjs`），并在 D-015/R-01/D-012/D-014/D-019 连续 5 次落地强制执行 | 观察中（待 V4） |
 | D-014 | P1 | B 调研瘫痪 | 循环策略 | `T001`（36 行 L1 文件）在 req 1–4 已读完核心文件后仍持续只读 17 轮 / 34 次工具调用不编辑；`req-11.json` 带 `[调查收敛提醒]` 重放 5/5（100%）仍不编辑 | `c405e8e8` | 跨任务 V2 5x 重放通过（`T001 req-11` `5/5 → 0/5`，`X1-T3 req-16` `5/5 → 1/5`）；全量 V1 全绿（`CacheWireTest`/`CacheContextTest`/`InvestigationTrackerTest`/`GoalExecutionPolicyTest` + 1091）；待 V3 重启与 V4 观察 | 观察中（待 V3/V4） |
 | D-015 | P1 | F 命令解析 Bug | 工具设计 | `CommandChain.parse()` 在双引号内未处理 `\"` 转义，导致 `grep -l "failures=\"[1-9]\|errors=\"[1-9]"` 提前闭合引号并误报 `不允许通过命令前缀设置 errors` | `d196d69d` | 同步修复 `CommandChain.parse()`（含重定向目标）与 `RunCommandTool.tokenize()`，跨平台兼容 Windows 路径与正则 `\|`；V1 全绿（`CommandChainTest` 7/7 + 全量 1090） | 观察中（待 V4） |
-| D-016 | P2 | E/B 沙箱嵌套排错空转 | 工具设计/运行时 | macOS Seatbelt 沙箱内跑 `mvn test` 触发嵌套 `sandbox-exec: Operation not permitted` 失败时无环境提示，导致模型白耗 22 轮追查无关单测 | 待修 | `T001` req 62–84 复现 | 新建 |
+| D-016 | P1 | E/B 沙箱嵌套排错空转 | 工具设计/运行时 | macOS Seatbelt / Linux bwrap 沙箱内跑全量测试触发嵌套沙箱 `Operation not permitted`（退出码 71 等）时无环境提示，导致 T001 与 T002 连续各白耗 22–25 轮追查无关沙箱测试 | `409a291d` | `CommandToolSupport.nestedSandboxHint()` 确定性识别 macOS Seatbelt 与 Linux bwrap 嵌套沙箱失败并首屏输出 `[环境提示]`（覆盖 `RunCommandTool`/`CommandStatusTool`/`CommandLogsTool`），不削弱沙箱隔离；V1 全绿（1092 用例） | 观察中（待 V3/V4） |
 | D-017 | P2 | C 评测泄露风险 | 自举工具 | 任务 worktree 中 `search_text` 命中 `evaluation/dogfood/tasks/`，可能暴露 S4 剧本答案 | `eb5e0a85` | S4 答案已迁至仓库外 `~/pilot-dogfood/supervisor-s4-scripts.md` | 已关闭 |
 | D-018 | P2 | G 计划门禁多余续跑 | 循环策略 | 验证已全部通过且模型给出完整答复时，仅因未把 plan 末项标 `completed` 被 `PlanGate` 触发 `RUN_CONTINUED` 多跑 3 轮与重复测试 | 待评估 | `T001` seq 707–716 复现，观察后续任务复现频率 | 新建 |
 | D-019 | P2 | A 预定位超时丢分 | 运行时/工具设计 | `PreFlightLocator.scanGitFileNames()` 对 `git ls-files` 全仓文件先做约 4,500 次磁盘校验再匹配文件名，高负载下 120ms 超时丢掉 `+90` 定义文件加分 | `e203e19a` | 改为先纯内存 `matchesAnyFileOrStem()` 初筛再校验命中候选并将路径子预算放宽至 200ms；实测 `PreFlightLocatorTest` 300ms→127ms、`InvestigationDisciplineVerificationTest` 2.10s→0.92s；V1 全绿（1092 用例） | 观察中（待 V4） |
+| D-020 | P1 | L 非法工具参数 JSON 误杀运行 | 运行时/模型适配 | `T002`（`ses_acfeb9f3` req 70）实测暴露：模型偶发返回非合法 JSON 工具调用参数时，适配器将其抛出为 `PERMANENT` 直接终结 70 步任务 | `a91bb586` | `ModelFailureKind` 新增 `MALFORMED_TOOL_CALL(retryable=true)`，`AgentLoop` 最多 3 次带 JSON 修正提示的有界重试；V1 全绿（108 定向 + 全量 1092） | 观察中（待 V3/V4） |
 
 ## 二、待复核疑点（R-01～R-04）
 
