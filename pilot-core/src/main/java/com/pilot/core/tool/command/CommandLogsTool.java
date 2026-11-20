@@ -48,8 +48,11 @@ public final class CommandLogsTool implements Tool {
             if (chunk == null) {
                 return "ERROR: 当前会话没有该命令任务";
             }
-            return "任务ID: " + chunk.taskId() + "\noffset: " + chunk.offset() + "\nnextOffset: " + chunk.nextOffset()
-                + "\neof: " + chunk.eof() + "\ntruncated: " + chunk.truncated() + "\n输出:\n" + chunk.text();
+            String sandboxHint = CommandToolSupport.nestedSandboxHint(chunk.text(), null);
+            String prefix = sandboxHint.isEmpty() ? "" : sandboxHint + "\n";
+            return prefix + "任务ID: " + chunk.taskId() + "\noffset: " + chunk.offset() + "\nnextOffset: "
+                + chunk.nextOffset() + "\neof: " + chunk.eof() + "\ntruncated: " + chunk.truncated() + "\n输出:\n"
+                + chunk.text();
         } catch (IllegalArgumentException e) {
             return "ERROR: " + e.getMessage();
         }

@@ -832,6 +832,10 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             return new ManagedRun("ERROR: 命令记录已清理，无法确认最终结果：" + taskId, true);
         }
         String rendered = quickFailure(task) + CommandToolSupport.render(task);
+        String sandboxHint = CommandToolSupport.nestedSandboxHint(commandTasks, sessionId, task);
+        if (!sandboxHint.isEmpty()) {
+            rendered = sandboxHint + "\n" + rendered;
+        }
         rendered += formatCompletedOutput(taskId);
         return new ManagedRun(launch.label() + "\n" + rendered, true);
     }
@@ -1047,8 +1051,15 @@ public final class RunCommandTool implements Tool, ProducesCheck {
 
     private static String render(String displayCommand, List<String> actual, int exitCode, long latencyMs,
         String output) {
-        StringBuilder out = new StringBuilder().append("命令: ").append(displayCommand).append('\n').append("退出码: ")
-            .append(exitCode).append('\n').append("耗时: ").append(latencyMs).append(" ms\n");
+        StringBuilder out = new StringBuilder();
+        if (exitCode != 0) {
+            String sandboxHint = CommandToolSupport.nestedSandboxHint(output, exitCode);
+            if (!sandboxHint.isEmpty()) {
+                out.append(sandboxHint).append('\n');
+            }
+        }
+        out.append("命令: ").append(displayCommand).append('\n').append("退出码: ").append(exitCode).append('\n')
+            .append("耗时: ").append(latencyMs).append(" ms\n");
         if (!actual.isEmpty() && !displayCommand.equals(String.join(" ", actual))) {
             out.append("实际执行: ").append(String.join(" ", actual)).append('\n');
         }

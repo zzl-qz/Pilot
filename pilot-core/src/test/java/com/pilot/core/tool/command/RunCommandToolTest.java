@@ -401,6 +401,23 @@ class RunCommandToolTest {
         assertTrue(nested.contains("stop_command"), nested);
     }
 
+    @Test
+    void detectsNestedOsSandboxFailuresAcrossPlatformsWithoutFalsePositives() {
+        String macSeatbelt =
+            CommandToolSupport.nestedSandboxHint("sandbox-exec: sandbox_apply: Operation not permitted", 71);
+        assertTrue(macSeatbelt.contains("[环境提示]") && macSeatbelt.contains("嵌套 OS 沙箱"), macSeatbelt);
+
+        String macExitOnly = CommandToolSupport.nestedSandboxHint("/usr/bin/sandbox-exec failed", 71);
+        assertTrue(macExitOnly.contains("[环境提示]"), macExitOnly);
+
+        String linuxBwrap = CommandToolSupport.nestedSandboxHint("bwrap: No permissions to creating new namespace", 1);
+        assertTrue(linuxBwrap.contains("[环境提示]"), linuxBwrap);
+
+        // 普通测试或编译失败不能误报为嵌套沙箱环境问题
+        assertEquals("", CommandToolSupport.nestedSandboxHint("AssertionFailedError: expected <1> but was <2>", 1));
+        assertEquals("", CommandToolSupport.nestedSandboxHint("BUILD SUCCESS", 0));
+    }
+
     private RunCommandTool tool() {
         return new RunCommandTool(new PathValidator(workspace));
     }

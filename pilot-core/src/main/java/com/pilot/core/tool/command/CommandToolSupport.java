@@ -1,5 +1,6 @@
 package com.pilot.core.tool.command;
 
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -15,6 +16,11 @@ final class CommandToolSupport {
     private static final int CHECK_COMMAND_MAX_CHARS = 240;
     private static final int CHECK_COMMAND_HEAD_CHARS = 150;
     private static final int CHECK_COMMAND_TAIL_CHARS = 70;
+    private static final int SANDBOX_LOG_TAIL_CHARS = 8_000;
+    private static final int MAC_SEATBELT_EX_OSERR = 71;
+    static final String NESTED_SANDBOX_HINT =
+        "[环境提示] 检测到嵌套 OS 沙箱失败（当前命令已在系统沙箱内运行，macOS Seatbelt / Linux bwrap 禁止在沙箱内再次创建子沙箱），"
+            + "这属于外层沙箱环境限制而非业务代码缺陷。请优先运行与本次改动直接相关的定向单测并明确区分环境限制，不要反复排查无关的沙箱隔离测试。";
 
     private CommandToolSupport() {
     }
@@ -95,6 +101,36 @@ final class CommandToolSupport {
         String tail = (boundary > 0 && boundary + 1 < single.length() ? single.substring(boundary + 1)
             : single.substring(tailStart)).stripLeading();
         return head + " … " + tail;
+    }
+
+    /** 确定性识别 macOS Seatbelt / Linux bwrap 嵌套沙箱失败，避免模型误将外层沙箱限制当成业务代码缺陷反复排错。 */
+    static String nestedSandboxHint(String output, Integer exitCode) {
+        if (output == null || output.isBlank()) {
+            return "";
+        }
+        String lower = output.toLowerCase(Locale.ROOT);
+        boolean macSeatbelt = lower.contains("sandbox_apply: operation not permitted") || (lower
+            .contains("sandbox-exec")
+            && (lower.contains("operation not permitted") || Integer.valueOf(MAC_SEATBELT_EX_OSERR).equals(exitCode)));
+        boolean linuxBwrap = lower.contains("bwrap:") && (lower.contains("no permissions to creating new namespace")
+            || lower.contains("operation not permitted") || lower.contains("setting up uid map"));
+        return macSeatbelt || linuxBwrap ? NESTED_SANDBOX_HINT : "";
+    }
+
+    static String nestedSandboxHint(CommandTaskManager tasks, String sessionId, CommandTaskManager.Task task) {
+        if (tasks == null || task == null || running(task) || CommandTaskStatus.COMPLETED.is(task.status())) {
+            return "";
+        }
+        long total = tasks.logLength(sessionId, task.taskId());
+        if (total <= 0L) {
+            return "";
+        }
+        long offset = Math.max(0L, total - SANDBOX_LOG_TAIL_CHARS);
+        CommandTaskManager.LogChunk tail = tasks.logs(sessionId, task.taskId(), offset, SANDBOX_LOG_TAIL_CHARS + 200);
+        if (tail == null) {
+            return "";
+        }
+        return nestedSandboxHint(tail.text(), task.exitCode());
     }
 
     static long integerArg(Map<String, Object> args, String name, long fallback, long min, long max) {
