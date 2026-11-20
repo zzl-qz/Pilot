@@ -14,8 +14,10 @@ import org.springframework.web.bind.annotation.RestController;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.server.config.AgentProperties;
+import com.pilot.server.frontend.FrontendStartup;
 import com.pilot.server.model.ModelSettings;
 import com.pilot.server.permission.PermissionSettings;
+import com.pilot.server.runtime.SourceLayout;
 
 import lombok.RequiredArgsConstructor;
 
@@ -56,12 +58,17 @@ public class HealthController {
     }
 
     private static boolean computeFrontendStale() {
-        Path root = Path.of(System.getProperty("user.dir"));
-        Path source = root.resolve("pilot-web/frontend/src");
-        Path assets = root.resolve("pilot-web/src/main/resources/static/assets");
-        if (!Files.isDirectory(source) || !Files.isDirectory(assets)) {
+        if (!FrontendStartup.runningFromClasses()) {
             return false;
         }
+        Path workingDirectory = SourceLayout.workingDirectory();
+        Path root = SourceLayout.frontendRoot(workingDirectory);
+        Path staticSource = SourceLayout.staticSource(workingDirectory);
+        if (root == null || staticSource == null) {
+            return false;
+        }
+        Path source = SourceLayout.frontendDirectory(root).resolve("src");
+        Path assets = staticSource.resolve("assets");
         try {
             return newest(source) > newest(assets) + 2_000L;
         } catch (IOException | RuntimeException e) {

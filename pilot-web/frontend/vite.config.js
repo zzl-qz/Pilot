@@ -5,9 +5,9 @@ import { fileURLToPath } from 'node:url';
 /**
  * 前端工程配置。
  *
- * 唯一正规运行方式：前端由后端 Maven 构建一并带起，不独立启动 dev server。
+ * 正常启动由 Maven 或 IDE 直接运行后端时准备前端，同源直连 /api。
  * 在 pilot-server 模块执行：
- *     mvn -pl pilot-server spring-boot:run        # 开发：自动 npm install + build，同源直连 /api
+ *     mvn -pl pilot-server spring-boot:run        # 开发：自动检查依赖，按需构建前端
  *     mvn package                                 # 打包：前端产物随 jar 一起发布
  * 纯后端迭代可用 -DskipFrontend=true 跳过前端构建（见 pilot-server/pom.xml）。
  *

@@ -9,18 +9,20 @@ import org.springframework.core.Ordered;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.MapPropertySource;
 
+import com.pilot.server.frontend.FrontendStartup;
 import com.pilot.server.runtime.SourceLayout;
 
 /**
  * 开发时直接读 pilot-web 源码里的页面，改 HTML/JS/CSS 保存后刷新浏览器即可。
- * 找不到源码目录（例如打成 jar 拿到别处跑）就什么都不改，继续用 classpath 里的静态文件。
+ * 打包的 jar 始终使用包内的静态文件。
  */
 public class LiveStaticEnvironment implements EnvironmentPostProcessor, Ordered {
     static final String LOCATIONS_KEY = "spring.web.resources.static-locations";
 
     @Override
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
-        if (environment.containsProperty(LOCATIONS_KEY) || environment.containsProperty(LOCATIONS_KEY + "[0]")) {
+        if (!FrontendStartup.runningFromClasses() || environment.containsProperty(LOCATIONS_KEY)
+            || environment.containsProperty(LOCATIONS_KEY + "[0]")) {
             return;
         }
         Path source = findStaticSource();

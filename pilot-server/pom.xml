@@ -83,8 +83,7 @@
             </resource>
         </resources>
         <plugins>
-            <!-- validate 阶段先补齐锁定的前端依赖，generate-resources 阶段再构建进 static/。
-                 纯后端构建用 -DskipFrontend=true 跳过这两步。 -->
+            <!-- 在复制静态资源前检查锁定的依赖，并按需构建前端。 -->
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>exec-maven-plugin</artifactId>
@@ -94,25 +93,16 @@
                 </configuration>
                 <executions>
                     <execution>
-                        <id>frontend-deps-ask</id>
-                        <phase>validate</phase>
-                        <goals><goal>exec</goal></goals>
-                        <configuration>
-                            <!-- 继承 Maven 的 stdin，终端仍可选择是否手动更新已安装的依赖。 -->
-                            <inheritIo>true</inheritIo>
-                            <workingDirectory>${project.basedir}/..</workingDirectory>
-                            <executable>node</executable>
-                            <arguments><argument>tools/ask-frontend-deps.mjs</argument></arguments>
-                        </configuration>
-                    </execution>
-                    <execution>
                         <id>frontend-build</id>
                         <phase>generate-resources</phase>
                         <goals><goal>exec</goal></goals>
                         <configuration>
                             <workingDirectory>${frontendDir}</workingDirectory>
                             <executable>node</executable>
-                            <arguments><argument>scripts/build.mjs</argument></arguments>
+                            <arguments>
+                                <argument>scripts/build.mjs</argument>
+                                <argument>--if-needed</argument>
+                            </arguments>
                             <environmentVariables>
                                 <CI>true</CI>
                             </environmentVariables>
@@ -158,6 +148,10 @@
                 <configuration>
                     <!-- true 会加上 -XX:TieredStopAtLevel=1，热代码不进 C2，长任务更吃 CPU。 -->
                     <optimizedLaunch>false</optimizedLaunch>
+                    <!-- spring-boot:run 在拉起 JVM 前已经执行过 Maven 生命周期。 -->
+                    <systemPropertyVariables>
+                        <pilot.frontend.prepare>false</pilot.frontend.prepare>
+                    </systemPropertyVariables>
                 </configuration>
             </plugin>
         </plugins>

@@ -9,7 +9,7 @@
 | 启动 Java | 检查版本、JDK 编译能力及架构；优先复用本机 Java 25+，否则下载私有 Temurin JDK 25 |
 | Node 与 npm | 检查 Node 22.13+ 和 npm 是否齐全，缺失或残缺时下载完整私有 Node 22；不修改系统安装 |
 | Maven | 使用固定版本的私有 Maven，通过 Java 参数数组启动，避免 Windows 批处理路径转义问题 |
-| 前端依赖 | 缺失或版本不符合锁文件时自动执行 npm ci；依赖齐全时保留终端中的更新询问 |
+| 前端依赖 | 缺失或版本不符合锁文件时自动执行 npm ci |
 | 可选手机连接桥 | 仅在打开“连接手机”时检查已打包组件；未打包时提示，不启动 Gradle，不构建 APK / 连接桥 |
 | 原生与二维码 | 手机连接窗口按需实际创建无中继的临时端点并生成 PNG，确认原生库能加载、二维码编码可运行；不创建配对身份 |
 | 桌面 Electron | npm 安装后显式运行官方二进制安装器；验证锁定版本、平台、架构、路径及执行权限后再准备桌面壳；失效副本保留后修复 |
@@ -52,12 +52,14 @@ IDE 或已打包后台仅在打开手机连接窗口时异步检查已打包组�
 
 完全离线的新机器无法凭空获得未携带的依赖。可先联网预热，或携带同系统 / 架构的完整便携包与缓存，再由启动探针确认。IDE 自身的 Java 编译器在程序运行前执行，无法由尚未启动的后台修改；没有 Java 25 时应先运行启动脚本，再按 IDE 需要选择生成的私有 JDK。
 
-直接从 IDE 运行 Maven 也会在编译前检查前端依赖，即使没有交互终端。若无法安装，启动会停在依赖检查，修好网络或缓存后可重试；只构建后端可指定 `-DskipFrontend=true`，同时跳过前端依赖安装与构建。
+在 IntelliJ 运行 `PilotServerApplication` 时，保留启动前的 Build，让 IDE 编译当前 Java 代码。前端会在启动时自动检查依赖。源码、锁文件或构建配置变化，或已生成的资源不完整时会重新构建。否则复用现有产物。源码启动脚本和 Maven 使用相同的前端检查规则。启动使用当前本地 checkout，需要远程更新时先手动拉取。打包后的 jar 使用包内的前端资源。
+
+安装或构建失败会中止启动。只构建后端可在 Maven 中指定 `-DskipFrontend=true`，IDE 直接运行时可在 JVM 选项中指定 `-Dpilot.frontend.prepare=false`。需要主动更新前端依赖时，可在 `pilot-web/frontend` 手动运行 `npm install`。
 
 ## 开发验证
 
 ```text
-node --test scripts/bootstrap.test.mjs scripts/frontend-deps.test.mjs
+node --test scripts/bootstrap.test.mjs scripts/frontend-deps.test.mjs scripts/frontend-build.test.mjs
 npm --prefix pilot-desktop test
 node scripts/mobile.mjs test  # 仅移动端开发验收，由开发者自行准备 Java 21 / Gradle / Android SDK
 node pilot-mobile/scripts/environment-smoke.mjs
