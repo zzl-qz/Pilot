@@ -1407,7 +1407,7 @@ const TurnStats = memo(function TurnStats({ stats, reports, agentCount }: { stat
     <details className="turn-stats-detail">
       <summary>
         <span>{elapsedLabel ? `${elapsedLabel} · ` : ''}用量详情</span>
-        {cacheSeen && <span className="turn-cache" title={`本轮累计命中缓存 ${formatCount(stats.cachedInputTokens)} / 总输入 ${formatCount(stats.inputTokens)}`}>缓存 {cacheLabel}</span>}
+        {cacheSeen && <span className="turn-cache" title={`本轮累计命中缓存 ${formatCount(stats.cachedInputTokens)} / 总输入 ${formatCount(stats.inputTokens)}`}>缓存命中 {cacheLabel}</span>}
         <span className="process-chevron" aria-hidden="true"><ProcessChevron /></span>
       </summary>
       <div className="turn-stats">

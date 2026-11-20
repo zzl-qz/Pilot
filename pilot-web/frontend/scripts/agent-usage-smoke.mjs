@@ -47,7 +47,7 @@ async function run(page, name) {
   await page.setViewportSize({ width: 1280, height: 900 }); await page.goto(url);
   const stats = page.locator('.turn-stats-detail'); await stats.waitFor();
   // 命中率直接写在折叠条上，不必展开用量详情才能看到。
-  assert.match(await stats.locator(':scope > summary').innerText(), /缓存 80%/, '折叠状态就显示本轮缓存命中');
+  assert.match(await stats.locator(':scope > summary').innerText(), /缓存命中 80%/, '折叠状态就显示本轮缓存命中');
   await stats.locator(':scope > summary').click();
   if (process.argv.includes('--before')) {
     await stats.scrollIntoViewIfNeeded(); await page.screenshot({ path: join(output, `${name}-before.png`) }); return;
