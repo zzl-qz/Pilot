@@ -21,12 +21,13 @@ import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
 import com.pilot.core.runtime.bootstrap.SourceEnvironment;
 import com.pilot.core.util.FileTrees;
 import com.pilot.core.util.HostOs;
+import com.pilot.server.common.data.PilotDataDir;
 
 import lombok.extern.slf4j.Slf4j;
 
 /**
  * 给技能脚本准备 Python 3.12 和 Node 22。
- * Python 继续使用 .pilot/runtime，Node 新安装共用源码启动器的校验缓存。
+ * Python 落在内置运行时根目录（显式配了数据目录时是数据目录下的 {@code runtime}），Node 新安装共用源码启动器的校验缓存。
  * 不进 git，打包 exe 时把这个目录一起拷走即可。
  */
 @Component
@@ -38,25 +39,32 @@ public class BundledRuntime implements SmartLifecycle {
     private static final String PYTHON_VERSION = "3.12.16";
 
     private final boolean provision;
+    private final Path runtimeRoot;
     private volatile boolean running;
 
-    public BundledRuntime(@Value("${pilot.runtime.provision:true}") boolean provision) {
+    public BundledRuntime(PilotDataDir dataDir, @Value("${pilot.runtime.provision:true}") boolean provision) {
         this.provision = provision;
+        this.runtimeRoot = resolveRuntimeRoot(SourceLayout.workingDirectory(), dataDir.file("runtime"),
+            dataDir.explicitlyConfigured());
     }
 
     @Override
     public void start() {
-        Path root = runtimeRoot();
         if (provision) {
-            ensure(root.resolve("python"), pythonArchive(), "python3", "python.exe");
+            ensure(runtimeRoot.resolve("python"), pythonArchive(), "python3", "python.exe");
         }
-        publish(root);
+        publish(runtimeRoot);
         running = true;
     }
 
     @Override
     public void stop() {
         running = false;
+    }
+
+    /** 实际使用的内置运行时根目录，单独暴露出来便于验证装配结果。 */
+    Path runtimeRoot() {
+        return runtimeRoot;
     }
 
     @Override
@@ -246,8 +254,16 @@ public class BundledRuntime implements SmartLifecycle {
         }
     }
 
-    private static Path runtimeRoot() {
-        Path current = SourceLayout.workingDirectory();
+    /**
+     * 内置运行时根目录：显式配了 {@code pilot.data.dir} / {@code PILOT_DATA_DIR} 时优先用数据目录下的
+     * {@code runtime}，避免在 worktree 里重复下载 Python；否则保持源码树仓库根 {@code .pilot/runtime}、
+     * 不在源码树时当前目录 {@code .pilot/runtime} 的老行为。
+     */
+    static Path resolveRuntimeRoot(Path workingDir, Path dataRuntime, boolean dataDirConfigured) {
+        Path current = workingDir.toAbsolutePath().normalize();
+        if (dataDirConfigured) {
+            return dataRuntime;
+        }
         Path root = SourceLayout.serverRoot(current);
         return SourceLayout.bundledRuntime(root == null ? current : root);
     }
