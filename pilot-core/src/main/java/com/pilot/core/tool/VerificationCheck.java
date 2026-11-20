@@ -267,7 +267,17 @@ public final class VerificationCheck {
             return Kind.OTHER;
         }
         String script = scriptName(bare(args.getFirst()));
-        return Set.of("check", "typecheck").contains(script) ? Kind.STATIC_ANALYSIS : Kind.OTHER;
+        if (SCRIPT_TESTS.contains(script) || script.endsWith("-smoke") || script.endsWith(".test")
+            || script.startsWith("test-")) {
+            return Kind.TEST;
+        }
+        if (SCRIPT_CHECKS.contains(script) || script.startsWith("verify-") || script.startsWith("lint-")) {
+            return Kind.STATIC_ANALYSIS;
+        }
+        if (SCRIPT_BUILDS.contains(script) || script.startsWith("build-") || script.startsWith("compile-")) {
+            return Kind.BUILD;
+        }
+        return Kind.OTHER;
     }
 
     private static String scriptName(String path) {

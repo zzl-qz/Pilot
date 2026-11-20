@@ -35,7 +35,7 @@ class CompletionGateTest {
     }
 
     @Test
-    void actionGoalWithoutAnyChangeIsPushedOnceToActuallyAct() {
+    void actionGoalWithoutAnyChangeStopsAfterOnePromptInsteadOfClaimingCompletion() {
         CompletionGate gate = new CompletionGate(PROMPTS, true, "修复登录接口的空指针");
 
         CompletionGate.Nudge nudge = gate.evaluate(Set.of(), List.of(), List.of(), List.of());
@@ -43,8 +43,10 @@ class CompletionGateTest {
         assertNotNull(nudge);
         assertTrue(nudge.reason().contains("动手"), nudge.reason());
         assertTrue(nudge.prompt().contains("修复登录接口的空指针"), nudge.prompt());
-        // 只推一次，之后放行，避免对确实只需要回答的请求反复催办
-        assertNull(gate.evaluate(Set.of(), List.of(), List.of(), List.of()));
+        CompletionGate.Nudge stopped = gate.evaluate(Set.of(), List.of(), List.of(), List.of());
+        assertNotNull(stopped);
+        assertTrue(stopped.halt());
+        assertTrue(stopped.reason().contains("仍无改动"), stopped.reason());
     }
 
     /** 征求意见的目标不该被当成「该动手却没动手」：Codex 也不会要求把简历改成文件。 */
@@ -240,20 +242,19 @@ class CompletionGateTest {
     }
 
     @Test
-    void verificationIsAskedAtMostTwiceThenFallsThroughToReview() {
+    void verificationIsAskedAtMostTwiceThenStopsWithoutPassingUnverifiedCode() {
         CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
         Set<String> changed = Set.of("src/A.java");
 
         CompletionGate.Nudge first = gate.evaluate(changed, List.of(), List.of(), List.of());
         CompletionGate.Nudge second = gate.evaluate(changed, List.of(), List.of(), List.of());
         CompletionGate.Nudge third = gate.evaluate(changed, List.of(), List.of(), List.of());
-        CompletionGate.Nudge fourth = gate.evaluate(changed, List.of(), List.of(), List.of());
 
         assertEquals(1, first.attempt());
         assertEquals(2, second.attempt());
-        assertTrue(third.reason().contains("自审"));
-        // 自审只做一次，之后放行
-        assertNull(fourth);
+        assertNotNull(third);
+        assertTrue(third.halt());
+        assertTrue(third.reason().contains("提醒上限"), third.reason());
     }
 
     @Test
@@ -409,6 +410,59 @@ class CompletionGateTest {
         gate.recordOutcome(List.of(), List.of("mvnw test → exit 0"));
         assertNull(gate.evaluate(changed, List.of("mvnw test → exit 0"), List.of(), List.of(), false, cleanChanges,
             null, reviewer));
+    }
+
+    @Test
+    void changeAndPassingCheckFromOneToolOutcomeStillRequireIndependentVerification() {
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复解析器");
+        Set<String> changed = Set.of("src/main/Parser.java");
+
+        gate.recordOutcome(changed, List.of("mvnw test → exit 0"));
+
+        CompletionGate.Nudge nudge = gate.evaluate(changed, List.of("mvnw test → exit 0"), List.of(), List.of());
+
+        assertNotNull(nudge);
+        assertTrue(nudge.reason().contains("重跑测试"), nudge.reason());
+    }
+
+    @Test
+    void baselinePassingCheckCannotVerifyCodeChangedDuringContinuation() {
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复解析器");
+        List<String> priorCheck = List.of("mvnw test → exit 0");
+        gate.baseline(priorCheck);
+
+        gate.recordOutcome(List.of("src/main/Parser.java"), List.of());
+
+        CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/main/Parser.java"), priorCheck, List.of(), List.of());
+
+        assertNotNull(nudge);
+        assertTrue(nudge.reason().contains("尚未重新验证"), nudge.reason());
+    }
+
+    @Test
+    void exhaustedVerificationRemindersStopInsteadOfAllowingUnverifiedCompletion() {
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复解析器");
+        Set<String> changed = Set.of("src/main/Parser.java");
+
+        assertFalse(gate.evaluate(changed, List.of(), List.of(), List.of()).halt());
+        assertFalse(gate.evaluate(changed, List.of(), List.of(), List.of()).halt());
+        CompletionGate.Nudge stopped = gate.evaluate(changed, List.of(), List.of(), List.of());
+
+        assertNotNull(stopped);
+        assertTrue(stopped.halt());
+        assertTrue(stopped.reason().contains("提醒上限"), stopped.reason());
+    }
+
+    @Test
+    void exhaustedActionReminderStopsInsteadOfAllowingNoChangeCompletion() {
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复解析器中的空输入错误");
+
+        assertFalse(gate.evaluate(Set.of(), List.of(), List.of(), List.of()).halt());
+        CompletionGate.Nudge stopped = gate.evaluate(Set.of(), List.of(), List.of(), List.of());
+
+        assertNotNull(stopped);
+        assertTrue(stopped.halt());
+        assertTrue(stopped.reason().contains("仍无改动"), stopped.reason());
     }
 
     @Test

@@ -110,13 +110,14 @@ final class CompletionGate {
 
     /** 追踪代码改动与验证的先后顺序：重构或修整代码后，此前旧版本的测试通过记录不能继续放行。 */
     void recordOutcome(Collection<String> changedPaths, List<String> outcomeChecks) {
-        boolean passedNow = outcomeChecks != null && hasPassingCheck(outcomeChecks);
-        if (passedNow) {
-            codeDirtySincePassingCheck = false;
-            return;
-        }
-        if (changedPaths != null && touchesCode(changedPaths)) {
+        boolean codeChanged = changedPaths != null && touchesCode(changedPaths);
+        if (codeChanged) {
             codeDirtySincePassingCheck = true;
+        }
+        boolean passedNow = outcomeChecks != null && hasPassingCheck(outcomeChecks);
+        // 同一工具结果无法证明检查发生在变更之后；要求下一次独立检查再清除 dirty。
+        if (passedNow && !codeChanged) {
+            codeDirtySincePassingCheck = false;
         }
     }
 
@@ -214,11 +215,15 @@ final class CompletionGate {
         // 只读任务没有改动，但「目标像调研、工具却只用了两三次」同样要核对覆盖范围
         boolean researching = !changed && toolCalls >= 2 && (readOnlyTask || GoalIntent.looksLikeResearch(goal));
         // 实现类目标却一个文件都没改就想收尾，多半是只给了方案或反问了一句，而不是真的做完
-        if (!readOnlyTask && !changed && !researching && actionPrompts < MAX_ACTION_PROMPTS
-            && GoalIntent.looksLikeAction(goal) && !GoalIntent.looksLikeResearch(goal)) {
-            actionPrompts++;
-            String prompt = prompts.render("completion/act", Map.of("goal", Texts.oneLine(goal, 500))).strip();
-            return new Nudge(prompt, "实现类目标尚无任何改动，已要求直接动手", actionPrompts, MAX_ACTION_PROMPTS);
+        if (!readOnlyTask && !changed && !researching && GoalIntent.looksLikeAction(goal)
+            && !GoalIntent.looksLikeResearch(goal)) {
+            if (actionPrompts < MAX_ACTION_PROMPTS) {
+                actionPrompts++;
+                String prompt = prompts.render("completion/act", Map.of("goal", Texts.oneLine(goal, 500))).strip();
+                return new Nudge(prompt, "实现类目标尚无任何改动，已要求直接动手", actionPrompts, MAX_ACTION_PROMPTS);
+            }
+            return new Nudge("目标要求实际改动，但本轮仍没有文件改动。停止并如实报告未完成原因。",
+                "实现类目标提醒后仍无改动，已停止", MAX_ACTION_PROMPTS, MAX_ACTION_PROMPTS, true);
         }
         if (!changed && !researching) {
             return null;
@@ -256,17 +261,20 @@ final class CompletionGate {
                 }
             }
         }
-        boolean needsVerify = (!hasPassingCheck(checks) || codeDirtySincePassingCheck) && !sameAsBaseline(checks);
-        if (changed && touchesCode(changedFiles) && needsVerify && verifyPrompts < MAX_VERIFY_PROMPTS) {
-            verifyPrompts++;
-            String checkDesc = checks.isEmpty() ? "（本轮没有跑过构建或测试）"
-                : codeDirtySincePassingCheck ? bullets(checks) + "\n（注意：上述验证早于最近一次代码修改，请对最新代码重跑验证）" : bullets(checks);
-            String prompt =
-                prompts.render("completion/verify", Map.of("changedFiles", bullets(changedFiles), "checks", checkDesc))
-                    .strip();
-            String reason =
-                codeDirtySincePassingCheck && hasPassingCheck(checks) ? "最近一次代码整理后尚未重新验证，已要求重跑测试" : "改动未验证，已要求先跑构建或测试";
-            return new Nudge(prompt, reason, verifyPrompts, MAX_VERIFY_PROMPTS);
+        boolean needsVerify = codeDirtySincePassingCheck || (!hasPassingCheck(checks) && !sameAsBaseline(checks));
+        if (changed && touchesCode(changedFiles) && needsVerify) {
+            if (verifyPrompts < MAX_VERIFY_PROMPTS) {
+                verifyPrompts++;
+                String checkDesc = checks.isEmpty() ? "（本轮没有跑过构建或测试）"
+                    : codeDirtySincePassingCheck ? bullets(checks) + "\n（注意：上述验证早于最近一次代码修改，请对最新代码重跑验证）" : bullets(checks);
+                String prompt = prompts.render("completion/verify",
+                    Map.of("changedFiles", bullets(changedFiles), "checks", checkDesc)).strip();
+                String reason = codeDirtySincePassingCheck && hasPassingCheck(checks)
+                    ? "最近一次代码整理后尚未重新验证，已要求重跑测试" : "改动未验证，已要求先跑构建或测试";
+                return new Nudge(prompt, reason, verifyPrompts, MAX_VERIFY_PROMPTS);
+            }
+            return new Nudge("代码改动仍没有当前版本的通过验证。停止并如实报告未完成项及验证阻碍。",
+                "达到验证提醒上限仍未验证，已停止", MAX_VERIFY_PROMPTS, MAX_VERIFY_PROMPTS, true);
         }
         if (!readOnlyTask && evidencePrompts < MAX_EVIDENCE_PROMPTS) {
             String evidenceIssue =

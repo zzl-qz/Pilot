@@ -27,10 +27,24 @@ class VerificationCheckTest {
             VerificationCheck.passingKind("node scripts/check.mjs → exit 0"));
         assertEquals(VerificationCheck.Kind.STATIC_ANALYSIS,
             VerificationCheck.passingKind("node scripts/typecheck.mjs → exit 0"));
+        assertEquals(VerificationCheck.Kind.TEST,
+            VerificationCheck.passingKind("node scripts/results-smoke.mjs → exit 0"));
+        assertEquals(VerificationCheck.Kind.TEST,
+            VerificationCheck.passingKind("node .\\scripts\\results-smoke.mjs → exit 0"));
+        assertEquals(VerificationCheck.Kind.TEST,
+            VerificationCheck.passingKind("node scripts/verify-results.test.js → exit 0"));
+        assertEquals(VerificationCheck.Kind.STATIC_ANALYSIS,
+            VerificationCheck.passingKind("node scripts/verify-contracts.mjs → exit 0"));
+        assertEquals(VerificationCheck.Kind.BUILD,
+            VerificationCheck.passingKind("node scripts/build-assets.mjs → exit 0"));
+        assertEquals(VerificationCheck.Kind.OTHER,
+            VerificationCheck.passingKind("node scripts/results-smoke.mjs → exit 1"));
         assertEquals(VerificationCheck.Kind.OTHER,
             VerificationCheck.passingKind("node scripts/check.mjs → exit 1"));
         assertEquals(VerificationCheck.Kind.OTHER,
             VerificationCheck.passingKind("node scripts/notcheck.mjs → exit 0"));
+        assertEquals(VerificationCheck.Kind.OTHER,
+            VerificationCheck.passingKind("node scripts/my-results-smoke-helper.mjs → exit 0"));
         assertEquals(VerificationCheck.Kind.TEST, VerificationCheck.classifyCommand("pnpm -C packages/ui test"));
         assertEquals(VerificationCheck.Kind.TEST, VerificationCheck.classifyCommand("npm --prefix=pilot-web test"));
         assertEquals(VerificationCheck.Kind.BUILD, VerificationCheck.classifyCommand("javac Main.java"));

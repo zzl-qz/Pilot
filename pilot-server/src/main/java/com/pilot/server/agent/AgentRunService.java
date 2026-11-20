@@ -43,6 +43,7 @@ import com.pilot.core.event.RunContinued;
 import com.pilot.core.event.RunEnded;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.RunFailureCode;
+import com.pilot.core.event.RunOutcome;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.event.RunUsageUpdated;
 import com.pilot.core.event.SessionEvent;
@@ -1858,6 +1859,8 @@ public class AgentRunService implements RunStarter {
                     handle.paused
                         || (handle.interruptedReason == null && stoppedTask != null && stoppedTask.automation() != null)
                             ? TaskControlStatus.PAUSED : TaskControlStatus.INTERRUPTED);
+                taskControls.settleDirectRun(sessionId, handle.paused ? RunOutcome.PAUSED : RunOutcome.CANCELLED,
+                    handle.interruptedReason == null ? "运行已停止" : handle.interruptedReason);
                 if (handle.paused) {
                     delivered = new RunFailed(RunFailureCode.PAUSED, "任务已暂停，目标、约束、验收条件和排队消息已保留。", true);
                 } else if (handle.interruptedReason != null) {
@@ -1865,9 +1868,11 @@ public class AgentRunService implements RunStarter {
                 }
             } else if (event instanceof RunFailed failed) {
                 taskControls.status(sessionId, failureTaskStatus(failed.code()));
+                taskControls.settleDirectRun(sessionId, RunOutcome.fromCode(failed.code()), failed.message());
             } else if (event instanceof RunEnded ended) {
                 // 部分交付/阻塞/等用户：任务状态由 outcome 派生，不再走 FAILED。
                 taskControls.status(sessionId, ended.outcome().taskStatus());
+                taskControls.settleDirectRun(sessionId, ended.outcome(), ended.summary());
             } else if (event instanceof RunCompleted completed) {
                 delivered = completedEvent(sessionId, planSink, completed);
             }

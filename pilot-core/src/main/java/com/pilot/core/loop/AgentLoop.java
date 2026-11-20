@@ -857,7 +857,7 @@ public final class AgentLoop {
         }
         if (nudge != null) {
             if (nudge.halt()) {
-                String partial = content + "\n\n规范检查未通过，已停止：" + nudge.reason();
+                String partial = content + "\n\n收尾门禁未通过，已停止：" + nudge.reason();
                 messages.set(messages.size() - 1, Message.assistant(partial, List.of()));
                 events.accept(RunEnded.of(RunOutcome.BLOCKED, RunFailureCode.TASK_INCOMPLETE.name(), partial, changed,
                     checksOut, plan, List.of("修复规范检查问题后继续")));
