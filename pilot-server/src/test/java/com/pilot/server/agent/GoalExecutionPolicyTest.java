@@ -34,6 +34,7 @@ import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelClientException;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ModelUsage;
+import com.pilot.core.tool.ToolResults;
 import com.pilot.core.tool.command.CommandTaskManager.Task;
 import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.multi.SpawnAgentTool;
@@ -781,6 +782,32 @@ class GoalExecutionPolicyTest {
         check(policy, "npm run test:unit", "web", 1);
         policy.review(history, Set.of(), List.of());
         assertEquals("CHECKS_FAILED", tasks.load("s").execution().phase(), "旧的成功不能覆盖新失败");
+    }
+
+    @Test
+    void nestedSandboxBlockedCheckDoesNotMaskRealFailureOrZeroPassButAllowsTargetedPass() {
+        var policy = policy((messages, tools) -> fail("no extra model call"), 20);
+        policy.beforeRequest(history);
+        String sandboxResult =
+            ToolResults.NESTED_SANDBOX_HINT_PREFIX + "（外层沙箱限制）\nERROR: 命令未成功完成（FAILED）\n任务ID: cmd_sb1\n状态: FAILED";
+        ToolCall blockedCall = new ToolCall("sb1", "run_command", Map.of("command", "mvn -pl pilot-core test"));
+        policy.beforeTool(blockedCall);
+        policy.observed(blockedCall, new ToolExecutor.Outcome("run_command", sandboxResult, List.of(),
+            List.of("mvn -pl pilot-core test → exit 1"), ToolExecutor.OutcomeStatus.PERMANENT_FAILURE));
+        // 没有任何通过的检查时，仅凭嵌套沙箱失败不能判为 CHECKS_PASSED
+        policy.review(history, Set.of(), List.of());
+        assertEquals("CHECKS_FAILED", tasks.load("s").execution().phase());
+
+        // 补跑定向检查通过后，纯嵌套沙箱受限项不再误标 CHECKS_FAILED，同时在 gap 中如实注明
+        check(policy, "mvn -pl pilot-server -Dtest=FrontendDepsPromptTest test", ".", 0);
+        policy.review(history, Set.of(), List.of());
+        assertEquals("CHECKS_PASSED", tasks.load("s").execution().phase());
+        assertTrue(tasks.load("s").execution().gap().contains("外层 OS 沙箱嵌套限制"), tasks.load("s").execution().gap());
+
+        // 若再出现真实业务失败，仍必须严格落为 CHECKS_FAILED
+        check(policy, "mvn -pl pilot-server spotless:check", ".", 1);
+        policy.review(history, Set.of(), List.of());
+        assertEquals("CHECKS_FAILED", tasks.load("s").execution().phase());
     }
 
     @Test

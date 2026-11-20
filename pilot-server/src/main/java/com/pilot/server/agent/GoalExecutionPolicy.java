@@ -33,6 +33,7 @@ import com.pilot.core.model.ModelUsage;
 import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.tool.Tool;
+import com.pilot.core.tool.ToolResults;
 import com.pilot.core.tool.ToolSchemas;
 import com.pilot.core.tool.ToolSupport;
 import com.pilot.core.tool.VerificationCheck;
@@ -725,6 +726,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
             endVersion, null, currentRequirements ? outcome.status().name() : EvidenceStatus.STALE.name(), startVersion,
             endVersion, System.currentTimeMillis(), operation));
         // 结构化工具（例如 spawn_agent）可能汇总多次真实检查；从第 0 条起逐条入账。
+        boolean nestedSandboxBlocked = ToolResults.isNestedSandboxFailure(outcome.result());
         for (int index = 0; index < outcome.checks().size(); index++) {
             String check = outcome.checks().get(index);
             EvidenceStatus status = !currentRequirements ? EvidenceStatus.STALE
@@ -732,6 +734,9 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                     : check.matches("(?s).+ → exit 0") ? EvidenceStatus.SUCCESS : EvidenceStatus.PERMANENT_FAILURE;
             String checkResult = ToolNames.COMMAND_STATUS.equals(call.name())
                 ? "任务ID: " + Objects.toString(call.args().get("taskId"), "") + "\n" + check : check;
+            if (nestedSandboxBlocked && status == EvidenceStatus.PERMANENT_FAILURE) {
+                checkResult = ToolResults.NESTED_SANDBOX_HINT_PREFIX + "\n" + checkResult;
+            }
             evidence.add(new TaskControlService.Evidence(UUID.randomUUID().toString(), call.name(), path, checkResult,
                 endVersion, check, status.name(), startVersion, endVersion, System.currentTimeMillis(),
                 operation + ":check:" + index));
@@ -829,20 +834,23 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private boolean finishDirect(TaskControlService.Execution state, TaskControlService.TaskContract requirements) {
         Map<String, TaskControlService.Evidence> checks = GoalEvidence.latestChecks(state.evidence());
         String version = sourceVersion();
-        List<String> failedChecks = checks.values().stream()
+        List<TaskControlService.Evidence> currentFailures = checks.values().stream()
             .filter(e -> version.equals(e.endVersion())
                 && !WireEnum.in(e.status(), EvidenceStatus.STALE, EvidenceStatus.RUNNING)
                 && !GoalEvidence.isQualifyingVerification(e))
-            .map(e -> Objects.toString(e.check(), "").strip()).filter(s -> !s.isBlank()).toList();
-        boolean failed = !failedChecks.isEmpty();
+            .toList();
+        List<String> realFailed = extractCheckNames(currentFailures, false);
+        List<String> sandboxBlocked = extractCheckNames(currentFailures, true);
+        boolean hasPassed = checks.values().stream()
+            .anyMatch(e -> version.equals(e.endVersion()) && GoalEvidence.isQualifyingVerification(e));
+        boolean failed = !realFailed.isEmpty() || (!sandboxBlocked.isEmpty() && !hasPassed);
         boolean running = checks.values().stream().anyMatch(e -> EvidenceStatus.RUNNING.is(e.status()));
         boolean stale = checks.values().stream()
             .anyMatch(e -> EvidenceStatus.STALE.is(e.status()) || !version.equals(e.endVersion()));
         ExecutionPhase phase = failed ? ExecutionPhase.CHECKS_FAILED : running ? ExecutionPhase.UNVERIFIED : stale
             ? ExecutionPhase.CHECKS_STALE : checks.isEmpty() ? ExecutionPhase.UNVERIFIED : ExecutionPhase.CHECKS_PASSED;
-        String detail = failed ? "当前版本仍有未通过的检查（" + String.join("；", failedChecks) + "）；执行已结束，不能声称验证通过。"
-            : running ? "验证命令仍在后台运行，尚未取得终态与退出码。" : stale ? "部分检查早于当前代码或用户要求，不能用旧结果证明当前版本。"
-                : checks.isEmpty() ? "未记录测试、构建或静态检查证据；执行结束不等于已核验。" : "已记录的当前版本检查通过；结果仅覆盖实际检查范围，不代表全部目标已独立验收。";
+        String detail = directVerificationDetail(phase, realFailed.isEmpty() ? sandboxBlocked : realFailed,
+            sandboxBlocked, running, checks.isEmpty());
         var finished = copy(state, state.mode(), phase, detail, state.evidence(), state.idleReviews(), state.progress(),
             state.usage());
         if (!tasks.executionForRequirements(session, requirements, finished)) {
@@ -850,6 +858,32 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         }
         updates.accept(finished);
         return true;
+    }
+
+    private static List<String> extractCheckNames(List<TaskControlService.Evidence> failures, boolean sandboxOnly) {
+        return failures.stream().filter(e -> ToolResults.isNestedSandboxFailure(e.result()) == sandboxOnly)
+            .map(e -> Objects.toString(e.check(), "").strip()).filter(s -> !s.isBlank()).toList();
+    }
+
+    private static String directVerificationDetail(ExecutionPhase phase, List<String> displayedFailures,
+        List<String> sandboxBlocked, boolean running, boolean empty) {
+        if (phase == ExecutionPhase.CHECKS_FAILED) {
+            return "当前版本仍有未通过的检查（" + String.join("；", displayedFailures) + "）；执行已结束，不能声称验证通过。";
+        }
+        if (running) {
+            return "验证命令仍在后台运行，尚未取得终态与退出码。";
+        }
+        if (phase == ExecutionPhase.CHECKS_STALE) {
+            return "部分检查早于当前代码或用户要求，不能用旧结果证明当前版本。";
+        }
+        if (empty) {
+            return "未记录测试、构建或静态检查证据；执行结束不等于已核验。";
+        }
+        if (!sandboxBlocked.isEmpty()) {
+            return "已记录的当前版本检查通过（另有 " + sandboxBlocked.size() + " 项因外层 OS 沙箱嵌套限制未在沙箱内通过："
+                + String.join("；", sandboxBlocked) + "）；结果仅覆盖实际检查范围，不代表全部目标已独立验收。";
+        }
+        return "已记录的当前版本检查通过；结果仅覆盖实际检查范围，不代表全部目标已独立验收。";
     }
 
     /** 不再自动复跑历史检查：是否再跑一次验证由模型自己决定。 */
