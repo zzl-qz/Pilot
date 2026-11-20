@@ -1290,17 +1290,28 @@ function planStatusTone(status?: string) {
 }
 
 const PlanCard = memo(function PlanCard({ row }: { row: PlanRow }) {
+  const running = useStore((state) => state.running);
   const items = (row.items || []).filter(item => (item.step || item.text || '').trim());
   if (!items.length) return null;
   const done = items.filter((item) => item.status === 'completed' || item.status === 'done').length;
   const finished = items.length > 0 && done === items.length;
   const pct = Math.round((done / items.length) * 100);
+  const activeItem = !finished
+    ? (items.find(item => planStatusTone(item.status) === 'in_progress')
+      || items.find(item => planStatusTone(item.status) === 'blocked')
+      || items.find(item => planStatusTone(item.status) === 'pending'))
+    : null;
+  const activeStep = activeItem ? (activeItem.step || activeItem.text || '').trim() : '';
+  // 已完成、已结束或长计划（>4 步）默认收成单行进度胶囊，避免霸占半屏；点开仍可看全部步骤。
+  const defaultOpen = running && !finished && items.length <= 4;
   return (
     <aside className={`plan-card${finished ? ' is-complete' : ''}`}>
-      <details open={!finished}>
+      <details open={defaultOpen}>
       <summary className="plan-head">
         <span className="plan-title">执行计划</span>
+        <span className="plan-mini-bar" aria-hidden="true"><i style={{ width: `${pct}%` }} /></span>
         <span className="plan-progress">{items.length ? `${done}/${items.length}` : ''}</span>
+        {activeStep && <span className="plan-current" title={activeStep}>{activeStep}</span>}
         <span className="process-chevron" aria-hidden="true"><ProcessChevron /></span>
       </summary>
       {!finished && <div className="plan-bar" aria-hidden="true"><i style={{ width: `${pct}%` }} /></div>}

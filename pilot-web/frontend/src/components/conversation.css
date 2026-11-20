@@ -1082,14 +1082,57 @@ html .conversation-thread .plan-card .plan-title {
 }
 
 html .conversation-thread .plan-card .plan-progress {
+  flex: none;
   color: var(--muted);
   font-family: var(--mono);
   font-size: 11.5px;
   font-variant-numeric: tabular-nums;
 }
 
+html .conversation-thread .plan-card .plan-mini-bar {
+  display: inline-block;
+  flex: none;
+  width: 44px;
+  height: 4px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+  overflow: hidden;
+}
+
+html .conversation-thread .plan-card .plan-mini-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+html .conversation-thread .plan-card.is-complete .plan-mini-bar > i {
+  background: var(--ok);
+}
+
+html .conversation-thread .plan-card .plan-current {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+
+html .conversation-thread .plan-card details[open] .plan-current {
+  display: none;
+}
+
 html .conversation-thread .plan-card .plan-head > .process-chevron {
   margin-inline-start: auto;
+}
+
+html .conversation-thread .plan-card .plan-list {
+  max-height: 240px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 html .conversation-thread .plan-card .plan-bar {

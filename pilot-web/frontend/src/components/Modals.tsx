@@ -63,6 +63,8 @@ export function TaskContract() {
   const displayGoal = goalParts.body || (goalParts.files.length
     ? `查看附件：${goalParts.files.map(file => file.name).join('、')}`
     : goal);
+  // 顶栏单行摘要去掉裸 Markdown 反引号与多余空白，避免把原始源码符号直接铺在标题栏。
+  const summaryGoal = displayGoal.replace(/`+/g, '').replace(/\s+/g, ' ').trim();
   const items = Array.isArray(task.acceptance) ? task.acceptance : [];
   const checked = items.filter((item) => item.checked).length;
   const status = String(task.status || '').toUpperCase();
@@ -75,7 +77,7 @@ export function TaskContract() {
     <details id="task-contract" className="task-contract" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary id="task-contract-summary">
         <span className="task-contract-label">任务契约</span>
-        <span className="task-contract-goal" title={displayGoal}>{displayGoal || '未设定目标'}</span>
+        <span className="task-contract-goal" title={displayGoal}>{summaryGoal || '未设定目标'}</span>
         <span className="task-contract-status">{lifecycle}{items.length ? ` · 验收 ${checked}/${items.length}` : ''}</span>
       </summary>
       <div className="task-contract-body">
