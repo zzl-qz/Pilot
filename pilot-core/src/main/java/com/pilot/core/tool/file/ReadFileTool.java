@@ -10,7 +10,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 import com.pilot.core.message.ToolNames;
 import com.pilot.core.tool.ReadGuard;
@@ -25,15 +24,13 @@ import com.pilot.core.workspace.PathValidator;
 
 /** 按行读取工作区文本。结果里只有请求的窗口，行号用文件里的绝对行号。 */
 public final class ReadFileTool implements Tool.ParallelReadOnly {
-    private static final int DEFAULT_LINES = 200;
+    public static final int DEFAULT_LINES = 400;
     private static final int MAX_LINES = 2000;
     private static final int MAX_LINE_CHARS = 2000;
 
     private final PathValidator paths;
     private final ReadGuard reads;
     private final SandboxSink sandbox;
-    /** 同一窗口、同一指纹不再把全文交回去。 */
-    private final ConcurrentHashMap<String, String> slices = new ConcurrentHashMap<>();
 
     public ReadFileTool(PathValidator paths) {
         this(paths, ReadGuard.allowAll());
@@ -67,7 +64,7 @@ public final class ReadFileTool implements Tool.ParallelReadOnly {
     public static Map<String, Object> schema(String pathDescription, String startLineDescription) {
         return ToolSchemas.object(Map.of("path", ToolSchemas.string(pathDescription), "start_line",
             ToolSchemas.integer(startLineDescription + "。正数从 1 开始，负数从末尾数，-1 是最后一行。默认 1"), "line_count",
-            ToolSchemas.integer("最多读取行数，默认 200，最大 2000"), "pages",
+            ToolSchemas.integer("最多读取行数，默认 " + DEFAULT_LINES + "，最大 " + MAX_LINES), "pages",
             ToolSchemas.string("仅 PDF：页码或范围，例如 \"3\" 或 \"2-5\"，默认前 10 页，单次最多 30 页")), List.of("path"));
     }
 
@@ -123,7 +120,8 @@ public final class ReadFileTool implements Tool.ParallelReadOnly {
         } catch (RuntimeException e) {
             return "ERROR: " + e.getMessage();
         }
-        String proposal = sandbox == null ? null : sandbox.proposedText(paths.display(file));
+        String displayPath = paths.display(file);
+        String proposal = sandbox == null ? null : sandbox.proposedText(displayPath);
         if (!Files.exists(file) && proposal == null) {
             return "ERROR: 文件不存在: " + rawPath;
         }
@@ -134,14 +132,16 @@ public final class ReadFileTool implements Tool.ParallelReadOnly {
             if (proposal == null && looksBinary(file)) {
                 return "ERROR: 二进制文件，无法读取: " + rawPath;
             }
-            String window = rawPath + ":" + startLine + ":" + lineCount;
             String seen = proposal == null ? reads.observationStamp(file) : "";
-            if (!seen.isEmpty() && seen.equals(slices.get(window))) {
-                return "文件未变化，沿用刚才读过的 " + rawPath + "（从第 " + startLine + " 行起，最多 " + lineCount + " 行）。不要再读这一段。";
-            }
-            if (proposal == null && !reads.deliverRead(file)) {
-                return "文件未变化，沿用刚才读过的 " + rawPath + "。同一文件已经读过 " + ReadTracker.MAX_DELIVERIES
-                    + " 次，不要再换行号重读。根据上文修改，或改看别的文件。";
+            ReadGuard.ReadCoverage coverage =
+                seen.isEmpty() ? ReadGuard.ReadCoverage.NONE : reads.checkDelivered(file, seen, startLine, lineCount);
+            if (!seen.isEmpty() && coverage.overlapRatio() >= ReadTracker.OVERLAP_DEDUP_RATIO) {
+                int pct = (int)Math.round(coverage.overlapRatio() * 100);
+                String requested =
+                    coverage.resolvedStart() == coverage.resolvedEnd() ? "第 " + coverage.resolvedStart() + " 行"
+                        : "第 " + coverage.resolvedStart() + "-" + coverage.resolvedEnd() + " 行";
+                return "文件未变化，沿用刚才读过的 " + displayPath + "（请求" + requested + "已有 " + pct + "% 覆盖；已交付区间："
+                    + ReadGuard.LineRange.formatAll(coverage.delivered()) + "）。如需查看其他部分，请指定未覆盖的 start_line。";
             }
             ReadResult slice =
                 proposal == null ? readSlice(file, startLine, lineCount) : readText(proposal, startLine, lineCount);
@@ -149,7 +149,13 @@ public final class ReadFileTool implements Tool.ParallelReadOnly {
             if (slice.hasLines()) {
                 reads.observed(file);
                 if (proposal == null) {
-                    slices.put(window, reads.observationStamp(file));
+                    String currentStamp = reads.observationStamp(file);
+                    reads.recordDelivered(file, currentStamp, slice.startLine(), slice.endLine(), slice.totalLines());
+                    int deliveredLines = slice.endLine() - slice.startLine() + 1;
+                    if (deliveredLines <= ReadTracker.TINY_READ_LINES && slice.endLine() < slice.totalLines()
+                        && coverage.tinyReadCount() + 1 >= ReadTracker.TINY_READ_HINT_AT) {
+                        return slice.text() + "\n（提示：已多次小窗口读取此文件，建议增大 line_count 一次读取相关函数完整区间）";
+                    }
                 }
             }
             return slice.text();
@@ -164,14 +170,14 @@ public final class ReadFileTool implements Tool.ParallelReadOnly {
             .toList();
         int total = all.size();
         if (total == 0) {
-            return new ReadResult("(空文件，共 0 行)", false);
+            return new ReadResult("(空文件，共 0 行)", false, 0, 0, 0);
         }
         long requested = startLine < 0 ? (long)total + startLine + 1 : startLine;
         int start = (int)Math.max(1, Math.min(total, requested));
         int end = Math.min(total, start + lineCount - 1);
         List<String> selected = all.subList(start - 1, end);
         String note = startLine < 0 && requested < 1 ? "（负向起点超出文件开头，已从第 1 行读起）" : "";
-        return new ReadResult(render(start, selected, total, "", note), !selected.isEmpty());
+        return new ReadResult(render(start, selected, total, "", note), !selected.isEmpty(), start, end, total);
     }
 
     private static boolean looksBinary(Path file) throws IOException {
@@ -184,23 +190,26 @@ public final class ReadFileTool implements Tool.ParallelReadOnly {
         if (startLine < 0) {
             int total = countLines(file);
             if (total == 0) {
-                return new ReadResult("(空文件，共 0 行)", false);
+                return new ReadResult("(空文件，共 0 行)", false, 0, 0, 0);
             }
             long resolved = (long)total + startLine + 1;
             boolean clamped = resolved < 1;
             int start = clamped ? 1 : (int)resolved;
             List<String> lines = collect(file, start, lineCount);
             String clampNote = clamped ? "（负向起点超出文件开头，已从第 1 行读起）" : "";
-            return new ReadResult(render(start, lines, total, "", clampNote), !lines.isEmpty());
+            int end = lines.isEmpty() ? 0 : start + lines.size() - 1;
+            return new ReadResult(render(start, lines, total, "", clampNote), !lines.isEmpty(), start, end, total);
         }
         Slice slice = scanSlice(file, startLine, lineCount);
         if (slice.total == 0) {
-            return new ReadResult("(空文件，共 0 行)", false);
+            return new ReadResult("(空文件，共 0 行)", false, 0, 0, 0);
         }
         if (slice.lines.isEmpty()) {
-            return new ReadResult("请求范围从第 " + startLine + " 行开始，但文件共 " + slice.total + " 行（无内容返回）", false);
+            return new ReadResult("请求范围从第 " + startLine + " 行开始，但文件共 " + slice.total + " 行（无内容返回）", false, 0, 0,
+                slice.total);
         }
-        return new ReadResult(render(startLine, slice.lines, slice.total, "", ""), true);
+        int end = startLine + slice.lines.size() - 1;
+        return new ReadResult(render(startLine, slice.lines, slice.total, "", ""), true, startLine, end, slice.total);
     }
 
     private static Slice scanSlice(Path file, int startLine, int lineCount) throws IOException {
@@ -304,7 +313,7 @@ public final class ReadFileTool implements Tool.ParallelReadOnly {
     private record IntArg(boolean present, Integer value) {
     }
 
-    private record ReadResult(String text, boolean hasLines) {
+    private record ReadResult(String text, boolean hasLines, int startLine, int endLine, int totalLines) {
     }
 
     private record Slice(List<String> lines, int total) {

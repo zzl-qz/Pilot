@@ -1245,8 +1245,9 @@ public class AgentRunService implements RunStarter {
      * 命令保留：git 只读子命令在内置白名单里，写命令照旧走权限门。
      */
     private ToolRegistry reviewTools(String workspace) {
-        AgentScope scope = AgentScope.readOnly(List.of(), List.of()).withTools(List.of("read_*", "list_*", "glob_*",
-            "search_*", ToolNames.RUN_COMMAND, ToolNames.WEB_SEARCH, ToolNames.WEB_FETCH), List.of());
+        AgentScope scope = AgentScope.readOnly(List.of(), List.of())
+            .withTools(List.of("read_*", "list_*", "glob_*", "search_*", com.pilot.core.tool.code.CodeSymbolTool.NAME,
+                ToolNames.RUN_COMMAND, ToolNames.WEB_SEARCH, ToolNames.WEB_FETCH), List.of());
         return toolFactory.registryForScope(workspace, scope, com.pilot.core.tool.SandboxSink.rejectAll());
     }
 

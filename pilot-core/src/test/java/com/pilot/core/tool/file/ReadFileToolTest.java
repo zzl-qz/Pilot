@@ -67,17 +67,74 @@ class ReadFileToolTest {
     }
 
     @Test
-    void fourthLookAtTheSameFileDoesNotReturnAnotherSlice() throws IOException {
-        Files.writeString(workspace.resolve("App.java"), "one\ntwo\nthree\nfour\n");
+    void largeFileSequentialPaginationPastThreeSlicesAlwaysSucceeds() throws IOException {
+        StringBuilder body = new StringBuilder();
+        for (int i = 1; i <= 1200; i++) {
+            body.append("line-").append(i).append('\n');
+        }
+        Files.writeString(workspace.resolve("Large.java"), body.toString());
         ReadFileTool tracked = new ReadFileTool(new PathValidator(workspace), new ReadTracker());
 
-        assertTrue(tracked.execute(Map.of("path", "App.java", "start_line", 1, "line_count", 1)).contains("one"));
-        assertTrue(tracked.execute(Map.of("path", "App.java", "start_line", 2, "line_count", 1)).contains("two"));
-        assertTrue(tracked.execute(Map.of("path", "App.java", "start_line", 3, "line_count", 1)).contains("three"));
-        String fourth = tracked.execute(Map.of("path", "App.java", "start_line", 4, "line_count", 1));
+        assertTrue(
+            tracked.execute(Map.of("path", "Large.java", "start_line", 1, "line_count", 200)).contains("line-1"));
+        assertTrue(
+            tracked.execute(Map.of("path", "Large.java", "start_line", 201, "line_count", 200)).contains("line-201"));
+        assertTrue(
+            tracked.execute(Map.of("path", "Large.java", "start_line", 401, "line_count", 200)).contains("line-401"));
+        String fourth = tracked.execute(Map.of("path", "Large.java", "start_line", 601, "line_count", 200));
+        String fifth = tracked.execute(Map.of("path", "Large.java", "start_line", 801, "line_count", 200));
+        String sixth = tracked.execute(Map.of("path", "Large.java", "start_line", 1001, "line_count", 200));
 
-        assertTrue(fourth.contains("未变化"), fourth);
-        assertFalse(fourth.contains("four"));
+        assertTrue(fourth.contains("line-601"), fourth);
+        assertFalse(fourth.startsWith("文件未变化"), fourth);
+        assertTrue(fifth.contains("line-801"), fifth);
+        assertTrue(sixth.contains("line-1001"), sixth);
+    }
+
+    @Test
+    void highOverlapRereadIsDedupedWhileSmallOverlapAndCanonicalPathWork() throws IOException {
+        StringBuilder body = new StringBuilder();
+        for (int i = 1; i <= 500; i++) {
+            body.append("row-").append(i).append('\n');
+        }
+        Files.writeString(workspace.resolve("App.java"), body.toString());
+        ReadTracker tracker = new ReadTracker();
+        ReadFileTool tracked = new ReadFileTool(new PathValidator(workspace), tracker);
+
+        assertTrue(tracked.execute(Map.of("path", "App.java", "start_line", 1, "line_count", 200)).contains("row-1"));
+        // 85%+ 重叠且换一种相对路径写法，仍应命中去重并提示已交付区间
+        String overlap = tracked.execute(Map.of("path", "./App.java", "start_line", 15, "line_count", 190));
+        assertTrue(overlap.startsWith("文件未变化"), overlap);
+        assertTrue(overlap.contains("1-200"), overlap);
+
+        // 合法的 10% 上下文衔接分页应放行
+        String next = tracked.execute(Map.of("path", "App.java", "start_line", 181, "line_count", 200));
+        assertTrue(next.contains("row-380"), next);
+        assertFalse(next.startsWith("文件未变化"), next);
+
+        // 上下文压缩触发视图失效后允许重读 1-200
+        tracker.invalidateDeliveredViews();
+        String rereadAfterCompact = tracked.execute(Map.of("path", "App.java", "start_line", 1, "line_count", 200));
+        assertTrue(rereadAfterCompact.contains("row-1"), rereadAfterCompact);
+        assertFalse(rereadAfterCompact.startsWith("文件未变化"), rereadAfterCompact);
+    }
+
+    @Test
+    void repeatedTinySlicesSucceedWithGentleHint() throws IOException {
+        StringBuilder body = new StringBuilder();
+        for (int i = 1; i <= 100; i++) {
+            body.append("tiny-").append(i).append('\n');
+        }
+        Files.writeString(workspace.resolve("Tiny.java"), body.toString());
+        ReadFileTool tracked = new ReadFileTool(new PathValidator(workspace), new ReadTracker());
+
+        assertTrue(tracked.execute(Map.of("path", "Tiny.java", "start_line", 1, "line_count", 5)).contains("tiny-1"));
+        assertTrue(tracked.execute(Map.of("path", "Tiny.java", "start_line", 6, "line_count", 5)).contains("tiny-6"));
+        assertTrue(tracked.execute(Map.of("path", "Tiny.java", "start_line", 11, "line_count", 5)).contains("tiny-11"));
+        String fourth = tracked.execute(Map.of("path", "Tiny.java", "start_line", 16, "line_count", 5));
+
+        assertTrue(fourth.contains("tiny-16"), fourth);
+        assertTrue(fourth.contains("建议增大 line_count"), fourth);
     }
 
     @Test
@@ -203,9 +260,9 @@ class ReadFileToolTest {
         String result = tool.execute(Map.of("path", "many.txt"));
 
         assertTrue(result.startsWith("  1 | L1\n"), result);
-        assertTrue(result.contains("\n200 | L200\n"), result);
-        assertFalse(result.contains("L201"), result);
-        assertTrue(result.endsWith("… 显示第 1 到第 200 行，文件共 100001 行，后续内容未显示，从第 201 行继续 …"), result);
+        assertTrue(result.contains("\n400 | L400\n"), result);
+        assertFalse(result.contains("L401"), result);
+        assertTrue(result.endsWith("… 显示第 1 到第 400 行，文件共 100001 行，后续内容未显示，从第 401 行继续 …"), result);
     }
 
     @Test
@@ -240,9 +297,9 @@ class ReadFileToolTest {
     }
 
     @Test
-    void defaultsToTwoHundredLines() throws IOException {
+    void defaultsToFourHundredLines() throws IOException {
         StringBuilder body = new StringBuilder();
-        for (int i = 1; i <= 250; i++) {
+        for (int i = 1; i <= 450; i++) {
             body.append("line ").append(i).append('\n');
         }
         Files.writeString(workspace.resolve("long.txt"), body.toString());
@@ -250,8 +307,8 @@ class ReadFileToolTest {
         String result = tool.execute(Map.of("path", "long.txt"));
 
         assertTrue(result.contains("1 | line 1\n"), result);
-        assertTrue(result.contains("200 | line 200\n"), result);
-        assertFalse(result.contains("201 | line 201"), result);
-        assertTrue(result.contains("从第 201 行继续"), result);
+        assertTrue(result.contains("400 | line 400\n"), result);
+        assertFalse(result.contains("401 | line 401"), result);
+        assertTrue(result.contains("从第 401 行继续"), result);
     }
 }

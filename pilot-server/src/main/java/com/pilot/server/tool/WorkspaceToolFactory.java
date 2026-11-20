@@ -218,6 +218,9 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
         if (view.allowsTool(ToolNames.SEARCH_TEXT)) {
             registry.register(new SearchTool(validator, reads));
         }
+        if (view.allowsTool(CodeSymbolTool.NAME)) {
+            registry.register(new CodeSymbolTool(validator));
+        }
         if (view.allowsTool(ToolNames.WEB_SEARCH)) {
             registry.register(searchTool());
         }
@@ -268,7 +271,7 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
         }
         LocalCodeChecker code = LocalCodeChecker.installed(root);
         registry.register(new CodeDiagnosticsTool(() -> code.available() ? "ready" : "", code::diagnose));
-        registry.register(new CodeSymbolTool(code::available, code::outline));
+        registry.register(new CodeSymbolTool(validator));
         if (questions != null) {
             registry.register(new AskUserTool(questions));
         }

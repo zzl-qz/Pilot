@@ -6,11 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+
 import com.pilot.core.workspace.PathValidator;
 
 class SearchToolTest {
@@ -119,5 +121,45 @@ class SearchToolTest {
         String result = tool.execute(Map.of("pattern", "alpha", "path", "../.."));
 
         assertTrue(result.startsWith("ERROR: 路径超出工作区"), result);
+    }
+
+    @Test
+    void filesOnlyReturnsFileCountsInBothRipgrepAndFallback() throws IOException {
+        Files.writeString(workspace.resolve("many.txt"), "alpha 1\nalpha 2\nalpha 3\n");
+        SearchTool fallback = new SearchTool(new PathValidator(workspace), null, false);
+
+        for (SearchTool candidate : List.of(tool, fallback)) {
+            String result = candidate.execute(Map.of("pattern", "alpha", "files_only", true));
+            assertTrue(result.contains("many.txt (3 处匹配)"), result);
+            assertTrue(result.contains("a.txt (2 处匹配)"), result);
+            assertTrue(result.contains("src/App.java (1 处匹配)"), result);
+            assertFalse(result.contains("beta alpha"), "files_only 不应倾倒正文行: " + result);
+            assertTrue(result.indexOf("many.txt") < result.indexOf("a.txt"), "应按匹配数降序排列: " + result);
+        }
+    }
+
+    @Test
+    void contextLinesIncludesSurroundingLinesAndHandlesDashedFilenames() throws IOException {
+        Files.writeString(workspace.resolve("2026-11-20-log.txt"),
+            "line1\nline2\ntarget-alpha\nline4\nline5\nline6\nline7\ntarget-alpha-2\nline9\n");
+        SearchTool fallback = new SearchTool(new PathValidator(workspace), null, false);
+
+        for (SearchTool candidate : List.of(tool, fallback)) {
+            String result =
+                candidate.execute(Map.of("pattern", "target-alpha", "path", "2026-11-20-log.txt", "context_lines", 1));
+            assertTrue(result.contains("2026-11-20-log.txt-2- line2"), result);
+            assertTrue(result.contains("2026-11-20-log.txt:3: target-alpha"), result);
+            assertTrue(result.contains("2026-11-20-log.txt-4- line4"), result);
+            assertTrue(result.contains("--"), "非连续块之间应有分隔符: " + result);
+            assertTrue(result.contains("2026-11-20-log.txt:8: target-alpha-2"), result);
+            assertTrue(result.contains("2026-11-20-log.txt-9- line9"), result);
+        }
+    }
+
+    @Test
+    void rejectsInvalidOptionalParameters() {
+        assertTrue(tool.execute(Map.of("pattern", "alpha", "files_only", "maybe")).startsWith("ERROR:"));
+        assertTrue(tool.execute(Map.of("pattern", "alpha", "context_lines", -1)).startsWith("ERROR:"));
+        assertTrue(tool.execute(Map.of("pattern", "alpha", "context_lines", "abc")).startsWith("ERROR:"));
     }
 }
