@@ -71,15 +71,18 @@ function RunningStatus() {
     return () => clearInterval(timer);
   }, []);
   if (hasApprovals) return null;
-  const clock = startedAt ? formatClock(Math.round((Date.now() - startedAt) / 1000)) : '';
-  // 顶栏已展示「正在思考」，没有正在执行的工具详情与计时时不再重复画一条占位横条。
-  if (!detail && !clock) return null;
-  const text = detail ? `${phase} · ${detail}` : phase;
+  const elapsed = startedAt ? Math.max(0, Math.round((Date.now() - startedAt) / 1000)) : 0;
+  const clock = startedAt ? formatClock(elapsed) : '';
+  // 短暂思考且无正在执行的工具时，顶栏已显示「正在思考」，不重复绘制占位条；
+  // 超过 8 秒的长思考或正在执行命令时再明确提示实时进度与耗时，避免用户误以为卡死。
+  if (!detail && elapsed < 8) return null;
+  const stage = detail ? `正在执行 · ${detail}` : `${phase}（模型深度思考中）`;
   return (
     <section id="verification-strip" className="verification-strip" data-tone="running" aria-label="任务状态">
       <div className="verification-strip-row">
+        <span className="verification-strip-pulse" aria-hidden="true" />
         {clock && <span className="verification-strip-badge">{clock}</span>}
-        <span className="verification-strip-detail" title={text}>{text}</span>
+        <span className="verification-strip-detail" title={stage}>{stage}</span>
       </div>
     </section>
   );

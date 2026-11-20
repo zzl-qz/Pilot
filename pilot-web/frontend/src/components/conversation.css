@@ -526,6 +526,25 @@ html .conversation-thread .turn-process .tool-group-jump:hover {
   color: var(--ink);
 }
 
+html .conversation-thread .turn-process .tool-group-earlier {
+  align-self: flex-start;
+  margin: 2px 0 6px;
+  padding: 4px 10px;
+  border: 1px dashed color-mix(in srgb, var(--line) 85%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--ink) 2.5%, transparent);
+  color: var(--muted);
+  font: 11.5px/1.4 var(--sans);
+  cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+html .conversation-thread .turn-process .tool-group-earlier:hover {
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  border-color: var(--accent-line);
+  color: var(--ink);
+}
+
 /* 限高滚动壳：上下柔和渐隐遮罩 + 跨三平台一致的悬浮细胶囊滚动条 */
 html .conversation-thread .process-scroll-shell {
   --scroll-fade-bg: var(--bg);

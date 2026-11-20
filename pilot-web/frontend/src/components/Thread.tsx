@@ -903,6 +903,9 @@ const ExploreCluster = memo(function ExploreCluster({ tools }: { tools: ToolView
   );
 });
 
+const INITIAL_TOOL_SEGMENTS = 40;
+const TOOL_SEGMENT_STEP = 80;
+
 /**
  * 操作组单独 memo：流式输出时只有 reply 在变，tools 数组引用不变，这一整块（可能几十行）
  * 直接跳过比对。默认收起为单行摘要，展开后在固定最大高度内滚动，不把对话拉成无限高度。
@@ -921,6 +924,7 @@ const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] }) {
   const shouldReveal = needsAttention || hasActiveAsk;
   const [open, setOpen] = useState(shouldReveal);
   const [attentionOnly, setAttentionOnly] = useState(false);
+  const [visibleLimit, setVisibleLimit] = useState(INITIAL_TOOL_SEGMENTS);
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const autoOpened = useRef(shouldReveal);
   useSecondTick(running > 0);
@@ -957,6 +961,8 @@ const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] }) {
     const list = detailsRef.current?.querySelector<HTMLElement>('.tool-group-list');
     if (list) list.scrollTop = list.scrollHeight;
   };
+  const hiddenSegments = !filterAttention && segments.length > visibleLimit ? segments.length - visibleLimit : 0;
+  const renderedSegments = hiddenSegments > 0 ? segments.slice(-visibleLimit) : segments;
   return (
     <details
       ref={detailsRef}
@@ -1001,7 +1007,16 @@ const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] }) {
         followKey={`${visibleTools.length}:${lastTool?.callId ?? ''}:${lastTool?.status ?? ''}:${filterAttention ? 'attn' : 'all'}`}
         focusSelector={hasActiveAsk ? '.arb-options' : needsAttention ? '.tool-row.is-attention' : undefined}
       >
-        {segments.map(seg => (
+        {hiddenSegments > 0 && (
+          <button
+            type="button"
+            className="tool-group-earlier"
+            onClick={() => setVisibleLimit(prev => prev + TOOL_SEGMENT_STEP)}
+          >
+            显示更早的 {hiddenSegments} 组记录（当前优先展示最近步骤）
+          </button>
+        )}
+        {renderedSegments.map(seg => (
           seg.kind === 'cluster'
             ? <ExploreCluster key={seg.key} tools={seg.tools} />
             : <ToolRow key={seg.tool.callId} tool={seg.tool} />
