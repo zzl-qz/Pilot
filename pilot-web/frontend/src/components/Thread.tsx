@@ -1,4 +1,4 @@
-import type { ThreadRow, UserRow, TurnRow, PlanRow, CompactionRow, ResultRow, SandboxRow, ArbitrationRow, ToolRow as ToolView, Thinking, AgentView, RunUsage } from '../types/thread.js';
+import type { ThreadRow, UserRow, TurnRow, PlanRow, ResultRow, SandboxRow, ArbitrationRow, ToolRow as ToolView, Thinking, AgentView, RunUsage } from '../types/thread.js';
 import type { MessageAttachment, RequestReport } from '../types/runtime.js';
 import type { ApiResults } from '../types/api.js';
 import { errorInfo } from '../lib/errors.js';
@@ -6,6 +6,7 @@ import { RequestList } from './RequestUsage.jsx';
 import { formatCache, totalCost } from '../lib/request-usage.js';
 import ThreadNavigator from './ThreadNavigator.jsx';
 import { modifierKey, duplicateResult } from '../lib/interaction.js';
+import { buildThreadDisplay, type CompactionGroupRow, type DisplayThreadRow } from '../lib/thread-display.js';
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '@astryxdesign/core/Button';
@@ -215,12 +216,19 @@ export function Thread() {
     scrollToBottom({ animation: latestAnimation() });
   }, [bottomSignal, scrollToBottom]);
 
+  const display = useMemo(() => buildThreadDisplay(rows), [rows]);
+
   if (!rows.length && !eventCount && !history.hasMore) {
     return <EmptyState />;
   }
 
   return (
     <div className="thread-scroll-region conversation-thread">
+      {display.pinnedPlan && (
+        <div className="thread-pinned-plan">
+          <PlanCard row={display.pinnedPlan} />
+        </div>
+      )}
       <div className="thread" ref={scrollRef} role="region" aria-label="消息记录" tabIndex={0} onScroll={handleScroll} onWheel={handleWheel}>
         <div className="thread-column" ref={contentRef}>
           {history.hasMore && (
@@ -230,13 +238,13 @@ export function Thread() {
               onClick={() => { stopScroll(); requestEarlierHistory({ force: true }); }}
             />
           )}
-          {rows.map((row, index) => (
+          {display.rows.map((row, index) => (
             <RowView
               key={row.key}
               row={row}
-              duplicate={row.type === 'result' && duplicateResult(rows, index)}
-              hasPrecedingReply={index > 0 && rows[index - 1]?.type === 'turn' && Boolean((rows[index - 1] as TurnRow).reply?.text)}
-              isLast={!rows.slice(index + 1).some(item => item.type === 'turn' || item.type === 'user')}
+              duplicate={row.type === 'result' && duplicateResult(display.rows as ThreadRow[], index)}
+              hasPrecedingReply={index > 0 && display.rows[index - 1]?.type === 'turn' && Boolean((display.rows[index - 1] as TurnRow).reply?.text)}
+              isLast={!display.rows.slice(index + 1).some(item => item.type === 'turn' || item.type === 'user')}
             />
           ))}
           {history.hasNewer && history.forwardError && (
@@ -336,12 +344,11 @@ function EmptyState() {
   );
 }
 
-const RowView = memo(function RowView({ row, isLast, duplicate, hasPrecedingReply = false }: { row: ThreadRow; isLast: boolean; duplicate: boolean; hasPrecedingReply?: boolean }) {
+const RowView = memo(function RowView({ row, isLast, duplicate, hasPrecedingReply = false }: { row: DisplayThreadRow; isLast: boolean; duplicate: boolean; hasPrecedingReply?: boolean }) {
   switch (row.type) {
     case 'user': return <UserMessage row={row} />;
     case 'turn': return <Turn row={row} isLast={isLast} />;
-    case 'plan': return <PlanCard row={row} />;
-    case 'compaction': return <CompactionCard row={row} />;
+    case 'compaction-group': return <CompactionGroupCard row={row} />;
     case 'result': return <ResultCard row={row} duplicate={duplicate} hasPrecedingReply={hasPrecedingReply} />;
     case 'sandbox': return <SandboxCard row={row} />;
     case 'arb': return <ArbitrationCard row={row} />;
@@ -1438,15 +1445,26 @@ function planStatusLabel(status: string) {
   return labels[status] || '未开始';
 }
 
-function CompactionCard({ row }: { row: CompactionRow }) {
+function CompactionGroupCard({ row }: { row: CompactionGroupRow }) {
+  const count = row.items.length;
+  const latest = row.items[count - 1];
+  const totalMessages = row.items.reduce((sum, item) => sum + (item.coveredMessages || 0), 0);
   return (
-    <details className="ctx-card">
+    <details className="ctx-card is-divider">
       <summary className="ctx-head">
-        <span>较早的对话已折成摘要，点开可以看</span>
-        <span className="process-chevron" aria-hidden="true"><ProcessChevron /></span>
+        <span className="ctx-line" aria-hidden="true" />
+        <span className="ctx-pill">
+          {count > 1 ? `较早上下文已自动整理（${count} 次）` : '较早上下文已自动整理'}
+          <span className="process-chevron" aria-hidden="true"><ProcessChevron /></span>
+        </span>
+        <span className="ctx-line" aria-hidden="true" />
       </summary>
-      <p className="ctx-note">折叠了 {row.coveredMessages} 条较早消息。字符数 {row.charactersBefore} → {row.charactersAfter}，这只是内部记账。</p>
-      <pre className="ctx-body">{row.summary}</pre>
+      <div className="ctx-panel">
+        <p className="ctx-note">
+          共整理 {totalMessages} 条较早消息{count > 1 ? `（最近一次：${latest.charactersBefore} → ${latest.charactersAfter} 字符）` : `（${latest.charactersBefore} → ${latest.charactersAfter} 字符）`}。
+        </p>
+        <pre className="ctx-body">{latest.summary}</pre>
+      </div>
     </details>
   );
 }
