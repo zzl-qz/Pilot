@@ -8,6 +8,7 @@ import { TextArea } from '@astryxdesign/core/TextArea';
 import { apiJson } from '../api.js';
 import { writeClipboard } from '../lib/clipboard.js';
 import { errorInfo } from '../lib/errors.js';
+import { formatDate, safeIsoDate } from '../lib/date-format.js';
 import type { MobileDevice, MobileInvite, MobileStatus } from '../types/mobile.js';
 import './mobile-connection.css';
 
@@ -304,7 +305,7 @@ export function MobileConnectionContent({ onDone }: { onDone: () => void }) {
                   <div className="pilot-mobile-device-name">
                     <strong>{device.name}</strong>
                     <Badge label={device.online ? '在线' : '离线'} variant={device.online ? 'success' : 'neutral'} />
-                    <p className="pilot-mobile-meta">配对于 <time dateTime={new Date(device.pairedAt).toISOString()}>{new Date(device.pairedAt).toLocaleDateString()}</time></p>
+                    {formatDate(device.pairedAt) && <p className="pilot-mobile-meta">配对于 <time dateTime={safeIsoDate(device.pairedAt)}>{formatDate(device.pairedAt)}</time></p>}
                   </div>
                   <Button ref={remove?.id === device.id ? deviceButton : undefined} label="撤销授权" variant="ghost" isDisabled={busy}
                     onClick={event => { deviceButton.current = event.currentTarget; setFailure(null); setRemove(device); }} />

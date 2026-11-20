@@ -6,6 +6,7 @@ import { Button } from '@astryxdesign/core/Button';
 import { EmptyState } from '@astryxdesign/core/EmptyState';
 import { api } from '../api.js';
 import { errorInfo } from '../lib/errors.js';
+import { formatDateTime } from '../lib/date-format.js';
 import { useStore } from '../store.js';
 import type { RecurringScheduleServiceSeries } from '../types/server.js';
 import { AutomationDialog } from './AutomationDialog.jsx';
@@ -14,9 +15,7 @@ import { useAutomationList } from './useAutomationList.js';
 const labels: Record<string, string> = { ACTIVE: '已启用', PAUSED: '已暂停', CANCELLED: '已取消', ERROR: '需要处理' };
 
 function nextTime(row: RecurringScheduleServiceSeries) {
-  if (!row.nextAt) return '—';
-  try { return new Date(row.nextAt).toLocaleString('zh-CN', { timeZone: row.timezone || 'UTC', hourCycle: 'h23' }); }
-  catch { return row.nextAt; }
+  return formatDateTime(row.nextAt, { timeZone: row.timezone || 'UTC', fallback: '—' });
 }
 
 export default function RecurringPlans() {

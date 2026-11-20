@@ -7,6 +7,7 @@ import { Switch } from '@astryxdesign/core/Switch';
 import { TextInput } from '@astryxdesign/core/TextInput';
 import { api } from '../api.js';
 import { errorInfo } from '../lib/errors.js';
+import { formatDateTime, safeIsoDate } from '../lib/date-format.js';
 import { useStore } from '../store.js';
 import type { DeliveryServiceDelivery, DeliveryServiceSettings } from '../types/server.js';
 import { AutomationDialog } from './AutomationDialog.jsx';
@@ -218,7 +219,7 @@ function NotificationDialog() {
                 </div>
                 <p className="automation-meta">{row.channel === 'DESKTOP' ? '桌面' : 'Webhook'} · 已尝试 {row.attempts} 次</p>
                 {row.error && <p className="automation-meta">{row.error}</p>}
-                {row.state === 'RETRY' && row.nextAt && <p className="automation-meta">下次重试 <time dateTime={row.nextAt}>{new Date(row.nextAt).toLocaleString()}</time></p>}
+                {row.state === 'RETRY' && row.nextAt && <p className="automation-meta">下次重试 <time dateTime={safeIsoDate(row.nextAt)}>{formatDateTime(row.nextAt, { fallback: row.nextAt })}</time></p>}
               </div>
               <div className="automation-actions">
                 <Button label="查看结果" variant="ghost" isDisabled={busy} onClick={() => useStore.getState().setUi({

@@ -1,5 +1,6 @@
 import type * as S from '../types/server.js';
 import { errorInfo } from '../lib/errors.js';
+import { formatDateTime } from '../lib/date-format.js';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button } from '@astryxdesign/core/Button';
 import { Dialog } from '@astryxdesign/core/Dialog';
@@ -159,7 +160,7 @@ function InboxDialog({ target }: { target?: string | null }) {
           {item.runId && <Button isDisabled={busy} onClick={() => act(async current => { const data = required(await api.runChanges(item.runId)); if (current()) setDiff((data.files || []).map(f => f.diff || '').join('\n') || '没有可用的运行差异。'); })} label="查看本次运行差异" />}
           {diff !== null && <pre className="result-diff" tabIndex={0} aria-label="运行差异">{diff}</pre>}
           {item.workspace && <><h3 id="result-workspace">执行工作区</h3><dl><dt>{item.workspace.mode === 'ISOLATED' ? '独立工作区' : '原目录执行'}</dt><dd>{item.workspace.path || '默认工作区'}</dd>{item.workspace.mode === 'ISOLATED' && <><dt>交回目录</dt><dd>{item.workspace.base}</dd><dt>创建基线</dt><dd>{item.workspace.commit}</dd></>}</dl>
-            {item.workspace.handedOffAt ? <p role="status">已于 {new Date(item.workspace.handedOffAt).toLocaleString()} 交回；执行目录仍保留。</p> : item.workspace.mode === 'ISOLATED' && <Button isDisabled={busy} onClick={() => act(async current => { setPreview(null); const data = await api.scheduleHandoffPreview(item.scheduleId); if (current()) setPreview(data); })} label="预览交回改动" />}
+            {item.workspace.handedOffAt ? <p role="status">已于 {formatDateTime(item.workspace.handedOffAt, { fallback: item.workspace.handedOffAt })} 交回；执行目录仍保留。</p> : item.workspace.mode === 'ISOLATED' && <Button isDisabled={busy} onClick={() => act(async current => { setPreview(null); const data = await api.scheduleHandoffPreview(item.scheduleId); if (current()) setPreview(data); })} label="预览交回改动" />}
           </>}
           {preview && <div className="result-handoff"><h3>交回预览 · {preview.files.length} 个文件</h3><p>包含从创建基线开始的全部改动。交回到：{preview.base}</p><ResultList rows={preview.files} />{preview.conflict && <p role="alert">{preview.conflict}</p>}{preview.truncated && <p>差异超过展示上限；请在独立工作区查看完整内容。</p>}<pre className="result-diff" tabIndex={0} aria-label="交回差异">{preview.diff || '没有需要交回的改动。'}</pre><Button variant="primary" isDisabled={busy || !!preview.conflict || !preview.files.length} onClick={() => act(async current => { const revision = preview.revision; setPreview(null); await api.scheduleHandoff(item.scheduleId, { revision }); if (current()) { setDetail(await api.result(item.id)); await refresh(); } })} label="交回原目录" /></div>}
           <h3 id="result-research">开源参考</h3><ResearchRecords records={detail.research} />

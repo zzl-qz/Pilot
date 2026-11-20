@@ -6,6 +6,7 @@ import { useStore } from '../store.js';
 import { noteInsertion } from '../lib/notes.js';
 import { api } from '../api.js';
 import { errorInfo } from '../lib/errors.js';
+import { modifierKey } from '../lib/interaction.js';
 import './notes.css';
 
 const NOTE_LIMIT = 4000;
@@ -267,7 +268,7 @@ export function SessionNotes({ onClose, embedded = false, onAsk }: { onClose?: (
           if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.stopPropagation(); void save(); }
         }} />
       <div className="notes-form-foot">
-        <span className="notes-hint">⌘/Ctrl + Enter 保存，不会发出去</span>
+        <span className="notes-hint">{modifierKey} + Enter 保存，不会发出去</span>
         <Button id="notes-save" type="button" size="sm" label={saving === 'create' ? '保存中…' : '保存'}
           isDisabled={!draft.trim() || Boolean(saving)} onClick={() => void save()} />
       </div>

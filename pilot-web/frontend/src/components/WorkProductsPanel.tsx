@@ -6,13 +6,14 @@ import { api } from '../api.js';
 import { useStore } from '../store.js';
 import { MarkdownBody } from './MarkdownBody.jsx';
 import { StructuredDocumentView, isStructuredDocumentFormat } from './StructuredDocumentView.jsx';
+import { formatDateTime } from '../lib/date-format.js';
 import './work-products.css';
 
 const STATUS: Record<string, string> = { PENDING: '待审核', APPROVED: '已接受', REJECTED: '已拒绝', REVERTED: '已撤回', CONFLICT: '版本冲突', APPROVING: '正在接受', REVERTING: '正在撤回' };
 function VerificationBadge({ status }: { status: string | null | undefined }) {
   return <span className="work-verdict" data-tone={verificationStatusTone(status)}>{verificationStatusLabel(status)}</span>;
 }
-const dateText = (value: string | null | undefined) => value ? new Date(value).toLocaleString() : '';
+const dateText = (value: string | null | undefined) => formatDateTime(value);
 function sourceHref(value: string) {
   try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? url.href : null; }
   catch { return null; }

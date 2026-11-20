@@ -1,5 +1,6 @@
 import type * as S from '../types/server.js';
 import { errorInfo } from '../lib/errors.js';
+import { formatDateTime } from '../lib/date-format.js';
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useStore } from '../store.js';
@@ -12,7 +13,7 @@ function sourceUrl(value: string) {
 export function ResearchRecords({ records = [] }: { records?: S.ResultInboxServiceResearch[] }) {
   if (!records.length) return <p className="research-empty">尚无开源调研记录。自主任务会在实现前阅读来源并记录复用决定。</p>;
   return <div className="research-records">{records.map(record => <article key={record.id}>
-    <header><strong>调研记录</strong><small>{record.observedAt ? new Date(record.observedAt).toLocaleString() : record.id}</small></header>
+    <header><strong>调研记录</strong><small>{formatDateTime(record.observedAt, { fallback: record.id })}</small></header>
     {record.structured ? <>
       <ul className="research-sources">{record.sources.map((source, index) => <li key={index}>{sourceUrl(source) ? <a href={sourceUrl(source) || undefined} target="_blank" rel="noreferrer">{source}</a> : <span>{source}</span>}</li>)}</ul>
       <h4>复用决定</h4><p>{record.decision || '未记录'}</p>
