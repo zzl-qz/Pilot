@@ -905,6 +905,8 @@ const ExploreCluster = memo(function ExploreCluster({ tools }: { tools: ToolView
 
 const INITIAL_TOOL_SEGMENTS = 40;
 const TOOL_SEGMENT_STEP = 80;
+/** 只有失败和等待批准会在展开组内自动露出详情；「已中断」只是收尾常态，不替用户撑开行。 */
+const AUTO_REVEAL_STATUS = new Set(['error', 'wait']);
 
 /**
  * 操作组单独 memo：流式输出时只有 reply 在变，tools 数组引用不变，这一整块（可能几十行）
@@ -921,20 +923,17 @@ const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] }) {
   const needsAttention = attention.length > 0;
   const failed = attention.some(tool => tool.status === 'error');
   const hasActiveAsk = sessionLive && tools.some(tool => tool.status === 'run' && tool.name === 'ask_user' && Boolean(parseAsk(tool.args)));
-  const shouldReveal = needsAttention || hasActiveAsk;
-  const [open, setOpen] = useState(shouldReveal);
+  // 操作组一律收起，除非用户自己点开：滚动历史或新建回合时不自动撑开，避免把正在看的位置顶走。
+  // 需要留意、等待回答只体现在摘要的提示上，不代替用户展开。
+  const [open, setOpen] = useState(false);
   const [attentionOnly, setAttentionOnly] = useState(false);
   const [visibleLimit, setVisibleLimit] = useState(INITIAL_TOOL_SEGMENTS);
   const detailsRef = useRef<HTMLDetailsElement>(null);
-  const autoOpened = useRef(shouldReveal);
   useSecondTick(running > 0);
-  // 需要处理（失败/审批/中断/提问）时仅提示一次，不覆盖用户手动收起或展开的选择。
+  // 只有「正在等我回答」这一种情况替他展开一次；其余提示留在摘要上，收起状态不动。
   useEffect(() => {
-    if (shouldReveal && !autoOpened.current) {
-      autoOpened.current = true;
-      setOpen(true);
-    }
-  }, [shouldReveal]);
+    if (hasActiveAsk) setOpen(true);
+  }, [hasActiveAsk]);
   const filterAttention = attentionOnly && needsAttention;
   const visibleTools = filterAttention ? attention : tools;
   const segments = useMemo(
@@ -1046,12 +1045,12 @@ function toolCounts(tools: ToolView[]) {
  */
 const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
   const rawBody = String(tool.body || '').trim();
-  const [open, setOpen] = useState(['error', 'wait', 'interrupted'].includes(tool.status));
+  const [open, setOpen] = useState(AUTO_REVEAL_STATUS.has(tool.status));
   const [copied, setCopied] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
   const userToggled = useRef(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => { if (['error', 'wait', 'interrupted'].includes(tool.status)) setOpen(true); }, [tool.status]);
+  useEffect(() => { if (AUTO_REVEAL_STATUS.has(tool.status)) setOpen(true); }, [tool.status]);
   useEffect(() => () => clearTimeout(copyTimer.current), []);
   const sessionLive = useStore(state => state.running);
   const running = tool.status === 'run' && sessionLive;
