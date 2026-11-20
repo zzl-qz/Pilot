@@ -18,8 +18,13 @@
 | D-009 | P2 | D 编辑噪音 | 工具设计 | `ReuseScan` 将流式 setter/方法体误报为重复工具函数，干扰编辑收尾 | `385f4032` | V1 通过；待 V4 观察 | 观察中 |
 | D-010 | P2 | F 日志翻页 | 工具设计 | `ToolExecutor` 误截断用户显式请求的 `command_logs` 小切片（<= 8192 字符） | `385f4032` | V1 通过；待 V4 观察 | 观察中 |
 | D-011 | P2 | E 核验误读 | 工具设计 | `CommandToolSupport`/`RunCommandTool` 命令摘要仅截前 120 字符，丢弃末尾目标测试类名 | `385f4032` | V1 通过；待 V4 观察 | 观察中 |
-| D-012 | P2 | C 临时文件遗留 | 工具设计/运行时 | Pilot 运行过程可能在工作区遗留 `.tmp-verify/*` 等未清理临时文件 | 待查 | Stage 2.2 专项排查根因 | 新建 |
-| D-013 | P1 | E 验证缺失 | 流程/循环策略 | 改动工具或规则后未跑全量 `mvn test`，漏改历史断言（如 `8025dfad`/`10a7b2f3` 遗留 4 处单测失配） | `cdbe4aa9`（基线已修绿） | Stage 2.2 固化 V1 全量门禁检查与自动化脚本 | 定位中 |
+| D-012 | P2 | C 临时文件遗留 | 工具设计/运行时 | Pilot 运行过程可能在工作区遗留 `.tmp-verify/*` 等未清理临时文件（已在历史 `ses_c502a2ef` 轨迹确认：Pilot 用 `mkdir -p .tmp-verify` 暂存回退文件） | 待修 | Stage 2.2 增加收尾未跟踪临时目录提醒/检查 | 定位中 |
+| D-013 | P1 | E 验证缺失 | 流程/循环策略 | 改动工具或规则后未跑全量 `mvn test`，漏改历史断言（如 `8025dfad`/`10a7b2f3` 遗留 4 处单测失配） | `cdbe4aa9`（基线已修绿） | Stage 2.2 固化 V1 全量门禁检查脚本 | 定位中 |
+| D-014 | P1 | B 调研瘫痪 | 循环策略 | `T001`（36 行 L1 文件）在 req 1–4 已读完核心文件后仍持续只读 17 轮 / 34 次工具调用不编辑；`req-11.json` 带 `[调查收敛提醒]` 重放 5/5（100%）仍不编辑 | 待修 | `replay.mjs --repeat 5` 基线已锁定 5/5 缺陷率；需改 `InvestigationTracker` 触发时机、冷却与无逃生口行动引导并过 V1+V2+V3 | 新建 |
+| D-015 | P1 | F 命令解析 Bug | 工具设计 | `CommandChain.parse()` 在双引号内未处理 `\"` 转义，导致 `grep -l "failures=\"[1-9]\|errors=\"[1-9]"` 提前闭合引号并误报 `不允许通过命令前缀设置 errors` | 待修 | `T001` seq 522 复现；确定性解析器缺陷，需修 `CommandChain` + 跨平台单测 | 新建 |
+| D-016 | P2 | E/B 沙箱嵌套排错空转 | 工具设计/运行时 | macOS Seatbelt 沙箱内跑 `mvn test` 触发嵌套 `sandbox-exec: Operation not permitted` 失败时无环境提示，导致模型白耗 22 轮追查无关单测 | 待修 | `T001` req 62–84 复现 | 新建 |
+| D-017 | P2 | C 评测泄露风险 | 自举工具 | 任务 worktree 中 `search_text` 命中 `evaluation/dogfood/tasks/`，可能暴露 S4 剧本答案 | `eb5e0a85` | S4 答案已迁至仓库外 `~/pilot-dogfood/supervisor-s4-scripts.md` | 已关闭 |
+| D-018 | P2 | G 计划门禁多余续跑 | 循环策略 | 验证已全部通过且模型给出完整答复时，仅因未把 plan 末项标 `completed` 被 `PlanGate` 触发 `RUN_CONTINUED` 多跑 3 轮与重复测试 | 待评估 | `T001` seq 707–716 复现，观察后续任务复现频率 | 新建 |
 
 ## 二、待复核疑点（R-01～R-04）
 
@@ -34,6 +39,6 @@
 
 | 编号 | 发现来源 | 简要描述 | 对应任务卡 | 状态 |
 |---|---|---|---|---|
-| P-001 | Stage 1.1 实机切换 `runner/` 启动日志 | 显式设置 `PILOT_DATA_DIR` 后，`BrowserHome` 仍强制使用仓库 `.pilot/browser`，触发 400MB Chromium 重复下载且桌面端点路径分离 | `T001` | 待派发 |
+| P-001 | Stage 1.1 实机切换 `runner/` 启动日志 | 显式设置 `PILOT_DATA_DIR` 后，`BrowserHome` 仍强制使用仓库 `.pilot/browser`，触发 400MB Chromium 重复下载且桌面端点路径分离 | `T001` | 已由 Pilot 修复并合入 `df/runner`（`2a020f1d`） |
 | P-002 | Stage 1.1 实机切换 `runner/` 启动日志 | 显式设置 `PILOT_DATA_DIR` 后，`BundledRuntime` 未接入 `PilotDataDir`，仍向当前 worktree `.pilot/runtime` 重复下载 Python 3.12 | `T002` | 待派发 |
 | P-003 | Stage 1.1 实机运行 `java -jar pilot-server` 启动日志 | 打包后的 Spring Boot 4 嵌套 jar 启动时仍触发 `FrontendDepsPrompt` 20 秒「是否更新前端依赖」询问，违背“仅开发态提示”契约 | `T003` | 待派发 |
