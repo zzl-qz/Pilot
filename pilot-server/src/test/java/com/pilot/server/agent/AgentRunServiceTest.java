@@ -1025,8 +1025,9 @@ class AgentRunServiceTest {
                 List.of(new PlanItem("第一步", PlanItem.PENDING), new PlanItem("仍未完成", PlanItem.PENDING)));
             fixture.start();
             fixture.awaitFinished("BUDGET_LIMITED");
-            if (completesStep)
+            if (completesStep) {
                 fixture.awaitFinished("BUDGET_LIMITED");
+            }
 
             assertEquals(completesStep ? 8 : 4, calls.get());
             assertEquals(completesStep ? 1 : 0, fixture.sessions.events(fixture.sessionId).stream().filter(

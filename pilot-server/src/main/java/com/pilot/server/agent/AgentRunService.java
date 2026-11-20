@@ -1114,8 +1114,9 @@ public class AgentRunService implements RunStarter {
         static BudgetProgress from(List<PlanItem> plan, TaskControlService.TaskContract task) {
             Set<String> done = plan.stream().filter(PlanItem::done).map(PlanItem::step).collect(Collectors.toSet());
             TaskControlService.Execution execution = task == null ? null : task.execution();
-            if (execution == null)
+            if (execution == null) {
                 return new BudgetProgress(done, Set.of(), Set.of());
+            }
             // 同一个检查对同一份源码得到同样的结果，即使重跑时间、任务 ID 不同，也不算新证据。
             Set<List<String>> checks = GoalEvidence.latestChecks(execution.evidence()).entrySet().stream()
                 .filter(entry -> WireEnum.in(entry.getValue().status(), EvidenceStatus.SUCCESS,

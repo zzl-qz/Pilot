@@ -111,8 +111,7 @@ public final class OsSandbox {
     static Launch windows(List<String> command, Path workspace) {
         Path runner = windowsRunner();
         if (runner == null) {
-            return new Launch(List.copyOf(command),
-                "隔离：未启用（Windows 受限令牌运行器未配置，命令在本机执行，写入不受限）", false);
+            return new Launch(List.copyOf(command), "隔离：未启用（Windows 受限令牌运行器未配置，命令在本机执行，写入不受限）", false);
         }
         if (!Files.isRegularFile(runner)) {
             return refused("隔离：命令未启动（Windows 写入限制运行器缺失，沙箱未能建立）");

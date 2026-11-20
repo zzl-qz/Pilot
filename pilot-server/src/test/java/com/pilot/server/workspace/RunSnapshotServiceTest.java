@@ -460,8 +460,7 @@ class RunSnapshotServiceTest {
         assertEquals(List.of("created.txt", "deleted.txt", "modified.txt"), result.changedPaths());
         assertTrue(result.warning().contains("3 个文件仅按大小和修改时间"), result.warning());
         assertEquals("before", Files.readString(unchanged));
-        assertTrue(snapshots.rollback("run_degraded").failed().contains("modified.txt"),
-            "降级基线没有原始字节，不能用于恢复已修改文件");
+        assertTrue(snapshots.rollback("run_degraded").failed().contains("modified.txt"), "降级基线没有原始字节，不能用于恢复已修改文件");
     }
 
     private void change(String runId, Path file, String content) throws IOException {

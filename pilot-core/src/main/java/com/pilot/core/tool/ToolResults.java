@@ -23,8 +23,7 @@ public final class ToolResults {
      * 命令跑完了，但有些文件没进基线（被占用、无权限或临时消失）。
      * 它们不在追踪范围内，也不能因为追踪不到就当成没改动；这是提示，不是失败。
      */
-    public static final String CHANGE_TRACKING_PARTIAL =
-        "NOTE: 部分文件没有进入命令前文件基线，其改动不在本轮差异/回滚追踪内，不能据此认为它们没有改动";
+    public static final String CHANGE_TRACKING_PARTIAL = "NOTE: 部分文件没有进入命令前文件基线，其改动不在本轮差异/回滚追踪内，不能据此认为它们没有改动";
     /** 被运行策略或中断信号跳过，工具没有执行。 */
     public static final String SKIPPED = "SKIPPED:";
 

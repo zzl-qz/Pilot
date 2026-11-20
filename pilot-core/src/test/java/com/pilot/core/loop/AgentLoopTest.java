@@ -1392,9 +1392,10 @@ class AgentLoopTest {
         AgentLoop.Result result = loop.run("把这几个文件都看一遍", List.of(), events::add);
 
         assertNull(result.failureCode());
-        assertTrue(client.requests.stream()
-            .noneMatch(request -> request.stream()
-                .anyMatch(message -> message.content().contains("update_plan"))), "已有计划的任务不该被打扰");
+        assertTrue(
+            client.requests.stream()
+                .noneMatch(request -> request.stream().anyMatch(message -> message.content().contains("update_plan"))),
+            "已有计划的任务不该被打扰");
     }
 
     /** 多步脚本：每轮只调一次 read_file（路径不同，避免被判成重复调用），最后一轮收尾。 */

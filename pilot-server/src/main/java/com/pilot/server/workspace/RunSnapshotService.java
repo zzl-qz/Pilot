@@ -304,7 +304,9 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
             String warning = skippedWarning(untracked);
             long metadataOnlyFiles = baseline.files().values().stream().filter(CommandFile::metadataOnly).count();
             if (metadataOnlyFiles > 0) {
-                if (!warning.isBlank()) warning += "；";
+                if (!warning.isBlank()) {
+                    warning += "；";
+                }
                 warning += metadataOnlyFiles + " 个文件仅按大小和修改时间检测变化，未保存原内容，可能漏报同大小、同修改时间的改动。";
             }
             CommandChangeTracker.Result result = new CommandChangeTracker.Result(changed, true, warning);
@@ -357,8 +359,8 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
                 CommandFile before = beforeFiles.get(relative);
                 // 降级过的路径在命令后也要用元数据；异种指纹比较会把未改动的文件判成改动。
                 if (degraded[0] || (before != null && before.metadataOnly())) {
-                    files.put(relative, new CommandFile("stat:" + attributes.size() + ":"
-                        + attributes.lastModifiedTime().toMillis(), false));
+                    files.put(relative, new CommandFile(
+                        "stat:" + attributes.size() + ":" + attributes.lastModifiedTime().toMillis(), false));
                     return FileVisitResult.CONTINUE;
                 }
                 Path target = backupRoot == null ? null : backupRoot.resolve(relative).normalize();
@@ -376,7 +378,9 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
 
             @Override
             public FileVisitResult visitFileFailed(Path file, IOException error) throws IOException {
-                if (workspace.equals(file)) throw error;
+                if (workspace.equals(file)) {
+                    throw error;
+                }
                 skipped.add(workspace.relativize(file).toString().replace('\\', '/'));
                 return FileVisitResult.CONTINUE;
             }
@@ -407,8 +411,7 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         }
         List<String> names = untracked.stream().sorted().toList();
         String sample = String.join("、", names.subList(0, Math.min(5, names.size())));
-        return untracked.size() + " 个文件读不了（被占用、无权限或临时消失），没有进入命令前文件基线，"
-            + "这些文件的改动不在本轮差异/回滚追踪内，不能据此认为它们没有改动：" + sample
+        return untracked.size() + " 个文件读不了（被占用、无权限或临时消失），没有进入命令前文件基线，" + "这些文件的改动不在本轮差异/回滚追踪内，不能据此认为它们没有改动：" + sample
             + (names.size() > 5 ? " 等" : "");
     }
 

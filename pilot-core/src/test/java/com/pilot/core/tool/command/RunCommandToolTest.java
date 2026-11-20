@@ -55,8 +55,8 @@ class RunCommandToolTest {
 
     @Test
     void missingUnixFileCommandPointsAtFileTools() {
-        String text = RunCommandTool.launchFailureText(
-            "ERROR: 无法启动命令 ls：Cannot run program \"ls\": CreateProcess error=2", 1);
+        String text =
+            RunCommandTool.launchFailureText("ERROR: 无法启动命令 ls：Cannot run program \"ls\": CreateProcess error=2", 1);
 
         assertTrue(text.contains("list_dir / read_file / search_text"), text);
         assertFalse(text.contains("不要原样重试"), "第一次不该升级成「不要重试」: " + text);
@@ -64,8 +64,8 @@ class RunCommandToolTest {
 
     @Test
     void secondMissingUnixFileCommandAsksToStopRetrying() {
-        String text = RunCommandTool.launchFailureText(
-            "ERROR: 无法启动命令 cat：Cannot run program \"cat\": CreateProcess error=2", 2);
+        String text =
+            RunCommandTool.launchFailureText("ERROR: 无法启动命令 cat：Cannot run program \"cat\": CreateProcess error=2", 2);
 
         assertTrue(text.contains("不要原样重试"), text);
         assertTrue(text.contains("PowerShell 等价命令"), text);
@@ -124,8 +124,8 @@ class RunCommandToolTest {
         assertTrue(Files.exists(workspace.resolve("proceeded.txt")), proceeded);
 
         // 左结合：a 失败时 a && b 被跳过、|| c 仍要执行
-        String fallback = tool.execute(
-            Map.of("command", failure + " && " + marker("never.txt") + " || " + marker("fallback.txt")));
+        String fallback =
+            tool.execute(Map.of("command", failure + " && " + marker("never.txt") + " || " + marker("fallback.txt")));
         assertTrue(fallback.contains("退出码: 0"), fallback);
         assertFalse(Files.exists(workspace.resolve("never.txt")), fallback);
         assertTrue(Files.exists(workspace.resolve("fallback.txt")), fallback);

@@ -85,8 +85,8 @@ class OsSandboxTest {
 
     @Test
     void windowsRefusesWhenConfiguredRunnerIsMissing() {
-        String previous = System.setProperty("pilot.windows.sandbox.runner",
-            workspace.resolve("missing-runner.exe").toString());
+        String previous =
+            System.setProperty("pilot.windows.sandbox.runner", workspace.resolve("missing-runner.exe").toString());
         try {
             OsSandbox.Launch launch = OsSandbox.wrap(List.of("mvn", "-v"), workspace, OsSandbox.Family.WINDOWS, true);
 
