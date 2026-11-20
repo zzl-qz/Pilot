@@ -31,7 +31,15 @@ export default defineConfig({
     emptyOutDir: false,
     assetsDir: 'assets',
     rollupOptions: {
-      input: fileURLToPath(new URL('./index.html', import.meta.url))
+      input: fileURLToPath(new URL('./index.html', import.meta.url)),
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          if (/[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'vendor-react';
+          if (/[\\/](@astryxdesign|@stylexjs|@react-aria|@react-stately|@react-types|@internationalized|lucide-react)[\\/]/.test(id)) return 'vendor-ui';
+          if (/[\\/](zustand|immer|dompurify|use-stick-to-bottom)[\\/]/.test(id)) return 'vendor-state';
+        }
+      }
     }
   }
 });

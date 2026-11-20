@@ -3,13 +3,11 @@ import type { ApiResults } from '../types/api.js';
 import type { SessionSummary } from '../types/core.js';
 type PaletteItem = { label: string; hint: string; run: () => unknown };
 import { errorInfo } from '../lib/errors.js';
-import { useEffect, useId, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useId, useRef, useState } from 'react';
 import { Button } from '@astryxdesign/core/Button';
 import { TextArea } from '@astryxdesign/core/TextArea';
 import { TextInput } from '@astryxdesign/core/TextInput';
 import { Modal } from './Modal.jsx';
-import { ProjectEditor } from './ProjectEditor.jsx';
-import { SettingsModal } from './Settings.jsx';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
 import { Icon, FileIcon } from './Icon.jsx';
@@ -18,8 +16,11 @@ import { downloadSessionExport, exportFailureMessage, saveSessionMarkdown } from
 import { buildTranscript } from '../lib/transcript.js';
 import { SessionActionDialog } from './SessionMenu.jsx';
 import { filterPaletteActions } from '../lib/commands.js';
-import { MobileConnectionContent } from './MobileConnection.jsx';
 import { verificationLabel, verificationHint, verificationTone, verificationNeedsRerun } from '../lib/verification.js';
+
+const ProjectEditor = lazy(() => import('./ProjectEditor.jsx').then(m => ({ default: m.ProjectEditor })));
+const SettingsModal = lazy(() => import('./Settings.jsx').then(m => ({ default: m.SettingsModal })));
+const MobileConnectionContent = lazy(() => import('./MobileConnection.jsx').then(m => ({ default: m.MobileConnectionContent })));
 import { reverifyPrompt } from '../lib/verification-status.js';
 import { splitAttachmentMarkers } from '../lib/attachments.js';
 import { toolArgsText, toolLabel } from '../lib/tool-meta.js';
@@ -185,15 +186,17 @@ export function Modals() {
   return (
     <>
       {picker && <WorkspacePicker />}
-      {projectEditor && <ProjectEditor />}
-      {settingsOpen && <SettingsModal />}
+      {projectEditor && <Suspense fallback={null}><ProjectEditor /></Suspense>}
+      {settingsOpen && <Suspense fallback={null}><SettingsModal /></Suspense>}
       {exportCopy != null && <SessionActionDialog action={{ kind: 'copy', value: exportCopy, title: '', trigger: null }}
         onClose={() => useStore.getState().setUi({ exportCopy: null })} />}
       {paletteOpen && <Palette />}
       {checkpoint && <CheckpointDialog key={checkpoint.sequence} />}
       {confirm && <ConfirmDialog />}
       {mobileConnectionOpen && <Modal id="mobile-connection" title="连接手机" width={760} onClose={() => useStore.getState().setUi({ mobileConnectionOpen: false })}>
-        <MobileConnectionContent onDone={() => useStore.getState().setUi({ mobileConnectionOpen: false })} />
+        <Suspense fallback={null}>
+          <MobileConnectionContent onDone={() => useStore.getState().setUi({ mobileConnectionOpen: false })} />
+        </Suspense>
       </Modal>}
     </>
   );
