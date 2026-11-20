@@ -556,7 +556,8 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             return objectMapper.readValue(raw,
                 objectMapper.getTypeFactory().constructMapType(LinkedHashMap.class, String.class, Object.class));
         } catch (RuntimeException e) {
-            throw new ModelClientException(ModelFailureKind.PERMANENT, "工具调用参数不是合法 JSON：" + ModelHttp.snippet(raw), e);
+            throw new ModelClientException(ModelFailureKind.MALFORMED_TOOL_CALL,
+                "工具调用参数不是合法 JSON：" + ModelHttp.snippet(raw), e);
         }
     }
 

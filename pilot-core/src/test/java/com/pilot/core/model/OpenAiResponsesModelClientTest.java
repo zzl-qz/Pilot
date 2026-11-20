@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import com.pilot.core.message.Message;
@@ -88,6 +89,25 @@ class OpenAiResponsesModelClientTest {
             OpenAiResponsesModelClient.resolveEndpoint(URI.create("https://api.openai.com/v1/chat/completions")));
         assertEquals(URI.create("https://gateway.test/api/llm/v1/responses"),
             OpenAiResponsesModelClient.resolveEndpoint(URI.create("https://gateway.test/api/llm/v1")));
+    }
+
+    @Test
+    void malformedToolArgumentsClassifyAsRetryableMalformedToolCall() throws IOException {
+        HttpServer server = server(new AtomicReference<>(), """
+            {"status":"completed","output":[
+              {"type":"function_call","call_id":"fc_bad","name":"edit_file","arguments":"{\\"path\\":\\"a.java\\""}
+            ]}
+            """);
+        server.start();
+        try {
+            ModelClientException error = Assertions.assertThrows(ModelClientException.class,
+                () -> client(server).chat(List.of(Message.user("edit")), List.of()));
+            assertEquals(ModelFailureKind.MALFORMED_TOOL_CALL, error.kind());
+            assertTrue(error.kind().retryable());
+            assertTrue(error.getMessage().contains("工具调用参数"), error.getMessage());
+        } finally {
+            server.stop(0);
+        }
     }
 
     private static OpenAiResponsesModelClient client(HttpServer server) {

@@ -401,6 +401,9 @@ class OpenAiCompatibleModelClientTest {
         try {
             ModelClientException exception = assertThrows(ModelClientException.class,
                 () -> client(server).chat(List.of(Message.user("hi")), List.of()));
+            assertEquals(ModelFailureKind.MALFORMED_TOOL_CALL, exception.kind(),
+                "工具调用参数偶发非法 JSON 应标记为可纠偏重试，不能直接判死整轮任务");
+            assertTrue(exception.kind().retryable());
             assertTrue(exception.getMessage().contains("工具调用参数"), exception.getMessage());
         } finally {
             server.stop(0);

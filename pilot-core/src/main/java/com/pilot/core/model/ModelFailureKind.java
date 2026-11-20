@@ -15,6 +15,8 @@ public enum ModelFailureKind {
     INCOMPLETE(true),
     /** 连上了但服务端暂时性故障（408/429/5xx）：在重试预算内指数退避。 */
     TRANSIENT(true),
+    /** 模型返回的工具调用参数不是合法 JSON：属于偶发采样畸变，由上层有界纠偏重试。 */
+    MALFORMED_TOOL_CALL(true),
     /**
      * 服务端明确拒绝「输入太长」。普通重试不会变好，要先收缩历史再发，而且最多试两次。
      */

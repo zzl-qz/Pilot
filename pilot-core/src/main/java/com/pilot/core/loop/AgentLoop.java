@@ -206,11 +206,15 @@ public final class AgentLoop {
     private static final long RETRY_SLICE_MS = 250L;
     /** 同一轮里允许因复读中止并重试的次数；第二次仍然复读说明不是偶发抖动。 */
     private static final int MAX_REPEAT_ABORTS = 2;
+    /** 同一请求里允许模型因非法工具调用 JSON 纠偏重试的最大次数。 */
+    private static final int MAX_MALFORMED_TOOL_RETRIES = 3;
     /** 同一地址连续这么多次快照都没有可点击元素，就停止验收，不再重开页面。 */
     private static final int MAX_EMPTY_BROWSER_SNAPSHOTS = 3;
     /** 阶段尾部候选提示默认存活的模型请求次数；首次文件编辑后会提前清退。 */
     static final int DEFAULT_PHASE_HINT_TURNS = 3;
     private static final String REPEAT_GUIDANCE = "上一次回复陷入逐行重复（同一行连续出现多次），已中止。" + "请重新组织答案：不要重复相同句子或列表项，直接推进未完成的部分。";
+    private static final String MALFORMED_TOOL_GUIDANCE =
+        "上一次响应的工具调用参数不是合法 JSON，本次调用未执行。请重新输出严格合法的 JSON 对象参数（注意转义双引号与换行），或将较大补丁拆小后分次提交。";
 
     private final ModelClient client;
     private final ToolRegistry tools;
@@ -1550,6 +1554,7 @@ public final class AgentLoop {
         int attempt = 0;
         int repeatAborts = 0;
         int overflowRetries = 0;
+        int malformedToolRetries = 0;
         String retainedGuidance = null;
         AtomicBoolean reasoningPreviewVisible = new AtomicBoolean();
         while (true) {
@@ -1711,6 +1716,21 @@ public final class AgentLoop {
                             RunFailureCode.CONTEXT_TOO_LARGE.name(), conversation(messages)));
                     }
                     events.accept(new RunContinued(overflowRetries, 2, "模型服务端提示上下文超限，已收缩历史并自动重试"));
+                    continue;
+                }
+                if (kind == ModelFailureKind.MALFORMED_TOOL_CALL) {
+                    malformedToolRetries++;
+                    events.accept(AssistantPreview.discarded());
+                    if (reasoningPreviewVisible.getAndSet(false)) {
+                        events.accept(AssistantReasoning.discarded());
+                    }
+                    if (malformedToolRetries > MAX_MALFORMED_TOOL_RETRIES) {
+                        throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_ERROR,
+                            "模型连续 " + malformedToolRetries + " 次返回非法工具调用参数 JSON，已停止重试；进度和对话已保存，可继续执行。");
+                    }
+                    runtimeGuidance.add(MALFORMED_TOOL_GUIDANCE);
+                    events.accept(
+                        new RunContinued(malformedToolRetries, MAX_MALFORMED_TOOL_RETRIES, "工具调用参数 JSON 非法，已提示模型重发"));
                     continue;
                 }
                 if (kind == ModelFailureKind.INTERRUPTED) {

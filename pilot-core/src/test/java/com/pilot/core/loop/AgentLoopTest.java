@@ -1501,6 +1501,44 @@ class AgentLoopTest {
     }
 
     @Test
+    void malformedToolCallJsonRetriesWithGuidanceAndStopsAfterCap() {
+        AtomicInteger attempts = new AtomicInteger();
+        List<List<Message>> captured = new ArrayList<>();
+        ModelClient recovering = (messages, tools) -> {
+            captured.add(List.copyOf(messages));
+            if (attempts.incrementAndGet() <= 2) {
+                throw new ModelClientException(ModelFailureKind.MALFORMED_TOOL_CALL, "工具调用参数不是合法 JSON");
+            }
+            return new ModelResponse("已按合法 JSON 完成", List.of());
+        };
+        AgentLoop loop = new AgentLoop(recovering, registry(), readOnlyGate(), ApprovalBroker.denyAll(), config(8, 3),
+            Cancellation.none(), () -> null, (call, result, latencyMs) -> {
+            }, millis -> {
+            }, null);
+
+        AgentLoop.Result recovered = loop.run("列出目录", List.of(), events::add);
+        assertNull(recovered.failureCode());
+        assertEquals("已按合法 JSON 完成", recovered.finalText());
+        assertEquals(3, attempts.get());
+        assertTrue(captured.get(1).getLast().content().contains("不是合法 JSON"), "重试请求应携带 JSON 纠偏提示");
+
+        // 连续超过上限（3 次重试即第 4 次仍失败）时有序停止，不无限循环
+        AtomicInteger alwaysBadCount = new AtomicInteger();
+        ModelClient alwaysBad = (messages, tools) -> {
+            alwaysBadCount.incrementAndGet();
+            throw new ModelClientException(ModelFailureKind.MALFORMED_TOOL_CALL, "工具调用参数不是合法 JSON");
+        };
+        AgentLoop failing = new AgentLoop(alwaysBad, registry(), readOnlyGate(), ApprovalBroker.denyAll(), config(8, 3),
+            Cancellation.none(), () -> null, (call, result, latencyMs) -> {
+            }, millis -> {
+            }, null);
+        AgentLoop.Result stopped = failing.run("继续", List.of(), ignored -> {
+        });
+        assertEquals("MODEL_ERROR", stopped.failureCode());
+        assertEquals(4, alwaysBadCount.get());
+    }
+
+    @Test
     void failureFinalizationDoesNotPublishTruncatedSummary() {
         CountingTool tool = new CountingTool("list_dir", "a.txt");
         ScriptedModelClient client =
