@@ -225,11 +225,27 @@ function ProjectGroup({ group, activeId, collapsed, filtering, onToggle, sidebar
   );
 }
 
+const SESSION_STATUS_LABELS: Record<string, string> = {
+  running: '执行中',
+  waiting_approval: '等待批准',
+  paused: '已暂停',
+  interrupted: '已中断',
+  blocked: '遇到阻塞',
+  budget_limited: '已达预算',
+  failed: '执行失败',
+  error: '执行失败',
+  completed: '已完成'
+};
+
 function SessionRow({ session, activeId, visible, onAction }: {
   session: SessionSummary; activeId: string | null; visible: boolean; onAction: (action: SessionAction) => void;
 }) {
   const blank = session.isBlank === true;
   const status = String(session.status || '').trim().toLowerCase();
+  const statusLabel = SESSION_STATUS_LABELS[status] || '';
+  const rowTitle = blank
+    ? '新对话：还没有消息，发送第一条后自动变成历史对话'
+    : [session.title, statusLabel ? `状态：${statusLabel}` : '', session.workspace || ''].filter(Boolean).join('\n');
   return (
     <li className={`session-row${session.unread ? ' is-unread' : ''}`} data-session-id={session.id}>
       <SessionMenu key={visible ? 'visible' : 'collapsed'} session={session} onAction={onAction}>
@@ -237,7 +253,7 @@ function SessionRow({ session, activeId, visible, onAction }: {
           type="button"
           className={`session-item${session.id === activeId ? ' is-active' : ''}${blank ? ' is-blank' : ''}${session.archived ? ' is-archived' : ''}`}
           aria-current={session.id === activeId ? 'page' : undefined}
-          title={blank ? '新对话：还没有消息，发送第一条后自动变成历史对话' : (session.workspace ? `${session.title}\n${session.workspace}` : session.title)}
+          title={rowTitle}
           onClick={() => useStore.getState().activate(session.id)}
         >
           {blank ? (
@@ -245,11 +261,11 @@ function SessionRow({ session, activeId, visible, onAction }: {
               <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
             </span>
           ) : (
-            <span className={`dot is-${status || 'idle'}`} aria-hidden="true" />
+            <span className={`dot is-${status || 'idle'}`} title={statusLabel || undefined} aria-hidden="true" />
           )}
           <span className="session-title">{blank ? '新对话' : session.title}</span>
           {session.pinned && <span className="session-pin" aria-label="已置顶"><Icon name="pin" /></span>}
-          {session.unread && <span className="session-unread" aria-label="未读" />}
+          {session.unread && <span className="session-unread" title="未读" aria-label="未读" />}
         </button>
       </SessionMenu>
     </li>

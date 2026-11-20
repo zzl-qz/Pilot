@@ -3995,22 +3995,30 @@ html[data-theme="light"] .accent-dot.is-on { box-shadow: 0 0 0 2px #fff, 0 0 0 4
   font-weight: 400;
 }
 
-/* 状态圆点：运行中黄、完成绿、失败红，未知保持中性灰 */
+/* 状态圆点：运行中主题色呼吸脉冲、等待审批琥珀外环、异常静默琥珀、完成绿、失败红 */
 .session-item .dot {
   width: 6px;
   height: 6px;
   margin-right: 1px;
   background: var(--dim);
 }
-.session-item .dot.is-running,
-.session-item .dot.is-waiting_approval,
+.session-item .dot.is-running {
+  background: var(--accent);
+  box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--accent) 28%, transparent);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.session-item .dot.is-waiting_approval {
+  background: var(--warn);
+  box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--warn) 30%, transparent);
+  animation: none;
+}
 .session-item .dot.is-paused,
 .session-item .dot.is-interrupted,
 .session-item .dot.is-blocked,
 .session-item .dot.is-budget_limited {
   background: var(--warn);
   box-shadow: none;
-  animation: pulse 1.6s ease-in-out infinite;
+  animation: none;
 }
 .session-item .dot.is-completed,
 .session-item .dot.is-done,
