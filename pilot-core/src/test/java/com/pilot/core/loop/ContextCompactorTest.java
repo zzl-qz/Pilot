@@ -264,6 +264,25 @@ class ContextCompactorTest {
         assertEquals(List.of(image), messages.get(1).attachments(), "硬裁剪也只能丢文字，不能丢失任务所依赖的原图");
     }
 
+    @Test
+    void repeatedHardDropsKeepPinnedMetadataBoundedClosedAndCapPinnedImages() {
+        ArrayList<Message> messages = new ArrayList<>();
+        messages.add(Message.system("sys"));
+        for (int i = 1; i <= 4; i++) {
+            messages.add(Message.user("用户图任务 " + i,
+                List.of(new Attachment("u" + i + ".png", "image/png", "/stable/u" + i + ".png"))));
+        }
+        messages.addAll(history(12, 3_000).subList(1, 25));
+
+        int dropped = ContextCompactor.dropOldestGroups(messages, 9_000, 4_000);
+        assertTrue(dropped > 0);
+        String pinned = messages.get(1).content();
+        assertTrue(pinned.endsWith("</pilot_context_metadata>"), pinned);
+        assertTrue(pinned.length() <= 4_500, "硬裁剪元数据必须有界，实际 " + pinned.length());
+        assertEquals(ContextCompactor.MAX_PINNED_USER_IMAGES, messages.get(1).attachments().size());
+        assertTrue(pinned.contains("u1.png") && pinned.contains("u2.png"), "更早原图应转为路径引用保留");
+    }
+
     /** 中文按 1 字符 1 token 估算，不能沿用「4 字符 1 token」把中文上下文算少。 */
     @Test
     void estimatesChineseTokensHigherThanAscii() {

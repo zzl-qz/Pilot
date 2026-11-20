@@ -10,6 +10,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import com.pilot.core.message.Attachment;
@@ -74,8 +76,17 @@ public final class ContextCompactor {
     /** 摘要正文上限，约 1500 token。 */
     private static final int MAX_SUMMARY_CHARS = 6_000;
 
-    /** 占位符化：最近 40% 预算内的工具输出保持原文。 */
-    private static final double PRUNE_KEEP_RATIO = 0.40;
+    /** 占位符化：触发高水位清理时保留最近 35% 预算的完整工具输出，一次腾出足够冷却跑道避免每 4 步反复破缓存。 */
+    private static final double PRUNE_KEEP_RATIO = 0.35;
+    /** 归档失败保护标记：只认 tool 消息末尾由 ToolExecutor 追加的真实标记，避免文档/源码正文提到字面量时误伤压缩。 */
+    static final String UNARCHIVED_MARKER = "[工具输出未归档，禁止清理原文]";
+    /** 仅匹配追加在工具输出末尾的真实存档引用，避免把文档/源码正文里引用的占位示例当成存档引用。 */
+    private static final Pattern TRAILING_ARCHIVE_REF = Pattern
+        .compile("(\\[工具输出存档 run_id=[A-Za-z0-9][A-Za-z0-9._-]* call_id=[A-Za-z0-9][A-Za-z0-9._-]*[^\\n\\]]*\\])$");
+    /** 硬裁剪时允许钉住的最大元数据字符数，防止 messages[1] 吞掉整个窗口。 */
+    private static final int DROP_PIN_MAX_CHARS = 16_000;
+    /** 折叠或硬裁剪时最多永久钉住最近几张用户原图，更早原图在摘要正文保留文件名与路径引用。 */
+    static final int MAX_PINNED_USER_IMAGES = 2;
     /** 小于这个长度的工具输出不值得替换，占位符本身也要占地方。 */
     private static final int PRUNE_MIN_CHARS = 4_000;
     private static final String PRUNED_PREFIX = "[旧工具输出已清理";
@@ -184,11 +195,11 @@ public final class ContextCompactor {
         }
 
         int end = groups.get(start)[0];
-        if (messages.subList(1, end).stream().anyMatch(message -> message.content().contains("[工具输出未归档"))) {
+        if (messages.subList(1, end).stream().anyMatch(ContextCompactor::isUnarchivedToolOutput)) {
             return Outcome.none(beforeChars);
         }
         String pins = ContextPins.capture(messages, end, sourceFingerprint(messages.subList(0, end)));
-        int pinLimit = SUMMARY_INPUT_CHARS / 2;
+        int pinLimit = Math.min(SUMMARY_INPUT_CHARS / 2, Math.max(4_000, targetChars / 3));
         if (pins.length() > pinLimit) {
             // 不能只留开头：已读文件列表常常在目标前面，截开头会把用户目标切掉。
             pins = ContextPins.limit(pins, pinLimit);
@@ -219,6 +230,12 @@ public final class ContextCompactor {
         summary += fileHistory(messages, 1, end);
         summary += userClues(messages, 1, end, summary);
 
+        // 摘要可以替代旧文本，但不能替代图像本身。把被折叠消息中最近几张稳定原图引用
+        // 挂到交接摘要上，更早原图在正文里保留文件名与路径供模型按需 read_file 查看。
+        PinnedAttachments pinned = boundedAttachments(attachments(messages, 1, end));
+        if (!pinned.omittedNote().isEmpty()) {
+            summary += pinned.omittedNote();
+        }
         int covered = end - 1;
         String head = header(covered);
         String replacement = head + summary + pins;
@@ -230,11 +247,8 @@ public final class ContextCompactor {
             return Outcome.none(beforeChars);
         }
 
-        // 摘要可以替代旧文本，但不能替代图像本身。把被折叠消息中的稳定附件引用
-        // 挂到交接摘要上，Goal reviewer、续跑和子代理继承历史时仍能看到原图。
-        List<Attachment> pinnedAttachments = attachments(messages, 1, end);
         messages.subList(1, end).clear();
-        messages.add(1, Message.user(replacement, pinnedAttachments));
+        messages.add(1, Message.user(replacement, pinned.kept()));
         return new Outcome(covered, beforeChars, totalChars(messages), summary);
     }
 
@@ -244,13 +258,21 @@ public final class ContextCompactor {
      * @return 被替换的条数
      */
     public static int pruneToolOutputs(List<Message> messages, int limit) {
-        return pruneToolOutputs(messages, limit, observedPrefix(messages));
+        return pruneToolOutputs(messages, limit, limit, observedPrefix(messages));
     }
 
     public static int pruneToolOutputs(List<Message> messages, int limit, int observedThroughIndex) {
-        int keep = Math.max(1, (int)(limit * PRUNE_KEEP_RATIO));
+        return pruneToolOutputs(messages, limit, limit, observedThroughIndex);
+    }
+
+    /** 双预算版本：同时尊重 token 与字符保留窗口，只清理早于 {@code observedThroughIndex} 的旧输出。 */
+    public static int pruneToolOutputs(List<Message> messages, int tokenBudget, int charBudget,
+        int observedThroughIndex) {
+        int keepChars = Math.max(1, (int)(Math.max(1, charBudget) * PRUNE_KEEP_RATIO));
+        int keepTokens = Math.max(1, (int)(Math.max(1, tokenBudget) * PRUNE_KEEP_RATIO));
         Map<String, String> calls = callIndex(messages);
-        int seen = 0;
+        int seenChars = 0;
+        int seenTokens = 0;
         int pruned = 0;
         for (int i = messages.size() - 1; i >= 0; i--) {
             Message message = messages.get(i);
@@ -258,11 +280,14 @@ public final class ContextCompactor {
                 continue;
             }
             int length = message.content().length();
-            seen += length;
+            int tokens = estimateTokens(message.content());
+            seenChars += length;
+            seenTokens += tokens;
             // Only prune observations that the model has already seen. The newest tool result
             // is appended after the previous request and must survive until the next request.
-            if (i >= Math.min(observedThroughIndex, messages.size()) || seen <= keep || length < PRUNE_MIN_CHARS
-                || message.content().startsWith(PRUNED_PREFIX) || message.content().contains("[工具输出未归档")) {
+            if (i >= Math.min(observedThroughIndex, messages.size())
+                || (seenChars <= keepChars && seenTokens <= keepTokens) || length < PRUNE_MIN_CHARS
+                || message.content().startsWith(PRUNED_PREFIX) || isUnarchivedToolOutput(message)) {
                 continue;
             }
             String target = calls.getOrDefault(message.toolCallId(), "工具");
@@ -290,9 +315,23 @@ public final class ContextCompactor {
         return end;
     }
 
+    private static boolean isUnarchivedToolOutput(Message message) {
+        return message != null && "tool".equals(message.role())
+            && message.content().stripTrailing().endsWith(UNARCHIVED_MARKER);
+    }
+
+    /** 提取工具输出末尾真实的归档引用；正文或文档里顺带提及的字面量示例不计入。 */
+    static String trailingArchiveReference(String text) {
+        if (text == null || text.isEmpty()) {
+            return null;
+        }
+        Matcher matcher = TRAILING_ARCHIVE_REF.matcher(text.stripTrailing());
+        return matcher.find() ? matcher.group(1) : null;
+    }
+
     private static String archiveReference(String text) {
-        int start = text.lastIndexOf("[工具输出存档 run_id=");
-        return start < 0 ? "（旧记录没有存档引用；不得重放有副作用的操作）" : "\n" + text.substring(start);
+        String ref = trailingArchiveReference(text);
+        return ref == null ? "（旧记录没有存档引用；不得重放有副作用的操作）" : "\n" + ref;
     }
 
     private static String sourceFingerprint(List<Message> messages) {
@@ -362,7 +401,7 @@ public final class ContextCompactor {
             }
             String content = message.content();
             if (content.length() <= TRUNCATE_TRIGGER_CHARS || content.startsWith(PRUNED_PREFIX)
-                || content.contains("[工具输出未归档")) {
+                || isUnarchivedToolOutput(message)) {
                 continue;
             }
             String trimmed = content.substring(0, TRUNCATE_HEAD_CHARS) + "\n" + TRUNCATE_MARK + "\n"
@@ -379,22 +418,36 @@ public final class ContextCompactor {
      * @return 被丢弃的消息条数
      */
     public static int dropOldestGroups(List<Message> messages, int limit) {
+        return dropOldestGroups(messages, limit, limit);
+    }
+
+    /** 双目标滞回硬裁剪：强制对钉住元数据施加长度上限，并一次性压回字符与 token 目标以内。 */
+    public static int dropOldestGroups(List<Message> messages, int targetChars, int targetTokens) {
+        int charCap = Math.max(1, targetChars);
+        int tokenCap = Math.max(1, targetTokens);
         String pinnedState = ContextPins.capture(messages, messages.size(), sourceFingerprint(messages));
-        if (pinnedState.length() >= limit) {
+        int pinCap = Math.min(DROP_PIN_MAX_CHARS, Math.max(256, charCap / 3));
+        if (charCap < 256) {
+            pinCap = Math.max(0, charCap - 80);
+        }
+        pinnedState = ContextPins.limit(pinnedState, pinCap);
+        if (pinnedState.length() >= charCap) {
             return 0;
         }
+        int pinnedTokens = estimateTokens(pinnedState);
         int dropped = 0;
         LinkedHashMap<String, Attachment> pinnedAttachments = new LinkedHashMap<>();
         // 兜底上限：即使分组逻辑写错也不能把调用方卡死
         int guard = messages.size() + 1;
-        while (totalChars(messages) + pinnedState.length() + 80 > limit && guard-- > 0) {
+        while ((totalChars(messages) + pinnedState.length() + 80 > charCap
+            || estimateTokens(messages) + pinnedTokens + 40 > tokenCap) && guard-- > 0) {
             List<int[]> groups = groups(messages);
             if (groups.size() <= HARD_DROP_MIN_KEEP_GROUPS) {
                 break;
             }
             // 参数是 [start, end)：要删的是第一组本体，取它的结束下标，别取开始下标
             int end = groups.get(0)[1];
-            if (messages.subList(1, end).stream().anyMatch(message -> message.content().contains("[工具输出未归档"))) {
+            if (messages.subList(1, end).stream().anyMatch(ContextCompactor::isUnarchivedToolOutput)) {
                 break;
             }
             for (Attachment attachment : attachments(messages, 1, end)) {
@@ -404,8 +457,9 @@ public final class ContextCompactor {
             messages.subList(1, end).clear();
         }
         if (dropped > 0) {
-            messages.add(1, Message.user("[更早的 " + dropped + " 条消息已因上下文超限丢弃]" + pinnedState,
-                List.copyOf(pinnedAttachments.values())));
+            PinnedAttachments pinned = boundedAttachments(List.copyOf(pinnedAttachments.values()));
+            messages.add(1,
+                Message.user("[更早的 " + dropped + " 条消息已因上下文超限丢弃]" + pinned.omittedNote() + pinnedState, pinned.kept()));
         }
         return dropped;
     }
@@ -703,5 +757,20 @@ public final class ContextCompactor {
             }
         }
         return List.copyOf(unique.values());
+    }
+
+    /** 最多永久钉住最近几张用户原图；更早原图留文件名与路径引用，避免长会话背负过多旧图挤爆预算。 */
+    private static PinnedAttachments boundedAttachments(List<Attachment> all) {
+        if (all.size() <= MAX_PINNED_USER_IMAGES) {
+            return new PinnedAttachments(all, "");
+        }
+        int split = all.size() - MAX_PINNED_USER_IMAGES;
+        List<Attachment> omitted = all.subList(0, split);
+        List<Attachment> kept = List.copyOf(all.subList(split, all.size()));
+        String names = omitted.stream().map(a -> a.name() + " (" + a.path() + ")").collect(Collectors.joining(", "));
+        return new PinnedAttachments(kept, "\n[更早的用户附件已转为路径引用，需要时可用 read_file 查看：" + names + "]");
+    }
+
+    private record PinnedAttachments(List<Attachment> kept, String omittedNote) {
     }
 }

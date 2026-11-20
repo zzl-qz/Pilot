@@ -54,8 +54,8 @@ class ContextBudgetTest {
     void compactsAndReportsWhenOverTheThreshold() {
         List<Message> messages = textHistory(4, 1_000);
         int before = ContextCompactor.totalChars(messages);
-        // usage ≈ 0.85：越过预压缩水位，但没到强制档，只压一轮
-        int limit = (int)(before / 0.85);
+        // usage ≈ 0.90：越过预压缩水位，但没到强制档，只压一轮
+        int limit = (int)(before / 0.90);
         AtomicInteger calls = new AtomicInteger();
         ContextBudget budget = new ContextBudget(recording(calls, covered(5)));
         ArrayList<SessionEvent> events = new ArrayList<SessionEvent>();
@@ -72,7 +72,7 @@ class ContextBudgetTest {
     @Test
     void backsOffAfterAFruitlessCompaction() {
         List<Message> messages = textHistory(4, 1_000);
-        int limit = (int)(ContextCompactor.totalChars(messages) / 0.85);
+        int limit = (int)(ContextCompactor.totalChars(messages) / 0.90);
         AtomicInteger calls = new AtomicInteger();
         // covered == 0 表示压不动（摘要不比原文短、或模型失败）
         ContextBudget budget = new ContextBudget(recording(calls, notCompacted()));
@@ -91,7 +91,7 @@ class ContextBudgetTest {
     @Test
     void retriesAfterContextGrowsPastTheBackoffWatermark() {
         List<Message> messages = textHistory(4, 1_000);
-        int limit = (int)(ContextCompactor.totalChars(messages) / 0.85);
+        int limit = (int)(ContextCompactor.totalChars(messages) / 0.90);
         AtomicInteger calls = new AtomicInteger();
         ContextBudget budget = new ContextBudget(recording(calls, notCompacted()));
 
@@ -115,7 +115,7 @@ class ContextBudgetTest {
         ContextBudget budget = new ContextBudget(recording(calls, notCompacted()));
 
         for (int attempt = 0; attempt < 3; attempt++) {
-            int limit = (int)(ContextCompactor.totalChars(messages) / 0.85);
+            int limit = (int)(ContextCompactor.totalChars(messages) / 0.90);
             budget.apply(messages, limit, event -> {
             });
             messages.add(Message.assistant("新内容".repeat(300), List.of()));
@@ -123,7 +123,7 @@ class ContextBudgetTest {
         }
         assertEquals(3, calls.get());
 
-        int limit = (int)(ContextCompactor.totalChars(messages) / 0.85);
+        int limit = (int)(ContextCompactor.totalChars(messages) / 0.90);
         budget.apply(messages, limit, event -> {
         });
 
@@ -133,7 +133,7 @@ class ContextBudgetTest {
     @Test
     void opensCircuitAfterThreeRapidRefills() {
         List<Message> messages = textHistory(4, 1_000);
-        int limit = (int)(ContextCompactor.totalChars(messages) / 0.85);
+        int limit = (int)(ContextCompactor.totalChars(messages) / 0.90);
         AtomicInteger calls = new AtomicInteger();
         ContextBudget budget = new ContextBudget(recording(calls, covered(5)));
 
@@ -180,6 +180,82 @@ class ContextBudgetTest {
         assertTrue(ContextBudget.usage(chinese, 10_000, 1_000) > ContextBudget.usage(ascii, 10_000, 1_000));
         // 字符预算更紧时取字符口径：两者字符数相同，占用也应该相同
         assertEquals(ContextBudget.usage(chinese, 1_000, 10_000), ContextBudget.usage(ascii, 1_000, 10_000));
+    }
+
+    @Test
+    void englishLogsAtThirtyOnePercentTokenUsagePerformZeroRewrites() {
+        List<Message> messages = toolHistory(20, 6_200);
+        List<Message> snapshot = List.copyOf(messages);
+        AtomicInteger calls = new AtomicInteger();
+        ContextBudget budget = new ContextBudget(recording(calls, notCompacted()));
+
+        boolean compacted = budget.apply(messages, 104_000, 400_000, 8_000, event -> {
+        }, messages.size());
+
+        assertFalse(compacted);
+        assertEquals(0, calls.get());
+        assertEquals(snapshot, messages, "英文长日志占 31% token 窗口时严禁提前改写任何旧消息");
+    }
+
+    @Test
+    void mediumPressureReadSessionAtSeventyFivePercentStaysAppendOnly() {
+        // 15 * 18k 英文代码 ≈ 67.5k token + 10k overhead ≈ 77.5k / 104k (74.5%)：
+        // 未到 80% 清理线时保留全部已读工作集，避免刚准备编辑时被提前清掉触发重读循环。
+        List<Message> messages = toolHistory(15, 18_000);
+        List<Message> snapshot = List.copyOf(messages);
+        ContextBudget budget = new ContextBudget(recording(new AtomicInteger(), notCompacted()));
+
+        budget.apply(messages, 104_000, 400_000, 10_000, event -> {
+        }, messages.size());
+
+        assertEquals(snapshot, messages, "74.5% 占用下严禁提前清理刚读完的核心源码");
+    }
+
+    @Test
+    void hysteresisCooldownKeepsAppendOnlyForSubsequentStepsAfterPrune() {
+        List<Message> messages = toolHistory(17, 18_000);
+        ContextBudget budget = new ContextBudget(recording(new AtomicInteger(), notCompacted()));
+        // 首次越过 80%（17*18k = 306k 字符 ≈ 76.5k token；加 10k overhead ≈ 86.5k/104k = 83%）触发一次批量清理
+        budget.apply(messages, 104_000, 400_000, 10_000, event -> {
+        }, messages.size());
+        List<Message> afterPrune = List.copyOf(messages);
+        assertTrue(messages.stream().anyMatch(m -> "tool".equals(m.role()) && m.content().startsWith("[旧工具输出已清理")));
+
+        // 一次清理腾出足够宽的只追加跑道：随后 8 步持续读取都不应再次改写历史前缀
+        for (int step = 0; step < 8; step++) {
+            int prefixLen = messages.size();
+            List<Message> prefixBefore = List.copyOf(messages);
+            messages.add(Message.assistant("s" + step, List.of(new ToolCall("n" + step, "read_file", Map.of()))));
+            messages.add(Message.tool("n" + step, "a".repeat(8_000)));
+            budget.apply(messages, 104_000, 400_000, 10_000, event -> {
+            }, prefixLen);
+            assertEquals(prefixBefore, messages.subList(0, prefixLen), "冷却期内第 " + step + " 步不应改写历史前缀");
+        }
+        assertFalse(afterPrune.isEmpty());
+    }
+
+    @Test
+    void circuitOpenHardDropFreesHysteresisHeadroomSoNextStepsDoNotRewriteIndexOne() {
+        List<Message> messages = textHistory(30, 4_000);
+        ModelClient failing = (request, tools) -> {
+            throw new ModelClientException("摘要挂了");
+        };
+        ContextBudget budget = new ContextBudget(new ContextCompactor(failing, 2)::compact);
+
+        budget.apply(messages, 80_000, 200_000, 4_000, event -> {
+        }, messages.size());
+        Message indexOne = messages.get(1);
+        assertTrue(indexOne.content().contains("已因上下文超限丢弃"), indexOne.content());
+        assertTrue(indexOne.content().endsWith("</pilot_context_metadata>"), indexOne.content());
+
+        for (int step = 0; step < 5; step++) {
+            int observed = messages.size();
+            messages.add(Message.assistant("next " + step, List.of(new ToolCall("k" + step, "read_file", Map.of()))));
+            messages.add(Message.tool("k" + step, "b".repeat(2_000)));
+            budget.apply(messages, 80_000, 200_000, 4_000, event -> {
+            }, observed);
+            assertEquals(indexOne, messages.get(1), "硬裁剪滞回后连续 5 步不应重写 messages[1]");
+        }
     }
 
     /** 纯文本历史：prune / truncate 只处理 tool 消息，这里可以精确控制水位。 */

@@ -196,8 +196,10 @@ public final class AgentLoop {
     /** 动态后台状态即使暂时不变也可能稍后完成；给它比普通重复调用更宽的有界观察窗口。 */
     private static final int MIN_DYNAMIC_POLL_ABORT = 8;
     private static final int MAX_PARALLEL_READS = 10;
-    /** 历史里最多保留几条带图片的工具观察；更早的换成文字说明。 */
+    /** 预算压力下保留最近几条带图片的工具观察；更早的换成文字说明。 */
     private static final int MAX_TOOL_IMAGE_MESSAGES = 3;
+    /** 低水位不逐轮改写旧工具图以保护 KV 前缀缓存，仅保留纯内存硬上限保险丝。 */
+    private static final int MAX_TOOL_IMAGE_MESSAGES_HARD = 12;
     /** 计划未完成时默认自动催模型继续的次数上限。 */
     private static final int DEFAULT_MAX_PLAN_CONTINUES = 3;
     /** 等待重试时拆成小段，取消能在这段时间内停下来。 */
@@ -206,6 +208,8 @@ public final class AgentLoop {
     private static final int MAX_REPEAT_ABORTS = 2;
     /** 同一地址连续这么多次快照都没有可点击元素，就停止验收，不再重开页面。 */
     private static final int MAX_EMPTY_BROWSER_SNAPSHOTS = 3;
+    /** 阶段尾部候选提示默认存活的模型请求次数；首次文件编辑后会提前清退。 */
+    static final int DEFAULT_PHASE_HINT_TURNS = 3;
     private static final String REPEAT_GUIDANCE = "上一次回复陷入逐行重复（同一行连续出现多次），已中止。" + "请重新组织答案：不要重复相同句子或列表项，直接推进未完成的部分。";
 
     private final ModelClient client;
@@ -232,6 +236,62 @@ public final class AgentLoop {
     private Function<List<String>, String> scopedRules = paths -> "";
     private ExecutionPolicy executionPolicy;
     private Hooks hooks = Hooks.none();
+    private Runnable contextShrinkListener = () -> {
+    };
+    private volatile PhaseHint phaseHint;
+    private Function<String, String> steeringHintProvider;
+
+    /** 上下文发生裁剪或摘要压缩时回调（用于失效已交付读取视图，防止重读被「文件未变化」卡死）。 */
+    public AgentLoop withContextShrinkListener(Runnable listener) {
+        this.contextShrinkListener = listener == null ? () -> {
+        } : listener;
+        return this;
+    }
+
+    /** 阶段级非持久化尾部引导（如候选定位点）：不落盘、不改历史前缀，命中候选读取、首次编辑或耗尽轮次后自动退场。 */
+    public AgentLoop withInitialPhaseHint(String hint) {
+        return withInitialPhaseHint(hint, Set.of());
+    }
+
+    /** 带候选路径集合的阶段引导：首轮一旦开始读取任意候选文件即清退，避免后续回合尾部反复移位。 */
+    public AgentLoop withInitialPhaseHint(String hint, Set<String> candidatePaths) {
+        refreshPhaseHint(hint, candidatePaths);
+        return this;
+    }
+
+    /** 用户 steering 纠正时按新输入重算阶段尾部引导。 */
+    public AgentLoop withSteeringHintProvider(Function<String, String> provider) {
+        this.steeringHintProvider = provider;
+        return this;
+    }
+
+    /** 刷新当前阶段尾部引导；传入空文本等价于清空。 */
+    public void refreshPhaseHint(String hint) {
+        refreshPhaseHint(hint, Set.of());
+    }
+
+    /** 刷新当前阶段尾部引导及对应候选路径集合；传入空文本等价于清空。 */
+    public void refreshPhaseHint(String hint, Set<String> candidatePaths) {
+        if (hint == null || hint.isBlank()) {
+            this.phaseHint = null;
+            return;
+        }
+        Set<String> normalized = candidatePaths == null ? Set.of() : candidatePaths.stream().filter(Objects::nonNull)
+            .map(AgentLoop::normalizeHintPath).filter(p -> !p.isBlank()).collect(Collectors.toUnmodifiableSet());
+        this.phaseHint = new PhaseHint(hint.strip(), DEFAULT_PHASE_HINT_TURNS, normalized);
+    }
+
+    /** 清空当前阶段尾部引导。 */
+    public void clearPhaseHint() {
+        this.phaseHint = null;
+    }
+
+    /** 返回本轮已读取或修改过的路径快照（供外层排除已读候选和统计命中率）。 */
+    public Set<String> observedPathsSnapshot() {
+        synchronized (touchedPaths) {
+            return Set.copyOf(touchedPaths);
+        }
+    }
 
     /** 把模型的推理增量推到界面。不影响最终回答。 */
     public AgentLoop withLiveReasoning(Consumer<String> reasoning) {
@@ -535,9 +595,14 @@ public final class AgentLoop {
                     return stopForCancellation(messages, events);
                 }
                 int beforeCompression = messages.size();
-                ContextCompactor.dropStaleToolImages(messages, MAX_TOOL_IMAGE_MESSAGES, observedThroughIndex);
-                budget.apply(messages, admissionLimit(), events, observedThroughIndex);
+                int beforeChars = ContextCompactor.totalChars(messages);
+                ContextCompactor.dropStaleToolImages(messages, MAX_TOOL_IMAGE_MESSAGES_HARD, observedThroughIndex);
+                budget.apply(messages, admissionLimit(), contextLimit(), fixedOverheadTokens(messages), events,
+                    observedThroughIndex);
                 observedThroughIndex = Math.max(0, observedThroughIndex - (beforeCompression - messages.size()));
+                if (ContextCompactor.totalChars(messages) < beforeChars) {
+                    notifyContextShrink();
+                }
 
                 if (applySteering(messages, events, pendingInput.get())) {
                     // 真实用户纠正优先，上一状态推导出的内部催办可能已经过期。
@@ -1049,10 +1114,17 @@ public final class AgentLoop {
             completionGate.recordOutcome(outcome.changedPaths(), outcome.checks());
         }
         changedFiles.addAll(outcome.changedPaths());
-        touchedPaths.addAll(outcome.changedPaths());
-        Object readPath = call.args() == null ? null : call.args().get("path");
-        if (readPath != null && !readPath.toString().isBlank()) {
-            touchedPaths.add(readPath.toString());
+        synchronized (touchedPaths) {
+            touchedPaths.addAll(outcome.changedPaths());
+            Object readPath = call.args() == null ? null : call.args().get("path");
+            if (readPath != null && !readPath.toString().isBlank()) {
+                touchedPaths.add(readPath.toString());
+            }
+        }
+        if (!outcome.changedPaths().isEmpty()) {
+            clearPhaseHint();
+        } else if (!ToolResults.isError(outcome.result()) && !ToolResults.isSkipped(outcome.result())) {
+            clearPhaseHintIfCandidateRead(call);
         }
         for (String check : outcome.checks()) {
             if (!checks.contains(check)) {
@@ -1122,18 +1194,22 @@ public final class AgentLoop {
         // 供应商的 prefix cache 从第一个被改的 token 起全部失效；能放下就保持原样追加。
         if (!requestFits(messages, guidance)) {
             recordToolObservationBoundary(messages);
+            ContextCompactor.dropStaleToolImages(messages, MAX_TOOL_IMAGE_MESSAGES, observedThroughIndex);
             ContextCompactor.truncateLongToolOutputs(messages, messages.size());
         }
         if (!requestFits(messages, guidance) && historyCanShrink(messages)) {
             int wireLimit = (int)Math.min(Integer.MAX_VALUE, RequestBudget
                 .assessRequest(requestMessages(messages, guidance), tools.definitions(), contextLimit()).inputLimit());
-            budget.apply(messages, Math.max(1, wireLimit), events, observedThroughIndex);
+            budget.apply(messages, Math.max(1, wireLimit), contextLimit(), fixedOverheadTokens(messages), events,
+                observedThroughIndex);
             observedThroughIndex = Math.min(observedThroughIndex, messages.size());
         }
         int guard = messages.size() + 1;
         while (guard-- > 0 && !requestFits(messages, guidance)) {
             int chars = ContextCompactor.totalChars(messages);
-            int dropped = ContextCompactor.dropOldestGroups(messages, Math.max(8_000, chars * 2 / 3));
+            int tokens = ContextCompactor.estimateTokens(messages);
+            int dropped = ContextCompactor.dropOldestGroups(messages, Math.max(8_000, chars * 2 / 3),
+                Math.max(2_000, tokens * 2 / 3));
             if (dropped == 0) {
                 break;
             }
@@ -1143,6 +1219,7 @@ public final class AgentLoop {
         // 这里改截短最长的历史正文，或去掉最早的工具图片，直到放得下。系统提示不动。
         shaveUntilFits(messages, guidance);
         if (ContextCompactor.totalChars(messages) < before) {
+            notifyContextShrink();
             events.accept(new RunContinued(1, 1, "上下文超过安全输入预算，已折叠更早的记录并继续"));
         }
     }
@@ -1262,11 +1339,23 @@ public final class AgentLoop {
         return Map.copyOf(changes);
     }
 
-    private static boolean applySteering(List<Message> messages, Consumer<SessionEvent> events, Message input) {
+    private boolean applySteering(List<Message> messages, Consumer<SessionEvent> events, Message input) {
         if (!hasInput(input)) {
             return false;
         }
         messages.add(input);
+        if (executionPolicy != null) {
+            executionPolicy.onSteering();
+        }
+        if (steeringHintProvider != null) {
+            try {
+                refreshPhaseHint(steeringHintProvider.apply(input.content()));
+            } catch (RuntimeException ignored) {
+                clearPhaseHint();
+            }
+        } else {
+            clearPhaseHint();
+        }
         events.accept(new RunSteered(input.content(), input.attachments(), input.imagePositions()));
         return true;
     }
@@ -1300,19 +1389,82 @@ public final class AgentLoop {
 
     private List<Message> requestMessages(List<Message> messages, String guidance) {
         refreshTaskContext(messages, guidance);
-        String rules = scopedRules.apply(List.copyOf(touchedPaths));
+        List<String> touched;
+        synchronized (touchedPaths) {
+            touched = List.copyOf(touchedPaths);
+        }
+        String rules = scopedRules.apply(touched);
+        PhaseHint activeHint = phaseHint;
+        boolean hasHint = activeHint != null && activeHint.remaining() > 0 && !activeHint.content().isBlank();
         boolean hasRules = rules != null && !rules.isBlank();
-        if ((guidance == null || guidance.isBlank()) && !hasRules) {
+        boolean hasGuidance = guidance != null && !guidance.isBlank();
+        if (!hasGuidance && !hasRules && !hasHint) {
             return List.copyOf(messages);
         }
         List<Message> request = new ArrayList<>(messages);
-        if (guidance != null && !guidance.isBlank()) {
+        if (hasHint) {
+            request.add(Message.system(activeHint.content()));
+        }
+        if (hasGuidance) {
             request.add(Message.system("[Runtime guidance; applies only to this request]\n" + guidance.strip()));
         }
         if (hasRules) {
             request.add(Message.system("[路径规则]\n" + rules.strip()));
         }
         return List.copyOf(request);
+    }
+
+    private void notifyContextShrink() {
+        try {
+            contextShrinkListener.run();
+        } catch (RuntimeException ignored) {
+            // 视图失效通知失败不应中断主循环
+        }
+    }
+
+    /** 估算工具定义、协议头与图片附件带来的非正文固定 token 开销，与 RequestBudget 保持同一口径。 */
+    private int fixedOverheadTokens(List<Message> messages) {
+        long full = RequestBudget.assess(messages, tools.definitions(), ModelCapacity.active()).estimatedInputTokens();
+        long body = ContextCompactor.estimateTokens(messages);
+        return (int)Math.max(0L, Math.min(Integer.MAX_VALUE, full - body));
+    }
+
+    private void consumePhaseHintTurn() {
+        PhaseHint current = phaseHint;
+        if (current == null) {
+            return;
+        }
+        int next = current.remaining() - 1;
+        phaseHint = next > 0 ? new PhaseHint(current.content(), next, current.candidates()) : null;
+    }
+
+    private void clearPhaseHintIfCandidateRead(ToolCall call) {
+        PhaseHint current = phaseHint;
+        if (current == null || current.candidates().isEmpty() || call == null || call.args() == null) {
+            return;
+        }
+        if (!ToolNames.READ_FILE.equals(call.name()) && !"code_symbol".equals(call.name())) {
+            return;
+        }
+        Object raw = call.args().get("path");
+        if (raw == null) {
+            return;
+        }
+        String normalized = normalizeHintPath(raw.toString());
+        if (!normalized.isBlank() && current.candidates().contains(normalized)) {
+            clearPhaseHint();
+        }
+    }
+
+    private static String normalizeHintPath(String path) {
+        String value = path == null ? "" : path.strip().replace('\\', '/');
+        while (value.startsWith("./")) {
+            value = value.substring(2);
+        }
+        return value;
+    }
+
+    private record PhaseHint(String content, int remaining, Set<String> candidates) {
     }
 
     public AgentLoop withScopedRules(Function<List<String>, String> rules) {
@@ -1416,9 +1568,11 @@ public final class AgentLoop {
                     request = requestMessages(messages, retainedGuidance);
                     admission = RequestBudget.assessRequest(request, tools.definitions(), contextLimit());
                 }
-                if (!admission.fits() && retainedGuidance != null && !retainedGuidance.isBlank()) {
-                    // 临时纠偏只是这段提示，差一点点时先拿掉它再发，不要为此中断任务。
+                if (!admission.fits()
+                    && (retainedGuidance != null && !retainedGuidance.isBlank() || phaseHint != null)) {
+                    // 临时纠偏与阶段提示都只是辅助上下文，差一点点时先拿掉它们再发，不要为此中断任务。
                     retainedGuidance = null;
+                    clearPhaseHint();
                     fitHistoryToInputBudget(messages, events, null);
                     request = requestMessages(messages, null);
                     admission = RequestBudget.assessRequest(request, tools.definitions(), contextLimit());
@@ -1475,6 +1629,7 @@ public final class AgentLoop {
                 retryBudget.reset();
                 connectionFailures = 0;
                 runtimeGuidance.clear();
+                consumePhaseHintTurn();
                 // client 已拿到请求快照；立即还原基础 system，避免当前内存历史也携带一次性提示。
                 refreshTaskContext(messages, null);
                 return new ModelTurn(response, null);
@@ -1542,8 +1697,8 @@ public final class AgentLoop {
                 }
                 connectionFailures = ModelRetryPolicy.connectionLost(reason) ? connectionFailures + 1 : 0;
                 if (connectionFailures >= ModelRetryPolicy.CONNECTION_BREAKER_FAILURES) {
-                    throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_ERROR,
-                        "同一端点连续 " + connectionFailures + " 次连接级失败（handshake / EOF / connection reset），已停止重试；进度和对话已保存，可继续执行。");
+                    throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_ERROR, "同一端点连续 " + connectionFailures
+                        + " 次连接级失败（handshake / EOF / connection reset），已停止重试；进度和对话已保存，可继续执行。");
                 }
                 RetryBudget.Decision decision = retryBudget.afterFailure(reason);
                 if (!decision.retry()) {

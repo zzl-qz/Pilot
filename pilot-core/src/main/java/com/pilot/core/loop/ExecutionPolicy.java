@@ -34,6 +34,10 @@ public interface ExecutionPolicy {
     default void observed(ToolCall call, ToolExecutor.Outcome outcome) {
     }
 
+    /** 用户中途纠正任务方向时通知策略重置当前阶段的调查窗口。 */
+    default void onSteering() {
+    }
+
     /** Stop 后允许策略预留一次不带工具的收尾模型调用。 */
     default void beginFinalization() {
     }

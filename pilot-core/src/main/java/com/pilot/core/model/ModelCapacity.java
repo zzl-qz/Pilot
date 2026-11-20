@@ -49,7 +49,7 @@ public record ModelCapacity(long contextTokens, long inputTokens, int outputToke
     public static ModelCapacity configured() {
         return new ModelCapacity(value("context-tokens", 128000), value("input-tokens", 128000),
             Math.toIntExact(value("output-tokens", 16000)), value("margin-tokens", 8000),
-            Math.toIntExact(value("image-tokens", 8192)));
+            Math.toIntExact(value("image-tokens", 2048)));
     }
 
     private static long value(String key, long fallback) {
