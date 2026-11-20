@@ -248,6 +248,13 @@ await check('想法库独立于侧边对话，跨项目保存文字与附件', a
   });
   await dialog.getByRole('button', { name: '保存想法' }).click();
   await dialog.getByRole('list', { name: '已保存的想法' }).getByRole('img', { name: '截图.png' }).waitFor();
+  // 缩略图点开大图，关闭后回到弹窗本身，不影响外层想法库
+  await dialog.getByRole('button', { name: '查看 截图.png' }).click();
+  const preview = dialog.getByRole('dialog', { name: '截图.png 预览' });
+  await preview.waitFor();
+  await dialog.getByRole('button', { name: '关闭预览' }).click();
+  await preview.waitFor({ state: 'detached' });
+  assert.equal(await dialog.getByLabel('想法文字').isVisible(), true, '关闭大图后想法库仍在');
   await dialog.getByText('查看当前会话的旧想法').click();
   await dialog.getByRole('button', { name: '复制到想法库' }).click();
   await dialog.getByText('已复制到想法库。').waitFor();
