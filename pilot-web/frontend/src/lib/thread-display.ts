@@ -115,5 +115,20 @@ export function buildThreadDisplay(rows: readonly ThreadRow[]): ThreadDisplayMod
     out.push(row);
   }
 
-  return { pinnedPlan, rows: out };
+  // 二次收敛：连续无回复回合向前合并后，原本被夹在中间的多条压缩记录会相邻，统一再合并为单条分隔线。
+  const compact: DisplayThreadRow[] = [];
+  for (const row of out) {
+    const prev = compact[compact.length - 1];
+    if (row.type === 'compaction-group' && prev && prev.type === 'compaction-group') {
+      compact[compact.length - 1] = {
+        ...prev,
+        end: Math.max(prev.end, row.end),
+        items: [...prev.items, ...row.items]
+      };
+      continue;
+    }
+    compact.push(row);
+  }
+
+  return { pinnedPlan, rows: compact };
 }

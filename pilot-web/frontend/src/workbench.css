@@ -795,7 +795,20 @@ html[data-theme="light"] .new-task {
   background: var(--bg);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
-html[data-theme] .project-head { min-height: 28px; }
+html[data-theme] .project-head { position: relative; min-height: 28px; }
+html[data-theme] .project-head .project-actions {
+  position: absolute;
+  inset-inline-end: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding-inline-start: 14px;
+  background: linear-gradient(to right, transparent, var(--sidebar) 36%);
+  pointer-events: none;
+}
+html[data-theme] .project-head:hover .project-actions,
+html[data-theme] .project-head:focus-within .project-actions {
+  pointer-events: auto;
+}
 html[data-theme] .session-item { position: relative; min-height: 30px; border-radius: 6px; transition: background-color 0.12s ease, color 0.12s ease; }
 html[data-theme] .session-item.is-active { box-shadow: none; font-weight: 520; }
 html[data-theme] .session-item.is-active::before {

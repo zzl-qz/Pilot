@@ -27,4 +27,22 @@ assert.equal(turns[0].tools.length, 2, '合并后保留全部工具调用');
 assert.equal(turns[0].reply.text, '全部完成', '保留最终回复正文');
 assert.deepEqual(turns[0].runIds, ['r1', 'r2'], '保留合并后的 runIds');
 
+// 回归验证：turn -> cmp -> turn -> cmp -> turn -> cmp -> turn 交替出现时，所有压缩记录必须收成 1 条，绝不堆叠多条分隔线
+const interleaved = [
+  { type: 'user', key: 'u1', sequence: 1, text: '长任务', attachments: [], imagePositions: [], start: 1, end: 1 },
+  { type: 'turn', key: 't1', runIds: ['r1'], start: 2, end: 3, tools: [{ callId: 'a1', name: 'read_file', args: 'a', status: 'ok' }], toolIndex: {}, thinking: null, reply: emptyReply(), stats: null, agents: {} },
+  { type: 'compaction', key: 'c1', start: 4, end: 4, coveredMessages: 5, charactersBefore: 1000, charactersAfter: 200, summary: 's1' },
+  { type: 'turn', key: 't2', runIds: ['r1'], start: 5, end: 6, tools: [{ callId: 'a2', name: 'read_file', args: 'b', status: 'ok' }], toolIndex: {}, thinking: null, reply: emptyReply(), stats: null, agents: {} },
+  { type: 'compaction', key: 'c2', start: 7, end: 7, coveredMessages: 5, charactersBefore: 1000, charactersAfter: 200, summary: 's2' },
+  { type: 'turn', key: 't3', runIds: ['r1'], start: 8, end: 9, tools: [{ callId: 'a3', name: 'read_file', args: 'c', status: 'ok' }], toolIndex: {}, thinking: null, reply: emptyReply(), stats: null, agents: {} },
+  { type: 'compaction', key: 'c3', start: 10, end: 10, coveredMessages: 5, charactersBefore: 1000, charactersAfter: 200, summary: 's3' },
+  { type: 'turn', key: 't4', runIds: ['r1'], start: 11, end: 12, tools: [{ callId: 'a4', name: 'run_command', args: 'test', status: 'ok' }], toolIndex: {}, thinking: null, reply: emptyReply(), stats: null, agents: {} }
+];
+const interleavedDisplay = buildThreadDisplay(interleaved);
+const interleavedCmps = interleavedDisplay.rows.filter(r => r.type === 'compaction-group');
+assert.equal(interleavedCmps.length, 1, '交替压缩与过程回合后，相邻压缩必须再次合并为 1 条分隔线');
+assert.equal(interleavedCmps[0].items.length, 3, '保留全部 3 次压缩计数');
+assert.equal(interleavedDisplay.rows.filter(r => r.type === 'turn').length, 1, '4 段过程回合合并为 1 个操作组');
+assert.equal(interleavedDisplay.rows.find(r => r.type === 'turn').tools.length, 4, '合并保留全部 4 项工具');
+
 console.log('PASS thread-display.test.mjs');

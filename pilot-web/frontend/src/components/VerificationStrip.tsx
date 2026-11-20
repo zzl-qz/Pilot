@@ -20,6 +20,7 @@ export function VerificationStrip() {
   const validation = useStore(state => state.validation);
   const hasRun = useStore(state => state.hasRun);
   const running = useStore(state => state.running);
+  const resumable = useStore(state => (state.thread?.rows || []).some(row => row.type === 'result' && row.resumable && !row.continued));
   const [open, setOpen] = useState(false);
 
   // 换会话时收起：展开状态跟内容走，不跟着组件实例走。
@@ -27,6 +28,8 @@ export function VerificationStrip() {
 
   if (!sessionId) return null;
   if (running) return <RunningStatus />;
+  // 任务中断待续跑时，输入框上方已有「继续执行」主动作条，不再叠放一条「未验证」干扰主操作。
+  if (resumable) return null;
 
   const view = stripView(validation, hasRun, running);
   if (!view.visible) return null;

@@ -1666,10 +1666,14 @@ html[data-theme] .conversation-composer #send.composer-primary:disabled { backgr
   overscroll-behavior: contain;
 }
 .conversation-composer .composer-docks:not(:empty) { margin-bottom: 6px; }
-html[data-theme] .conversation-composer :is(.task-live-controls, .approval-card, .message-queue, .agents-dock) {
+html[data-theme] .conversation-composer :is(.task-live-controls, .approval-card, .message-queue, .agents-dock),
+html[data-theme] .conversation-composer .task-live-controls:not([hidden]) {
   margin: 0;
+  margin-inline: 0;
+  width: 100%;
+  box-sizing: border-box;
   border: 1px solid var(--line-soft);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--bg-soft);
   box-shadow: none;
 }
