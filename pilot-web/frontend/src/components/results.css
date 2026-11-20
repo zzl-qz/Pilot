@@ -8,7 +8,9 @@
 .results-header h1 { font-size: 20px; line-height: 1.4; margin: 0; }
 .results-header p { color: var(--color-text-secondary); margin: 4px 0 0; font-size: 13px; }
 .results-close { flex: none; width: 36px; height: 36px; }
-.results-body { padding: 20px 24px 24px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+/* 标题与工具栏固定，左右两栏各自上下滚动：内容再多也只滚动各自那一栏。 */
+.results-body { flex: 1 1 auto; display: flex; flex-direction: column; padding: 20px 24px 24px; min-height: 0; overflow: hidden; }
+.results-body > :not(.results-layout) { flex: none; }
 .results-toolbar, .results-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .results-toolbar { justify-content: space-between; gap: 12px; }
 .results-count, .results-note { color: var(--color-text-secondary); font-size: 13px; }
@@ -22,10 +24,10 @@
 .result-detail [data-verification-tone='error'] .result-verification-badge { color: var(--err, #b73535); }
 .result-detail [data-verification-tone='muted'] .result-verification-badge { color: var(--color-text-secondary); }
 /* 只列卡片时铺满宽度，选中结果后宽屏分栏、900px 以下切换为单栏阅读。 */
-.results-layout { min-width: 0; }
-.results-layout.has-detail { display: grid; grid-template-columns: minmax(240px, .8fr) minmax(0, 1.2fr); gap: 24px; }
+.results-layout { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); flex: 1 1 auto; min-width: 0; min-height: 0; }
+.results-layout.has-detail { grid-template-columns: minmax(240px, .8fr) minmax(0, 1.2fr); gap: 24px; }
 /* 列表只放固定尺寸卡片：高度一致，标题与摘要按行截断，正文留在详情里。 */
-.results-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; align-content: start; }
+.results-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr)); gap: 12px; align-content: start; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
 .results-list > :not(.result-card) { grid-column: 1 / -1; }
 .result-card {
   display: flex;
@@ -59,7 +61,7 @@
 .result-card-summary { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; color: var(--color-text-secondary); font-size: 12.5px; line-height: 1.5; }
 .result-card-meta { margin-top: auto; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--color-text-secondary); font-size: 11.5px; }
 .result-unread { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin: 0 7px 2px 0; }
-.result-detail { min-width: 0; padding-left: 24px; border-left: 1px solid var(--color-border); font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.result-detail { min-width: 0; min-height: 0; padding-left: 24px; border-left: 1px solid var(--color-border); font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; overflow-y: auto; overscroll-behavior: contain; }
 .result-detail h2 { font-size: 18px; line-height: 1.5; margin: 0 0 8px; }
 .result-detail h3 { font-size: 15px; margin: 24px 0 8px; }
 .result-detail p { margin: 8px 0; }
@@ -87,7 +89,10 @@
 .result-sections { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--color-border); }
 .results-dialog h3[id] { scroll-margin-top: 20px; }
 @media(max-width: 900px) {
-  .results-layout.has-detail { display: block; }
+  /* 窄屏是单栏阅读，回到整页滚动，详情不再各自滚动。 */
+  .results-body { display: block; overflow-y: auto; overscroll-behavior: contain; }
+  .results-layout, .results-layout.has-detail { display: block; min-height: 0; }
+  .results-list, .result-detail { overflow: visible; }
   .results-layout.has-detail .results-list { display: none; }
   .result-detail { border: 0; padding: 0; }
   .results-back { display: inline-flex; margin-bottom: 16px; }

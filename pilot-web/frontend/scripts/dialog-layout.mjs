@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict';
 
-// 模拟长内容，验证滚动只发生在正文，标题与关闭入口始终可见。
-export async function checkDialogLayout(page, { close: closeSelector = '.dialog-close', header = '.schedule-header', body = '.schedule-dialog-body' } = {}) {
+// 模拟长内容，验证滚动只发生在正文（或指定的滚动区），标题与关闭入口始终可见。
+export async function checkDialogLayout(page, { close: closeSelector = '.dialog-close', header = '.schedule-header', body = '.schedule-dialog-body', scroll = body } = {}) {
   const dialog = page.locator('dialog[open]');
   // 弹窗入场会缩放点击区域；等真实动画结束后检查最终布局，而不禁用产品动效。
   await dialog.evaluate(el => Promise.all(el.getAnimations().map(animation => animation.finished.catch(() => {}))));
   const close = dialog.locator(closeSelector);
-  await dialog.locator(body).evaluate(body => {
+  const scroller = dialog.locator(scroll);
+  await scroller.evaluate(scroller => {
     const filler = document.createElement('div');
     filler.dataset.layoutTest = 'true'; filler.style.height = '2000px';
-    body.append(filler); body.scrollTop = 0;
+    scroller.append(filler); scroller.scrollTop = 0;
   });
   const before = await close.boundingBox();
   const bounds = await dialog.boundingBox();
@@ -19,16 +20,16 @@ export async function checkDialogLayout(page, { close: closeSelector = '.dialog-
   const targetSize = page.viewportSize().width <= 560 ? 44 : 36;
   assert.ok(before.width >= targetSize && before.height >= targetSize, '关闭按钮点击区域');
   assert.equal(await dialog.locator(header + ' button').count(), 1, '标题栏只保留关闭操作');
-  await dialog.locator(body).evaluate(body => { body.scrollTop = body.scrollHeight; });
+  await scroller.evaluate(scroller => { scroller.scrollTop = scroller.scrollHeight; });
   try {
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
-    assert.ok(await dialog.locator(body).evaluate(el => el.scrollTop > 0 && el.scrollWidth <= el.clientWidth + 1), '正文独立滚动且无横向溢出');
+    assert.ok(await scroller.evaluate(el => el.scrollTop > 0 && el.scrollWidth <= el.clientWidth + 1), '内容独立滚动且无横向溢出');
     const after = await close.boundingBox();
     assert.ok(Math.abs(after.x - before.x) < 1 && Math.abs(after.y - before.y) < 1, '滚动后关闭按钮位置固定');
     assert.ok(await close.evaluate(el => { const r = el.getBoundingClientRect(); return el.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)); }), '关闭按钮没有被内容遮挡');
     await close.focus(); await page.keyboard.press('Tab');
     assert.ok(await dialog.evaluate(el => el.contains(document.activeElement)), '键盘焦点保留在弹窗内');
   } finally {
-    await dialog.locator(body).evaluate(body => { body.querySelector('[data-layout-test]').remove(); body.scrollTop = 0; });
+    await scroller.evaluate(scroller => { scroller.querySelector('[data-layout-test]').remove(); scroller.scrollTop = 0; });
   }
 }

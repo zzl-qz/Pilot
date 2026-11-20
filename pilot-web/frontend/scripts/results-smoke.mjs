@@ -185,7 +185,8 @@ async function run(page, name, url) {
     await page.setViewportSize({width,height:900}); await page.goto(url+'?preview=1');
     await card().waitFor();
     assert.ok(await page.locator('dialog').evaluate(el=>el.scrollWidth<=el.clientWidth+1));
-    await checkDialogLayout(page, {close:'.results-close',header:'.results-header',body:'.results-body'});
+    // 宽屏列表自己滚动，窄屏是单栏整页滚动；两种都要保证标题与关闭按钮不动。
+    await checkDialogLayout(page, {close:'.results-close',header:'.results-header',body:'.results-body',scroll:width>900?'.results-list':'.results-body'});
     const listBounds=await page.locator('.results-dialog').boundingBox();
     if(name==='chromium') await page.screenshot({path:join(output,`${name}-${width}-list.png`),animations:'disabled',timeout:20000});
     await openCard(); await page.locator('.result-detail h2').waitFor();
@@ -193,6 +194,61 @@ async function run(page, name, url) {
     const detailBounds=await page.locator('.results-dialog').boundingBox();
     assert.ok(Math.abs(detailBounds.y-listBounds.y)<1,'详情不改变弹窗位置');
     if(name==='chromium') await page.screenshot({path:join(output,`${name}-${width}-detail.png`),animations:'disabled',timeout:20000});
+    if(width>900) {
+      const scrollState = () => page.evaluate(() => ({
+        list: document.querySelector('.results-list').scrollTop,
+        detail: document.querySelector('.result-detail').scrollTop,
+        body: document.querySelector('.results-body').scrollTop
+      }));
+      const fill = (selector, mark) => page.locator(selector).evaluate((el, mark) => {
+        const filler = document.createElement('div'); filler.dataset[mark] = 'true'; filler.style.height = '2000px';
+        el.append(filler); el.scrollTop = el.scrollHeight;
+      }, mark);
+      // 左栏与右栏各自上下滚动：内容再多也不带动另一栏和外框。
+      await fill('.results-list', 'listTest');
+      const afterList = await scrollState();
+      assert.ok(afterList.list > 0, '列表超出高度后自己滚动');
+      assert.equal(afterList.detail, 0, '列表滚动不带动详情');
+      assert.equal(afterList.body, 0, '列表滚动不带动外框');
+      if(name==='chromium') await page.screenshot({path:join(output,`${name}-${width}-list-long.png`),animations:'disabled',timeout:20000});
+      await fill('.result-detail', 'detailTest');
+      const afterDetail = await scrollState();
+      assert.ok(afterDetail.detail > 0, '详情超出高度后自己滚动');
+      assert.equal(afterDetail.list, afterList.list, '详情滚动不带动列表');
+      assert.equal(afterDetail.body, 0, '详情滚动不带动外框');
+      await page.evaluate(()=>{
+        for(const filler of document.querySelectorAll('[data-list-test],[data-detail-test]')) filler.remove();
+        document.querySelector('.results-list').scrollTop=0; document.querySelector('.result-detail').scrollTop=0;
+      });
+      // 结果条数变多时左栏自己滚动：标题、筛选、右栏详情都停在原位。
+      const anchored = await page.evaluate(()=>['.results-header','.results-toolbar','.result-detail h2']
+        .map(selector=>{const r=document.querySelector(selector).getBoundingClientRect();return [r.x,r.y];}));
+      await page.evaluate(()=>{ window.rows=[...Array(8)].flatMap((_,i)=>window.rows.map(r=>({...r,id:`${r.id}-${i}`}))); });
+      await refreshResults(); await page.locator('.result-card').nth(9).waitFor();
+      await page.locator('.results-list').evaluate(el=>{el.scrollTop=240;});
+      assert.ok(await page.locator('.results-list').evaluate(el=>el.scrollTop>0),'多条结果时列表自己滚动');
+      const stillThere = await page.evaluate(()=>['.results-header','.results-toolbar','.result-detail h2']
+        .map(selector=>{const r=document.querySelector(selector).getBoundingClientRect();return [r.x,r.y];}));
+      assert.deepEqual(stillThere,anchored,'列表滚动后标题、筛选与详情不动');
+      if(name==='chromium') await page.screenshot({path:join(output,`${name}-${width}-list-many.png`),animations:'disabled',timeout:20000});
+      // 真实滚轮与内容导航同样只作用于各自那一栏。
+      await page.locator('.results-list').hover();
+      await page.mouse.wheel(0, 600);
+      assert.ok(await page.locator('.results-list').evaluate(el=>el.scrollTop>0),'滚轮滚动列表');
+      assert.equal(await page.locator('.result-detail').evaluate(el=>el.scrollTop),0,'滚轮不带动详情');
+      assert.equal(await page.locator('.results-body').evaluate(el=>el.scrollTop),0,'滚轮不带动外框');
+      await page.locator('.result-detail').evaluate(el=>{
+        const filler=document.createElement('div'); filler.dataset.detailTest='true'; filler.style.height='2000px'; el.append(filler);
+      });
+      await page.getByRole('button',{name:'开源参考',exact:true}).click();
+      assert.ok(await page.locator('.result-detail').evaluate(el=>el.scrollTop>0),'内容导航滚动详情');
+      assert.equal(await page.locator('.results-body').evaluate(el=>el.scrollTop),0,'内容导航不带动外框');
+      await page.evaluate(()=>{
+        for(const filler of document.querySelectorAll('[data-list-test],[data-detail-test]')) filler.remove();
+        document.querySelector('.results-list').scrollTop=0; document.querySelector('.result-detail').scrollTop=0;
+      });
+      await page.goto(url+'?preview=1'); await card().waitFor();
+    }
     if(width<=900){
       await page.getByRole('button',{name:'返回结果列表',exact:true}).click();
       assert.equal(await card().evaluate(el=>el===document.activeElement),true,'返回后聚焦原结果');

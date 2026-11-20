@@ -33,6 +33,8 @@ function formatResultTime(value?: string | number | null): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleString();
 }
+// 与 results.css 断点一致：宽屏左右各自滚动，窄屏单栏整页滚动。
+const NARROW = '(max-width: 900px)';
 export default function ResultInbox() {
   const target = useStore(s => s.ui.resultTarget);
   return <InboxDialog target={target} />;
@@ -40,13 +42,14 @@ export default function ResultInbox() {
 function InboxDialog({ target }: { target?: string | null }) {
   const ref = useRef<HTMLDialogElement>(null), alive = useRef(true), request = useRef(0), listRequest = useRef(0);
   const listInFlight = useRef(false);
-  const bodyRef = useRef<HTMLDivElement>(null), detailRef = useRef<HTMLElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null), detailRef = useRef<HTMLElement>(null), listRef = useRef<HTMLElement>(null);
   const rowRefs = useRef(new Map<string, HTMLButtonElement>()), lastRow = useRef<string | null>(null), listScroll = useRef(0);
   const [items, setItems] = useState<S.ResultInboxServiceItem[]>([]), [truncated, setTruncated] = useState(false), [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(target || null), [detail, setDetail] = useState<S.ResultInboxServiceDetail | null>(null), [detailLoading, setDetailLoading] = useState(false);
   const [reload, setReload] = useState(0);
   const [listError, setListError] = useState(''), [hasLoaded, setHasLoaded] = useState(false);
   const [filter, setFilter] = useState('pending'), [error, setError] = useState(''), [busy, setBusy] = useState(false), [preview, setPreview] = useState<S.GitWorktreesPreview | null>(null), [diff, setDiff] = useState<string | null>(null);
+  const listScroller = () => window.matchMedia(NARROW).matches ? bodyRef.current : listRef.current;
   const close = () => useStore.getState().setUi({ resultsOpen: false, resultTarget: null });
   const refresh = useCallback(async (background = false) => {
     // 慢连接下不让每轮轮询使上一轮失效；主动读取仍可取代旧响应。
@@ -72,12 +75,15 @@ function InboxDialog({ target }: { target?: string | null }) {
   useLayoutEffect(() => {
     if (selected) {
       detailRef.current?.focus({ preventScroll: true });
-      if (bodyRef.current && window.matchMedia('(max-width: 900px)').matches) bodyRef.current.scrollTop = 0;
+      // 换一条结果从顶部读：宽屏滚详情那一栏，窄屏滚整页。
+      const top = window.matchMedia(NARROW).matches ? bodyRef.current : detailRef.current;
+      if (top) top.scrollTop = 0;
     } else if (lastRow.current) {
       const destination = rowRefs.current.get(lastRow.current)
         || ref.current?.querySelector<HTMLButtonElement>('[role="radio"][aria-checked="true"]');
       destination?.focus({ preventScroll: true });
-      if (bodyRef.current) bodyRef.current.scrollTop = listScroll.current;
+      const list = listScroller();
+      if (list) list.scrollTop = listScroll.current;
       lastRow.current = null;
     }
   }, [selected]);
@@ -106,6 +112,12 @@ function InboxDialog({ target }: { target?: string | null }) {
     await act(async current => { const updated = required(await api.resultReceipt(item.id, { revision: item.revision, action })); if (current()) { setDetail(d => d && ({ ...d, item: updated })); await refresh(); } });
   }
   const openNotifications = () => { close(); useStore.getState().setUi({ notificationsOpen: true }); };
+  const gotoSection = (key: string) => {
+    const section = detailRef.current?.querySelector<HTMLElement>(`#result-${key}`);
+    // 宽屏滚动详情那一栏，窄屏滚动整页；两者都只在自己内部移动。
+    const box = window.matchMedia(NARROW).matches ? bodyRef.current : detailRef.current;
+    if (section && box) box.scrollTop += section.getBoundingClientRect().top - box.getBoundingClientRect().top - 20;
+  };
   return <Dialog ref={ref} isOpen onOpenChange={next => { if (!next) close(); }} purpose="form" width={1120} maxHeight="calc(100dvh - 48px)" padding={0} className="results-dialog" aria-labelledby="results-title" onKeyDown={e => e.stopPropagation()}>
     <header className="results-header">
       <div><h1 id="results-title">任务收件箱</h1><p>核对执行结果与验证依据，再标记已处理。</p></div>
@@ -128,12 +140,12 @@ function InboxDialog({ target }: { target?: string | null }) {
     {error && <Banner className="results-error" status="error" role="alert" title={error} endContent={<Button label="重新加载详情" isDisabled={busy} onClick={() => { setError(''); setReload(v => v + 1); }} />} />}
     {truncated && <p className="results-note">仅展示最近 500 条结果；更早记录可在原对话查看。</p>}
     <div className={`results-layout${selected ? ' has-detail' : ''}`}>
-      <section className="results-list" aria-label="结果列表" aria-busy={loading}>
+      <section ref={listRef} className="results-list" aria-label="结果列表" aria-busy={loading}>
         {hasLoaded && !loading && !listError && !visible.length && <EmptyState title={`暂无${filter === 'handled' ? '已处理' : filter === 'unread' ? '未读' : filter === 'pending' ? '待处理' : ''}结果`} description={filter === 'all' ? '任务完成或需要处理时，结果会显示在这里。' : '可以切换到全部查看其他结果。'} isCompact />}
         {visible.map(row => {
           const stateLabel = row.handled ? '已处理' : labels[row.state] || row.state || '待查看';
           const timeText = formatResultTime(row.at);
-          return <button key={row.id} ref={node => { if (node) rowRefs.current.set(row.id, node); else rowRefs.current.delete(row.id); }} className={`result-card${row.id === selected ? ' is-selected' : ''}`} disabled={busy} aria-pressed={row.id === selected} onClick={() => { lastRow.current = row.id; listScroll.current = bodyRef.current?.scrollTop || 0; setSelected(row.id); }}>
+          return <button key={row.id} ref={node => { if (node) rowRefs.current.set(row.id, node); else rowRefs.current.delete(row.id); }} className={`result-card${row.id === selected ? ' is-selected' : ''}`} disabled={busy} aria-pressed={row.id === selected} onClick={() => { lastRow.current = row.id; listScroll.current = listScroller()?.scrollTop || 0; setSelected(row.id); }}>
           <span className="result-card-head"><strong className="result-card-title">{!row.read && <span className="result-unread" aria-label="未读" />}{row.title || '未命名任务'}</strong><Badge label={stateLabel} variant={row.state === 'NEEDS_ATTENTION' && !row.handled ? 'warning' : 'neutral'} /></span>
           <small className="result-card-summary">{row.summary || '暂无摘要'}</small>
           <small className="result-card-meta">{row.source === 'SCHEDULE' ? '定时任务' : '对话任务'}{timeText ? ` · ${timeText}` : ''}</small>
@@ -144,7 +156,7 @@ function InboxDialog({ target }: { target?: string | null }) {
         <Button className="results-back" label="返回结果列表" variant="ghost" isDisabled={busy} onClick={() => { lastRow.current = selected; setSelected(null); }} />
         {detailLoading && <p role="status">正在读取详情…</p>}
         {item && detail && <><h2>{item.title || '未命名任务'}</h2><p>{labels[item.state] || item.state} · {item.handled ? '已处理' : '待处理'}</p><p className="result-summary">{item.summary || '暂无摘要，请打开执行对话查看。'}</p>
-          <nav className="result-sections" aria-label="结果内容导航">{[['verification', '验收'], ['changes', '改动'], ...(item.workspace ? [['workspace', '工作区']] : []), ['research', '开源参考']].map(([key, text]) => <Button key={key} label={text} variant="ghost" onClick={() => ref.current?.querySelector(`#result-${key}`)?.scrollIntoView({ block: 'start' })} />)}</nav>
+          <nav className="result-sections" aria-label="结果内容导航">{[['verification', '验收'], ['changes', '改动'], ...(item.workspace ? [['workspace', '工作区']] : []), ['research', '开源参考']].map(([key, text]) => <Button key={key} label={text} variant="ghost" onClick={() => gotoSection(key)} />)}</nav>
           <h3 id="result-verification">验收与验证</h3><p data-verification-phase={detail.verification} data-verification-tone={verificationTone(detail.verification)}><span className="result-verification-badge">{verificationLabel(detail.verification)}</span>{verificationHint(detail.verification) && <span className="results-note">{verificationHint(detail.verification)}</span>}</p>
           {verificationNeedsRerun(detail.verification) && <Button label="重新验证" isDisabled={busy} onClick={() => act(async () => { await useStore.getState().activate(item.sessionId); await useStore.getState().submitInput(reverifyPrompt(verificationHint(detail.verification))); close(); })} />}
           {detail.verificationDetail && <p className="results-note">{detail.verificationDetail}</p>}
