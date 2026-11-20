@@ -43,9 +43,10 @@ final class ModelHttp {
     }
 
     static HttpRequest.Builder jsonPost(URI endpoint, Duration timeout, ObjectMapper mapper, Map<String, Object> body) {
+        Object ordered = CanonicalJson.ordered(body);
+        ModelRequestDumper.recordIfEnabled(endpoint, mapper, ordered);
         return HttpRequest.newBuilder(endpoint).header("Content-Type", "application/json").timeout(timeout)
-            .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(CanonicalJson.ordered(body)),
-                StandardCharsets.UTF_8));
+            .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(ordered), StandardCharsets.UTF_8));
     }
 
     static JsonNode parseJson(ObjectMapper mapper, String body) {

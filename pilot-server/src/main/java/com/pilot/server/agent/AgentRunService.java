@@ -1547,9 +1547,11 @@ public class AgentRunService implements RunStarter {
                 publish(sessionId, runId, runUsage.request(report));
             }
         };
-        ModelClient measuredMain = new MeteredModelClient(modelClient, sessionId, "main", promptSources, reports);
+        ModelClient measuredMain = new MeteredModelClient(modelClient, sessionId, "main", promptSources, reports)
+            .withRunContext(sessionId, runId);
         ModelClient measuredChild =
-            new MeteredModelClient(modelClient, sessionId + ":subagent", "subagent", List.of(), reports);
+            new MeteredModelClient(modelClient, sessionId + ":subagent", "subagent", List.of(), reports)
+                .withRunContext(sessionId, runId);
         AgentLoop.Config config =
             new AgentLoop.Config(properties.maxSteps(), properties.repeatRemindAt(), properties.repeatAbortAt(),
                 promptSources.stream().map(ContextComposition.Source::text)

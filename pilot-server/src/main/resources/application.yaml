@@ -165,3 +165,6 @@ pilot:
     validation-days: ${PILOT_RETENTION_VALIDATION_DAYS:0}
     # 仅清理已超过 N 天且没有所属会话的附件目录；在册会话的附件保留。
     attachments-days: ${PILOT_RETENTION_ATTACHMENTS_DAYS:0}
+  debug:
+    # 完整模型请求脱敏落盘开关（仅用于单步排障与反事实重放），默认关闭、无额外磁盘开销。
+    dump-model-requests: ${PILOT_DEBUG_DUMP_MODEL_REQUESTS:false}

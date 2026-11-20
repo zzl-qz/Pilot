@@ -24,6 +24,8 @@ public final class MeteredModelClient implements ModelClient {
     private final Consumer<RequestReport> sink;
     private final ConcurrentHashMap<String, Baseline> previous = new ConcurrentHashMap<>();
     private volatile String previousModel;
+    private volatile String traceSessionId = "";
+    private volatile String traceRunId = "";
 
     private record Baseline(String model, String tools, List<String> messages) {
     }
@@ -35,6 +37,13 @@ public final class MeteredModelClient implements ModelClient {
         this.purpose = purpose;
         this.sources = sources == null ? List.of() : List.copyOf(sources);
         this.sink = sink;
+    }
+
+    /** 绑定当前会话与运行 ID，供调试级完整请求落盘按 sessionId/runId 归档（默认关闭时无额外开销）。 */
+    public MeteredModelClient withRunContext(String sessionId, String runId) {
+        this.traceSessionId = sessionId == null ? "" : sessionId;
+        this.traceRunId = runId == null ? "" : runId;
+        return this;
     }
 
     /** 观察一次已获准的请求用量。预算和请求用途由调用方决定。 */
@@ -151,7 +160,7 @@ public final class MeteredModelClient implements ModelClient {
                     reasoning.accept(value);
                 }
             };
-            response = ModelRequestScope.within(null, group, false,
+            response = ModelRequestScope.within(actualPurpose, group, false, traceSessionId, traceRunId,
                 () -> streaming ? target.chat(messages, tools, onText, onReasoning) : target.chat(messages, tools));
             status = "completed";
             return response;
