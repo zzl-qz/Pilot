@@ -754,6 +754,7 @@ export function Composer() {
         <AgentDock />
         {/* 验证结论放在输入框容器内侧：和输入框同宽，不会比它更靠外。 */}
         <VerificationStrip />
+        <ComposerChangesStrip />
       </div>
       {/* 附件单独一排，排在输入框上方外侧：不挤占正文宽度，也不被输入框边框包住 */}
       <div className="composer-attachments" ref={railRef} hidden aria-label="待发送的附件" />
@@ -1015,6 +1016,61 @@ function AgentDock() {
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+/** 改动文件汇总条：审阅面板收起且工作区有变更时显示，点击文件名或操作按钮直达 diff。 */
+function ComposerChangesStrip() {
+  const files = useStore((state) => state.changeReport?.files);
+  const inspectorOpen = useStore((state) => state.ui.inspectorOpen);
+  const embedded = useStore((state) => state.embeddedSessionId);
+  if (embedded || inspectorOpen || !files || !files.length) return null;
+  let added = 0;
+  let removed = 0;
+  for (const file of files) {
+    added += Number(file.added) || 0;
+    removed += Number(file.removed) || 0;
+  }
+  const openReview = (filePath?: string) => {
+    const target = filePath || files[0]?.path || '';
+    useStore.getState().setUi({ inspectorOpen: true, inspectorTab: 'changes', changeView: target });
+  };
+  const visibleFiles = files.slice(0, 3);
+  const extraCount = files.length - visibleFiles.length;
+  return (
+    <div id="composer-changes-strip" className="composer-changes-strip" role="region" aria-label="本次工作区改动汇总">
+      <div className="composer-changes-summary">
+        <span className="composer-changes-dot" aria-hidden="true" />
+        <span className="composer-changes-count">{files.length} 个文件改动</span>
+        {(added > 0 || removed > 0) && (
+          <span className="composer-changes-diff" aria-label={`新增 ${added} 行，删除 ${removed} 行`}>
+            {added > 0 && <span className="diff-add">+{added}</span>}
+            {removed > 0 && <span className="diff-del">-{removed}</span>}
+          </span>
+        )}
+      </div>
+      <div className="composer-changes-files">
+        {visibleFiles.map((file) => {
+          const base = String(file.path || '').split(/[\\/]/).filter(Boolean).pop() || file.path;
+          return (
+            <button
+              key={file.path}
+              type="button"
+              className="composer-change-chip"
+              title={file.path}
+              onClick={() => openReview(file.path)}
+            >
+              <span className="composer-change-chip-name">{base}</span>
+            </button>
+          );
+        })}
+        {extraCount > 0 && <span className="composer-changes-more">+{extraCount}</span>}
+      </div>
+      <button type="button" className="composer-changes-action" onClick={() => openReview()}>
+        审阅改动
+        <span aria-hidden="true">→</span>
+      </button>
     </div>
   );
 }

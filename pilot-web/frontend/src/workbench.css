@@ -1003,3 +1003,39 @@ html[data-theme] .task-live-controls > .btn { min-height: 28px; }
 .mobile-completion-actions .btn, .mobile-device-footer .btn { min-height: 44px; }
 .mobile-device-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; }
 .mobile-device-footer p { flex: 1 1 220px; }
+
+/* 顶栏审阅按钮变动数角标：未展开审阅面板时一眼识别存在未审阅文件改动。 */
+html[data-theme] .workbench-review .review-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  font: 600 11px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+html[data-theme="light"] .workbench-review .review-count-badge {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+html[data-theme] .workbench-review.has-changes {
+  position: relative;
+}
+@media (max-width: 960px) {
+  html[data-theme] .workbench-review .review-count-badge {
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 3px;
+    margin-left: 0;
+    font-size: 10px;
+    background: var(--accent);
+    color: #fff;
+  }
+}

@@ -73,6 +73,7 @@ function Workbench() {
   const reviewExpanded = useStore(state => state.ui.reviewExpanded && state.ui.inspectorOpen && state.ui.inspectorTab === 'changes');
   const inspectorOpen = useStore((state) => state.ui.inspectorOpen);
   const inspectorTab = useStore((state) => state.ui.inspectorTab);
+  const changeCount = useStore((state) => state.changeReport?.files?.length || 0);
   const embedded = useStore((state) => state.embeddedSessionId);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [narrowViewport, setNarrowViewport] = useState(() => window.matchMedia('(max-width: 960px)').matches);
@@ -385,16 +386,24 @@ function Workbench() {
             {!embedded && (
               <Button
                 id="toggle-activity"
-                className="workbench-control workbench-review"
+                className={`workbench-control workbench-review${changeCount > 0 ? ' has-changes' : ''}`}
                 label="切换审阅面板"
                 icon={<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v9h-11zM9.5 3.5v9" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinejoin="round" /></svg>}
                 isIconOnly={narrowViewport}
                 variant={inspectorOpen ? 'secondary' : 'ghost'}
                 aria-pressed={inspectorOpen}
-                tooltip={`审阅面板 (${shortcut('J')})`}
-                onClick={() => useStore.getState().setUi((ui) => ({ inspectorOpen: !ui.inspectorOpen }))}
+                tooltip={changeCount > 0 ? `审阅面板 · ${changeCount} 个文件改动 (${shortcut('J')})` : `审阅面板 (${shortcut('J')})`}
+                onClick={() => useStore.getState().setUi((ui) => {
+                  if (!ui.inspectorOpen && changeCount > 0) return { inspectorOpen: true, inspectorTab: 'changes' };
+                  return { inspectorOpen: !ui.inspectorOpen };
+                })}
               >
                 审阅
+                {changeCount > 0 && (
+                  <span className="review-count-badge" aria-label={`${changeCount} 个文件改动`}>
+                    {changeCount > 99 ? '99+' : changeCount}
+                  </span>
+                )}
               </Button>
             )}
           </div>
