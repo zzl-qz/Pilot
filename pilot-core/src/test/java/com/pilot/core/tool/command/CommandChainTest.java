@@ -70,4 +70,35 @@ class CommandChainTest {
         assertEquals("'it'\\''s'", CommandChain.quote("it's"));
         assertEquals("'a b'", CommandChain.quote("a b"));
     }
+
+    @Test
+    void handlesEscapedQuotesAndBackslashesInsideDoubleQuotesOnly() {
+        // 真实复现场景：grep BRE 正则中同时含转义双引号 \" 与分支 \|，不能提前闭合引号或误拆分管道
+        CommandChain.Parsed grep =
+            CommandChain.parse("grep -l \"failures=\\\"[1-9]\\|errors=\\\"[1-9]\" target/surefire-reports/*.xml");
+        assertNull(grep.error());
+        assertFalse(grep.chained());
+        assertEquals(List.of("grep", "-l", "failures=\"[1-9]\\|errors=\"[1-9]", "target/surefire-reports/*.xml"),
+            grep.segments().getFirst().tokens());
+
+        // Windows 路径与普通正则反斜杠原样保留，仅 \" 与 \\ 生效；末尾 \\ 不误吞闭合引号
+        CommandChain.Parsed winAndEscapes =
+            CommandChain.parse("echo \"C:\\Users\\alice\\file.txt\" \"dir\\\\\" \"a\\\\\\\"b\"");
+        assertNull(winAndEscapes.error());
+        assertEquals(List.of("echo", "C:\\Users\\alice\\file.txt", "dir\\", "a\\\"b"),
+            winAndEscapes.segments().getFirst().tokens());
+
+        // 单引号内所有字符严格字面量，不解析反斜杠转义
+        CommandChain.Parsed single = CommandChain.parse("echo 'a \\\" b \\\\ c'");
+        assertNull(single.error());
+        assertEquals(List.of("echo", "a \\\" b \\\\ c"), single.segments().getFirst().tokens());
+
+        // 重定向目标的双引号转义同样生效
+        CommandChain.Parsed redirect = CommandChain.parse("echo hi > \"out \\\"1\\\".txt\"");
+        assertNull(redirect.error());
+        assertEquals("out \"1\".txt", redirect.segments().getFirst().redirectTo());
+
+        // 末尾只有转义双引号 \" 时引号仍未闭合，必须报错
+        assertNotNull(CommandChain.parse("echo \"unterminated \\\"").error());
+    }
 }

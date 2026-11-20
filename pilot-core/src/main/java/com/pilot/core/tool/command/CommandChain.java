@@ -6,7 +6,8 @@ import java.util.List;
 /**
  * 把一条命令行解析成「命令段 + 连接符」，只认 {@code && || ; |} 四种连接符。
  *
- * <p>解析是 run_command 安全模型的第一道门：引号内的任何字符都是字面量；引号外的
+ * <p>解析是 run_command 安全模型的第一道门：单引号内的任何字符都是字面量；双引号内除
+ * {@code \"} 与 {@code \\} 转义外均为字面量（保留正则 {@code \|} 与 Windows 路径反斜杠）；引号外的
  * 命令替换、后台符、换行一律拒绝（括号只是普通字符，不会形成子 shell）。输出重定向只记下目标，
  * 由调用方确认落在工作区内。解析结果不再交给 shell 做二次解释——
  * 单条命令直接以参数数组启动，多条命令由调用方把每个词重新加单引号后拼成脚本，
@@ -53,7 +54,9 @@ final class CommandChain {
         for (int i = 0; i < length; i++) {
             char ch = raw.charAt(i);
             if (quote != 0) {
-                if (ch == quote) {
+                if (isDoubleQuoteEscape(quote, raw, i)) {
+                    current.append(raw.charAt(++i));
+                } else if (ch == quote) {
                     quote = 0;
                 } else {
                     current.append(ch);
@@ -120,11 +123,23 @@ final class CommandChain {
                     String target;
                     if (raw.charAt(cursor) == '"' || raw.charAt(cursor) == '\'') {
                         char mark = raw.charAt(cursor);
-                        int end = raw.indexOf(mark, cursor + 1);
+                        StringBuilder targetBuf = new StringBuilder();
+                        int end = -1;
+                        for (int p = cursor + 1; p < length; p++) {
+                            char tc = raw.charAt(p);
+                            if (isDoubleQuoteEscape(mark, raw, p)) {
+                                targetBuf.append(raw.charAt(++p));
+                            } else if (tc == mark) {
+                                end = p;
+                                break;
+                            } else {
+                                targetBuf.append(tc);
+                            }
+                        }
                         if (end < 0) {
                             return Parsed.error("引号没有闭合");
                         }
-                        target = raw.substring(cursor + 1, end);
+                        target = targetBuf.toString();
                         cursor = end + 1;
                     } else {
                         int end = cursor;
@@ -202,6 +217,15 @@ final class CommandChain {
             return Parsed.error("单次最多 " + MAX_SEGMENTS + " 条命令串联，请拆开执行");
         }
         return new Parsed(List.copyOf(segments), List.copyOf(operators), null);
+    }
+
+    /** 双引号内仅将 {@code \"} 与 {@code \\} 视为转义，其余反斜杠按字面保留以兼容正则与 Windows 路径。 */
+    static boolean isDoubleQuoteEscape(char quote, String raw, int index) {
+        if (quote != '"' || raw.charAt(index) != '\\' || index + 1 >= raw.length()) {
+            return false;
+        }
+        char next = raw.charAt(index + 1);
+        return next == '"' || next == '\\';
     }
 
     /** POSIX 单引号转义：词内的单引号写成 {@code '\''}。 */

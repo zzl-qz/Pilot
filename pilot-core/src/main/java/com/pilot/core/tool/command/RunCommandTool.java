@@ -1194,7 +1194,9 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         for (int i = 0; i < raw.length(); i++) {
             char ch = raw.charAt(i);
             if (quote != 0) {
-                if (ch == quote) {
+                if (CommandChain.isDoubleQuoteEscape(quote, raw, i)) {
+                    current.append(raw.charAt(++i));
+                } else if (ch == quote) {
                     quote = 0;
                 } else {
                     current.append(ch);
