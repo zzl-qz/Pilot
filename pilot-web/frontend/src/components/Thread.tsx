@@ -19,7 +19,19 @@ import { api, apiFetch } from '../api.js';
 import { historyPrefetchDistance } from '../lib/history.js';
 import { MarkdownBody } from './MarkdownBody.jsx';
 import { StructuredDocumentView, isStructuredDocumentFormat } from './StructuredDocumentView.jsx';
-import { TOOL_STATUS_TITLES, formatLatency, parseAsk, questionChoice, toolArgsText, toolLabel } from '../lib/tool-meta.js';
+import {
+  TOOL_STATUS_TITLES,
+  computeToolSpanSeconds,
+  extractFileMeta,
+  formatLatency,
+  formatProcessDuration,
+  parseAsk,
+  parseToolDisplay,
+  questionChoice,
+  summarizeActiveTool,
+  toolLabel,
+  type ToolIconKind
+} from '../lib/tool-meta.js';
 import { agentMeta, agentTitle, manifestFacts, splitSubagentResult, summarizeAgents, agentStatusLabel, agentStatusDotVariant } from '../lib/agents.js';
 import { splitAttachmentMarkers, layoutMessageParts, attachmentUrl, isImageAttachment, fileBadge, formatBytes } from '../lib/attachments.js';
 import { parseDiff } from '../lib/diff.js';
@@ -303,8 +315,10 @@ function EmptyState() {
                       state.composerApi?.appendText((state.composerApi.getText().trim() ? '\n' : '') + item.prompt);
                       state.composerApi?.focus();
                     }}>
-                    <span className="conversation-prompt-title">{item.title}</span>
-                    <span className="conversation-prompt-note">{item.sub}</span>
+                    <span className="conversation-prompt-copy">
+                      <span className="conversation-prompt-title">{item.title}</span>
+                      <span className="conversation-prompt-note">{item.sub}</span>
+                    </span>
                   </Button>
                 </li>
               ))}
@@ -530,12 +544,261 @@ function AttachmentPreview({ file, onClose }: { file: MessageAttachment; onClose
   </Dialog>;
 }
 
-/* ---------- 回合（操作组 + 思考 + 回复 + 统计） ---------- */
+/* ---------- 回合（思考 + 操作组 + 子智能体 + 回复 + 统计） ---------- */
+
+function ProcessChevron() {
+  return (
+    <svg className="process-chevron-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m6 3.5 4.5 4.5L6 12.5" />
+    </svg>
+  );
+}
+
+function ProcessKindIcon({ kind }: { kind: ToolIconKind }) {
+  let content: React.ReactNode;
+  switch (kind) {
+    case 'java':
+      content = (
+        <>
+          <path d="M4.2 7.2h6.2v2.7a2.8 2.8 0 0 1-2.8 2.8H7a2.8 2.8 0 0 1-2.8-2.8V7.2Z" />
+          <path d="M10.4 8h1.1a1.3 1.3 0 0 1 0 2.6h-1.1" />
+          <path d="M6.2 4.8c0-.7.7-1 .7-1.7M8.5 4.8c0-.7.7-1 .7-1.7" />
+          <path d="M3.6 13.8h7.6" />
+        </>
+      );
+      break;
+    case 'markdown':
+      content = (
+        <>
+          <path d="M2.4 11.4V4.8l2.5 3.1 2.5-3.1v6.6" />
+          <path d="M11.6 4.8v6.2m-2-2 2 2 2-2" />
+        </>
+      );
+      break;
+    case 'typescript':
+    case 'javascript':
+    case 'python':
+    case 'code':
+      content = <path d="m5.4 5.2-2.9 2.8 2.9 2.8m5.2-5.6 2.9 2.8-2.9 2.8M9 3.6 7 12.4" />;
+      break;
+    case 'style':
+      content = <path d="M6 3 4.6 13M11.4 3 10 13M3 6.2h10M2.6 9.8h10" />;
+      break;
+    case 'json':
+      content = <path d="M5.6 3.2c-1 0-1.4.5-1.4 1.4v1.8c0 .8-.4 1.3-1.2 1.6.8.3 1.2.8 1.2 1.6v1.8c0 .9.4 1.4 1.4 1.4M10.4 3.2c1 0 1.4.5 1.4 1.4v1.8c0 .8.4 1.3 1.2 1.6-.8.3-1.2.8-1.2 1.6v1.8c0 .9-.4 1.4-1.4 1.4" />;
+      break;
+    case 'markup':
+      content = <path d="m5.5 4.8-3 3.2 3 3.2m5-6.4 3 3.2-3 3.2" />;
+      break;
+    case 'shell':
+    case 'terminal':
+      content = <path d="m3.5 5 3.2 3-3.2 3M8.2 11h4.3" />;
+      break;
+    case 'search':
+      content = (
+        <>
+          <circle cx="7.2" cy="7.2" r="4.2" />
+          <path d="m10.5 10.5 2.7 2.7" />
+        </>
+      );
+      break;
+    case 'folder':
+      content = <path d="M2.4 4.4h3.7l1.5 1.5h6v6.5H2.4Z" />;
+      break;
+    case 'browser':
+      content = (
+        <>
+          <circle cx="8" cy="8" r="5.4" />
+          <path d="M2.8 8h10.4M8 2.6a8 8 0 0 1 0 10.8M8 2.6a8 8 0 0 0 0 10.8" />
+        </>
+      );
+      break;
+    case 'plan':
+      content = <path d="m3 5 1.3 1.3L6.6 4M8.4 5.2H13M3 9.2l1.3 1.3L6.6 8.2M8.4 9.4H13M8.4 12.6H13" />;
+      break;
+    case 'agent':
+      content = (
+        <>
+          <circle cx="8" cy="3.8" r="1.6" />
+          <circle cx="4" cy="11.8" r="1.6" />
+          <circle cx="12" cy="11.8" r="1.6" />
+          <path d="M7.2 5.2 4.8 10.4M8.8 5.2l2.4 5.2" />
+        </>
+      );
+      break;
+    case 'file':
+    default:
+      content = <path d="M4.2 2.4h5l3.2 3.2v8H4.2Z M9.2 2.4v3.2h3.2" />;
+      break;
+  }
+  return (
+    <svg className={`process-kind-icon is-${kind}`} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {content}
+    </svg>
+  );
+}
+
+type ScrollFade = 'none' | 'top' | 'bottom' | 'both';
+
+/**
+ * 限高可滑动容器：默认由父级折叠，展开后限制最大高度并支持内部下拉滚动；
+ * 顶部 / 底部在可滚动方向显示柔和渐隐遮罩，流式输出时仅在贴底状态跟随，用户上翻立刻放手。
+ */
+function ProcessScrollViewport({
+  active,
+  className,
+  autoFollow = false,
+  followKey,
+  focusSelector,
+  tabIndex,
+  children
+}: {
+  active: boolean;
+  className: string;
+  autoFollow?: boolean;
+  followKey?: unknown;
+  focusSelector?: string;
+  tabIndex?: number;
+  children: React.ReactNode;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const thumbRef = useRef<HTMLDivElement>(null);
+  const following = useRef(true);
+  const [fade, setFade] = useState<ScrollFade>('none');
+  const [scrollable, setScrollable] = useState(false);
+
+  const measureScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const maxScroll = el.scrollHeight - el.clientHeight;
+    const overflow = maxScroll > 2;
+    const top = overflow && el.scrollTop > 2;
+    const bottom = overflow && maxScroll - el.scrollTop > 2;
+    const next: ScrollFade = top && bottom ? 'both' : top ? 'top' : bottom ? 'bottom' : 'none';
+    setFade((prev) => (prev === next ? prev : next));
+    setScrollable((prev) => (prev === overflow ? prev : overflow));
+    const thumb = thumbRef.current;
+    const track = trackRef.current;
+    if (thumb && track && overflow) {
+      const trackHeight = Math.max(0, track.clientHeight || el.clientHeight - 12);
+      const thumbHeight = Math.max(28, Math.min(trackHeight, Math.round((el.clientHeight / el.scrollHeight) * trackHeight)));
+      const travel = Math.max(0, trackHeight - thumbHeight);
+      const thumbTop = Math.round((el.scrollTop / maxScroll) * travel);
+      thumb.style.height = `${thumbHeight}px`;
+      thumb.style.transform = `translateY(${thumbTop}px)`;
+    }
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!active) return undefined;
+    if (autoFollow) following.current = true;
+    const el = scrollRef.current;
+    const inner = innerRef.current;
+    measureScroll();
+    const frame = requestAnimationFrame(measureScroll);
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measureScroll) : null;
+    if (el) observer?.observe(el);
+    if (inner) observer?.observe(inner);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+    };
+  }, [active, autoFollow, measureScroll]);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !active) return;
+    if (autoFollow && following.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+    measureScroll();
+  }, [active, autoFollow, followKey, measureScroll]);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !active || !focusSelector) return;
+    const target = el.querySelector<HTMLElement>(focusSelector);
+    if (!target) return;
+    const view = el.getBoundingClientRect();
+    const box = target.getBoundingClientRect();
+    if (box.top < view.top || box.bottom > view.bottom) {
+      const offset = box.top - view.top + el.scrollTop;
+      el.scrollTop = Math.max(0, offset - Math.max(16, (el.clientHeight - box.height) / 2));
+      measureScroll();
+    }
+  }, [active, focusSelector, measureScroll]);
+
+  const handleScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    const el = event.currentTarget;
+    following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 18;
+    measureScroll();
+  }, [measureScroll]);
+
+  const handleThumbPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const el = scrollRef.current;
+    const track = trackRef.current;
+    const thumb = thumbRef.current;
+    if (!el || !track || !thumb) return;
+    const maxScroll = el.scrollHeight - el.clientHeight;
+    if (maxScroll <= 2) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const startY = event.clientY;
+    const startScrollTop = el.scrollTop;
+    const travel = Math.max(1, track.clientHeight - thumb.offsetHeight);
+    const pointerId = event.pointerId;
+    thumb.setPointerCapture?.(pointerId);
+    thumb.dataset.dragging = 'true';
+    const onMove = (move: PointerEvent) => {
+      el.scrollTop = startScrollTop + ((move.clientY - startY) / travel) * maxScroll;
+    };
+    const onEnd = () => {
+      delete thumb.dataset.dragging;
+      thumb.releasePointerCapture?.(pointerId);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onEnd);
+      window.removeEventListener('pointercancel', onEnd);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onEnd);
+    window.addEventListener('pointercancel', onEnd);
+  }, []);
+
+  const handleTrackPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const el = scrollRef.current;
+    const track = trackRef.current;
+    const thumb = thumbRef.current;
+    if (!el || !track || !thumb || event.target === thumb) return;
+    const maxScroll = el.scrollHeight - el.clientHeight;
+    if (maxScroll <= 2) return;
+    const rect = track.getBoundingClientRect();
+    const travel = Math.max(1, rect.height - thumb.offsetHeight);
+    const offset = event.clientY - rect.top - thumb.offsetHeight / 2;
+    el.scrollTop = Math.max(0, Math.min(1, offset / travel)) * maxScroll;
+  }, []);
+
+  return (
+    <div className="process-scroll-shell" data-fade={fade} data-scrollable={scrollable ? 'true' : 'false'}>
+      <div className={className} ref={scrollRef} tabIndex={tabIndex} onScroll={handleScroll}>
+        <div className="process-scroll-content" ref={innerRef}>
+          {children}
+        </div>
+      </div>
+      <div className="process-scroll-track" ref={trackRef} aria-hidden="true" onPointerDown={handleTrackPointerDown}>
+        <div className="process-scroll-thumb" ref={thumbRef} onPointerDown={handleThumbPointerDown} />
+      </div>
+    </div>
+  );
+}
 
 const Turn = memo(function Turn({ row, isLast }: { row: TurnRow; isLast: boolean }) {
   // 正文 = 已落库的 delta + 还在路上的 preview；两者不能都拼进 text（会重复）
   const replyText = `${row.reply.text || ''}${row.reply.preview || ''}`;
   const running = useStore((state) => state.running);
+  const agentCount = Object.keys(row.agents || {}).length;
+  const hasProcess = Boolean(row.thinking) || row.tools.length > 0 || agentCount > 0;
   /*
    * 「重新生成」走 /regenerate：后端用上一条用户输入重跑，历史里不会多一条重复的用户消息。
    * 只在最后一轮、且没有任务在跑时给入口，避免对中间轮次重放出错乱的历史。
@@ -543,9 +806,13 @@ const Turn = memo(function Turn({ row, isLast }: { row: TurnRow; isLast: boolean
   const canRegenerate = isLast && !running && !row.reply.live && Boolean(replyText);
   return (
     <div className="turn-shell" data-run={row.runIds?.join(',') || undefined}>
-      {row.tools.length > 0 && <ToolGroup tools={row.tools} />}
-      {row.thinking && <ThinkingBlock thinking={row.thinking} />}
-      <AgentGroup agents={row.agents} />
+      {hasProcess && (
+        <div className="turn-process">
+          {row.thinking && <ThinkingBlock thinking={row.thinking} />}
+          {row.tools.length > 0 && <ToolGroup tools={row.tools} />}
+          <AgentGroup agents={row.agents} />
+        </div>
+      )}
       {(replyText || row.reply.live) && (
         <article className={`msg msg-assistant${row.reply.live ? ' is-streaming' : ''}`}>
           <header className="conversation-reply-head">
@@ -564,14 +831,14 @@ const Turn = memo(function Turn({ row, isLast }: { row: TurnRow; isLast: boolean
           {replyText && <div className="bubble"><MarkdownBody text={replyText} /></div>}
         </article>
       )}
-      <TurnStats stats={row.stats} reports={row.requests} agentCount={Object.keys(row.agents || {}).length} />
+      <TurnStats stats={row.stats} reports={row.requests} agentCount={agentCount} />
     </div>
   );
 });
 
 /**
  * 操作组单独 memo：流式输出时只有 reply 在变，tools 数组引用不变，这一整块（可能几十行）
- * 直接跳过比对。旧实现靠命令式只改几个节点，React 这边靠这个切分拿到同样的代价。
+ * 直接跳过比对。默认收起为单行摘要，展开后在固定最大高度内滚动，不把对话拉成无限高度。
  */
 const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] }) {
   const sessionLive = useStore(state => state.running);
@@ -583,25 +850,51 @@ const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] }) {
   });
   const needsAttention = attention.length > 0;
   const failed = attention.some(tool => tool.status === 'error');
-  const ref = useRef<HTMLDetailsElement>(null);
-  // 需要处理时提示一次，流式更新不冲掉用户手动展开的状态。
+  const hasActiveAsk = sessionLive && tools.some(tool => tool.status === 'run' && tool.name === 'ask_user' && Boolean(parseAsk(tool.args)));
+  const shouldReveal = needsAttention || hasActiveAsk;
+  const [open, setOpen] = useState(shouldReveal);
+  const autoOpened = useRef(shouldReveal);
+  useSecondTick(running > 0);
+  // 需要处理（失败/审批/中断/提问）时仅提示一次，不覆盖用户手动收起或展开的选择。
   useEffect(() => {
-    if (ref.current && needsAttention) ref.current.open = true;
-  }, [needsAttention]);
+    if (shouldReveal && !autoOpened.current) {
+      autoOpened.current = true;
+      setOpen(true);
+    }
+  }, [shouldReveal]);
+  const spanSeconds = computeToolSpanSeconds(tools, running > 0);
+  const durationLabel = spanSeconds != null && spanSeconds >= 1 ? formatProcessDuration(spanSeconds) : '';
+  const activePeek = running > 0 ? summarizeActiveTool(tools) : '';
+  const lastTool = tools[tools.length - 1];
   return (
-    <details className="tool-group conversation-tools" ref={ref}>
+    <details
+      className={`tool-group conversation-tools${running > 0 ? ' is-live' : ''}`}
+      open={open}
+      onToggle={event => setOpen(event.currentTarget.open)}
+    >
       <summary className="tool-group-head">
-        <span className="tool-group-chevron" aria-hidden="true" />
+        {running > 0 && !needsAttention && <Spinner size="sm" shade="subtle" aria-hidden="true" />}
         <span className="tool-group-label">{running ? running + ' 项正在执行' : tools.length + ' 项操作'}</span>
+        {durationLabel && <span className="tool-group-duration">{durationLabel}</span>}
         <span className="tool-group-count">{toolCounts(tools)}</span>
-        {needsAttention ? <span className="conversation-tool-attention">
-          <StatusDot variant={failed ? 'error' : 'warning'} label="需要留意" aria-hidden="true" />
-          {attention.length} 项需留意
-        </span> : running > 0 && <Spinner size="sm" shade="subtle" aria-hidden="true" />}
+        {!open && activePeek && <span className="tool-group-peek" title={activePeek}>{activePeek}</span>}
+        {needsAttention && (
+          <span className="conversation-tool-attention">
+            <StatusDot variant={failed ? 'error' : 'warning'} label="需要留意" aria-hidden="true" />
+            {attention.length} 项需留意
+          </span>
+        )}
+        <span className="tool-group-chevron" aria-hidden="true"><ProcessChevron /></span>
       </summary>
-      <div className="tool-group-list">
+      <ProcessScrollViewport
+        active={open}
+        className="tool-group-list"
+        autoFollow={running > 0 && !needsAttention && !hasActiveAsk}
+        followKey={`${tools.length}:${lastTool?.callId ?? ''}:${lastTool?.status ?? ''}`}
+        focusSelector={hasActiveAsk ? '.arb-options' : needsAttention ? '.tool-row.is-attention' : undefined}
+      >
         {tools.map((tool) => <ToolRow key={tool.callId} tool={tool} />)}
-      </div>
+      </ProcessScrollViewport>
     </details>
   );
 });
@@ -622,18 +915,21 @@ function toolCounts(tools: ToolView[]) {
 }
 
 /**
- * 单条操作。展开状态放组件内：每帧被父级重渲染时不会把用户折叠的动作顶回去。
- *
- * <p>跑得久的工具（大目录 grep、npm test）每秒刷一次「执行中 Ns」——光一个不动的
- * 转圈会被当成卡死，用户只能干等。
+ * 单条操作。默认收起为单行摘要，点击后再展开详情；状态放组件内，流式刷新不会顶掉用户折叠状态。
  */
 const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
   const rawBody = String(tool.body || '').trim();
   const [open, setOpen] = useState(['error', 'wait', 'interrupted'].includes(tool.status));
+  const [copied, setCopied] = useState(false);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const userToggled = useRef(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => { if (['error', 'wait', 'interrupted'].includes(tool.status)) setOpen(true); }, [tool.status]);
+  useEffect(() => () => clearTimeout(copyTimer.current), []);
   const sessionLive = useStore(state => state.running);
   const running = tool.status === 'run' && sessionLive;
   const shownStatus = tool.status === 'run' && !sessionLive ? 'interrupted' : tool.status;
+  const attention = ['error', 'wait', 'interrupted'].includes(shownStatus);
   // 协议里失败正文常带 ERROR: 前缀，界面改成「失败：」。
   const body = tool.status === 'error' && /^ERROR:\s*/i.test(rawBody)
     ? rawBody.replace(/^ERROR:\s*/i, '失败：')
@@ -641,24 +937,104 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
   useSecondTick(running);
   const seconds = running ? elapsedSeconds(tool.startedAt, tool.finishedAt) : 0;
   const meta = formatLatency(tool.meta === '未返回结果' ? '' : (tool.meta || ''));
-  const args = toolArgsText(tool.name, tool.args);
+  const display = parseToolDisplay(tool);
   const status = TOOL_STATUS_TITLES[shownStatus] || '状态未知';
-  const Header = body ? 'button' : 'div';
+  const hasDetail = Boolean(body);
+  const Header = hasDetail ? 'button' : 'div';
+  const detailLabel = display.fullTarget
+    ? `${display.fullTarget}${display.lineRange ? ` ${display.lineRange}` : ''}`
+    : `${toolLabel(tool.name)} · ${status.split('：')[0]}`;
+
+  /* 点击展开靠近限高视口底部的行时，只微调内部滚动列表，确保详情立即可见而不牵动外层消息流。 */
+  useLayoutEffect(() => {
+    if (!open || !hasDetail || !userToggled.current) return;
+    userToggled.current = false;
+    const row = rowRef.current;
+    const container = row?.closest<HTMLElement>('.tool-group-list');
+    if (!row || !container) return;
+    const view = container.getBoundingClientRect();
+    const box = row.getBoundingClientRect();
+    if (box.bottom > view.bottom - 12) {
+      const overflow = box.bottom - (view.bottom - 16);
+      const maxAdvance = Math.max(0, box.top - view.top - 12);
+      container.scrollTop += Math.min(overflow, maxAdvance);
+    } else if (box.top < view.top + 8) {
+      container.scrollTop -= (view.top + 12) - box.top;
+    }
+  }, [open, hasDetail]);
+
+  const copyDetail = async () => {
+    const ok = await writeClipboard(body);
+    if (!ok) {
+      useStore.getState().showNotice('复制失败，请手动选择文本');
+      return;
+    }
+    setCopied(true);
+    clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setCopied(false), 1400);
+  };
+
   return (
-    <div className={'tool-row' + (open && body ? ' is-open' : '')}>
-      <Header className="conversation-tool-line" type={body ? 'button' : undefined}
-        aria-expanded={body ? open : undefined} onClick={body ? () => setOpen(value => !value) : undefined}>
-        {body ? <span className="tool-group-chevron" aria-hidden="true" /> : <span aria-hidden="true" />}
+    <div
+      ref={rowRef}
+      className={`tool-row${open && hasDetail ? ' is-open' : ''}${attention ? ' is-attention' : ''}${shownStatus === 'error' ? ' is-error' : ''}${running ? ' is-running' : ''}`}
+    >
+      <Header
+        className="conversation-tool-line"
+        type={hasDetail ? 'button' : undefined}
+        aria-expanded={hasDetail ? open : undefined}
+        onClick={hasDetail ? () => { userToggled.current = true; setOpen(value => !value); } : undefined}
+      >
         <span className="conversation-tool-name">{toolLabel(tool.name)}</span>
-        <span className="tool-args" title={args}>{args}</span>
-        <span className={'conversation-tool-state is-' + shownStatus} title={status}>
-          {running ? <Spinner size="sm" shade="subtle" aria-hidden="true" />
-            : shownStatus === 'ok' ? <Icon name="check" /> : <Icon name="info" />}
-          {running && seconds >= 3 ? formatClock(seconds) : status.split('：')[0]}
-        </span>
+        <ProcessKindIcon kind={display.kind} />
+        <span className="tool-args" title={display.fullTarget || undefined}>{display.primary}</span>
+        {display.lineRange && <span className="tool-line-range">{display.lineRange}</span>}
+        {display.diff && (
+          <span className="tool-diff" aria-label={`新增 ${display.diff.added} 行，删除 ${display.diff.removed} 行`}>
+            <span className="tool-diff-add">+{display.diff.added}</span>
+            <span className="tool-diff-del">-{display.diff.removed}</span>
+          </span>
+        )}
+        {display.exitCode != null && (
+          <span className="tool-exit-code">· 退出码 {display.exitCode}</span>
+        )}
+        {(running || attention) && (
+          <span className={'conversation-tool-state is-' + shownStatus} title={status}>
+            {running ? <Spinner size="sm" shade="subtle" aria-hidden="true" /> : <Icon name="info" />}
+            {running && seconds >= 3 ? formatClock(seconds) : status.split('：')[0]}
+          </span>
+        )}
+        {hasDetail && (
+          <span className="tool-row-chevron" aria-hidden="true"><ProcessChevron /></span>
+        )}
         {meta && !running && <span className="tool-meta" title={meta}>{meta}</span>}
       </Header>
-      {open && body && <div className="tool-body"><pre tabIndex={0}>{body}</pre></div>}
+      {open && hasDetail && (
+        <div className="tool-body">
+          <div className="tool-body-bar">
+            <span className="tool-body-target" title={detailLabel}>{detailLabel}</span>
+            <div className="tool-body-actions">
+              {display.filePath && (
+                <button
+                  type="button"
+                  className="tool-body-action"
+                  onClick={() => useStore.getState().openPreview(display.filePath, display.startLine)}
+                >
+                  预览文件
+                </button>
+              )}
+              <button
+                type="button"
+                className={`tool-body-action${copied ? ' is-done' : ''}`}
+                onClick={copyDetail}
+              >
+                {copied ? '已复制' : '复制'}
+              </button>
+            </div>
+          </div>
+          <pre tabIndex={0}>{body}</pre>
+        </div>
+      )}
       {running && <AskChoices tool={tool} />}
     </div>
   );
@@ -691,31 +1067,33 @@ function AskChoices({ tool }: { tool: ToolView }) {
   );
 }
 
-/** 思考块：思考中自动展开并滚到底，正文出来就收起（旧版 settleReasoning）；摘要带秒数和当前动作。 */
+/** 思考块：默认收起为单行摘要，点击后再在限高可滑动区域查看详情；实时思考展开时自动贴底跟随。 */
 const ThinkingBlock = memo(function ThinkingBlock({ thinking }: { thinking: Thinking }) {
-  const ref = useRef<HTMLDetailsElement>(null);
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const following = useRef(true);
+  const [open, setOpen] = useState(false);
   const live = Boolean(thinking.live);
   useSecondTick(live);
-  useLayoutEffect(() => {
-    if (ref.current) ref.current.open = live;
-    if (live) following.current = true;
-  }, [live]);
-  useLayoutEffect(() => {
-    const body = bodyRef.current;
-    if (body && live && following.current) body.scrollTop = body.scrollHeight;
-  }, [thinking.text, live]);
   const seconds = elapsedSeconds(thinking.startedAt, thinking.finishedAt);
   const duration = thinking.startedAt == null || (!live && thinking.finishedAt == null) ? '' : ` ${seconds}s`;
   const action = thinking.action ? ` · ${thinking.action}` : '';
   return (
-    <details className={`think-block${live ? ' is-live' : ''}`} ref={ref}>
-      <summary>{live ? `思考中${duration}${action}` : `已思考${duration}`}</summary>
-      <div className="think-body" ref={bodyRef} tabIndex={0} onScroll={event => {
-        const body = event.currentTarget;
-        following.current = body.scrollHeight - body.scrollTop - body.clientHeight < 12;
-      }}>{thinking.text}</div>
+    <details
+      className={`think-block${live ? ' is-live' : ''}`}
+      open={open}
+      onToggle={event => setOpen(event.currentTarget.open)}
+    >
+      <summary>
+        <span className="think-summary-text">{live ? `思考中${duration}${action}` : `已思考${duration}`}</span>
+        <span className="process-chevron" aria-hidden="true"><ProcessChevron /></span>
+      </summary>
+      <ProcessScrollViewport
+        active={open}
+        className="think-body"
+        autoFollow={live}
+        followKey={thinking.text.length}
+        tabIndex={0}
+      >
+        {thinking.text}
+      </ProcessScrollViewport>
     </details>
   );
 });
@@ -741,12 +1119,24 @@ function elapsedSeconds(startedAt?: number, finishedAt?: number | null) {
 
 const AgentGroup = memo(function AgentGroup({ agents }: { agents: Record<string, AgentView> }) {
   const list = Object.values(agents || {});
+  const [open, setOpen] = useState(false);
   if (!list.length) return null;
   const summary = summarizeAgents(list);
-  return <details className="agent-group">
-    <summary className="agent-group-head"><span className="tool-group-chevron" aria-hidden="true" /><span>{summary.text}</span></summary>
-    <div className="agent-group-list">{list.map(agent => <AgentCard key={agent.id} agent={agent} />)}</div>
-  </details>;
+  return (
+    <details
+      className="agent-group"
+      open={open}
+      onToggle={event => setOpen(event.currentTarget.open)}
+    >
+      <summary className="agent-group-head">
+        <span>{summary.text}</span>
+        <span className="tool-group-chevron" aria-hidden="true"><ProcessChevron /></span>
+      </summary>
+      <ProcessScrollViewport active={open} className="agent-group-list" followKey={list.length}>
+        {list.map(agent => <AgentCard key={agent.id} agent={agent} />)}
+      </ProcessScrollViewport>
+    </details>
+  );
 });
 
 const AgentCard = memo(function AgentCard({ agent }: { agent: AgentView }) {
@@ -762,7 +1152,6 @@ const AgentCard = memo(function AgentCard({ agent }: { agent: AgentView }) {
   return (
     <details className={`tool-group agent-card is-${status || 'stopped'}`}>
       <summary className="tool-group-head agent-head">
-        <span className="tool-group-chevron" aria-hidden="true" />
         <StatusDot variant={agentStatusDotVariant(status)}
           label={agentStatusLabel(status)} aria-hidden="true" />
         <span className="tool-group-label agent-name" title={agent.task}>
@@ -770,23 +1159,34 @@ const AgentCard = memo(function AgentCard({ agent }: { agent: AgentView }) {
         </span>
         <span className="agent-state">{agentStatusLabel(status)}</span>
         <span className="tool-group-count">{agentMeta({ tools, ms, status })}</span>
+        <span className="tool-group-chevron" aria-hidden="true"><ProcessChevron /></span>
       </summary>
       <div className="agent-body">
         <p className="agent-brief">{agent.task}</p>
-        <div className="tool-group-list agent-tools">
-          {(agent.tools || []).map((tool, index) => {
-            const toolStatus = tool.status === 'run' && !sessionLive ? 'interrupted' : tool.status;
-            return (
-              <div key={index} className="tool-row">
-                <div className="conversation-agent-tool">
-                  <span className="conversation-tool-name">{toolLabel(tool.name)}</span>
-                  <span className="tool-args" title={toolArgsText(tool.name, tool.args)}>{toolArgsText(tool.name, tool.args)}</span>
-                  <span className={'conversation-tool-state is-' + toolStatus}>{(TOOL_STATUS_TITLES[toolStatus] || '状态未知').split('：')[0]}</span>
+        {tools > 0 && (
+          <div className="tool-group-list agent-tools">
+            {(agent.tools || []).map((tool, index) => {
+              const toolStatus = tool.status === 'run' && !sessionLive ? 'interrupted' : tool.status;
+              const display = parseToolDisplay(tool);
+              return (
+                <div key={index} className="tool-row">
+                  <div className="conversation-agent-tool">
+                    <span className="conversation-tool-name">{toolLabel(tool.name)}</span>
+                    <ProcessKindIcon kind={display.kind} />
+                    <span className="tool-args" title={display.fullTarget || undefined}>{display.primary}</span>
+                    {display.diff && (
+                      <span className="tool-diff">
+                        <span className="tool-diff-add">+{display.diff.added}</span>
+                        <span className="tool-diff-del">-{display.diff.removed}</span>
+                      </span>
+                    )}
+                    <span className={'conversation-tool-state is-' + toolStatus}>{(TOOL_STATUS_TITLES[toolStatus] || '状态未知').split('：')[0]}</span>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
         {split.text && (
           <>
             <span className="agent-result-label">结论</span>
@@ -856,7 +1256,12 @@ const TurnStats = memo(function TurnStats({ stats, reports, agentCount }: { stat
     priceNote = `含压缩与子代理。可计价 ${priced}/${requests} 次${incomplete}。`;
   }
   return (
-    <details className="turn-stats-detail"><summary>{elapsedLabel ? `${elapsedLabel} · ` : ''}用量详情</summary><div className="turn-stats">
+    <details className="turn-stats-detail">
+      <summary>
+        <span>{elapsedLabel ? `${elapsedLabel} · ` : ''}用量详情</span>
+        <span className="process-chevron" aria-hidden="true"><ProcessChevron /></span>
+      </summary>
+      <div className="turn-stats">
       {elapsedLabel && <span className="turn-stat"><span>耗时</span><b>{elapsedLabel}</b></span>}
       <span className="turn-stat"><span>模型请求</span><b>{stats.modelRequests == null ? '—' : stats.modelRequests + ' 次'}</b></span>
       {agentCount > 0 && <span className="turn-stat"><span>子智能体</span><b>{agentCount} 个</b></span>}
@@ -876,29 +1281,43 @@ const TurnStats = memo(function TurnStats({ stats, reports, agentCount }: { stat
 
 /* ---------- 卡片 ---------- */
 
+function planStatusTone(status?: string) {
+  if (status === 'completed' || status === 'done') return 'completed';
+  if (status === 'in_progress' || status === 'doing' || status === 'running') return 'in_progress';
+  if (status === 'blocked' || status === 'failed') return 'blocked';
+  if (status === 'skipped') return 'skipped';
+  return 'pending';
+}
+
 const PlanCard = memo(function PlanCard({ row }: { row: PlanRow }) {
   const items = (row.items || []).filter(item => (item.step || item.text || '').trim());
   if (!items.length) return null;
   const done = items.filter((item) => item.status === 'completed' || item.status === 'done').length;
   const finished = items.length > 0 && done === items.length;
+  const pct = Math.round((done / items.length) * 100);
   return (
     <aside className={`plan-card${finished ? ' is-complete' : ''}`}>
       <details open={!finished}>
       <summary className="plan-head">
         <span className="plan-title">执行计划</span>
         <span className="plan-progress">{items.length ? `${done}/${items.length}` : ''}</span>
+        <span className="process-chevron" aria-hidden="true"><ProcessChevron /></span>
       </summary>
+      {!finished && <div className="plan-bar" aria-hidden="true"><i style={{ width: `${pct}%` }} /></div>}
       <ol className="plan-list">
-        {items.map((item, index) => (
-          <li key={index} className={`plan-item${item.status === 'blocked' ? ' is-blocked' : ''}${item.status === 'skipped' ? ' is-skipped' : ''}`}>
+        {items.map((item, index) => {
+          const tone = planStatusTone(item.status);
+          return (
+          <li key={index} className={`plan-item is-${tone}`}>
             <span className="plan-index">{index + 1}</span>
             <span className="plan-text" title={item.note || undefined}>{item.step || item.text || ''}</span>
-            <span className={`plan-status is-${item.status || 'pending'}`}>{planStatusLabel(item.status)}</span>
+            <span className={`plan-status is-${tone}`}>{planStatusLabel(item.status)}</span>
             {item.note && (
               <span className="plan-note">{item.note}</span>
             )}
           </li>
-        ))}
+          );
+        })}
       </ol>
       </details>
     </aside>
@@ -919,7 +1338,8 @@ function CompactionCard({ row }: { row: CompactionRow }) {
   return (
     <details className="ctx-card">
       <summary className="ctx-head">
-        较早的对话已折成摘要，点开可以看
+        <span>较早的对话已折成摘要，点开可以看</span>
+        <span className="process-chevron" aria-hidden="true"><ProcessChevron /></span>
       </summary>
       <p className="ctx-note">折叠了 {row.coveredMessages} 条较早消息。字符数 {row.charactersBefore} → {row.charactersAfter}，这只是内部记账。</p>
       <pre className="ctx-body">{row.summary}</pre>
@@ -1153,7 +1573,10 @@ function ChangedFilesCard({ files, canRollback, onOpen, onRollback }: {
               onPointerEnter={(event) => schedulePreview(index, event.currentTarget, event)}
               onPointerLeave={() => armClose()}
             >
-              <span className="changed-path">{file.path}</span>
+              <span className="changed-file-label">
+                <ProcessKindIcon kind={extractFileMeta(file.path).kind} />
+                <span className="changed-path">{file.path}</span>
+              </span>
               <ChangedCounts added={Number(file.added || 0)} removed={Number(file.removed || 0)} />
             </button>
           </li>
@@ -1225,14 +1648,20 @@ function ResultCard({ row, duplicate, hasPrecedingReply = false }: { row: Result
           row.continued || row.resumable || (!settled && files.length > 0)
             ? (
               <details className="turn-card-more">
-                <summary>{row.continued ? '查看错误详情' : '查看运行详情'}</summary>
+                <summary>
+                  <span>{row.continued ? '查看错误详情' : '查看运行详情'}</span>
+                  <span className="process-chevron" aria-hidden="true"><ProcessChevron /></span>
+                </summary>
                 <div className="turn-card-detail"><MarkdownBody text={row.detail} /></div>
               </details>
             )
             : String(row.detail).length > 280
             ? (
               <details className="turn-card-more">
-                <summary>查看结论</summary>
+                <summary>
+                  <span>查看结论</span>
+                  <span className="process-chevron" aria-hidden="true"><ProcessChevron /></span>
+                </summary>
                 <div className="turn-card-detail"><MarkdownBody text={row.detail} /></div>
               </details>
             )

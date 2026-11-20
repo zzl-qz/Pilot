@@ -11,7 +11,9 @@ html[data-theme] .conversation-thread > .thread {
 html[data-theme] .conversation-thread > .thread.is-empty {
   padding-inline: var(--conversation-gutter);
 }
-html[data-theme] .conversation-thread .thread-column { gap: 14px; }
+html[data-theme] .conversation-thread .thread-column { gap: 20px; }
+html[data-theme] .conversation-thread .turn-shell { gap: 8px; }
+html[data-theme] .conversation-thread :is(.turn-shell, .turn-card, .changed-card) + .msg-user { margin-top: 6px; }
 .conversation-thread > .thread:focus-visible { outline: 2px solid var(--ink-2); outline-offset: -2px; }
 .conversation-thread:has(.conversation-latest) { padding-block-end: calc(var(--conversation-control) + 20px); }
 .conversation-thread .conversation-latest {
@@ -31,33 +33,105 @@ html[data-theme] .conversation-thread .thread-column { gap: 14px; }
   outline-offset: -2px;
 }
 
-.conversation-empty { margin: auto; width: min(100%, 520px); padding-block: 16px; color: var(--ink); }
-.conversation-empty .empty-title { margin: 0; font-size: clamp(20px, 2.2vw, 26px); font-weight: 600; }
-html[data-theme] .conversation-empty .empty-sub { max-width: 48ch; margin: 6px 0 18px; line-height: 1.65; }
+.conversation-empty { margin: auto; width: min(100%, 560px); padding-block: 24px; color: var(--ink); }
+.conversation-empty .empty-title {
+  margin: 0;
+  font-size: clamp(22px, 2.3vw, 27px);
+  font-weight: 620;
+  letter-spacing: -0.025em;
+  line-height: 1.25;
+}
+html[data-theme] .conversation-empty .empty-sub {
+  max-width: 50ch;
+  margin: 8px 0 20px;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.65;
+}
 .conversation-scope {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
+  padding: 12px 14px;
   border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  background: var(--bg-soft);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--ink) 2.5%, var(--bg));
   font-size: 13px;
 }
 .conversation-scope > .ui-icon { color: var(--muted); }
 .conversation-scope > div { display: grid; gap: 2px; min-width: 0; }
 .conversation-scope > div > span { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.conversation-prompts { display: grid; padding: 0; margin: 14px 0 10px; list-style: none; }
-.conversation-prompts > li + li { border-top: 1px solid var(--line-soft); }
-.conversation-prompt { justify-content: space-between; min-height: 40px; text-align: start; }
-.conversation-prompt-title { margin-inline-end: 10px; font-weight: 600; }
-.conversation-prompt-note { color: var(--muted); font-size: 12px; font-weight: 400; white-space: normal; }
-html[data-theme] .conversation-empty .empty-keys { display: flex; align-items: center; justify-content: start; flex-wrap: wrap; gap: 6px 14px; margin: 8px 0 0; color: var(--muted); }
-.conversation-empty .empty-keys kbd { margin-inline-end: 2px; color: var(--muted); }
+.conversation-prompts { display: grid; gap: 8px; padding: 0; margin: 16px 0 14px; list-style: none; }
+html[data-theme] .conversation-empty .conversation-prompt {
+  justify-content: space-between;
+  align-items: center;
+  height: auto;
+  min-height: 54px;
+  padding: 10px 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ink) 2%, var(--bg));
+  text-align: start;
+  transition: border-color 0.14s ease, background-color 0.14s ease;
+}
+html[data-theme] .conversation-empty .conversation-prompt:hover {
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--ink) 5%, var(--bg));
+}
+html[data-theme] .conversation-empty .conversation-prompt .ui-icon {
+  color: var(--dim);
+  transition: color 0.14s ease, transform 0.14s ease;
+}
+html[data-theme] .conversation-empty .conversation-prompt:hover .ui-icon {
+  color: var(--muted);
+  transform: translateX(2px);
+}
+.conversation-prompt-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.conversation-prompt-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 560;
+  line-height: 1.35;
+}
+.conversation-prompt-note {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+  white-space: normal;
+}
+html[data-theme] .conversation-empty .empty-keys { display: flex; align-items: center; justify-content: start; flex-wrap: wrap; gap: 8px 16px; margin: 12px 0 0; color: var(--muted); font-size: 11.5px; }
+html[data-theme] .conversation-empty .empty-keys kbd {
+  padding: 1px 5px;
+  margin-inline-end: 3px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--ink) 4%, var(--bg));
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
 
 html[data-theme] .conversation-thread .msg { animation: none; }
-html[data-theme] .conversation-thread .msg-user :is(.bubble, .msg-peek) { border-radius: 10px 10px 3px 10px; }
+html[data-theme] .conversation-thread .msg-user :is(.bubble, .msg-peek) {
+  padding: 10px 15px;
+  border-radius: 16px 16px 4px 16px;
+  font-size: 14px;
+  line-height: 1.62;
+}
+html[data-theme="light"] .conversation-thread .msg-user .bubble {
+  background: #f3f5f8;
+  border-color: #e6eaf0;
+}
 html[data-theme] .conversation-thread .msg-user .msg-actions {
   gap: 2px;
   height: auto;
@@ -96,60 +170,1127 @@ html[data-theme] .conversation-thread .msg-assistant .bubble-md {
   line-height: 1.75;
   color: var(--ink);
 }
-html[data-theme] .conversation-thread .bubble .md-table-wrap { margin-block: 10px; border-radius: 8px; }
+html[data-theme] .conversation-thread .msg-assistant .bubble-md :is(h1, h2, h3, h4) {
+  color: var(--ink);
+  font-weight: 620;
+  letter-spacing: -0.015em;
+  line-height: 1.38;
+  margin: 20px 0 8px;
+}
+html[data-theme] .conversation-thread .msg-assistant .bubble-md > :is(h1, h2, h3, h4):first-child { margin-top: 0; }
+html[data-theme] .conversation-thread .msg-assistant .bubble-md h1 { font-size: 18px; }
+html[data-theme] .conversation-thread .msg-assistant .bubble-md h2 { font-size: 16px; }
+html[data-theme] .conversation-thread .msg-assistant .bubble-md h3 { font-size: 14.5px; }
+html[data-theme] .conversation-thread .msg-assistant .bubble-md h4 { font-size: 14px; color: var(--ink-2); }
+html[data-theme] .conversation-thread .msg-assistant .bubble-md :is(ul, ol) {
+  margin: 10px 0;
+  padding-inline-start: 20px;
+}
+html[data-theme] .conversation-thread .msg-assistant .bubble-md ul { list-style: disc; }
+html[data-theme] .conversation-thread .msg-assistant .bubble-md ul ul { list-style: circle; }
+html[data-theme] .conversation-thread .msg-assistant .bubble-md ol { list-style: decimal; }
+html[data-theme] .conversation-thread .msg-assistant .bubble-md li { margin: 0; }
+html[data-theme] .conversation-thread .msg-assistant .bubble-md li + li { margin-top: 5px; }
+html[data-theme] .conversation-thread .msg-assistant .bubble-md li.md-task-item { list-style: none; }
+html[data-theme] .conversation-thread .msg-assistant .bubble-md li::marker { color: var(--muted); }
+html[data-theme] .conversation-thread .msg-assistant .bubble-md hr {
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+  margin: 18px 0;
+}
+html[data-theme] .conversation-thread .bubble-md :not(pre) > code {
+  padding: 1px 5px;
+  border: 0;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.89em;
+}
+html[data-theme] .conversation-thread .bubble-md blockquote {
+  margin-block: 12px;
+  padding: 3px 0 3px 14px;
+  border-inline-start: 2.5px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  color: var(--muted);
+}
+html[data-theme] .conversation-thread .bubble .md-code {
+  margin-block: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ink) 3%, var(--bg));
+}
+html[data-theme] .conversation-thread .bubble .md-code-head {
+  min-height: 32px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--line-soft);
+  background: color-mix(in srgb, var(--ink) 2.5%, transparent);
+}
+html[data-theme] .conversation-thread .bubble .md-code pre {
+  margin: 0;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+html[data-theme] .conversation-thread .bubble .md-code pre code {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+html[data-theme] .conversation-thread .bubble .md-table-wrap {
+  margin-block: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+}
 html[data-theme] .conversation-thread .msg-assistant .bubble-md .md-table-wrap > table { margin: 0; }
-html[data-theme] .conversation-thread .md-table-wrap th { background: var(--bg); color: var(--muted); }
+html[data-theme] .conversation-thread .md-table-wrap th {
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--ink) 3%, var(--bg));
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 560;
+}
+html[data-theme] .conversation-thread .md-table-wrap td { padding: 8px 12px; font-size: 13px; }
 html[data-theme] .conversation-thread .md-table-wrap tbody tr:nth-child(even) { background: transparent; }
 .conversation-thread .bubble-md :is(.md-table-wrap, .md-code, pre) { max-width: 100%; overscroll-behavior-inline: contain; }
 
-html[data-theme] .conversation-thread .conversation-tools { border: 0; background: transparent; }
-.conversation-tools > .tool-group-head {
-  flex-wrap: wrap;
-  row-gap: 2px;
-  min-height: 34px;
-  border-radius: 6px;
-  color: var(--muted);
+/* ---------- 回合过程（思考 / 操作流 / 子智能体）：默认收起，展开限高滑动 + 上下渐隐 ---------- */
+
+html .conversation-thread .turn-process {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
-html[data-theme] .conversation-tools .tool-group-label { color: var(--ink-2); font-size: 13px; font-weight: 600; white-space: nowrap; }
-html[data-theme] .conversation-tools .tool-group-count {
-  flex: 0 1 auto;
-  margin-inline-start: 0;
-  padding: 0;
+
+/* 通用折叠头部：无外框干扰，安静紧凑，像终端/IDE 原生过程折叠行 */
+html .conversation-thread .turn-process :is(.think-block, .conversation-tools, .agent-group) {
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+html .conversation-thread .turn-process .think-block > summary,
+html .conversation-thread .turn-process .conversation-tools > .tool-group-head,
+html .conversation-thread .turn-process .agent-group > .agent-group-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: calc(100% + 8px);
+  min-width: 0;
+  min-height: 30px;
+  margin-inline-start: -8px;
+  padding: 4px 8px;
+  border-radius: 7px;
   background: transparent;
   color: var(--muted);
-  font: 13px/1.5 var(--sans);
-  white-space: normal;
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  transition: color 0.14s ease, background-color 0.14s ease;
 }
-.conversation-tool-attention { display: inline-flex; align-items: center; gap: 6px; margin-inline-start: auto; white-space: nowrap; font-size: 12px; }
-html[data-theme] .conversation-tools .tool-group-list {
-  margin-inline-start: 8px;
-  padding: 0 0 0 8px;
-  border-inline-start: 1px solid var(--line);
-}
-html[data-theme] .conversation-thread .conversation-tool-line,
-.conversation-agent-tool {
+
+html .conversation-thread .turn-process .conversation-tools > .tool-group-head {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-width: 0;
-  min-height: 32px;
-  padding: 4px 6px;
-  text-align: start;
+  width: fit-content;
+  flex-wrap: nowrap;
 }
-.conversation-tool-line > :first-child { flex: none; width: 7px; }
-.conversation-tool-line[aria-expanded="true"] > .tool-group-chevron { transform: rotate(90deg); }
-.conversation-tool-name { flex: none; max-width: 26%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.conversation-tool-state { display: inline-flex; flex: none; align-items: center; gap: 4px; color: var(--muted); white-space: nowrap; font-size: 12px; font-variant-numeric: tabular-nums; }
-.conversation-tool-state > .ui-icon { width: 12px; height: 12px; }
-html[data-theme] .conversation-thread :is(.conversation-tool-line, .conversation-agent-tool) .tool-args {
+
+html .conversation-thread .turn-process :is(.think-block > summary, .conversation-tools > .tool-group-head, .agent-group > .agent-group-head)::-webkit-details-marker {
+  display: none;
+}
+
+html .conversation-thread .turn-process :is(.think-block > summary, .conversation-tools > .tool-group-head, .agent-group > .agent-group-head):hover {
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  color: var(--ink);
+}
+
+/* 清除旧版三角形和伪元素箭头，统一用精致矢量 chevron */
+html .conversation-thread .turn-process .think-block > summary::before,
+html .conversation-thread .turn-process .think-block > summary::after {
+  content: none;
+  display: none;
+}
+
+html .conversation-thread .turn-process .think-block.is-live > summary::before {
+  content: '';
+  display: inline-block;
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  transform: none;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+html .conversation-thread .turn-process .think-block.is-live > summary,
+html .conversation-thread .turn-process .conversation-tools.is-live > .tool-group-head {
+  color: var(--ink-2);
+}
+
+html .conversation-thread .turn-process .think-summary-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+html .conversation-thread .turn-process .tool-group-chevron,
+html .conversation-thread .turn-process .process-chevron,
+html .conversation-thread .turn-process .tool-row-chevron {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: 0;
+  color: var(--dim);
+  transform: none;
+  transition: transform 0.16s ease, color 0.14s ease, opacity 0.14s ease;
+}
+
+html .conversation-thread .turn-process .process-chevron-svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* 复位旧版后代选择器造成的联动旋转，只旋转当前展开项自身的箭头 */
+html .conversation-thread .turn-process .tool-group[open] .tool-group-chevron {
+  transform: none;
+}
+
+html .conversation-thread .turn-process :is(.conversation-tools, .agent-group, .agent-card)[open] > summary > .tool-group-chevron,
+html .conversation-thread .turn-process .think-block[open] > summary > .process-chevron,
+html .conversation-thread .turn-process .conversation-tool-line[aria-expanded="true"] > .tool-row-chevron {
+  transform: rotate(90deg);
+  color: var(--muted);
+}
+
+html .conversation-thread .turn-process :is(summary, .conversation-tool-line):hover > :is(.tool-group-chevron, .process-chevron, .tool-row-chevron) {
+  color: var(--ink-2);
+}
+
+html .conversation-thread .turn-process .tool-group-label {
+  flex: none;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 520;
+  white-space: nowrap;
+  letter-spacing: -0.005em;
+}
+
+html .conversation-thread .turn-process .tool-group-duration {
+  flex: none;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+html .conversation-thread .turn-process .tool-group-count {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-inline-start: 0;
+  padding: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: transparent;
+  color: var(--dim);
+  font: 12px/1.4 var(--sans);
+}
+
+html .conversation-thread .turn-process .tool-group-peek {
+  flex: 0 1 220px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--muted);
   font-size: 12px;
 }
-.conversation-tool-state.is-error { color: var(--err); }
-.conversation-tool-state:is(.is-wait, .is-interrupted) { color: var(--warn); }
-.conversation-tool-line .tool-meta { flex-shrink: 1; max-width: 26%; overflow: hidden; text-overflow: ellipsis; }
-html[data-theme] .conversation-thread .think-body { border-color: var(--line); }
+
+html .conversation-thread .turn-process .tool-group-peek::before {
+  content: '·';
+  margin-inline-end: 6px;
+  color: var(--dim);
+}
+
+html .conversation-thread .turn-process .conversation-tool-attention {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  margin-inline-start: 2px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  color: var(--ink-2);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+/* 限高滚动壳：上下柔和渐隐遮罩 + 跨三平台一致的悬浮细胶囊滚动条 */
+html .conversation-thread .process-scroll-shell {
+  --scroll-fade-bg: var(--bg);
+  position: relative;
+  min-width: 0;
+  margin-top: 2px;
+}
+
+html .conversation-thread .process-scroll-track {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  inset-inline-end: 0;
+  width: 12px;
+  z-index: 3;
+  display: flex;
+  justify-content: flex-end;
+  padding-inline-end: 3px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease;
+}
+
+html .conversation-thread .process-scroll-shell[data-scrollable="true"] > .process-scroll-track {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+html .conversation-thread .process-scroll-thumb {
+  width: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 28%, transparent);
+  cursor: pointer;
+  touch-action: none;
+  will-change: transform;
+  transition: background-color 0.14s ease, width 0.14s ease;
+}
+
+html .conversation-thread .process-scroll-track:hover > .process-scroll-thumb,
+html .conversation-thread .process-scroll-thumb[data-dragging="true"] {
+  width: 5px;
+  background: color-mix(in srgb, var(--ink) 48%, transparent);
+}
+
+html .conversation-thread .process-scroll-shell::before,
+html .conversation-thread .process-scroll-shell::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0 14px;
+  height: 34px;
+  pointer-events: none;
+  z-index: 2;
+  opacity: 0;
+  transition: opacity 0.16s ease;
+}
+
+html .conversation-thread .process-scroll-shell::before {
+  top: 0;
+  background: linear-gradient(
+    to bottom,
+    var(--scroll-fade-bg) 0%,
+    color-mix(in srgb, var(--scroll-fade-bg) 76%, transparent) 44%,
+    transparent 100%
+  );
+}
+
+html .conversation-thread .process-scroll-shell::after {
+  bottom: 0;
+  background: linear-gradient(
+    to top,
+    var(--scroll-fade-bg) 0%,
+    color-mix(in srgb, var(--scroll-fade-bg) 76%, transparent) 44%,
+    transparent 100%
+  );
+}
+
+html .conversation-thread .process-scroll-shell[data-fade="top"]::before,
+html .conversation-thread .process-scroll-shell[data-fade="both"]::before {
+  opacity: 1;
+}
+
+html .conversation-thread .process-scroll-shell[data-fade="bottom"]::after,
+html .conversation-thread .process-scroll-shell[data-fade="both"]::after {
+  opacity: 1;
+}
+
+html .conversation-thread .process-scroll-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+/* 统一限高与平滑内部滚动 */
+html .conversation-thread .turn-process .conversation-tools .tool-group-list {
+  display: block;
+  position: relative;
+  max-height: min(320px, 46vh);
+  max-height: min(320px, 46dvh);
+  margin: 0;
+  padding: 4px 16px 6px 6px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  border: 0;
+}
+
+html .conversation-thread .turn-process .conversation-tools .tool-group-list::before {
+  content: none;
+  display: none;
+}
+
+html .conversation-thread .turn-process .think-body {
+  max-width: 78ch;
+  max-height: min(220px, 34vh);
+  max-height: min(220px, 34dvh);
+  margin: 0 0 4px 6px;
+  padding: 4px 12px 8px 12px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  border-inline-start: 1.5px solid color-mix(in srgb, var(--ink) 14%, transparent);
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  scroll-behavior: auto;
+}
+
+html .conversation-thread .turn-process .think-body .process-scroll-content {
+  display: block;
+}
+
+html .conversation-thread .turn-process .agent-group-list {
+  max-height: 280px;
+  padding: 4px 8px 6px 12px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+
+html .conversation-thread .turn-process .agent-tools {
+  max-height: 180px;
+  padding: 2px 4px 4px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  border: 0;
+}
+
+html .conversation-thread .turn-process .agent-tools::before {
+  content: none;
+  display: none;
+}
+
+html .conversation-thread .plan-list {
+  max-height: 240px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* 过程滚动壳内的主列表隐藏各平台形态不一的原生滚动条，统一由右侧悬浮细胶囊滑块承载 */
+html .conversation-thread .process-scroll-shell > .tool-group-list,
+html .conversation-thread .process-scroll-shell > .think-body,
+html .conversation-thread .process-scroll-shell > .agent-group-list {
+  scrollbar-width: none;
+}
+
+html .conversation-thread .process-scroll-shell > .tool-group-list::-webkit-scrollbar,
+html .conversation-thread .process-scroll-shell > .think-body::-webkit-scrollbar,
+html .conversation-thread .process-scroll-shell > .agent-group-list::-webkit-scrollbar {
+  display: none;
+}
+
+/* 嵌套子滚动区（详情代码、子智能体工具、计划列表）保持原生轻量细滚动条 */
+html .conversation-thread .agent-tools,
+html .conversation-thread .tool-body pre,
+html .conversation-thread .plan-list {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--ink) 24%, transparent) transparent;
+}
+
+/* 单条步骤行：清爽紧凑、紧贴图标/目标/增减数/右箭头，无多余分割线 */
+html .conversation-thread .turn-process .tool-row {
+  margin: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  overflow: visible;
+  animation: none;
+}
+
+html .conversation-thread .turn-process .conversation-tool-line,
+html .conversation-thread .turn-process .conversation-agent-tool {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: 13px/1.45 var(--sans);
+  text-align: start;
+  transition: background-color 0.12s ease;
+}
+
+html .conversation-thread .turn-process button.conversation-tool-line {
+  cursor: pointer;
+}
+
+html .conversation-thread .turn-process button.conversation-tool-line:hover {
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+
+html .conversation-thread .turn-process .tool-row.is-open > button.conversation-tool-line {
+  background: color-mix(in srgb, var(--ink) 4.5%, transparent);
+}
+
+html .conversation-thread .turn-process .tool-row.is-running > .conversation-tool-line {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+html .conversation-thread .turn-process .conversation-tool-name {
+  flex: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 440;
+  white-space: nowrap;
+}
+
+/* 文件 / 工具类型小图标（暗色与浅色主题分别校色） */
+html .conversation-thread .process-kind-icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+}
+
+html .conversation-thread .process-kind-icon.is-java { color: #e06c65; }
+html .conversation-thread .process-kind-icon.is-markdown { color: #5aa9ff; }
+html .conversation-thread .process-kind-icon.is-typescript { color: #61afef; }
+html .conversation-thread .process-kind-icon.is-javascript { color: #e5c07b; }
+html .conversation-thread .process-kind-icon.is-style { color: #b48eff; }
+html .conversation-thread .process-kind-icon.is-json { color: #4fd1a5; }
+html .conversation-thread .process-kind-icon.is-markup { color: #f08c55; }
+html .conversation-thread .process-kind-icon.is-python { color: #7cc47f; }
+
+html[data-theme="light"] .conversation-thread .process-kind-icon.is-java { color: #c44740; }
+html[data-theme="light"] .conversation-thread .process-kind-icon.is-markdown { color: #1b6ec2; }
+html[data-theme="light"] .conversation-thread .process-kind-icon.is-typescript { color: #2563eb; }
+html[data-theme="light"] .conversation-thread .process-kind-icon.is-javascript { color: #a86d08; }
+html[data-theme="light"] .conversation-thread .process-kind-icon.is-style { color: #6d4aff; }
+html[data-theme="light"] .conversation-thread .process-kind-icon.is-json { color: #0f8759; }
+html[data-theme="light"] .conversation-thread .process-kind-icon.is-markup { color: #c4541c; }
+html[data-theme="light"] .conversation-thread .process-kind-icon.is-python { color: #2d7d32; }
+
+html .conversation-thread .turn-process :is(.conversation-tool-line, .conversation-agent-tool) .tool-args {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 460;
+}
+
+html .conversation-thread .turn-process .conversation-tool-line:hover .tool-args,
+html .conversation-thread .turn-process .tool-row.is-open .tool-args {
+  color: var(--ink);
+}
+
+html .conversation-thread .turn-process .tool-line-range {
+  flex: none;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+html .conversation-thread .turn-process .tool-diff {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  margin-inline-start: 2px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+html .conversation-thread .turn-process .tool-diff-add { color: var(--ok); }
+html .conversation-thread .turn-process .tool-diff-del { color: var(--err); }
+
+html .conversation-thread .turn-process .tool-exit-code {
+  flex: none;
+  color: var(--err);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+html .conversation-thread .turn-process .conversation-tool-state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  white-space: nowrap;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+html .conversation-thread .turn-process .conversation-tool-state > .ui-icon {
+  width: 12px;
+  height: 12px;
+}
+
+html .conversation-thread .turn-process .conversation-tool-state.is-run { color: var(--accent); }
+html .conversation-thread .turn-process .conversation-tool-state.is-error { color: var(--err); }
+html .conversation-thread .turn-process .conversation-tool-state:is(.is-wait, .is-interrupted) { color: var(--warn); }
+
+html .conversation-thread .turn-process .tool-row-chevron {
+  opacity: 0.65;
+}
+
+html .conversation-thread .turn-process .conversation-tool-line:hover > .tool-row-chevron,
+html .conversation-thread .turn-process .tool-row.is-open > .conversation-tool-line > .tool-row-chevron {
+  opacity: 1;
+}
+
+html .conversation-thread .turn-process .conversation-tool-line .tool-meta {
+  order: 0;
+  flex: none;
+  margin-inline-start: auto;
+  padding-inline-start: 8px;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.62;
+  transition: opacity 0.14s ease;
+}
+
+html .conversation-thread .turn-process .conversation-tool-line:hover .tool-meta,
+html .conversation-thread .turn-process .tool-row.is-open .tool-meta {
+  opacity: 1;
+}
+
+/* 单步展开详情抽屉：清晰层次、完整路径与快捷操作、内部限高滚动 */
+html .conversation-thread .turn-process .tool-body {
+  max-height: none;
+  margin: 4px 6px 8px 14px;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  transition: none;
+}
+
+html .conversation-thread .turn-process .tool-row.is-error .tool-body {
+  border-color: color-mix(in srgb, var(--err) 30%, var(--line-soft));
+}
+
+html .conversation-thread .turn-process .tool-row.is-attention:not(.is-error) .tool-body {
+  border-color: color-mix(in srgb, var(--warn) 30%, var(--line-soft));
+}
+
+html .conversation-thread .turn-process .tool-row.is-open .tool-body {
+  max-height: none;
+  overflow: hidden;
+  border-top-width: 1px;
+}
+
+html .conversation-thread .turn-process .tool-body-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--line-soft);
+  background: color-mix(in srgb, var(--ink) 2.5%, var(--bg-soft));
+}
+
+html .conversation-thread .turn-process .tool-body-target {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+html .conversation-thread .turn-process .tool-body-actions {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+}
+
+html .conversation-thread .turn-process .tool-body-action {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 11.5px;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+html .conversation-thread .turn-process .tool-body-action:hover {
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  color: var(--ink);
+}
+
+html .conversation-thread .turn-process .tool-body-action.is-done {
+  border-color: color-mix(in srgb, var(--ok) 40%, var(--line));
+  color: var(--ok);
+}
+
+html .conversation-thread .turn-process .tool-body pre {
+  max-height: 220px;
+  margin: 0;
+  padding: 9px 11px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-2);
+  font: 12px/1.6 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 子智能体卡片在过程流中的柔和适配 */
+html .conversation-thread .turn-process .agent-card {
+  margin: 2px 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+}
+
+html .conversation-thread .turn-process .agent-card[open] {
+  border-color: var(--line-soft);
+  background: color-mix(in srgb, var(--ink) 2.5%, var(--bg));
+}
+
+html .conversation-thread .turn-process .agent-head {
+  min-height: 32px;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+html .conversation-thread .turn-process .agent-head:hover {
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+
+html .conversation-thread .turn-process .agent-head > .tool-group-chevron {
+  margin-inline-start: 2px;
+}
+
+html .conversation-thread .turn-process .agent-body {
+  border-top-color: var(--line-soft);
+}
+
+/* 通用折叠箭头（用量详情、计划卡、压缩摘要、结果详情与过程流视觉统一） */
+html .conversation-thread .process-chevron {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--dim);
+  transition: transform 0.16s ease, color 0.14s ease;
+}
+
+html .conversation-thread .process-chevron-svg {
+  width: 13px;
+  height: 13px;
+}
+
+html .conversation-thread details[open] > summary > .process-chevron {
+  transform: rotate(90deg);
+  color: var(--muted);
+}
+
+/* 回合用量详情：去掉原生黑三角，改为与过程折叠行一致的轻量触发条 + 柔和卡片 */
+html .conversation-thread .turn-stats-detail {
+  min-width: 0;
+  border-radius: 9px;
+}
+
+html .conversation-thread .turn-stats-detail > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  min-height: 28px;
+  margin-inline-start: -8px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  transition: color 0.14s ease, background-color 0.14s ease;
+}
+
+html .conversation-thread .turn-stats-detail > summary::-webkit-details-marker {
+  display: none;
+}
+
+html .conversation-thread .turn-stats-detail > summary:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+
+html .conversation-thread .turn-stats-detail[open] {
+  margin-top: 2px;
+  padding: 6px 12px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ink) 2.5%, var(--bg));
+}
+
+html .conversation-thread .turn-stats-detail[open] > summary {
+  margin-inline-start: 0;
+  padding: 2px 0;
+  color: var(--ink-2);
+  background: transparent;
+}
+
+html[data-theme] .conversation-thread .turn-stats-detail .turn-stats {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px 18px;
+  padding: 8px 0 4px;
+}
+
+html[data-theme] .conversation-thread .turn-stats-detail .turn-stat-note {
+  padding-top: 4px;
+  border-top: 1px solid var(--line-soft);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* 执行计划卡：中性克制卡片 + 状态分级 + 进度细条 + 完成态安静收起 */
+html .conversation-thread .plan-card {
+  padding: 10px 12px 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ink) 3%, var(--bg));
+  box-shadow: none;
+  font-size: 12.5px;
+}
+
+html .conversation-thread .plan-card .plan-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 28px;
+  padding: 2px 0;
+  color: var(--ink-2);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+html .conversation-thread .plan-card .plan-head::-webkit-details-marker {
+  display: none;
+}
+
+html .conversation-thread .plan-card .plan-title {
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 560;
+}
+
+html .conversation-thread .plan-card .plan-progress {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+html .conversation-thread .plan-card .plan-head > .process-chevron {
+  margin-inline-start: auto;
+}
+
+html .conversation-thread .plan-card .plan-bar {
+  height: 2px;
+  margin: 6px 0 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+  overflow: hidden;
+}
+
+html .conversation-thread .plan-card .plan-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.28s ease;
+}
+
+html .conversation-thread .plan-card .plan-index {
+  width: 16px;
+  flex: none;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+html .conversation-thread .plan-card .plan-item {
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  transition: background-color 0.12s ease;
+}
+
+html .conversation-thread .plan-card .plan-item:hover {
+  background: color-mix(in srgb, var(--ink) 4.5%, transparent);
+}
+
+html .conversation-thread .plan-card .plan-item.is-completed .plan-text,
+html .conversation-thread .plan-card .plan-item.is-skipped .plan-text {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--muted) 45%, transparent);
+}
+
+html .conversation-thread .plan-card .plan-item.is-completed .plan-status {
+  background: color-mix(in srgb, var(--ok) 13%, transparent);
+  color: var(--ok);
+}
+
+html .conversation-thread .plan-card .plan-item.is-in_progress .plan-text {
+  color: var(--ink);
+  font-weight: 520;
+}
+
+html .conversation-thread .plan-card .plan-item.is-in_progress .plan-status {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+html .conversation-thread .plan-card .plan-item.is-blocked .plan-text {
+  color: var(--err);
+}
+
+html .conversation-thread .plan-card .plan-item.is-blocked .plan-status {
+  background: color-mix(in srgb, var(--err) 14%, transparent);
+  color: var(--err);
+}
+
+html .conversation-thread .plan-card .plan-item.is-pending .plan-text {
+  color: var(--muted);
+}
+
+html .conversation-thread .plan-card .plan-item.is-pending .plan-status,
+html .conversation-thread .plan-card .plan-item.is-skipped .plan-status {
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  color: var(--muted);
+}
+
+html .conversation-thread .plan-card.is-complete {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+html .conversation-thread .plan-card.is-complete .plan-head {
+  width: fit-content;
+  margin-inline-start: -8px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  color: var(--muted);
+}
+
+html .conversation-thread .plan-card.is-complete .plan-head:hover {
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  color: var(--ink);
+}
+
+html .conversation-thread .plan-card.is-complete .plan-head > .process-chevron {
+  margin-inline-start: 0;
+}
+
+html .conversation-thread .plan-card.is-complete details[open] .plan-list {
+  margin-top: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--ink) 2.5%, var(--bg));
+}
+
+/* 上下文压缩摘要与结果折叠详情：统一轻量矢量箭头与柔和层次 */
+html .conversation-thread .ctx-card {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+html .conversation-thread .ctx-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  margin-inline-start: -8px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  color: var(--muted);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  transition: color 0.14s ease, background-color 0.14s ease;
+}
+
+html .conversation-thread .ctx-head::-webkit-details-marker {
+  display: none;
+}
+
+html .conversation-thread .ctx-head:hover {
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  color: var(--ink);
+}
+
+html .conversation-thread .ctx-card[open] {
+  padding: 8px 12px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--ink) 2%, var(--bg));
+}
+
+html .conversation-thread .ctx-card[open] > .ctx-head {
+  margin-inline-start: 0;
+  padding: 2px 0;
+  color: var(--ink-2);
+  background: transparent;
+}
+
+html .conversation-thread .ctx-body {
+  max-height: 220px;
+  margin-top: 6px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+html .conversation-thread .turn-card:not(.is-compact) {
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ink) 3%, var(--bg));
+  border-color: var(--line-soft);
+}
+
+html .conversation-thread .turn-card:not(.is-compact).is-warn {
+  background: color-mix(in srgb, var(--warn) 7%, var(--bg));
+  border-color: color-mix(in srgb, var(--warn) 28%, var(--line-soft));
+}
+
+html .conversation-thread .turn-card:not(.is-compact).is-error {
+  background: color-mix(in srgb, var(--err) 7%, var(--bg));
+  border-color: color-mix(in srgb, var(--err) 28%, var(--line-soft));
+}
+
+html .conversation-thread .turn-card-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+}
+
+html .conversation-thread .turn-resolved {
+  padding: 1px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+html .conversation-thread .turn-card.is-compact .turn-card-more {
+  margin: 2px 0 0 12px;
+}
+
+html .conversation-thread .turn-card-more > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 2px 6px 2px 0;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+html .conversation-thread .turn-card-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+html .conversation-thread .turn-card-more > summary:hover {
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html .conversation-thread .process-scroll-shell::before,
+  html .conversation-thread .process-scroll-shell::after,
+  html .conversation-thread .turn-process .tool-group-chevron,
+  html .conversation-thread .process-chevron,
+  html .conversation-thread .turn-process .tool-row-chevron,
+  html .conversation-thread .turn-process .think-block.is-live > summary::before,
+  html .conversation-thread .plan-card .plan-bar i,
+  html .conversation-thread .plan-card .plan-item.is-in_progress .plan-status::before,
+  html[data-theme] .conversation-empty .conversation-prompt,
+  html[data-theme] .conversation-empty .conversation-prompt .ui-icon,
+  html[data-theme] .conversation-composer .composer,
+  html[data-theme] .conversation-composer #send.composer-primary {
+    animation: none;
+    transition: none;
+  }
+}
+
 html[data-theme] .conversation-thread .turn-card.is-compact .turn-card-title { font-size: 12px; }
 
 html[data-theme] .composer-wrap.conversation-composer {
@@ -158,28 +1299,42 @@ html[data-theme] .composer-wrap.conversation-composer {
 }
 html[data-theme] .conversation-composer .composer {
   position: relative;
-  gap: 6px;
-  padding: 10px;
+  gap: 4px;
+  padding: 12px 14px 10px;
   border: 1px solid var(--composer-edge);
-  border-radius: 10px;
-  box-shadow: none;
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: 0 4px 20px rgb(0 0 0 / 0.22);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
 }
-html[data-theme] .conversation-composer .composer:focus-within { border-color: var(--ink-2); }
+html[data-theme="light"] .conversation-composer .composer {
+  border-color: #dde2ea;
+  box-shadow: 0 2px 12px rgb(15 23 42 / 0.055), 0 1px 2px rgb(15 23 42 / 0.03);
+}
+html[data-theme] .conversation-composer .composer:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.28), 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+html[data-theme="light"] .conversation-composer .composer:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 58%, #cbd5e1);
+  box-shadow: 0 4px 16px rgb(15 23 42 / 0.07), 0 0 0 2px color-mix(in srgb, var(--accent) 12%, transparent);
+}
 html[data-theme] .conversation-composer .input-flow {
-  min-height: 36px;
+  min-height: 38px;
   max-height: min(200px, 25vh);
   max-height: min(200px, 25dvh);
-  padding: 2px 4px 6px;
+  padding: 2px 2px 4px;
   color: var(--ink);
   font-size: 14px;
+  line-height: 1.58;
 }
 html[data-theme] .conversation-composer .input-flow[data-empty="true"]::before { color: var(--muted); }
-html[data-theme] .conversation-composer .composer-bar {
+html[data-theme] .conversation-composer .composer .composer-bar {
   flex-wrap: wrap;
   justify-content: space-between;
   gap: 4px 8px;
-  padding-top: 4px;
-  border-top-color: var(--line-soft);
+  padding-top: 6px;
+  border-top: 0;
 }
 html[data-theme] .conversation-composer .composer-left { gap: 2px; flex: 0 1 auto; max-width: 100%; }
 html[data-theme] .conversation-composer .composer-actions { gap: 2px; margin-inline-start: auto; }
@@ -206,7 +1361,8 @@ html[data-theme] .conversation-composer #send.composer-primary {
   width: var(--conversation-control);
   height: var(--conversation-control);
   padding: 0;
-  border-radius: 8px;
+  border-radius: 9px;
+  transition: opacity 0.14s ease, transform 0.12s ease, background-color 0.14s ease;
 }
 html[data-theme] .conversation-composer #send.composer-primary:not(:disabled) { background: var(--ink); color: var(--bg); }
 html[data-theme] .conversation-composer #send.composer-primary:disabled { background: var(--panel-3); color: var(--muted); }
@@ -379,10 +1535,14 @@ html[data-theme] .conversation-composer .voice-timer { font-family: var(--sans);
 }
 @media (max-width: 600px), (pointer: coarse) {
   :is(.conversation-thread, .conversation-composer) { --conversation-control: 44px; }
-  html[data-theme] .conversation-thread .thread-column { gap: 14px; }
+  html[data-theme] .conversation-thread .thread-column { gap: 16px; }
+  html[data-theme] .conversation-thread .turn-stats-detail .turn-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 14px;
+  }
   html[data-theme] .conversation-thread .message-action { width: 44px; height: 44px; }
   html[data-theme] .conversation-thread .msg-user .msg-actions { margin-top: 0; }
-  .conversation-prompt { min-height: 44px; }
+  html[data-theme] .conversation-empty .conversation-prompt { min-height: 56px; }
   .conversation-scope button { min-height: 44px; }
   .conversation-composer .composer-suggestions .ref-item { min-height: 44px; }
   .conversation-composer .composer-model { max-width: min(156px, 100%); }
@@ -391,6 +1551,22 @@ html[data-theme] .conversation-composer .voice-timer { font-family: var(--sans);
   .conversation-composer .composer-context { min-width: 44px; }
   .conversation-composer .voice-panel-actions > button,
   .conversation-composer .approval-actions > button { min-height: 44px; }
+  html .conversation-thread .turn-process :is(.think-block > summary, .conversation-tools > .tool-group-head, .agent-group > .agent-group-head) {
+    min-height: 36px;
+  }
+  html .conversation-thread .turn-process .conversation-tool-line {
+    min-height: 36px;
+  }
+  html .conversation-thread .turn-process .conversation-tools .tool-group-list {
+    padding-inline: 8px 4px;
+  }
+  html .conversation-thread .turn-process .tool-group-peek,
+  html .conversation-thread .turn-process .conversation-tool-line .tool-meta {
+    display: none;
+  }
+  html .conversation-thread .turn-process .tool-body {
+    margin-inline-start: 8px;
+  }
 }
 @media (pointer: coarse) {
   html[data-theme] .conversation-composer .queue-grip { display: none; }
@@ -533,10 +1709,15 @@ html[data-theme] .conversation-thread .changed-review:focus-visible {
   outline-offset: 1px;
 }
 html[data-theme] .conversation-thread .changed-list {
+  max-height: 260px;
   margin: 0;
   padding: 2px 0 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   list-style: none;
   border-top: 1px solid var(--line-soft);
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--ink) 24%, transparent) transparent;
 }
 html[data-theme] .conversation-thread .changed-row {
   display: flex;
@@ -546,17 +1727,25 @@ html[data-theme] .conversation-thread .changed-row {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  min-height: 28px;
+  min-height: 30px;
   margin: 0;
   padding: 4px 12px;
-  color: var(--muted);
+  color: var(--ink-2);
+  transition: background-color 0.12s ease;
 }
-html[data-theme] .conversation-thread .changed-row:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+html[data-theme] .conversation-thread .changed-row:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); color: var(--ink); }
+html[data-theme] .conversation-thread .changed-file-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
 html[data-theme] .conversation-thread .changed-path {
   min-width: 0;
   overflow: hidden;
   font-family: inherit;
-  font-size: 12px;
+  font-size: 12.5px;
   line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;

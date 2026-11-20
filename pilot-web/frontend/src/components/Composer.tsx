@@ -755,6 +755,8 @@ export function Composer() {
         {/* 验证结论放在输入框容器内侧：和输入框同宽，不会比它更靠外。 */}
         <VerificationStrip />
       </div>
+      {/* 附件单独一排，排在输入框上方外侧：不挤占正文宽度，也不被输入框边框包住 */}
+      <div className="composer-attachments" ref={railRef} hidden aria-label="待发送的附件" />
       <form
         id="composer"
         className={`composer${dragging ? ' is-dragging' : ''}`}
@@ -762,8 +764,6 @@ export function Composer() {
         onPaste={(event) => void receiveFiles(event, event.clipboardData, 'paste')}
       >
         {dragging && <div className="attachment-drop-overlay" aria-hidden="true">松开以添加文件</div>}
-        {/* 附件单独占一行，排在输入框上方：不挤占正文宽度，缩略图也能整排浏览 */}
-        <div className="composer-attachments" ref={railRef} hidden aria-label="待发送的附件" />
         {pendingFiles > 0 && <div className="attachment-status" role="status">
           正在读取 {pendingFiles} 个附件…
         </div>}
