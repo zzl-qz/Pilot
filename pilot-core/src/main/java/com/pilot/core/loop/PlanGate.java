@@ -15,7 +15,7 @@ final class PlanGate {
 
     private static final String REMINDER = """
         连续执行了多步操作，但本次 run 还没有 update_plan。
-        如果任务还有 3 步以上没做完，请先调用 update_plan 列出 5–8 步（每步可独立验证），再继续执行；
+        如果任务还有多步未完成，请先调用 update_plan 列出剩余可验证步骤（小任务 2–4 步，跨模块大任务 5–8 步），再继续执行；
         只差一两个动作就能收尾时忽略这条提醒。""";
 
     private int toolCalls;

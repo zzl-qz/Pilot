@@ -132,6 +132,18 @@ class PromptLibraryTest {
             prompts.render("loop/budget-wind-down", Map.of("objective", "完成修复", "completedConditions", "- c1/e17",
                 "changedFiles", "A.java", "verification", "单测未运行", "remaining", "缺少验证", "nextAction", "运行目标单测"));
         assertTrue(windDown.contains("不代表任务已经完成"));
+
+        String investigation = prompts.render("loop/investigation-nudge",
+            Map.of("summary", "最近 6 次查询中有 5 次未带来新线索。", "action", "先基于已有证据收束结论。"));
+        assertTrue(investigation.contains("最近 6 次查询中有 5 次未带来新线索"));
+        assertTrue(investigation.contains("收束结论"));
+        assertFalse(investigation.contains("{{"));
+
+        String workflow = prompts.get("system/workflow");
+        assertTrue(workflow.contains("首轮最小证据集"));
+        assertTrue(workflow.contains("动态反馈优先"));
+        assertTrue(workflow.contains("4 条扩展条件"));
+        assertFalse(workflow.contains("缺一项就先搜索或读取确认"));
     }
 
     @Test

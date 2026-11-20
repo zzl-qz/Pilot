@@ -28,6 +28,7 @@ import com.pilot.core.permission.PermissionMode;
  * @param directMaxInvestigationTools 兼容旧配置的高位调查诊断值；运行时不据此拒绝读取/搜索
  * @param lintGateEnabled      收尾时是否运行当前仓库的 lint。默认开启，设为 false 可做对照
  * @param lintOnFailure        规范没过时的处理：retry 先改，次数用尽且测试通过才放行（默认）；pass 直接记录并放行；stop 直接终止
+ * @param preflightLocalizationEnabled 是否在每次新用户消息进入循环前执行确定性候选目标预定位；默认开启，设为 false 可做对照
  */
 @ConfigurationProperties(prefix = "pilot.agent")
 public record AgentProperties(String workspace, PermissionMode permissionMode, int maxSteps, Integer repeatRemindAt,
@@ -35,7 +36,7 @@ public record AgentProperties(String workspace, PermissionMode permissionMode, i
     Integer contextMaxChars, Boolean completionChecks, Boolean goalModeEnabled, Integer directMaxRequests,
     Long directMaxInputTokens, Long directMaxOutputTokens, Long directMaxActiveMillis,
     Integer directMaxInvestigationTools, Long goalMaxInputTokens, Long goalMaxOutputTokens, Long goalMaxActiveMillis,
-    Boolean lintGateEnabled, String lintOnFailure) {
+    Boolean lintGateEnabled, String lintOnFailure, Boolean preflightLocalizationEnabled) {
     private static final int DEFAULT_MAX_STEPS = 1_000;
     /** 单个普通任务的模型请求收敛上限；对齐 OpenHands 的 max_iterations 默认值 500，继续执行会开新一段额度。 */
     private static final int DEFAULT_DIRECT_MAX_REQUESTS = 500;
@@ -46,13 +47,24 @@ public record AgentProperties(String workspace, PermissionMode permissionMode, i
     public AgentProperties(String workspace, PermissionMode mode, int steps, Integer remind, Integer abort, int timeout,
         int threads, Integer continues, Integer chars, Boolean checks) {
         this(workspace, mode, steps, remind, abort, timeout, threads, continues, chars, checks, false, null, null, null,
-            null, null, null, null, null, null, null);
+            null, null, null, null, null, null, null, null);
     }
 
     public AgentProperties(String workspace, PermissionMode mode, int steps, Integer remind, Integer abort, int timeout,
         int threads, Integer continues, Integer chars, Boolean checks, Boolean goals) {
         this(workspace, mode, steps, remind, abort, timeout, threads, continues, chars, checks, goals, null, null, null,
-            null, null, null, null, null, null, null);
+            null, null, null, null, null, null, null, null);
+    }
+
+    public AgentProperties(String workspace, PermissionMode mode, int steps, Integer remind, Integer abort, int timeout,
+        int threads, Integer continues, Integer chars, Boolean checks, Boolean goals, Integer directMaxRequests,
+        Long directMaxInputTokens, Long directMaxOutputTokens, Long directMaxActiveMillis,
+        Integer directMaxInvestigationTools, Long goalMaxInputTokens, Long goalMaxOutputTokens,
+        Long goalMaxActiveMillis, Boolean lintGateEnabled, String lintOnFailure) {
+        this(workspace, mode, steps, remind, abort, timeout, threads, continues, chars, checks, goals,
+            directMaxRequests, directMaxInputTokens, directMaxOutputTokens, directMaxActiveMillis,
+            directMaxInvestigationTools, goalMaxInputTokens, goalMaxOutputTokens, goalMaxActiveMillis, lintGateEnabled,
+            lintOnFailure, null);
     }
 
     public boolean goalModeEnabledValue() {
@@ -114,6 +126,15 @@ public record AgentProperties(String workspace, PermissionMode permissionMode, i
             String policy = System.getProperty("pilot.agent.lint-on-failure");
             lintOnFailure = policy == null || policy.isBlank() ? "retry" : policy.strip();
         }
+        if (preflightLocalizationEnabled == null) {
+            String flag = System.getProperty("pilot.agent.preflight-localization-enabled");
+            preflightLocalizationEnabled = flag == null || flag.isBlank() || !"false".equalsIgnoreCase(flag.strip());
+        }
+    }
+
+    /** 确定性 Pre-flight 候选目标预定位默认开启。 */
+    public boolean preflightLocalizationEnabledValue() {
+        return !Boolean.FALSE.equals(preflightLocalizationEnabled);
     }
 
     /** 收尾 lint 默认开启。 */

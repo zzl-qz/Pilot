@@ -15,6 +15,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.pilot.core.event.RunFailureCode;
 import com.pilot.core.loop.ExecutionPolicy;
 import com.pilot.core.loop.ModelRetryPolicy;
@@ -49,6 +52,7 @@ import tools.jackson.databind.ObjectMapper;
  * 自适应任务执行策略：普通请求直接执行；主 Agent 明确升级 Goal 后才跨轮核验。
  */
 final class GoalExecutionPolicy implements ExecutionPolicy {
+    private static final Logger log = LoggerFactory.getLogger(GoalExecutionPolicy.class);
     private static final int POLICY_VERSION = 7;
     private static final int DEFAULT_DIRECT_MAX_REQUESTS = 120;
     private static final long DEFAULT_DIRECT_MAX_INPUT_TOKENS = 8_000_000L;
@@ -61,14 +65,9 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private static final long DEFAULT_MAX_OUTPUT_TOKENS = 500_000L;
     private static final int REVIEWER_RESERVED_REQUESTS = 2;
     private static final int MAX_CONSECUTIVE_RESEARCH_FAILURES = 3;
-    /** 连续只读超过这一档就提醒一次；之后每再多这么多次再提醒，避免长任务一直读不改。 */
-    private static final int INVESTIGATION_NUDGE_AT = 8;
     private static final Set<String> RESEARCH_TOOLS = Set.of(ToolNames.WEB_SEARCH, ToolNames.WEB_FETCH);
     /** 命令的发起与查询：两者的证据按同一条命令归并。 */
     private static final Set<String> COMMAND_TOOLS = Set.of(ToolNames.RUN_COMMAND, ToolNames.COMMAND_STATUS);
-    /** 只看不改的工具：连续用太多次说明一直在观察、没有推进。 */
-    private static final Set<String> OBSERVATION_TOOLS =
-        Set.of(ToolNames.READ_FILE, ToolNames.SEARCH_TEXT, ToolNames.LIST_DIR, ToolNames.GLOB_FILES);
     /** 还欠调研结论时允许用的工具：只能查资料、读文件、记结论。 */
     private static final Set<String> RESEARCH_PHASE_TOOLS = Set.of(ToolNames.WEB_SEARCH, ToolNames.WEB_FETCH,
         ToolNames.READ_FILE, ToolNames.LIST_DIR, ToolNames.SEARCH_TEXT, ToolNames.GLOB_FILES, ToolNames.RECORD_RESEARCH,
@@ -82,7 +81,8 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private final String session;
     private final Path root;
     private final BooleanSupplier cancelled;
-    private String investigationNudgeSignature = "";
+    private final InvestigationTracker investigation = new InvestigationTracker();
+    private boolean readOnlySession;
     private final int requestBudget;
     private final int directMaxRequests;
     private final long directMaxInputTokens;
@@ -162,6 +162,12 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     GoalExecutionPolicy withCommandLookup(
         java.util.function.Function<String, com.pilot.core.tool.command.CommandTaskManager.Task> lookup) {
         this.commandLookup = lookup == null ? ignored -> null : lookup;
+        return this;
+    }
+
+    /** 标记本轮为只读/审查会话：纯调研隔离，绝不催促修改代码。 */
+    GoalExecutionPolicy withReadOnlySession(boolean readOnly) {
+        this.readOnlySession = readOnly;
         return this;
     }
 
@@ -249,24 +255,14 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     }
 
     private String investigationGuidance(TaskControlService.Execution state) {
-        int observations = 0;
-        String phase = "start";
-        for (TaskControlService.Evidence evidence : state.evidence()) {
-            if (GoalEvidence.successfulEvidence(evidence) && (ToolNames.FILE_EDITS.contains(evidence.tool())
-                || GoalEvidence.isQualifyingVerification(evidence))) {
-                observations = 0;
-                phase = evidence.id();
-            } else if (OBSERVATION_TOOLS.contains(evidence.tool())) {
-                observations++;
-            }
-        }
-        int bucket = observations / INVESTIGATION_NUDGE_AT;
-        String mark = phase + "#" + bucket;
-        if (observations < INVESTIGATION_NUDGE_AT || mark.equals(investigationNudgeSignature)) {
+        InvestigationTracker.Nudge nudge = investigation.nextNudge(researchOnlyGoal());
+        if (nudge == null) {
             return null;
         }
-        investigationNudgeSignature = mark;
-        return prompts.render("loop/investigation-nudge", Map.of("count", String.valueOf(observations))).strip();
+        log.info("Investigation nudge: session={} lowGain={} obs={} files={} summary={}", session, nudge.lowGain(),
+            investigation.phaseObservations(), investigation.distinctReadFiles(), nudge.summary());
+        return prompts.render("loop/investigation-nudge", Map.of("summary", nudge.summary(), "action", nudge.action()))
+            .strip();
     }
 
     private void initializeOrMigrate() {
@@ -649,10 +645,16 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     }
 
     @Override
+    public void onSteering() {
+        investigation.reset();
+    }
+
+    @Override
     public void observed(ToolCall call, ToolExecutor.Outcome outcome) {
         if (outcome == null) {
             return;
         }
+        investigation.observe(call, outcome);
         if (RESEARCH_TOOLS.contains(call.name())) {
             if (outcome.status() == ToolExecutor.OutcomeStatus.SUCCESS) {
                 consecutiveResearchFailures = 0;
@@ -1220,11 +1222,20 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     }
 
     private boolean researchOnlyGoal() {
+        if (readOnlySession) {
+            return true;
+        }
         TaskControlService.TaskContract current = task();
         if (current == null) {
             return false;
         }
         String goal = current.originalGoal().toLowerCase();
+        boolean explicitNoEdit = List.of("不要直接动手", "先不要落地", "不要动手", "不要修改", "不改代码", "不要改代码", "只分析", "只评估", "先给方案", "只读",
+            "read-only", "readonly", "do not edit", "don't edit", "don't modify", "without modifying").stream()
+            .anyMatch(goal::contains);
+        if (explicitNoEdit) {
+            return true;
+        }
         boolean research =
             List.of("分析", "调研", "评估", "解释", "梳理", "研究", "为什么", "analyze", "analyse", "research", "explain", "review")
                 .stream().anyMatch(goal::contains);

@@ -90,9 +90,9 @@ import com.pilot.server.model.ModelSettings;
 import com.pilot.server.multi.DispatchAgentsTool;
 import com.pilot.server.multi.MultiAgentService;
 import com.pilot.server.multi.SpawnAgentTool;
+import com.pilot.server.run.EvidenceStatus;
 import com.pilot.server.run.ExecutionMode;
 import com.pilot.server.run.ExecutionPhase;
-import com.pilot.server.run.EvidenceStatus;
 import com.pilot.server.run.ReviewMode;
 import com.pilot.server.run.RunRegistry;
 import com.pilot.server.run.RunStarter;
@@ -146,6 +146,7 @@ public class AgentRunService implements RunStarter {
     private static final long GIT_TIMEOUT_MS = 2_000L;
     private static final Set<String> IGNORED_ENTRIES = Set.of(".git", ".pilot", ".idea", ".vscode", ".gradle", ".venv",
         "__pycache__", "node_modules", "target", "build", "dist", "out");
+    private final PreFlightLocator preFlightLocator = new PreFlightLocator();
 
     private final SessionService sessions;
     private final ModelClient modelClient;
@@ -167,9 +168,9 @@ public class AgentRunService implements RunStarter {
     private final com.pilot.server.store.QueuedMessageRepository queuedMessages;
     private final ConcurrentMap<String, Integer> autoContinueAttempts = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, String> autoContinueSignature = new ConcurrentHashMap<>();
-    private final ObjectMapper objectMapper;
     /** 会话级已启用的延迟工具，按激活顺序保存，让续跑与追问沿用同一个尾部扩展段。 */
     private final ConcurrentMap<String, List<String>> sessionEnabledDeferredTools = new ConcurrentHashMap<>();
+    private final ObjectMapper objectMapper;
     private final PilotDataDir dataDir;
     private final MultiAgentService multiAgent;
     private final MultiAgentProperties multiProperties;
@@ -965,8 +966,8 @@ public class AgentRunService implements RunStarter {
         inboxes.remove(sessionId);
         autoContinueAttempts.remove(sessionId);
         autoContinueSignature.remove(sessionId);
-        try {
         sessionEnabledDeferredTools.remove(sessionId);
+        try {
             queuedMessages.clearHold(sessionId);
         } catch (RuntimeException e) {
             log.warn("清理会话 {} 的队列暂停状态失败", sessionId, e);
@@ -1113,7 +1114,8 @@ public class AgentRunService implements RunStarter {
         static BudgetProgress from(List<PlanItem> plan, TaskControlService.TaskContract task) {
             Set<String> done = plan.stream().filter(PlanItem::done).map(PlanItem::step).collect(Collectors.toSet());
             TaskControlService.Execution execution = task == null ? null : task.execution();
-            if (execution == null) return new BudgetProgress(done, Set.of(), Set.of());
+            if (execution == null)
+                return new BudgetProgress(done, Set.of(), Set.of());
             // 同一个检查对同一份源码得到同样的结果，即使重跑时间、任务 ID 不同，也不算新证据。
             Set<List<String>> checks = GoalEvidence.latestChecks(execution.evidence()).entrySet().stream()
                 .filter(entry -> WireEnum.in(entry.getValue().status(), EvidenceStatus.SUCCESS,
@@ -1495,12 +1497,18 @@ public class AgentRunService implements RunStarter {
         TaskControlService.TaskContract executionTask = taskControls.load(sessionId);
         boolean unattended = executionTask != null && executionTask.automation() != null;
         ReviewMode review = ReviewMode.parse(unattended ? executionTask.originalGoal() : input);
+        Path resolvedWorkspace = toolFactory.resolve(workspace);
+        PathValidator workspaceValidator = new PathValidator(resolvedWorkspace);
+        AtomicReference<AgentLoop> activeLoopRef = new AtomicReference<>();
+        AtomicReference<List<PlanItem>> previousPlanRef = new AtomicReference<>(plans.load(sessionId));
         PlanSink planSink = (items, explanation) -> {
+            List<PlanItem> beforePlan = previousPlanRef.getAndSet(items);
             plans.save(sessionId, items);
             publish(sessionId, runId,
                 new PlanUpdated(items.stream()
                     .map(item -> new PlanUpdated.PlanItemPayload(item.step(), item.status(), item.note())).toList(),
                     explanation));
+            maybeRefreshPlanPhaseHint(activeLoopRef.get(), resolvedWorkspace, workspaceValidator, beforePlan, items);
         };
         ToolRegistry tools =
             review.active() ? reviewTools(workspace) : sessionTools(sessionId, runId, workspace, planSink);
@@ -1557,7 +1565,10 @@ public class AgentRunService implements RunStarter {
                 properties.goalMaxInputTokens(), properties.goalMaxOutputTokens(), properties.goalMaxActiveMillis())
             : null;
         if (goalPolicy != null) {
-            goalPolicy.withCommandLookup(id -> commandTasks.get(sessionId, id));
+            boolean readOnlySession =
+                review.active() || properties.permissionMode() == com.pilot.core.permission.PermissionMode.READ_ONLY
+                    || tools.availableTools().stream().noneMatch(t -> t instanceof com.pilot.core.tool.WritesFiles);
+            goalPolicy.withCommandLookup(id -> commandTasks.get(sessionId, id)).withReadOnlySession(readOnlySession);
             goalPolicy.withAvailableTools(availableTools)
                 .withUpdates(state -> sink.accept(new com.pilot.core.event.ExecutionUpdated(state.mode(), state.phase(),
                     state.requests(), state.reason(), state.gap())));
@@ -1617,7 +1628,6 @@ public class AgentRunService implements RunStarter {
         // 与会话数据库、快照保持一致，统一落在数据目录（默认项目下的 .pilot）
         JsonlTraceRecorder traceRecorder =
             new JsonlTraceRecorder(dataDir.file("traces", sessionId + ".jsonl"), objectMapper);
-        Path resolvedWorkspace = toolFactory.resolve(workspace);
         AgentLoop loop = new AgentLoop(executionClient, tools, sessionGate, approvals, config, handle.cancelled::get,
             () -> null, traceRecorder, delta -> sessions.preview(sessionId, runId, new AssistantPreview(delta)))
             .withPendingMessages(() -> pollSteering(sessionId))
@@ -1639,6 +1649,24 @@ public class AgentRunService implements RunStarter {
             .withToolJournal(runId, journals == null ? com.pilot.core.tool.ToolCallJournal.none()
                 : journals.forWorkspace(sessionId, toolFactory.resolve(workspace)));
 
+        com.pilot.core.tool.ReadGuard readGuard = readGuardOf(tools);
+        if (readGuard != null) {
+            loop.withContextShrinkListener(readGuard::invalidateDeliveredViews);
+        }
+        PreFlightLocator.Result preflight = null;
+        if (!continuation && properties.preflightLocalizationEnabledValue()) {
+            preflight = preFlightLocator.locate(resolvedWorkspace, workspaceValidator, input, Set.of());
+            if (preflight.hasCandidates()) {
+                loop.withInitialPhaseHint(preflight.renderBlock(), preflight.candidatePaths());
+            }
+            loop.withSteeringHintProvider(text -> {
+                PreFlightLocator.Result steered =
+                    preFlightLocator.locate(resolvedWorkspace, workspaceValidator, text, loop.observedPathsSnapshot());
+                return steered.renderBlock();
+            });
+        }
+        activeLoopRef.set(loop);
+
         if (goalPolicy != null) {
             loop.withExecutionPolicy(goalPolicy);
         }
@@ -1652,6 +1680,7 @@ public class AgentRunService implements RunStarter {
                 : loop.run(input, attachments, imagePositions,
                     withSkillActivation(withRepositoryBrief(history, workspace), workspace, handle), sink, checkpoint);
             conversations.save(sessionId, result.conversation());
+            logPreflightTelemetry(runId, preflight, loop.observedPathsSnapshot(), result.changedFiles());
             log.info("Agent run {} completed: failureCode={}, messages={}, workspace={}", runId, result.failureCode(),
                 result.conversation().size(), workspace == null ? properties.workspace() : workspace);
             // 失败/部分交付也要把已经跑过的检查记进证据账本；不能因为收尾是 TASK_INCOMPLETE
@@ -1711,6 +1740,69 @@ public class AgentRunService implements RunStarter {
         } catch (RuntimeException e) {
             log.warn("完成运行快照失败 {}", runId, e);
         }
+    }
+
+    private static com.pilot.core.tool.ReadGuard readGuardOf(ToolRegistry tools) {
+        for (com.pilot.core.tool.Tool tool : tools.tools()) {
+            if (tool instanceof com.pilot.core.tool.file.ReadFileTool read) {
+                return read.guard();
+            }
+        }
+        return null;
+    }
+
+    /** 仅当计划完成数增加且切换到全新 in_progress 步骤，并且能产出高置信未读候选时刷新尾部阶段锚点。 */
+    private void maybeRefreshPlanPhaseHint(AgentLoop activeLoop, Path workspaceRoot, PathValidator validator,
+        List<PlanItem> before, List<PlanItem> after) {
+        if (activeLoop == null || !properties.preflightLocalizationEnabledValue() || after == null || after.isEmpty()) {
+            return;
+        }
+        long beforeDone = before == null ? 0 : before.stream().filter(PlanItem::done).count();
+        long afterDone = after.stream().filter(PlanItem::done).count();
+        if (afterDone <= beforeDone) {
+            return;
+        }
+        String beforeActive = activeStepOf(before);
+        String afterActive = activeStepOf(after);
+        if (afterActive.isBlank() || afterActive.equals(beforeActive)) {
+            return;
+        }
+        PreFlightLocator.Result next =
+            preFlightLocator.locate(workspaceRoot, validator, afterActive, activeLoop.observedPathsSnapshot());
+        if (next.hasCandidates()) {
+            activeLoop.refreshPhaseHint(next.renderBlock(), next.candidatePaths());
+        }
+    }
+
+    private static String activeStepOf(List<PlanItem> items) {
+        if (items == null) {
+            return "";
+        }
+        return items.stream().filter(item -> PlanItem.IN_PROGRESS.equals(item.status())).map(PlanItem::step).findFirst()
+            .orElse("");
+    }
+
+    private static void logPreflightTelemetry(String runId, PreFlightLocator.Result preflight,
+        Set<String> observedPaths, List<String> changedFiles) {
+        if (preflight == null) {
+            return;
+        }
+        if (!preflight.hasCandidates()) {
+            log.debug("Pre-flight localization skipped run={}: elapsedMs={}, anchors={}, timedOut={}, reason={}", runId,
+                preflight.elapsedMs(), preflight.anchorCount(), preflight.timedOut(), preflight.skipReason());
+            return;
+        }
+        Set<String> normalizedObserved = observedPaths.stream().filter(java.util.Objects::nonNull)
+            .map(p -> p.strip().replace('\\', '/')).collect(Collectors.toSet());
+        Set<String> normalizedChanged = changedFiles.stream().filter(java.util.Objects::nonNull)
+            .map(p -> p.strip().replace('\\', '/')).collect(Collectors.toSet());
+        Set<String> candidates = preflight.candidatePaths();
+        long hitRead = candidates.stream().filter(normalizedObserved::contains).count();
+        long hitEdit = candidates.stream().filter(normalizedChanged::contains).count();
+        log.info(
+            "Pre-flight localization run={}: elapsedMs={}, anchors={}, candidates={}, hitRead={}, hitEdit={}, timedOut={}",
+            runId, preflight.elapsedMs(), preflight.anchorCount(), candidates.size(), hitRead, hitEdit,
+            preflight.timedOut());
     }
 
     private SpawnAgentTool.UsageSink childUsageSink(GoalExecutionPolicy goalPolicy, RunUsageAccumulator runUsage,

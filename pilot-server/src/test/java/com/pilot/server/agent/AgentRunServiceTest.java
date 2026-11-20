@@ -66,6 +66,7 @@ import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.MultiAgentProperties;
 import com.pilot.server.config.SkillProperties;
+import com.pilot.server.config.WebSearchProperties;
 import com.pilot.server.model.ModelProperties;
 import com.pilot.server.model.ModelSettings;
 import com.pilot.server.observability.RunMetrics;
@@ -604,7 +605,6 @@ class AgentRunServiceTest {
             .filter(message -> message.content().startsWith("## 仓库现状")).count();
     }
 
-    /** 请求里的 system 提示词（第一条 system 消息）。 */
     /**
      * 延迟工具只在尾部追加：第一轮打开 browser 以后核心工具的位置与内容不能变；
      * 同会话第二次 run 的首条请求就要带上已启用的集合，不再退回精简工具表。
@@ -752,6 +752,7 @@ class AgentRunServiceTest {
         };
     }
 
+    /** 请求里的 system 提示词（第一条 system 消息）。 */
     private static String systemOf(List<Message> messages) {
         return messages.stream().filter(message -> "system".equals(message.role())).map(Message::content).findFirst()
             .orElse("");
@@ -1013,23 +1014,23 @@ class AgentRunServiceTest {
                 return new ModelResponse("进度已保存", List.of());
             }
             if (calls.getAndIncrement() == 0 && completesStep) {
-                current[0].plans.save(current[0].sessionId, List.of(new PlanItem("第一步", PlanItem.COMPLETED),
-                    new PlanItem("仍未完成", PlanItem.PENDING)));
+                current[0].plans.save(current[0].sessionId,
+                    List.of(new PlanItem("第一步", PlanItem.COMPLETED), new PlanItem("仍未完成", PlanItem.PENDING)));
             }
             return readFile();
         };
         try (Fixture fixture = new Fixture(model, 12, true, 1, PermissionMode.READ_ONLY, 4)) {
             current[0] = fixture;
-            fixture.plans.save(fixture.sessionId, List.of(new PlanItem("第一步", PlanItem.PENDING),
-                new PlanItem("仍未完成", PlanItem.PENDING)));
+            fixture.plans.save(fixture.sessionId,
+                List.of(new PlanItem("第一步", PlanItem.PENDING), new PlanItem("仍未完成", PlanItem.PENDING)));
             fixture.start();
             fixture.awaitFinished("BUDGET_LIMITED");
-            if (completesStep) fixture.awaitFinished("BUDGET_LIMITED");
+            if (completesStep)
+                fixture.awaitFinished("BUDGET_LIMITED");
 
             assertEquals(completesStep ? 8 : 4, calls.get());
-            assertEquals(completesStep ? 1 : 0, fixture.sessions.events(fixture.sessionId).stream()
-                .filter(event -> event.payload() instanceof RunContinued continued
-                    && continued.reason().startsWith("预算分段继续"))
+            assertEquals(completesStep ? 1 : 0, fixture.sessions.events(fixture.sessionId).stream().filter(
+                event -> event.payload() instanceof RunContinued continued && continued.reason().startsWith("预算分段继续"))
                 .count());
         }
     }
@@ -1118,9 +1119,9 @@ class AgentRunServiceTest {
         final RunMetrics metrics;
         final AgentRunService service;
         final com.pilot.core.tool.command.CommandTaskManager commandTasks;
-        String runId;
         /** 会话级扩展工具：默认空，测试在 start 前覆盖成 browser 之类延迟工具。 */
         List<com.pilot.core.tool.Tool> sessionExtras = List.of();
+        String runId;
 
         Fixture(ModelClient model, int maxSteps) {
             this(model, maxSteps, false);
@@ -1140,9 +1141,9 @@ class AgentRunServiceTest {
 
         Fixture(ModelClient model, int maxSteps, boolean goals, int runThreads, PermissionMode mode,
             Integer directMaxRequests) {
-            AgentProperties properties = new AgentProperties(workspace.toString(), mode, maxSteps, 3, 5, 300,
-                runThreads, 0, 60_000, false, goals, directMaxRequests, null, null, null, null, null, null, null, null,
-                null);
+            AgentProperties properties =
+                new AgentProperties(workspace.toString(), mode, maxSteps, 3, 5, 300, runThreads, 0, 60_000, false,
+                    goals, directMaxRequests, null, null, null, null, null, null, null, null, null);
             JsonMapper mapper = JsonMapper.builder().build();
             PilotDataDir dataDir = new PilotDataDir(dataRoot.toString());
             commandTasks = new com.pilot.core.tool.command.CommandTaskManager(dataDir.file("commands"), mapper);
@@ -1264,5 +1265,175 @@ class AgentRunServiceTest {
 
     private static ModelResponse done() {
         return new ModelResponse("完成", List.of());
+    }
+
+    @Test
+    void preflightLocalizationRunsOnSecondTurnWithoutPollutingHistoryAndRefreshesOnPlanAdvance() throws Exception {
+        Files.createDirectories(workspace.resolve("src/alpha"));
+        Files.createDirectories(workspace.resolve("src/beta"));
+        Files.writeString(workspace.resolve("src/alpha/AlphaCheckoutService.java"),
+            "class AlphaCheckoutService { void settle() {} }\n");
+        Files.writeString(workspace.resolve("src/beta/BetaLedgerEngine.java"),
+            "class BetaLedgerEngine { void reconcile() {} }\n");
+
+        List<List<Message>> seenRequests = new CopyOnWriteArrayList<>();
+        ModelClient model = preflightPlanAdvanceModel(seenRequests);
+        try (Fixture fixture = new Fixture(model, 10, false, 1, PermissionMode.AUTO)) {
+            BlockingQueue<String> doneStatuses = new LinkedBlockingQueue<>();
+            AgentRunService runService = preflightRunService(fixture, model, doneStatuses);
+            try {
+                // 第 1 条消息（泛化寒暄）
+                runAndWait(runService, fixture, doneStatuses, "你好");
+                assertFalse(seenRequests.get(0).stream().anyMatch(m -> m.content().contains("<candidate-targets")));
+
+                // 第 2 条消息（同会话非首条消息！仍应获得 AlphaCheckoutService 预定位）
+                String task2 = "修复 AlphaCheckoutService 的结算逻辑";
+                runAndWait(runService, fixture, doneStatuses, task2);
+
+                assertTrue(
+                    seenRequests.get(1).stream()
+                        .anyMatch(m -> "system".equals(m.role()) && m.content().contains("AlphaCheckoutService.java")),
+                    "同会话第 2 条任务首步应获得预定位");
+                assertTrue(
+                    seenRequests.get(2).stream()
+                        .anyMatch(m -> "system".equals(m.role()) && m.content().contains("AlphaCheckoutService.java")),
+                    "首轮调 update_plan 后第 2 步仍应能看到初始候选");
+                assertTrue(
+                    seenRequests.get(3).stream()
+                        .anyMatch(m -> "system".equals(m.role()) && m.content().contains("BetaLedgerEngine.java")),
+                    "计划推进到高置信新步骤应刷新阶段锚点");
+                List<Message> saved = fixture.conversations.load(fixture.sessionId);
+                assertFalse(saved.stream().anyMatch(m -> m.content().contains("<candidate-targets")));
+                assertEquals(List.of("你好", task2), userInputs(saved));
+            } finally {
+                runService.shutdown();
+            }
+        }
+    }
+
+    private static ModelClient preflightPlanAdvanceModel(List<List<Message>> seenRequests) {
+        AtomicInteger callNo = new AtomicInteger();
+        return new ModelClient() {
+            @Override
+            public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
+                seenRequests.add(List.copyOf(messages));
+                return switch (callNo.incrementAndGet()) {
+                    case 1 -> done();
+                    case 2 -> planCall("p1", "in_progress", "pending", null);
+                    case 3 -> planCall("p2", "completed", "in_progress", null);
+                    case 4 -> planCall("p3", "completed", "completed", "in_progress");
+                    case 5 -> planCall("p4", "completed", "completed", "completed");
+                    default -> done();
+                };
+            }
+        };
+    }
+
+    private static ModelResponse planCall(String id, String s1, String s2, String s3) {
+        List<Map<String, String>> items = s3 == null
+            ? List.of(Map.of("step", "修改 AlphaCheckoutService", "status", s1),
+                Map.of("step", "核对 BetaLedgerEngine 对账逻辑", "status", s2))
+            : List.of(Map.of("step", "修改 AlphaCheckoutService", "status", s1),
+                Map.of("step", "核对 BetaLedgerEngine 对账逻辑", "status", s2), Map.of("step", "运行回归测试并收尾", "status", s3));
+        return new ModelResponse("", List.of(new ToolCall(id, "update_plan", Map.of("plan", items))));
+    }
+
+    private AgentRunService preflightRunService(Fixture fixture, ModelClient model,
+        BlockingQueue<String> doneStatuses) {
+        PathValidator validator = new PathValidator(workspace);
+        WorkspaceToolFactory realPlanFactory = mock(WorkspaceToolFactory.class, withSettings().mockMaker(SUBCLASS));
+        when(realPlanFactory.resolve(anyString())).thenReturn(workspace);
+        when(realPlanFactory.registryFor(anyString(), any(PlanSink.class))).thenAnswer(inv -> {
+            PlanSink sink = inv.getArgument(1);
+            ToolRegistry reg = new ToolRegistry();
+            reg.register(new ReadFileTool(validator, new ReadTracker()));
+            reg.register(new CodeSymbolTool(validator));
+            reg.register(new UpdatePlanTool(sink, () -> fixture.plans.load(fixture.sessionId)));
+            return reg;
+        });
+        AgentProperties props = new AgentProperties(workspace.toString(), PermissionMode.AUTO, 10, 3, 5, 300, 1, 0,
+            60_000, false, false, null, null, null, null, null, null, null, null, null, null, true);
+        JsonMapper mapper = JsonMapper.builder().build();
+        PilotDataDir dir = new PilotDataDir(dataRoot.resolve("preflight").toString());
+        RunMetrics metrics = new RunMetrics() {
+            @Override
+            public void recordRun(String status, long durationMs) {
+                super.recordRun(status, durationMs);
+                doneStatuses.add(status);
+            }
+        };
+        return new AgentRunService(fixture.sessions, model, realPlanFactory,
+            new PolicyPermissionGate(PermissionMode.AUTO), ApprovalBroker.denyAll(), props,
+            new ModelSettings(new ModelProperties("", "http://localhost", "test", List.of()),
+                new InMemorySettingsStore()),
+            new RunSnapshotService(mapper, dir), new RunRegistry(), RunRepository.noop(), fixture.conversations,
+            fixture.plans, mapper, dir, new QueuedMessageRepository(), null,
+            new MultiAgentProperties(false, 1, 1, 8, 30, List.of()), metrics, new TaskControlService(mapper, dir),
+            fixture.commandTasks, new SkillService(new SkillProperties(true, null), props, dir));
+    }
+
+    private static void runAndWait(AgentRunService runService, Fixture fixture, BlockingQueue<String> doneStatuses,
+        String input) throws Exception {
+        String runId = runService.claimRun(fixture.sessionId).orElseThrow();
+        fixture.sessions.publish(fixture.sessionId, runId, new RunStarted(input));
+        runService.start(fixture.sessionId, runId, input);
+        assertEquals("COMPLETED", doneStatuses.poll(5, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void preflightLocalizationRespectsDisableFlagAndWorkspaceToolsExposeParallelCodeSymbol() throws Exception {
+        Files.writeString(workspace.resolve("PaymentGateway.java"), """
+            public class PaymentGateway {
+                public boolean charge(long amount) {
+                    return amount > 0;
+                }
+            }
+            """);
+        List<List<Message>> seenRequests = new CopyOnWriteArrayList<>();
+        ModelClient model = (messages, tools) -> {
+            seenRequests.add(List.copyOf(messages));
+            return done();
+        };
+
+        try (Fixture fixture = new Fixture(model, 5, false, 1, PermissionMode.AUTO)) {
+            AgentProperties disabled = new AgentProperties(workspace.toString(), PermissionMode.AUTO, 5, 3, 5, 300, 1,
+                0, 60_000, false, false, null, null, null, null, null, null, null, null, null, null, false);
+            JsonMapper mapper = JsonMapper.builder().build();
+            PilotDataDir dir = new PilotDataDir(dataRoot.resolve("preflight-off").toString());
+            BlockingQueue<String> doneStatuses = new LinkedBlockingQueue<>();
+            RunMetrics metrics = new RunMetrics() {
+                @Override
+                public void recordRun(String status, long durationMs) {
+                    super.recordRun(status, durationMs);
+                    doneStatuses.add(status);
+                }
+            };
+            WorkspaceToolFactory realFactory = new WorkspaceToolFactory(disabled,
+                new WebSearchProperties(false, "", "", ""), SnapshotSink.none(), mapper);
+            ToolRegistry built = realFactory.registryFor(workspace.toString());
+            assertTrue(built.names().contains(CodeSymbolTool.NAME),
+                "无外部编译器环境下 WorkspaceToolFactory 也应默认暴露 code_symbol");
+            assertTrue(built.find(CodeSymbolTool.NAME).orElseThrow().parallelSafe());
+
+            AgentRunService runService = new AgentRunService(fixture.sessions, model, realFactory,
+                new PolicyPermissionGate(PermissionMode.AUTO), ApprovalBroker.denyAll(), disabled,
+                new ModelSettings(new ModelProperties("", "http://localhost", "test", List.of()),
+                    new InMemorySettingsStore()),
+                new RunSnapshotService(mapper, dir), new RunRegistry(), RunRepository.noop(), fixture.conversations,
+                fixture.plans, mapper, dir, new QueuedMessageRepository(), null,
+                new MultiAgentProperties(false, 1, 1, 8, 30, List.of()), metrics, new TaskControlService(mapper, dir),
+                fixture.commandTasks, new SkillService(new SkillProperties(true, null), disabled, dir));
+            try {
+                String runId = runService.claimRun(fixture.sessionId).orElseThrow();
+                String prompt = "排查 PaymentGateway 的 charge 逻辑";
+                fixture.sessions.publish(fixture.sessionId, runId, new RunStarted(prompt));
+                runService.start(fixture.sessionId, runId, prompt);
+                assertEquals("COMPLETED", doneStatuses.poll(5, TimeUnit.SECONDS));
+                assertFalse(seenRequests.getFirst().stream().anyMatch(m -> m.content().contains("<candidate-targets")),
+                    "关闭 preflightLocalizationEnabled 后不应注入候选目标块");
+            } finally {
+                runService.shutdown();
+            }
+        }
     }
 }

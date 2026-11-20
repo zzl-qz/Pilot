@@ -37,6 +37,7 @@ class AgentPropertiesTest {
         assertEquals(400_000, properties.contextMaxChars());
         assertEquals(0, properties.maxPlanContinues(), "计划不再自动催继续");
         assertTrue(properties.completionChecksEnabled(), "收尾门默认开启");
+        assertTrue(properties.preflightLocalizationEnabledValue(), "Pre-flight 预定位默认开启");
     }
 
     @Test

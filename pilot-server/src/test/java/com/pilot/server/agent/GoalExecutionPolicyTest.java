@@ -29,6 +29,7 @@ import com.pilot.core.loop.ExecutionPolicy;
 import com.pilot.core.loop.ToolExecutor;
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
+import com.pilot.core.message.ToolNames;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelClientException;
 import com.pilot.core.model.ModelResponse;
@@ -1047,5 +1048,69 @@ class GoalExecutionPolicyTest {
         String captured = reviewerInput.get();
         assertTrue(!captured.contains("触达代码静态审计前后对比"), captured);
         assertTrue(captured.contains("准备交付的文本"), captured);
+    }
+
+    @Test
+    void marginalGainGuidanceReplacesRawCountAndRespectsExplicitNoEditResearch() {
+        tasks.start("s", "分析怎么优化这套架构，给出方案，不要直接动手", List.of(), List.of());
+        GoalExecutionPolicy policy = policy((messages, tools) -> new ModelResponse("unused", List.of()), 30);
+        policy.beforeRequest(history);
+
+        // 连续 18 次有效跨文件阅读：纯方案讨论（即便含「优化」字样）绝不催改代码
+        for (int i = 1; i <= 18; i++) {
+            ToolCall call = new ToolCall("r" + i, ToolNames.READ_FILE, Map.of("path", "pkg/File" + i + ".java"));
+            policy.beforeTool(call);
+            policy.observed(call, new ToolExecutor.Outcome(ToolNames.READ_FILE,
+                "1 | class File" + i + " {}\n… 显示第 1 到第 100 行，文件共 100 行 …", null, null));
+            assertNull(policy.requestGuidance(), "纯调研持续产生新线索时第 " + i + " 次不应催促修改");
+        }
+
+        // 陷入连续 4 次空搜索时，给出面向调研模式的低增益提醒（绝不要求改代码）
+        for (int i = 1; i <= 4; i++) {
+            ToolCall call = new ToolCall("s" + i, ToolNames.SEARCH_TEXT, Map.of("pattern", "absent_" + i));
+            policy.beforeTool(call);
+            policy.observed(call, new ToolExecutor.Outcome(ToolNames.SEARCH_TEXT, "未找到匹配项: absent_" + i, null, null));
+        }
+        String guidance = policy.requestGuidance();
+        assertNotNull(guidance);
+        assertTrue(guidance.contains("空搜索 4 次"), guidance);
+        assertTrue(guidance.contains("收束结论"), guidance);
+        assertFalse(guidance.contains("最小可执行改动"), guidance);
+    }
+
+    @Test
+    void implementationTaskSoftWanderingTriggersDataBackedNudgeAndSteeringResetsIt() {
+        tasks.start("s", "修复订单超时重试逻辑", List.of(), List.of());
+        GoalExecutionPolicy policy = policy((messages, tools) -> new ModelResponse("unused", List.of()), 30);
+        policy.beforeRequest(history);
+
+        // 前 8 次跨不同文件有效调查不再按旧的 8 次硬计数误催
+        for (int i = 1; i <= 8; i++) {
+            ToolCall call = new ToolCall("r" + i, ToolNames.READ_FILE, Map.of("path", "order/Part" + i + ".java"));
+            policy.beforeTool(call);
+            policy.observed(call, new ToolExecutor.Outcome(ToolNames.READ_FILE,
+                "1 | class Part" + i + " {}\n… 显示第 1 到第 80 行，文件共 80 行 …", null, null));
+            assertNull(policy.requestGuidance(), "有效跨文件追踪第 " + i + " 次不应误催");
+        }
+
+        // 随后连续 4 次空搜索/重复命中 -> 精准捕获软空转
+        for (int i = 1; i <= 4; i++) {
+            ToolCall call = new ToolCall("m" + i, ToolNames.SEARCH_TEXT, Map.of("pattern", "ghost_" + i));
+            policy.beforeTool(call);
+            policy.observed(call, new ToolExecutor.Outcome(ToolNames.SEARCH_TEXT, "未找到匹配项: ghost_" + i, null, null));
+        }
+        String nudge = policy.requestGuidance();
+        assertNotNull(nudge);
+        assertTrue(nudge.contains("空搜索 4 次"), nudge);
+        assertTrue(nudge.contains("最小可执行改动"), nudge);
+
+        // 用户 steering 纠正后重置调查窗口
+        policy.onSteering();
+        for (int i = 1; i <= 3; i++) {
+            ToolCall call = new ToolCall("after" + i, ToolNames.SEARCH_TEXT, Map.of("pattern", "new_miss_" + i));
+            policy.beforeTool(call);
+            policy.observed(call, new ToolExecutor.Outcome(ToolNames.SEARCH_TEXT, "未找到匹配项: new_miss_" + i, null, null));
+        }
+        assertNull(policy.requestGuidance(), "steering 重置后未满阈值不应误触发");
     }
 }
