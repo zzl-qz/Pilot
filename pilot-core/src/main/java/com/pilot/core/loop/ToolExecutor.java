@@ -246,14 +246,16 @@ public final class ToolExecutor {
         OutcomeStatus status = classify(primaryResult, singleton(nativeCheck));
         boolean archiveReader =
             ToolNames.READ_TOOL_OUTPUT.equals(call.name()) || ToolNames.COMMAND_LOGS.equals(call.name());
-        boolean commandOutput = ToolNames.RUN_COMMAND.equals(call.name()) || ToolNames.COMMAND_LOGS.equals(call.name());
+        // run_command 首次输出 > 6k 即定型；command_logs 属于显式分页读取，保留 <= 8,192（不触发二次截断）的请求切片原文。
+        int compactTrigger = ToolNames.RUN_COMMAND.equals(call.name()) ? ToolOutputPresenter.COMPACT_TRIGGER_CHARS
+            : ToolNames.COMMAND_LOGS.equals(call.name()) ? 8_192 : Integer.MAX_VALUE;
         if (journalRunId != null && !ToolNames.READ_TOOL_OUTPUT.equals(call.name())) {
             try {
                 journal.recordObservation(journalRunId, call, result);
                 if (Objects.equals(result, journal.observation(journalRunId, call.callId()).orElse(null))) {
                     String archiveRef = "\n[工具输出存档 run_id=" + journalRunId + " call_id=" + call.callId()
                         + "；使用 read_tool_output 分页读取，禁止重放原操作]";
-                    if (commandOutput && result.length() > ToolOutputPresenter.COMPACT_TRIGGER_CHARS) {
+                    if (result.length() > compactTrigger) {
                         result = ToolOutputPresenter.compactCommandOutput(result, archiveRef);
                     } else if (!archiveReader
                         && (result.length() >= 4_000 || result.contains("已截断") || result.contains("后续日志使用"))) {

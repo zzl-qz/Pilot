@@ -161,20 +161,101 @@ class CacheContextTest {
 
     @Test
     void optInCompactionReusesPrefixAndDisablesToolExecution() {
-        compact(false, 100_000, true);
+        compact(false, 100_000, 400_000, true);
     }
 
     @Test
     void rejectedPrefixSummaryFallsBackToShortInputAndCountsBothAttempts() {
-        compact(true, 100_000, true);
+        compact(true, 100_000, 400_000, true);
     }
 
     @Test
-    void insufficientHeadroomUsesShortSummaryDirectly() {
-        compact(false, 10000, false);
+    void characterCapBlockingHeadroomUsesShortSummaryDirectly() {
+        compact(false, 100_000, 20_000, false);
     }
 
-    private void compact(boolean rejectPrefix, int limit, boolean prefixExpected) {
+    /**
+     * spec 场景：180,000 字符（140k ASCII + 40k 汉字）、75,000 token 的历史，
+     * tokenBudget=104,000、charBudget=400,000。拿字符总数去比 token 预算会把这种历史
+     * 误判成「放不下」，白丢掉前缀缓存命中。
+     */
+    @Test
+    void reusesPrefixWhenCharactersExceedTokenBudgetButTokensFit() {
+        var history = new ArrayList<Message>();
+        history.add(Message.system("stable-system"));
+        for (int i = 0; i < 10; i++) {
+            history.add(Message.user("问题" + i + "中".repeat(4_000)));
+            history.add(Message.assistant("回复" + i + "x".repeat(13_999), List.of()));
+        }
+        int chars = ContextCompactor.totalChars(history);
+        int tokens = ContextCompactor.estimateTokens(history);
+        assertTrue(chars >= 175_000 && chars <= 185_000, "spec 场景的字符总量约 180,000，实际 " + chars);
+        assertTrue(chars > 104_000, "字符总数本身已超过 token 预算");
+        assertTrue(tokens >= 70_000 && tokens < 80_000, "spec 场景的 token 估算约 75,000，实际 " + tokens);
+        var original = List.copyOf(history);
+        var requests = new ArrayList<List<Message>>();
+        var definitions = List.of(new ToolDefinition("read", "read", Map.of("type", "object")));
+        ModelClient model = new ModelClient() {
+            public ModelProfile profile() {
+                return ModelProfile.resolve(null, "test", "generic", "auto", "", false, false, "prefix", null);
+            }
+
+            public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
+                requests.add(List.copyOf(messages));
+                assertTrue(ModelRequestScope.current().toolsDisabled());
+                assertEquals(definitions, tools);
+                return new ModelResponse("交接摘要", List.of());
+            }
+        };
+
+        var result = new ContextCompactor(model, 2).withTools(() -> definitions).withTokenLimit(() -> 104_000)
+            .withCharLimit(() -> 400_000).compact(history, 8_000);
+
+        assertTrue(result.compacted());
+        assertEquals(1, requests.size(), "余量充足时只应发一次前缀复用请求");
+        var request = requests.getFirst();
+        assertEquals(original, request.subList(0, original.size()), "前缀复用要原样带上历史与系统提示");
+        assertTrue(request.getLast().content().contains("交接摘要"), request.getLast().content());
+    }
+
+    /**
+     * 兼容网关按需入口：provider=generic 不主动声明前缀缓存，配置里也是 short，
+     * 只有本 run 真的观测到 cachedInputTokens>0 才复用前缀。
+     */
+    @Test
+    void compatibleGatewayReusesPrefixOnlyAfterObservingCacheHit() {
+        assertTrue(gatewayUsesPrefix(true), "观测到缓存命中后应复用前缀");
+        assertFalse(gatewayUsesPrefix(false), "没观测到命中时仍走短摘录，避免白送一遍历史");
+    }
+
+    private boolean gatewayUsesPrefix(boolean cacheHit) {
+        var history = new ArrayList<Message>();
+        history.add(Message.system("stable-system"));
+        for (int i = 0; i < 12; i++) {
+            history.add(Message.user("question " + i));
+            history.add(Message.assistant("answer" + "x".repeat(2_000), List.of()));
+        }
+        var requests = new ArrayList<List<Message>>();
+        var definitions = List.of(new ToolDefinition("read", "read", Map.of("type", "object")));
+        ModelClient model = new ModelClient() {
+            public ModelProfile profile() {
+                return ModelProfile.resolve(null, "test", "generic", "auto", "", false, false, "short", null);
+            }
+
+            public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
+                requests.add(List.copyOf(messages));
+                return new ModelResponse("交接摘要", List.of());
+            }
+        };
+
+        var result = new ContextCompactor(model, 2).withTools(() -> definitions).withTokenLimit(() -> 100_000)
+            .withCharLimit(() -> 400_000).withObservedCacheHit(() -> cacheHit).compact(history, 8_000);
+
+        assertTrue(result.compacted());
+        return requests.getFirst().size() > 2;
+    }
+
+    private void compact(boolean rejectPrefix, int tokenLimit, int charLimit, boolean prefixExpected) {
         List<Message> history = new ArrayList<>();
         history.add(Message.system("stable-system"));
         for (int i = 0; i < 12; i++) {
@@ -209,8 +290,8 @@ class CacheContextTest {
             }
         };
         var measured = new MeteredModelClient(model, "test", "main", List.of(), reports::add);
-        var result = new ContextCompactor(measured, 2).withTools(() -> definitions).withContextLimit(() -> limit)
-            .compact(history, 8000);
+        var result = new ContextCompactor(measured, 2).withTools(() -> definitions).withTokenLimit(() -> tokenLimit)
+            .withCharLimit(() -> charLimit).compact(history, 8000);
         assertTrue(result.compacted());
         assertEquals(prefixExpected, requests.getFirst().size() > 2);
         assertEquals(rejectPrefix && prefixExpected ? 2 : 1, reports.size());

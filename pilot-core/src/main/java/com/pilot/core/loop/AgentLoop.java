@@ -217,6 +217,8 @@ public final class AgentLoop {
     private final PermissionGate permissionGate;
     /** 上下文预算的四层收缩策略与退避状态。 */
     private final ContextBudget budget;
+    /** 本 run 是否已观测到端点缓存命中；兼容网关据此决定摘要是否值得复用前缀。 */
+    private final AtomicBoolean observedCacheHit = new AtomicBoolean();
     private final ToolExecutor toolExecutor;
     private final Config config;
     private final Cancellation cancellation;
@@ -473,7 +475,8 @@ public final class AgentLoop {
         this.tools = Objects.requireNonNull(tools, "tools must not be null");
         this.permissionGate = Objects.requireNonNull(permissionGate, "permissionGate must not be null");
         this.budget = new ContextBudget(
-            new ContextCompactor(client).withTools(tools::definitions).withContextLimit(this::admissionLimit)::compact);
+            new ContextCompactor(client).withTools(tools::definitions).withTokenLimit(this::admissionLimit)
+                .withCharLimit(this::contextLimit).withObservedCacheHit(observedCacheHit::get)::compact);
         this.toolExecutor = new ToolExecutor(tools, this.permissionGate,
             Objects.requireNonNull(approvals, "approvals must not be null"), traceRecorder, hooks);
         this.config = Objects.requireNonNull(config, "config must not be null");
@@ -582,7 +585,7 @@ public final class AgentLoop {
             }
             completionGate.baseline(List.copyOf(checks));
         }
-        UsageTracker usage = new UsageTracker(events);
+        UsageTracker usage = new UsageTracker(events, this::noteUsage);
         DynamicPollTracker dynamicPolls = new DynamicPollTracker(config.repeatRemindAt(), config.repeatAbortAt());
         planGate.reset();
         RuntimeGuidance runtimeGuidance = new RuntimeGuidance();
@@ -1750,6 +1753,13 @@ public final class AgentLoop {
         return new Result(null, RunFailureCode.CANCELLED.name(), conversation(messages));
     }
 
+    /** 端点报告了缓存命中（且用量确实来自端点）才认；估出来的缓存量不能当证据。 */
+    private void noteUsage(ModelUsage usage) {
+        if (usage.exact() && usage.inputTokens() > 0 && usage.cachedInputTokens() > 0) {
+            observedCacheHit.set(true);
+        }
+    }
+
     /** 真正会拿去发给模型的输入上限。界面和日常压缩都用这一口径，避免本地 40 万字符预算把 10 万的发送线挡住。 */
     int admissionLimit() {
         long wire = ModelCapacity.active().inputBudget();
@@ -1904,6 +1914,8 @@ public final class AgentLoop {
     /** 一次 run 内累计模型用量；请求开始先推估算，响应回来后再用端点 usage 校准。 */
     private static final class UsageTracker {
         private final Consumer<SessionEvent> events;
+        /** 每拿到一次端点用量就回传，用来记录本 run 是否出现过缓存命中。 */
+        private final Consumer<ModelUsage> observer;
         private int requests;
         private long inputTokens;
         private long outputTokens;
@@ -1913,8 +1925,9 @@ public final class AgentLoop {
         private int contextLimit = 1;
         private boolean allExact = true;
 
-        private UsageTracker(Consumer<SessionEvent> events) {
+        private UsageTracker(Consumer<SessionEvent> events, Consumer<ModelUsage> observer) {
             this.events = events;
+            this.observer = observer;
         }
 
         private void start(List<Message> messages, int limit) {
@@ -1932,6 +1945,7 @@ public final class AgentLoop {
         private void finish(ModelResponse response) {
             ModelUsage reported = response == null ? ModelUsage.unknown() : response.usage();
             if (reported != null && reported.present()) {
+                observer.accept(reported);
                 inputTokens += reported.inputTokens() > 0 ? reported.inputTokens() : pendingInput;
                 outputTokens += reported.outputTokens();
                 // 缓存命中只有在端点真的给出了输入用量时才可信；回落到本地估算的那一步

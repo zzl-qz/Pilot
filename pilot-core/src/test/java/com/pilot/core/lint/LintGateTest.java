@@ -221,6 +221,7 @@ class LintGateTest {
         LintGate.LintAssessment renamedCopy = gate.assess(root, List.of("src/app.js"));
         assertEquals(LintGate.LintAssessment.Kind.FINDINGS, renamedCopy.kind());
         assertTrue(renamedCopy.prompt().contains("换名复制"), renamedCopy.prompt());
+        assertTrue(renamedCopy.prompt().contains("命中片段："), renamedCopy.prompt());
 
         String once = before + "\n" + copied;
         String twice = once + "\n" + copied;
@@ -231,6 +232,45 @@ class LintGateTest {
         LintGate.LintAssessment pasted = exact.assess(root, List.of("src/app.js"));
         assertEquals(LintGate.LintAssessment.Kind.FINDINGS, pasted.kind());
         assertTrue(pasted.prompt().contains("原样复制"), pasted.prompt());
+        assertTrue(pasted.prompt().contains("命中片段："), pasted.prompt());
+    }
+
+    @Test
+    void fluentBuilderSettersDoNotTriggerFalseRenamedCopyFindings() {
+        String before = """
+            public final class Sample {
+                public Sample withTools(Runnable value) {
+                    this.tools = value;
+                    return this;
+                }
+                public Sample withContextLimit(Runnable value) {
+                    this.contextLimit = value;
+                    return this;
+                }
+            }
+            """;
+        String after = """
+            public final class Sample {
+                public Sample withTools(Runnable value) {
+                    this.tools = value;
+                    return this;
+                }
+                public Sample withContextLimit(Runnable value) {
+                    this.contextLimit = value;
+                    return this;
+                }
+                public Sample withTokenLimit(Runnable value) {
+                    this.tokenLimit = value == null ? () -> {} : value;
+                    return this;
+                }
+                public Sample withCharLimit(Runnable value) {
+                    this.charLimit = value == null ? () -> {} : value;
+                    return this;
+                }
+            }
+            """;
+        List<String> findings = ReuseScan.scan("Sample.java", before, after, List.of());
+        assertTrue(findings.isEmpty(), "连续 fluent setter 样板代码不应误报换名复制: " + findings);
     }
 
     @Test

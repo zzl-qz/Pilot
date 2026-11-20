@@ -21,6 +21,7 @@ import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PolicyPermissionGate;
 import com.pilot.core.tool.ReadTracker;
 import com.pilot.core.tool.ToolResult;
+import com.pilot.core.tool.VerificationCheck;
 import com.pilot.core.tool.file.ReadFileTool;
 import com.pilot.core.workspace.PathValidator;
 
@@ -351,5 +352,18 @@ class RunCommandPolicyTest {
         String second = tool.execute(Map.of("command", "echo git-cache-check"));
         assertTrue(first.contains("退出码: 0"), first);
         assertTrue(second.startsWith("与上次相同，未再执行"), second);
+    }
+
+    @Test
+    void longMavenTestCommandPreservesTrailingGoalForVerificationClassification() {
+        String longCmd =
+            "mvnw -q -pl pilot-server -Dtest=AgentPropertiesBindingTest,AgentPropertiesTest -Dsurefire.failIfNoSpecifiedTests=false test";
+        String summary = CommandToolSupport.summarizeCommand(longCmd) + " → exit 0";
+        assertEquals(VerificationCheck.Kind.TEST, VerificationCheck.passingKind(summary), summary);
+
+        String hugeCmd = "mvnw -q -pl pilot-server -Dtest=" + "VeryLongTestClassName,".repeat(15)
+            + "AgentPropertiesBindingTest -Dsurefire.failIfNoSpecifiedTests=false test";
+        String hugeSummary = CommandToolSupport.summarizeCommand(hugeCmd) + " → exit 0";
+        assertEquals(VerificationCheck.Kind.TEST, VerificationCheck.passingKind(hugeSummary), hugeSummary);
     }
 }

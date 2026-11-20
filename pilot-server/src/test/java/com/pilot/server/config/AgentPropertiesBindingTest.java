@@ -26,7 +26,8 @@ class AgentPropertiesBindingTest {
         runner.withSystemProperties("pilot.completion.checks=false").run(context -> {
             var properties = context.getBean(AgentProperties.class);
             assertFalse(properties.completionChecksEnabled());
-            assertEquals(1_000, properties.directMaxRequests());
+            // application.yaml 里 direct-max-requests 留空，取 AgentProperties 自己的默认值，不再跟随 max-steps
+            assertEquals(500, properties.directMaxRequests());
             assertEquals(300, properties.approvalTimeoutSeconds());
         });
     }

@@ -8,6 +8,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
@@ -75,6 +76,9 @@ public final class ContextCompactor {
     private static final double MIN_GAIN_RATIO = 0.05;
     /** 摘要正文上限，约 1500 token。 */
     private static final int MAX_SUMMARY_CHARS = 6_000;
+    /** 前缀复用摘要的容量护栏：token 口径留 2000 余量给回复，字符口径留 8000 给协议包装。 */
+    private static final int PREFIX_TOKEN_SAFETY = 2_000;
+    private static final int PREFIX_CHAR_SAFETY = 8_000;
 
     /** 占位符化：触发高水位清理时保留最近 35% 预算的完整工具输出，一次腾出足够冷却跑道避免每 4 步反复破缓存。 */
     private static final double PRUNE_KEEP_RATIO = 0.35;
@@ -114,15 +118,33 @@ public final class ContextCompactor {
     private final ModelClient client;
     private final int minKeepGroups;
     private Supplier<List<ToolDefinition>> tools = List::of;
-    private IntSupplier contextLimit = () -> Integer.MAX_VALUE;
+    /** 完整请求的 token 输入预算（{@code AgentLoop.admissionLimit()}）。 */
+    private IntSupplier tokenLimit = () -> Integer.MAX_VALUE;
+    /** 内存字符上限（{@code AgentLoop.contextLimit()}），与 token 预算分开卡。 */
+    private IntSupplier charLimit = () -> Integer.MAX_VALUE;
+    /** 本 run 是否已观测到端点缓存命中；兼容网关据此决定是否值得复用前缀。 */
+    private BooleanSupplier observedCacheHit = () -> false;
 
     public ContextCompactor withTools(Supplier<List<ToolDefinition>> value) {
         this.tools = value;
         return this;
     }
 
-    public ContextCompactor withContextLimit(IntSupplier value) {
-        this.contextLimit = value;
+    /** token 预算：判断复用历史前缀后是否仍放得下摘要请求。 */
+    public ContextCompactor withTokenLimit(IntSupplier value) {
+        this.tokenLimit = value;
+        return this;
+    }
+
+    /** 字符上限：内存护栏，不再拿它跟 token 口径互相比。 */
+    public ContextCompactor withCharLimit(IntSupplier value) {
+        this.charLimit = value;
+        return this;
+    }
+
+    /** 本 run 是否已观测到端点缓存命中；兼容网关据此决定是否值得复用前缀。 */
+    public ContextCompactor withObservedCacheHit(BooleanSupplier value) {
+        this.observedCacheHit = value;
         return this;
     }
 
@@ -491,20 +513,21 @@ public final class ContextCompactor {
         List<ToolDefinition> definitions = tools.get();
         String instruction = "请只生成当前对话的交接摘要，不调用工具。保留目标、约束、已完成工作、验证证据和剩余事项。\n" + SUMMARY_PROMPT;
         int input = estimateTokens(history) + estimateTokens(String.valueOf(definitions));
+        int tokenBudget = Math.max(0, tokenLimit.getAsInt());
+        int charBudget = Math.max(0, charLimit.getAsInt());
         // dsh 的摘要请求复用本轮系统提示、工具和历史前缀，后面只追加整理指令，
         // 这样 DeepSeek 一类的前缀缓存还能命中。本地或未开 prefix 的端点仍走短摘录，
-        // 避免把整段历史再送一遍。
-        boolean prefix = (ModelProfile.COMPACTION_PREFIX.equals(profile.compactionMode())
-            || ModelProfile.PROVIDER_DEEPSEEK.equals(profile.provider())) && !history.isEmpty()
-            && contextLimit.getAsInt() > 0 && input + estimateTokens(instruction) + 2_000 < contextLimit.getAsInt()
-            && totalChars(history) + instruction.length() + 8_000 < contextLimit.getAsInt();
+        // 避免把整段历史再送一遍。容量分别按 token 预算与字符上限判定：英文长对话常常
+        // 字符数远超 token 数，拿字符总数去比 token 预算会把它误判成「放不下」。
+        boolean prefix = prefixEligible(profile) && !history.isEmpty() && tokenBudget > 0 && charBudget > 0
+            && input + estimateTokens(instruction) + PREFIX_TOKEN_SAFETY < tokenBudget
+            && totalChars(history) + instruction.length() + PREFIX_CHAR_SAFETY < charBudget;
         if (prefix) {
             List<Message> request = new ArrayList<>(history);
             request.add(Message.user(instruction));
             try {
-                if (!RequestBudget.assessRequest(request, definitions, contextLimit.getAsInt()).fits()) {
-                    throw new IllegalArgumentException("摘要请求超过安全预算");
-                }
+                // 发送前的真实容量由端点适配器的 RequestBudget.enforce 把关；这里再加一道本地
+                // 余量判定只会把刚通过上面 guard 的请求挡回去。
                 List<Message> admittedRequest = List.copyOf(request);
                 ModelResponse response =
                     ModelRequestScope.within("compaction", null, true, () -> client.chat(admittedRequest, definitions));
@@ -518,7 +541,7 @@ public final class ContextCompactor {
             }
         }
         List<Message> request = List.of(Message.system(SUMMARY_PROMPT), Message.user(transcript));
-        if (!RequestBudget.assessRequest(request, List.of(), contextLimit.getAsInt()).fits()) {
+        if (!RequestBudget.assessRequest(request, List.of(), tokenBudget).fits()) {
             return "";
         }
         ModelResponse response =
@@ -527,6 +550,21 @@ public final class ContextCompactor {
             return "";
         }
         return response.content() == null ? "" : response.content().strip();
+    }
+
+    /**
+     * 是否值得复用会话前缀做摘要：端点选了 {@code prefix}、是 DeepSeek 的自动前缀缓存端点，
+     * 或在隐式缓存端点上本轮已经看到缓存命中。
+     *
+     * <p>最后一条是兼容网关的按需入口：{@code provider=generic} 的网关不会主动声明前缀缓存能力，
+     * 但一旦观测到 {@code cachedInputTokens > 0}，再送一遍相同前缀就能命中。DeepSeek 单独列出来是
+     * 因为运行设置默认写的是 {@code short}，若只认显式 {@code prefix}，这些端点的前缀缓存永远用不上；
+     * 端点拒绝或超窗时仍静默回落 {@code short}，不会阻断压缩。
+     */
+    private boolean prefixEligible(ModelProfile profile) {
+        return ModelProfile.COMPACTION_PREFIX.equals(profile.compactionMode())
+            || ModelProfile.PROVIDER_DEEPSEEK.equals(profile.provider())
+            || (ModelProfile.CACHE_IMPLICIT.equals(profile.cacheMode()) && observedCacheHit.getAsBoolean());
     }
 
     private static int chars(List<Message> messages, int[] group) {

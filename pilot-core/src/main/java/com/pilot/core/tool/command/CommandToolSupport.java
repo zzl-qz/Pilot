@@ -5,13 +5,16 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import com.pilot.core.tool.ToolResults;
-import com.pilot.core.util.Texts;
 import com.pilot.core.util.WireEnum;
 
 /** 命令工具共用的状态表示；日志内容不参与判断验证是否通过。 */
 final class CommandToolSupport {
     private static final Pattern TASK_ID = Pattern.compile("(?m)^任务ID: ([A-Za-z0-9_-]+)$");
     private static final Pattern STATUS = Pattern.compile("(?m)^状态: ([A-Z_]+)$");
+    /** 命令摘要保留上限；超长时保留首尾 token，防止把末尾 test/verify 等验证目标截掉导致收尾门误判。 */
+    private static final int CHECK_COMMAND_MAX_CHARS = 240;
+    private static final int CHECK_COMMAND_HEAD_CHARS = 150;
+    private static final int CHECK_COMMAND_TAIL_CHARS = 70;
 
     private CommandToolSupport() {
     }
@@ -66,7 +69,7 @@ final class CommandToolSupport {
         if (task == null || running(task) || task.exitCode() == null || !task.status().equals(status.group(1))) {
             return null;
         }
-        String command = Texts.oneLine(task.command(), 90);
+        String command = summarizeCommand(task.command());
         if (ToolResults.isChangeTrackingIncomplete(result)) {
             return command + " → CHANGE_TRACKING_INCOMPLETE";
         }
@@ -75,6 +78,23 @@ final class CommandToolSupport {
         }
         // 超时或取消不是成功验证，即使恰好捕获到退出码 0，也不能满足收尾门。
         return command + " → " + task.status() + "（进程退出码 " + task.exitCode() + "）";
+    }
+
+    /** 保留完整可执行名与尾部目标（如 `mvnw -pl ... -Dtest=... test`），避免 90 字符硬截断裁掉末尾验证目标。 */
+    static String summarizeCommand(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "";
+        }
+        String single = raw.replaceAll("\\s+", " ").strip();
+        if (single.length() <= CHECK_COMMAND_MAX_CHARS) {
+            return single;
+        }
+        String head = single.substring(0, CHECK_COMMAND_HEAD_CHARS).stripTrailing();
+        int tailStart = Math.max(CHECK_COMMAND_HEAD_CHARS, single.length() - CHECK_COMMAND_TAIL_CHARS);
+        int boundary = single.indexOf(' ', tailStart);
+        String tail = (boundary > 0 && boundary + 1 < single.length() ? single.substring(boundary + 1)
+            : single.substring(tailStart)).stripLeading();
+        return head + " … " + tail;
     }
 
     static long integerArg(Map<String, Object> args, String name, long fallback, long min, long max) {

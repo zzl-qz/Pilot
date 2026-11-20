@@ -762,18 +762,18 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         if (commandTasks != null) {
             return CommandToolSupport.checkSummary(commandTasks, sessionId, result);
         }
-        String command =
-            call == null || call.args() == null ? "" : String.valueOf(call.args().getOrDefault("command", ""));
+        String command = CommandToolSupport.summarizeCommand(
+            call == null || call.args() == null ? "" : String.valueOf(call.args().getOrDefault("command", "")));
         if (ToolResults.isChangeTrackingIncomplete(result)) {
-            return Texts.oneLine(command, 90) + " → CHANGE_TRACKING_INCOMPLETE";
+            return command + " → CHANGE_TRACKING_INCOMPLETE";
         }
         Matcher matcher = EXIT_CODE.matcher(result);
         if (matcher.find()) {
-            return Texts.oneLine(command, 90) + " → exit " + matcher.group(1);
+            return command + " → exit " + matcher.group(1);
         }
         // 超时、启动失败没有退出码，但同样是「验证没通过」，要留在记录里
         if (ToolResults.isError(result)) {
-            return Texts.oneLine(command, 90) + " → " + Texts.oneLine(result, 80);
+            return command + " → " + Texts.oneLine(result, 80);
         }
         return null;
     }

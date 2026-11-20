@@ -15,7 +15,10 @@ import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelClientException;
+import com.pilot.core.model.ModelProfile;
+import com.pilot.core.model.ModelRequestScope;
 import com.pilot.core.model.ModelResponse;
+import com.pilot.core.model.ToolDefinition;
 
 class ContextCompactorTest {
 
@@ -281,6 +284,93 @@ class ContextCompactorTest {
         assertTrue(pinned.length() <= 4_500, "硬裁剪元数据必须有界，实际 " + pinned.length());
         assertEquals(ContextCompactor.MAX_PINNED_USER_IMAGES, messages.get(1).attachments().size());
         assertTrue(pinned.contains("u1.png") && pinned.contains("u2.png"), "更早原图应转为路径引用保留");
+    }
+
+    /** 前缀复用：带上原历史与工具定义，末尾只追加禁工具整理指令，并置 toolsDisabled。 */
+    @Test
+    void prefixSummaryReusesHistoryAndToolsBeforeAppendingInstruction() {
+        List<Message> messages = history(10, 3_000);
+        List<Message> original = List.copyOf(messages);
+        List<ToolDefinition> definitions = List.of(new ToolDefinition("read_file", "read", Map.of("type", "object")));
+        ArrayList<List<Message>> requests = new ArrayList<>();
+        ArrayList<List<ToolDefinition>> sentTools = new ArrayList<>();
+        ModelClient client = new ModelClient() {
+            public ModelProfile profile() {
+                return ModelProfile.resolve(null, "m", "generic", "auto", "", null, null, "prefix", null);
+            }
+
+            public ModelResponse chat(List<Message> request, List<ToolDefinition> tools) {
+                requests.add(List.copyOf(request));
+                sentTools.add(List.copyOf(tools));
+                assertTrue(ModelRequestScope.current().toolsDisabled(), "前缀复用摘要必须禁工具");
+                assertEquals("compaction", ModelRequestScope.current().purpose());
+                return new ModelResponse("摘要", List.of());
+            }
+        };
+
+        ContextCompactor.Outcome outcome = new ContextCompactor(client, 2).withTools(() -> definitions)
+            .withTokenLimit(() -> 104_000).withCharLimit(() -> 400_000).compact(messages, 8_000);
+
+        assertTrue(outcome.compacted());
+        assertEquals(1, requests.size(), "只应发一次前缀复用请求");
+        assertEquals(original, requests.getFirst().subList(0, original.size()), "前缀必须与当前会话一致");
+        assertEquals(original.size() + 1, requests.getFirst().size(), "末尾只追加一条整理指令");
+        assertTrue(requests.getFirst().getLast().content().contains("不调用工具"));
+        assertEquals(definitions, sentTools.getFirst());
+        assertFalse(ModelRequestScope.current().toolsDisabled(), "调用栈退出后必须恢复");
+    }
+
+    /** 端点回了工具调用：前缀复用结果不可用，静默回落短摘录，不阻断压缩。 */
+    @Test
+    void prefixSummaryFallsBackToShortInputWhenEndpointReturnsToolCalls() {
+        List<Message> messages = history(10, 3_000);
+        List<ToolDefinition> definitions = List.of(new ToolDefinition("read_file", "read", Map.of("type", "object")));
+        ArrayList<List<Message>> requests = new ArrayList<>();
+        ModelClient client = new ModelClient() {
+            public ModelProfile profile() {
+                return ModelProfile.resolve(null, "m", "generic", "auto", "", null, null, "prefix", null);
+            }
+
+            public ModelResponse chat(List<Message> request, List<ToolDefinition> tools) {
+                requests.add(List.copyOf(request));
+                return tools.isEmpty() ? new ModelResponse("回落摘要", List.of())
+                    : new ModelResponse("", List.of(new ToolCall("bad", "read_file", Map.of("path", "f0"))));
+            }
+        };
+
+        ContextCompactor.Outcome outcome = new ContextCompactor(client, 2).withTools(() -> definitions)
+            .withTokenLimit(() -> 104_000).withCharLimit(() -> 400_000).compact(messages, 8_000);
+
+        assertTrue(outcome.compacted(), "前缀被拒绝时仍要完成压缩");
+        assertEquals(2, requests.size(), "前缀失败后应再发一次短摘录请求");
+        assertTrue(requests.getFirst().size() > 2);
+        assertEquals(2, requests.getLast().size(), "短摘录只带系统提示与摘录正文");
+        assertTrue(messages.get(1).content().contains("回落摘要"));
+    }
+
+    /** 字符上限不够时直接走短摘录，不拿字符总数去比 token 预算。 */
+    @Test
+    void skipsPrefixWhenCharacterCapLeavesNoHeadroom() {
+        List<Message> messages = history(10, 3_000);
+        List<ToolDefinition> definitions = List.of(new ToolDefinition("read_file", "read", Map.of("type", "object")));
+        ArrayList<List<Message>> requests = new ArrayList<>();
+        ModelClient client = new ModelClient() {
+            public ModelProfile profile() {
+                return ModelProfile.resolve(null, "m", "generic", "auto", "", null, null, "prefix", null);
+            }
+
+            public ModelResponse chat(List<Message> request, List<ToolDefinition> tools) {
+                requests.add(List.copyOf(request));
+                return new ModelResponse("短摘录摘要", List.of());
+            }
+        };
+
+        ContextCompactor.Outcome outcome = new ContextCompactor(client, 2).withTools(() -> definitions)
+            .withTokenLimit(() -> 104_000).withCharLimit(() -> 20_000).compact(messages, 8_000);
+
+        assertTrue(outcome.compacted());
+        assertEquals(1, requests.size());
+        assertEquals(2, requests.getFirst().size(), "字符护栏不足时只能发短摘录");
     }
 
     /** 中文按 1 字符 1 token 估算，不能沿用「4 字符 1 token」把中文上下文算少。 */
