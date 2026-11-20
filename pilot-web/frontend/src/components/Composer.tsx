@@ -809,7 +809,7 @@ export function Composer() {
             </span>
             <div className="perm-picker composer-notes-picker">
               <span title="打开跨项目的想法库">
-                <Button id="notes-chip" className="composer-choice" size="sm" variant="ghost"
+                <IconButton id="notes-chip" className="composer-icon" variant="ghost"
                   label="想法库" icon={<Icon name="note" />}
                   aria-haspopup="dialog" aria-expanded={notesOpen}
                   onClick={() => {

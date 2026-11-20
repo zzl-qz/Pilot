@@ -1329,27 +1329,45 @@ html[data-theme] .conversation-composer .input-flow {
   line-height: 1.58;
 }
 html[data-theme] .conversation-composer .input-flow[data-empty="true"]::before { color: var(--muted); }
+html[data-theme] .conversation-composer .composer {
+  container-type: inline-size;
+  container-name: composer;
+}
 html[data-theme] .conversation-composer .composer .composer-bar {
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
   justify-content: space-between;
-  gap: 4px 8px;
+  gap: 4px 6px;
   padding-top: 6px;
   border-top: 0;
 }
-html[data-theme] .conversation-composer .composer-left { gap: 2px; flex: 0 1 auto; max-width: 100%; }
-html[data-theme] .conversation-composer .composer-actions { gap: 2px; margin-inline-start: auto; }
-.conversation-composer .composer-bar > :is(.composer-left, .composer-actions) > span { display: flex; }
+html[data-theme] .conversation-composer .composer-left {
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+html[data-theme] .conversation-composer .composer-actions {
+  gap: 2px;
+  flex: none;
+  margin-inline-start: auto;
+}
+.conversation-composer .composer-bar > :is(.composer-left, .composer-actions) > span { display: flex; flex: none; }
 html[data-theme] .conversation-composer .composer-icon {
   width: var(--conversation-control);
   height: var(--conversation-control);
   border-radius: 8px;
   flex: none;
 }
-.conversation-composer .composer-choice { min-height: var(--conversation-control); padding-inline: 7px; font-size: 12px; }
+.conversation-composer .composer-choice { min-height: var(--conversation-control); padding-inline: 7px; font-size: 12px; flex: none; }
 .conversation-composer .composer-choice[aria-expanded="true"] { background: var(--ui-selected); color: var(--ink); }
-.conversation-composer .composer-model-picker { min-width: 0; }
-.conversation-composer .composer-model { max-width: 192px; min-width: 0; }
+.conversation-composer .composer-model-picker { flex: 0 1 auto; min-width: 0; max-width: 196px; }
+.conversation-composer .composer-model { width: 100%; max-width: 196px; min-width: 0; }
 .conversation-composer .model-chip-name { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@container composer (max-width: 440px) {
+  html[data-theme] .conversation-composer .composer .composer-bar { flex-wrap: wrap; }
+  html[data-theme] .conversation-composer .composer-left { flex: 1 1 100%; }
+}
 .conversation-composer .composer-chevron { width: 12px; height: 12px; transform: rotate(90deg); }
 .conversation-composer .composer-context-picker,
 .conversation-composer .composer-left > .perm-picker:not(.composer-model-picker) { position: static; }
