@@ -70,7 +70,7 @@ dialog#review-action-dialog.pilot-dialog { max-width: min(440px, calc(100vw - 32
 .pilot-dialog-content .session-rename-form .modal-foot { padding-bottom: 0; }
 .pilot-dialog-content .confirm-message { padding: 0; }
 .modal .pilot-dialog-frame :is(button, input, textarea, select, summary, [tabindex]):focus-visible {
-  outline: 2px solid var(--color-text-primary, var(--ink));
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 .modal .pilot-dialog-frame :is(.astryx-text-input, .astryx-text-area) :is(input, textarea):focus-visible { outline: none; }
@@ -81,7 +81,7 @@ dialog#review-action-dialog.pilot-dialog { max-width: min(440px, calc(100vw - 32
 }
 .pilot-dialog-content .picker-roots { padding-block: 0 12px; }
 .pilot-dialog-content .picker-list { min-height: 0; max-height: none; overflow: visible; }
-.pilot-dialog-content .picker-item { min-height: 38px; }
+.pilot-dialog-content .picker-item { min-height: 38px; border-radius: 8px; }
 .pilot-dialog-content .picker-item .picker-hint { flex: 0 1 auto; }
 .pilot-dialog-content .picker-item.is-on { background: var(--ui-selected); color: var(--ink); }
 .picker-status { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: 13px; margin: 10px 0; }
@@ -89,17 +89,22 @@ dialog#review-action-dialog.pilot-dialog { max-width: min(440px, calc(100vw - 32
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 9px;
+  padding: 0 11px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 10px;
   color: var(--muted);
   background: var(--ui-field);
+  transition: border-color 0.14s ease, box-shadow 0.14s ease;
 }
-#palette .palette-search:focus-within { outline: 2px solid var(--ink); outline-offset: 1px; }
+#palette .palette-search:focus-within {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
 #palette .palette-search input {
   width: 100%;
   min-width: 0;
-  min-height: 38px;
+  min-height: 40px;
   padding: 5px 0;
   border: 0;
   background: transparent;
@@ -107,8 +112,16 @@ dialog#review-action-dialog.pilot-dialog { max-width: min(440px, calc(100vw - 32
   outline: none;
   font: 14px/1.5 var(--sans);
 }
-#palette .picker-list { max-height: min(380px, 45vh); overflow: auto; overscroll-behavior: contain; }
-#palette .picker-item .picker-hint { color: var(--muted); font-size: 12px; }
+#palette .picker-list { max-height: min(380px, 45vh); margin-top: 8px; overflow: auto; overscroll-behavior: contain; }
+#palette .picker-item { padding-inline: 10px; }
+#palette .picker-item .picker-hint {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
 #palette .pilot-inline-status { margin-top: 8px; }
 .pilot-dialog-content .checkpoint-choices label:has(:checked) {
   border-color: var(--muted);
