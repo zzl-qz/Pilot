@@ -41,38 +41,12 @@ final class CompletionGate {
     private static final int MAX_REVIEW_PROMPTS = 1;
     /** 实现类目标却没有任何改动就想收尾时，只推一次让它直接动手。 */
     private static final int MAX_ACTION_PROMPTS = 1;
-    /** 目标像「修复 / 实现 / 修改」时，没有任何改动就收尾通常是半途停手，而不是完成。 */
-    private static final List<String> ACTION_HINTS =
-        List.of("修复", "修改", "实现", "添加", "增加", "新增", "重构", "优化", "改成", "改为", "开发", "落地");
-    private static final List<String> ACTION_HINTS_EN =
-        List.of("fix", "implement", "add ", "change", "refactor", "update", "build");
-    /** 代码落点：目标里没有这些词时，「优化」更可能是在问建议，不是在要求改仓库。 */
-    private static final List<String> CODE_HINTS =
-        List.of("代码", "函数", "方法", "接口", "模块", "文件", "仓库", "页面", "组件", "测试", "脚本", "配置", "依赖", "构建", "部署", "报错", "异常",
-            "性能", "数据库", "sql", "前端", "后端", "服务", "日志", "样式", "工程", "分支", "提交", "路由", "bug");
-    private static final List<String> CODE_HINTS_EN =
-        List.of("code", "function", "method", "api", "module", "file", "repo", "page", "component", "test", "script",
-            "config", "build", "deploy", "error", "database", "service", "log", "style", "bug");
-    /** 明确在征求意见的措辞：即使带「优化/修改」，也不该被催着改文件。 */
-    private static final List<String> CONSULT_HINTS =
-        List.of("建议", "看看", "评估", "分析", "意见", "思路", "方案", "对比", "解释", "为什么", "是否", "值不值", "有什么", "怎么看", "判断一下", "调研");
-    private static final List<String> CONSULT_HINTS_EN =
-        List.of("suggest", "advice", "opinion", "evaluate", "compare", "explain", "review");
-    /** 本轮只读或全局禁止改文件是范围约束；不能因提到已实现的功能而催办写入。 */
-    private static final List<String> READ_ONLY_TASK_HINTS =
-        List.of("本轮只读", "本次只读", "本任务只读", "仅做只读", "只分析不修改", "不要修改任何仓库文件", "不得修改任何仓库文件", "不要修改任何文件", "不得修改任何文件",
-            "do not modify any files", "do not change any files", "do not edit any files", "this task is read-only");
     private static final int MAX_EVIDENCE_PROMPTS = 1;
     /** 只改这些后缀的文档不算「改了代码」，不强制跑构建。 */
     private static final Set<String> DOC_SUFFIXES = Set.of(".md", ".txt", ".rst", ".adoc");
     /** 这些后缀是图片/字体/锁文件等非代码资源，不触发构建或测试门。 */
     private static final Set<String> ASSET_SUFFIXES = Set.of(".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".ico",
         ".svg", ".woff", ".woff2", ".ttf", ".otf", ".map", ".lock", ".snap");
-    /** 目标像「调研 / 解释 / 定位」时，只读任务也要核对覆盖范围，不能读两个文件就下结论。 */
-    private static final List<String> RESEARCH_HINTS = List.of("分析", "梳理", "说明", "解释", "为什么", "怎么实现", "如何实现", "调用链",
-        "流程", "审查", "评估", "调研", "看一下", "读一下", "哪些", "对比", "定位");
-    private static final List<String> RESEARCH_HINTS_EN =
-        List.of("explain", "analyze", "analyse", "review", "how does", "why", "walk through");
 
     /**
      * @param attempt 第几次提醒
@@ -223,8 +197,7 @@ final class CompletionGate {
         if (!enabled) {
             return null;
         }
-        boolean readOnlyTask =
-            goal != null && READ_ONLY_TASK_HINTS.stream().anyMatch(goal.toLowerCase(Locale.ROOT)::contains);
+        boolean readOnlyTask = GoalIntent.isExplicitReadOnly(goal);
         if (!readOnlyTask && !openSteps.isEmpty() && planPrompts < 2) {
             planPrompts++;
             return new Nudge("原始用户目标：" + (goal == null ? "见持久任务上下文" : goal) + "\n计划进度："
@@ -234,10 +207,10 @@ final class CompletionGate {
         }
         boolean changed = !changedFiles.isEmpty();
         // 只读任务没有改动，但「目标像调研、工具却只用了两三次」同样要核对覆盖范围
-        boolean researching = !changed && toolCalls >= 2 && (readOnlyTask || looksLikeResearch(goal));
+        boolean researching = !changed && toolCalls >= 2 && (readOnlyTask || GoalIntent.looksLikeResearch(goal));
         // 实现类目标却一个文件都没改就想收尾，多半是只给了方案或反问了一句，而不是真的做完
-        if (!readOnlyTask && !changed && !researching && actionPrompts < MAX_ACTION_PROMPTS && looksLikeAction(goal)
-            && !looksLikeResearch(goal)) {
+        if (!readOnlyTask && !changed && !researching && actionPrompts < MAX_ACTION_PROMPTS
+            && GoalIntent.looksLikeAction(goal) && !GoalIntent.looksLikeResearch(goal)) {
             actionPrompts++;
             String prompt = prompts.render("completion/act", Map.of("goal", Texts.oneLine(goal, 500))).strip();
             return new Nudge(prompt, "实现类目标尚无任何改动，已要求直接动手", actionPrompts, MAX_ACTION_PROMPTS);
@@ -331,36 +304,6 @@ final class CompletionGate {
             return "";
         }
         return "\n本项目约束（必须遵守，做不到就继续改，不要宣称完成）：\n" + projectConstraints;
-    }
-
-    private static boolean looksLikeAction(String goal) {
-        if (goal == null || goal.isBlank()) {
-            return false;
-        }
-        String lower = goal.toLowerCase(Locale.ROOT);
-        boolean action =
-            ACTION_HINTS.stream().anyMatch(goal::contains) || ACTION_HINTS_EN.stream().anyMatch(lower::contains);
-        if (!action) {
-            return false;
-        }
-        // 有明确的代码落点，才允许按「该动手却没动手」催办
-        boolean codeTarget =
-            CODE_HINTS.stream().anyMatch(lower::contains) || CODE_HINTS_EN.stream().anyMatch(lower::contains);
-        if (codeTarget) {
-            return true;
-        }
-        // 没有代码落点时，带「看看 / 建议 / 评估」的是在征求意见：「看看怎么优化简历」不是偷懒
-        boolean consult =
-            CONSULT_HINTS.stream().anyMatch(goal::contains) || CONSULT_HINTS_EN.stream().anyMatch(lower::contains);
-        return !consult;
-    }
-
-    private static boolean looksLikeResearch(String goal) {
-        if (goal == null || goal.isBlank()) {
-            return false;
-        }
-        String lower = goal.toLowerCase(Locale.ROOT);
-        return RESEARCH_HINTS.stream().anyMatch(goal::contains) || RESEARCH_HINTS_EN.stream().anyMatch(lower::contains);
     }
 
     private static String bullets(Collection<String> values) {

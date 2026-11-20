@@ -20,6 +20,7 @@ import org.slf4j.LoggerFactory;
 
 import com.pilot.core.event.RunFailureCode;
 import com.pilot.core.loop.ExecutionPolicy;
+import com.pilot.core.loop.GoalIntent;
 import com.pilot.core.loop.ModelRetryPolicy;
 import com.pilot.core.loop.ToolExecutor;
 import com.pilot.core.message.Attachment;
@@ -1221,28 +1222,30 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
             && evidence.result().matches("(?is).*状态:\\s*(COMPLETED|FAILED|CANCELLED).*");
     }
 
-    private boolean researchOnlyGoal() {
+    boolean researchOnlyGoal() {
+        // 1. 结构性信号优先：只读会话或当前工具集不含任何写文件工具时，必然按只读/分析任务处理。
         if (readOnlySession) {
+            return true;
+        }
+        if (availableTools != null && availableTools.stream().noneMatch(ToolNames.FILE_EDITS::contains)) {
             return true;
         }
         TaskControlService.TaskContract current = task();
         if (current == null) {
             return false;
         }
-        String goal = current.originalGoal().toLowerCase();
-        boolean explicitNoEdit = List.of("不要直接动手", "先不要落地", "不要动手", "不要修改", "不改代码", "不要改代码", "只分析", "只评估", "先给方案", "只读",
-            "read-only", "readonly", "do not edit", "don't edit", "don't modify", "without modifying").stream()
-            .anyMatch(goal::contains);
-        if (explicitNoEdit) {
-            return true;
+        // 2. 用户中途 steering 纠偏优先覆盖初始方向（例如“先不要落地”或“现在直接改代码”）。
+        if (!current.corrections().isEmpty()) {
+            String latest = current.corrections().getLast();
+            if (GoalIntent.isExplicitReadOnly(latest)) {
+                return true;
+            }
+            if (GoalIntent.looksLikeAction(latest)) {
+                return false;
+            }
         }
-        boolean research =
-            List.of("分析", "调研", "评估", "解释", "梳理", "研究", "为什么", "analyze", "analyse", "research", "explain", "review")
-                .stream().anyMatch(goal::contains);
-        boolean implementation =
-            List.of("修复", "实现", "修改", "开发", "优化", "落地", "增加", "添加", "fix", "implement", "change", "build", "add ")
-                .stream().anyMatch(goal::contains);
-        return research && !implementation;
+        // 3. 复用与 CompletionGate 同一口径的轻量意图判定，避免“只读/不要修改测试”误杀实现类任务。
+        return GoalIntent.isResearchOnly(current.originalGoal());
     }
 
     private String meaningfulProgress(List<TaskControlService.Evidence> evidence) {

@@ -274,6 +274,29 @@ class GoalExecutionPolicyTest {
     }
 
     @Test
+    void researchOnlyGoalPrefersStructuralSignalsAndDoesNotMisclassifyImplementationMentions() {
+        JsonMapper json = JsonMapper.builder().build();
+        // 1. 实现任务里出现「只读」或窄范围「不要修改某文件」，绝不能被误判成只读分析任务（X1-T3 真实复现场景）
+        tasks.start("s-impl", "同步检查适配器容量读取，避免只读 configured() 导致偏差；请完成以下改造并补齐单测，不要修改测试夹具", List.of(), List.of());
+        GoalExecutionPolicy impl = new GoalExecutionPolicy((m, t) -> new ModelResponse("ok", List.of()), json, tasks,
+            "s-impl", root, () -> false, 20).withAvailableTools(Set.of("read_file", "edit_file", "apply_patch"));
+        assertFalse(impl.researchOnlyGoal(), "含「避免只读」或窄范围禁止修改的实现任务不能误判为只读");
+
+        // 2. 工具集不含任何写工具时，即便目标含实现动词也按结构性只读处理
+        GoalExecutionPolicy noWriteTools = new GoalExecutionPolicy((m, t) -> new ModelResponse("ok", List.of()), json,
+            tasks, "s-impl", root, () -> false, 20).withAvailableTools(Set.of("read_file", "search_text"));
+        assertTrue(noWriteTools.researchOnlyGoal(), "无写工具的结构性只读会话必须识别为只读");
+
+        // 3. 显式只读任务或 steering 切换方向准确生效
+        tasks.start("s-ro", "本轮只读：梳理整个调度流程，先不要落地修改", List.of(), List.of());
+        GoalExecutionPolicy ro = new GoalExecutionPolicy((m, t) -> new ModelResponse("ok", List.of()), json, tasks,
+            "s-ro", root, () -> false, 20).withAvailableTools(Set.of("read_file", "edit_file"));
+        assertTrue(ro.researchOnlyGoal());
+        tasks.correct("s-ro", "方案已确认，现在直接修复并修改相关代码");
+        assertFalse(ro.researchOnlyGoal(), "steering 明确要求开始修改后，应解除旧的只读标记");
+    }
+
+    @Test
     void configuredAccidentFuseStopsWithoutHalfBudgetBehaviorChange() {
         GoalExecutionPolicy policy =
             policy((messages, tools) -> new ModelResponse("继续", List.of(), new ModelUsage(30_000, 10, 0, true)), 120,
