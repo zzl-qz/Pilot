@@ -87,6 +87,8 @@ public record Message(String role, String content, List<ToolCall> toolCalls, Str
     public static final String RUNTIME_INJECTION_PREFIX = "[系统";
     /** 模型切换提醒前缀；同样由运行时注入，不算新的一轮用户输入。 */
     public static final String MODEL_SWITCH_MARKER = "[模型切换]";
+    /** 运行时行为检查点提醒前缀；以 user 角色临时追加但不算新一轮真实用户输入。 */
+    public static final String RUNTIME_CHECKPOINT_MARKER = "[运行时检查点]";
     private static final String RUNTIME_CONTEXT_MARKER = "[Runtime task context]";
 
     /**
@@ -115,7 +117,7 @@ public record Message(String role, String content, List<ToolCall> toolCalls, Str
         String trimmed = text == null ? "" : text.stripLeading();
         return trimmed.startsWith(TOOL_IMAGE_MARKER) || trimmed.startsWith(SYSTEM_REMINDER_PREFIX)
             || trimmed.startsWith(RUNTIME_INJECTION_PREFIX) || trimmed.startsWith(MODEL_SWITCH_MARKER)
-            || trimmed.contains(RUNTIME_CONTEXT_MARKER);
+            || trimmed.startsWith(RUNTIME_CHECKPOINT_MARKER) || trimmed.contains(RUNTIME_CONTEXT_MARKER);
     }
 
     /**

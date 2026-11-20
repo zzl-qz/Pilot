@@ -281,13 +281,16 @@ class CacheWireTest {
         assertTrue(Message.toolImages("截图", List.of()).isInternalUserMessage());
         assertTrue(Message.user(Message.MODEL_SWITCH_MARKER + " 模型已切换为 model-b。按新模型继续。").isInternalUserMessage(),
             "MeteredModelClient 的切换提醒必须能被统一识别");
+        assertTrue(Message.user(Message.RUNTIME_CHECKPOINT_MARKER + " 你已经连续做了 14 次只读查询。").isInternalUserMessage(),
+            "运行时行为检查点以 user 角色临时注入，不得被当作新一轮真实用户输入");
         assertTrue(Message.user("<system-reminder>\n[Runtime task context]\n步骤 1\n</system-reminder>")
             .isInternalUserMessage());
         assertFalse(Message.user("把 A 模块改完").isInternalUserMessage());
         assertTrue(Message.user("把 A 模块改完").isRealUserTurn());
         List<Message> history = List.of(Message.system("rules"), Message.user("开始"), Message.assistant("好", List.of()),
-            Message.user("<system-reminder>\n状态\n</system-reminder>"));
-        assertEquals(1, Message.lastRealUserTurnIndex(history), "尾部内部提醒不能推进真实用户轮次");
+            Message.user("<system-reminder>\n状态\n</system-reminder>"),
+            Message.user(Message.RUNTIME_CHECKPOINT_MARKER + " 停止只读查询并开始修改"));
+        assertEquals(1, Message.lastRealUserTurnIndex(history), "尾部内部提醒与运行时检查点都不能推进真实用户轮次");
         assertEquals(-1, Message.lastRealUserTurnIndex(
             List.of(Message.system("rules"), Message.user(Message.MODEL_SWITCH_MARKER + " 切换"))), "没有真实用户输入时返回 -1");
     }

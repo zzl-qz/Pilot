@@ -549,7 +549,7 @@ function analyze({ session, runs, events, messages, trace, diagnostics, gitInfo,
         if (wirePrunedInReq > maxWirePruned) maxWirePruned = wirePrunedInReq;
         const tail = seq[seq.length - 1];
         const tailText = typeof tail?.content === 'string' ? tail.content : '';
-        if (tailText.includes('[调查收敛提醒]')) investigationReminders++;
+        if (tailText.includes('[运行时检查点]') || tailText.includes('[调查收敛提醒]')) investigationReminders++;
         if (tailText.includes('重复调用') || tailText.includes('连续多次')) repeatReminders++;
       }
     }

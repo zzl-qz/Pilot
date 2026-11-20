@@ -52,10 +52,11 @@ class InvestigationTrackerTest {
         InvestigationTracker.Nudge nudge = tracker.nextNudge(false);
         assertNotNull(nudge, "连续 4 次零增益应触发低增益收敛提醒");
         assertTrue(nudge.lowGain());
-        assertTrue(nudge.summary().contains("空搜索 2 次"), nudge.summary());
-        assertTrue(nudge.summary().contains("重复/重叠读取 1 次"), nudge.summary());
-        assertTrue(nudge.summary().contains("仅命中已知位置 1 次"), nudge.summary());
-        assertTrue(nudge.action().contains("最小可执行改动"), nudge.action());
+        assertTrue(nudge.diagnostics().contains("空搜索 2 次"), nudge.diagnostics());
+        assertTrue(nudge.diagnostics().contains("重复/重叠读取 1 次"), nudge.diagnostics());
+        assertTrue(nudge.diagnostics().contains("仅命中已知位置 1 次"), nudge.diagnostics());
+        assertTrue(nudge.summary().contains("已读完 A.java、B.java"), nudge.summary());
+        assertTrue(nudge.action().contains("直接调用 apply_patch"), nudge.action());
 
         // 冷却期内不应立刻再次刷屏
         tracker.observe(new ToolCall("s4", ToolNames.SEARCH_TEXT, Map.of("pattern", "missing3")),
@@ -100,12 +101,14 @@ class InvestigationTrackerTest {
         // 纯调研/只读模式绝不催改代码
         assertNull(tracker.nextNudge(true), "纯调研模式跨多文件有效阅读不应触发催动手提醒");
 
-        // 实现模式达到 16 次且跨 >= 10 个文件时温和提醒一次
+        // 实现模式达到阈值（>= 14 次且跨 >= 8 个文件）时发出非阻断编辑检查点
         InvestigationTracker.Nudge broad = tracker.nextNudge(false);
         assertNotNull(broad);
         assertFalse(broad.lowGain());
         assertTrue(broad.summary().contains("16 个文件"), broad.summary());
-        assertNull(tracker.nextNudge(false), "下一轮未满 +10 次不应重复提醒");
+        assertTrue(broad.summary().contains("已读完"), broad.summary());
+        assertTrue(broad.action().contains("直接调用 apply_patch"), broad.action());
+        assertNull(tracker.nextNudge(false), "下一轮未满步进不应重复提醒");
     }
 
     @Test
@@ -130,7 +133,7 @@ class InvestigationTrackerTest {
         assertFalse(nudge.lowGain());
         assertTrue(nudge.summary().contains("AgentLoop.java 4次"), nudge.summary());
         assertTrue(nudge.summary().contains("ContextCompactor.java 4次"), nudge.summary());
-        assertTrue(nudge.action().contains("改动面最小"), nudge.action());
+        assertTrue(nudge.action().contains("直接调用 apply_patch"), nudge.action());
     }
 
     @Test

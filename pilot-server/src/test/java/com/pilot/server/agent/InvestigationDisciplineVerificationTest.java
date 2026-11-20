@@ -123,7 +123,8 @@ class InvestigationDisciplineVerificationTest {
         assertTrue(toolResults.stream().anyMatch(r -> r.contains("public int step60(int x)")));
         assertFalse(toolResults.stream().anyMatch(r -> r.contains("已经读过")));
         // 确认有效深读期间零误催
-        assertFalse(requests.stream().flatMap(List::stream).anyMatch(m -> m.content().contains("[调查收敛提醒]")));
+        assertFalse(requests.stream().flatMap(List::stream)
+            .anyMatch(m -> m.content().contains(Message.RUNTIME_CHECKPOINT_MARKER)));
     }
 
     private static String buildMegaWorkflowSource(int methods) {
@@ -186,10 +187,14 @@ class InvestigationDisciplineVerificationTest {
         });
 
         assertNull(result.failureCode());
-        // 第 3 次请求应收到带统计明细的低增益软提醒
+        // 第 3 次请求应以临时 user 角色收到包含已读文件清单的运行时检查点，且绝不落盘到历史
         assertTrue(
-            requests.get(2).stream().anyMatch(m -> m.content().contains("[调查收敛提醒]") && m.content().contains("空搜索 4 次")),
-            "连续 4 次空搜索应触发低增益收敛提醒");
+            requests.get(2).stream().anyMatch(m -> "user".equals(m.role())
+                && m.content().startsWith(Message.RUNTIME_CHECKPOINT_MARKER) && m.content().contains("Mod1.java")),
+            "连续 4 次空搜索应以临时 user 角色触发运行时检查点");
+        assertFalse(
+            result.conversation().stream().anyMatch(m -> m.content().contains(Message.RUNTIME_CHECKPOINT_MARKER)),
+            "运行时检查点不应污染持久化对话历史");
         // 但第 3 次请求中读取新文件 Mod3 仍然完全放行并拿到真实正文
         assertTrue(
             result.conversation().stream().anyMatch(

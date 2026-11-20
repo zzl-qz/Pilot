@@ -102,6 +102,53 @@ class CacheContextTest {
         assertFalse(result.conversation().stream().anyMatch(m -> m.content().contains("Runtime guidance")));
     }
 
+    @Test
+    void runtimeCheckpointGuidanceUsesEphemeralUserRoleWithoutPollutingSavedHistory() {
+        var requests = new ArrayList<List<Message>>();
+        var turn = new AtomicInteger();
+        ModelClient model = new ModelClient() {
+            public ModelProfile profile() {
+                return ModelProfile.resolve(null, "test", "generic", "auto", "", true, null, "short", null);
+            }
+
+            public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
+                requests.add(List.copyOf(messages));
+                return turn.incrementAndGet() == 1
+                    ? new ModelResponse("", List.of(new ToolCall("c1", "read", Map.of())))
+                    : new ModelResponse("done", List.of());
+            }
+        };
+        var tools = new ToolRegistry();
+        tools.register(stubTool("read", true, "ok", List.of()));
+        var emitted = new AtomicInteger();
+        ExecutionPolicy policy = new ExecutionPolicy() {
+            public void beforeRequest(List<Message> history) {
+            }
+
+            public String requestGuidance() {
+                return emitted.incrementAndGet() == 2 ? Message.RUNTIME_CHECKPOINT_MARKER + " 停止只读并开始修改" : null;
+            }
+
+            public String review(List<Message> history, Set<String> changedFiles, List<String> checks) {
+                return null;
+            }
+        };
+        var loop = new AgentLoop(model, tools, new PolicyPermissionGate(PermissionMode.READ_ONLY),
+            new AgentLoop.Config(5, 0, 5, "stable", List::of, 0, 100_000, false)).withExecutionPolicy(policy);
+        var result = loop.run("task", List.of(), ignored -> {
+        });
+        assertNull(result.failureCode());
+        assertEquals(2, requests.size());
+        assertEquals("stable", requests.get(1).getFirst().content());
+        Message tail = requests.get(1).getLast();
+        assertEquals("user", tail.role(), "运行时检查点必须以临时 user 角色投递，避免被模型当作尾部 system 忽略");
+        assertTrue(tail.isInternalUserMessage(), "临时检查点仍属于内部注入消息，不得推进真实用户轮次");
+        assertTrue(tail.content().startsWith(Message.RUNTIME_CHECKPOINT_MARKER));
+        assertFalse(
+            result.conversation().stream().anyMatch(m -> m.content().contains(Message.RUNTIME_CHECKPOINT_MARKER)),
+            "临时检查点不得落盘到持久化对话历史");
+    }
+
     private void taskState(boolean supported) {
         var requests = new ArrayList<List<Message>>();
         var state = new AtomicInteger();

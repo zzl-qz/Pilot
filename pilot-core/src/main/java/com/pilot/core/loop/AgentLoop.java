@@ -1409,12 +1409,38 @@ public final class AgentLoop {
             request.add(Message.system(activeHint.content()));
         }
         if (hasGuidance) {
-            request.add(Message.system("[Runtime guidance; applies only to this request]\n" + guidance.strip()));
+            appendGuidance(request, guidance);
         }
         if (hasRules) {
             request.add(Message.system("[路径规则]\n" + rules.strip()));
         }
         return List.copyOf(request);
+    }
+
+    /**
+     * 临时纠偏默认走尾部 system；以 {@link Message#RUNTIME_CHECKPOINT_MARKER} 开头的行为检查点走临时 user 角色，
+     * 仅对本次请求生效（不落盘、不推进真实用户轮次），确保模型在长推理链里确实响应收敛信号。
+     */
+    private static void appendGuidance(List<Message> request, String guidance) {
+        String trimmed = guidance.strip();
+        if (trimmed.isEmpty()) {
+            return;
+        }
+        if (trimmed.startsWith(Message.RUNTIME_CHECKPOINT_MARKER)) {
+            request.add(Message.user(trimmed));
+            return;
+        }
+        int marker = trimmed.indexOf("\n\n" + Message.RUNTIME_CHECKPOINT_MARKER);
+        if (marker >= 0) {
+            String before = trimmed.substring(0, marker).strip();
+            String checkpoint = trimmed.substring(marker + 2).strip();
+            if (!before.isEmpty()) {
+                request.add(Message.system("[Runtime guidance; applies only to this request]\n" + before));
+            }
+            request.add(Message.user(checkpoint));
+            return;
+        }
+        request.add(Message.system("[Runtime guidance; applies only to this request]\n" + trimmed));
     }
 
     private void notifyContextShrink() {

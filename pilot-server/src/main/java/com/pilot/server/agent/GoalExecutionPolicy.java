@@ -260,8 +260,9 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         if (nudge == null) {
             return null;
         }
-        log.info("Investigation nudge: session={} lowGain={} obs={} files={} summary={}", session, nudge.lowGain(),
-            investigation.phaseObservations(), investigation.distinctReadFiles(), nudge.summary());
+        log.info("Investigation nudge: session={} lowGain={} obs={} files={} diag={} summary={}", session,
+            nudge.lowGain(), investigation.phaseObservations(), investigation.distinctReadFiles(), nudge.diagnostics(),
+            nudge.summary());
         return prompts.render("loop/investigation-nudge", Map.of("summary", nudge.summary(), "action", nudge.action()))
             .strip();
     }

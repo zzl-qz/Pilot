@@ -398,7 +398,11 @@ class GoalExecutionPolicyTest {
         for (int i = 0; i < 16; i++) {
             observe(policy, "read_file", "File" + i + ".java", "content", null);
         }
-        assertTrue(policy.requestGuidance().contains("立即执行"));
+        String nudge = policy.requestGuidance();
+        assertNotNull(nudge);
+        assertTrue(nudge.startsWith(Message.RUNTIME_CHECKPOINT_MARKER), nudge);
+        assertTrue(nudge.contains("已读完 File0.java"), nudge);
+        assertTrue(nudge.contains("直接调用 apply_patch"), nudge);
         assertNull(policy.requestGuidance());
     }
 
@@ -1124,8 +1128,9 @@ class GoalExecutionPolicyTest {
         }
         String nudge = policy.requestGuidance();
         assertNotNull(nudge);
-        assertTrue(nudge.contains("空搜索 4 次"), nudge);
-        assertTrue(nudge.contains("最小可执行改动"), nudge);
+        assertTrue(nudge.startsWith(Message.RUNTIME_CHECKPOINT_MARKER), nudge);
+        assertTrue(nudge.contains("已读完 Part1.java"), nudge);
+        assertTrue(nudge.contains("直接调用 apply_patch"), nudge);
 
         // 用户 steering 纠正后重置调查窗口
         policy.onSteering();
