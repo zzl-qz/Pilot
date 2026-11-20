@@ -3,7 +3,7 @@ import type { MessageAttachment, RequestReport } from '../types/runtime.js';
 import type { ApiResults } from '../types/api.js';
 import { errorInfo } from '../lib/errors.js';
 import { RequestList } from './RequestUsage.jsx';
-import { formatCache, totalCost } from '../lib/request-usage.js';
+import { cacheRatio, formatCache, totalCost } from '../lib/request-usage.js';
 import ThreadNavigator from './ThreadNavigator.jsx';
 import { modifierKey, duplicateResult } from '../lib/interaction.js';
 import { buildThreadDisplay, type CompactionGroupRow, type DisplayThreadRow } from '../lib/thread-display.js';
@@ -1377,6 +1377,8 @@ const TurnStats = memo(function TurnStats({ stats, reports, agentCount }: { stat
   const contextTone = ratio >= 0.92 ? ' is-critical' : ratio >= 0.8 ? ' is-warn' : '';
   // 估算路径没有缓存观测：显示「—」，不能把「没观测」读成「没命中」
   const cacheLabel = formatCache(stats.details);
+  // 有观测就把命中率提到折叠条上，不展开也能看到；没观测就不占位。
+  const cacheSeen = cacheRatio(stats.details) != null;
   const priced = stats.details?.pricedRequests ?? 0;
   const requests = stats.details?.requests ?? stats.modelRequests ?? 0;
   let priceNote: string;
@@ -1392,6 +1394,7 @@ const TurnStats = memo(function TurnStats({ stats, reports, agentCount }: { stat
     <details className="turn-stats-detail">
       <summary>
         <span>{elapsedLabel ? `${elapsedLabel} · ` : ''}用量详情</span>
+        {cacheSeen && <span className="turn-cache" title={`本轮累计命中缓存 ${formatCount(stats.cachedInputTokens)} / 总输入 ${formatCount(stats.inputTokens)}`}>缓存 {cacheLabel}</span>}
         <span className="process-chevron" aria-hidden="true"><ProcessChevron /></span>
       </summary>
       <div className="turn-stats">

@@ -1159,6 +1159,20 @@ html .conversation-thread .turn-stats-detail > summary:hover {
   background: color-mix(in srgb, var(--ink) 5%, transparent);
 }
 
+/* 命中率提到折叠条上：不展开也能看到本轮缓存情况；没有观测时不显示。 */
+html .conversation-thread .turn-stats-detail > summary .turn-cache {
+  padding: 0 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+html .conversation-thread .turn-stats-detail > summary:hover .turn-cache {
+  border-color: currentColor;
+}
+
 html .conversation-thread .turn-stats-detail[open] {
   margin-top: 2px;
   padding: 6px 12px 8px;

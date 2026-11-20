@@ -46,6 +46,8 @@ async function run(page, name) {
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   await page.setViewportSize({ width: 1280, height: 900 }); await page.goto(url);
   const stats = page.locator('.turn-stats-detail'); await stats.waitFor();
+  // 命中率直接写在折叠条上，不必展开用量详情才能看到。
+  assert.match(await stats.locator(':scope > summary').innerText(), /缓存 80%/, '折叠状态就显示本轮缓存命中');
   await stats.locator(':scope > summary').click();
   if (process.argv.includes('--before')) {
     await stats.scrollIntoViewIfNeeded(); await page.screenshot({ path: join(output, `${name}-before.png`) }); return;
@@ -110,6 +112,7 @@ async function run(page, name) {
   await page.evaluate(() => seed(0, 0));
   assert.equal(await page.locator('.agent-group').count(), 0); assert.equal(await dock.count(), 0);
   assert.equal(await stats.locator('.request-group').count(), 0);
+  assert.equal(await stats.locator('.turn-cache').count(), 0, '没有缓存观测时不显示命中率占位');
   await page.evaluate(() => send('subagent.started', { agentId: 'running', task: '检查剩余文件' }));
   assert.match(await dock.innerText(), /1 运行中/);
   await page.evaluate(() => send('run.failed', { code: 'CANCELLED' }));
