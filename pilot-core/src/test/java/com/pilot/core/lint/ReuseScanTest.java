@@ -27,6 +27,8 @@ class ReuseScanTest {
     @Test
     void trivialReturnsStayQuietAndARealStatementRepeats() {
         assertTrue(ReuseScan.scan("A.java", "", "    return 1;\n".repeat(4), List.of()).isEmpty());
+        assertTrue(ReuseScan.scan("A.java", "", "    try {\n    } else {\n".repeat(4), List.of()).isEmpty(),
+            "语法块关键字 try {/} else { 不应触发单行重复告警");
         List<String> hit = ReuseScan.scan("A.java", "", "order.setStatus(paid);\n".repeat(4), List.of());
         assertTrue(hit.stream().anyMatch(line -> line.contains("setStatus")), hit.toString());
     }

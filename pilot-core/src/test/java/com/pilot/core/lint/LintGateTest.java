@@ -181,6 +181,11 @@ class LintGateTest {
         });
         LintGate.LintAssessment assessment = gate.assess(root, List.of("src/app.js"));
         assertFalse(assessment.kind() == LintGate.LintAssessment.Kind.BLOCKED, assessment.prompt());
+
+        // 续跑缺少写前基线时，也不应把旧文件原有逻辑整份当作“本轮新增复制”误报（T002 seq 710 复现场景）
+        Files.writeString(root.resolve("src/legacy.js"), "order.setStatus(paid);\n".repeat(5));
+        LintGate.LintAssessment resumed = gate.assess(root, List.of("src/legacy.js"));
+        assertFalse(resumed.prompt().contains("复制"), "续跑无基线文件不应误报复制造轮子: " + resumed.prompt());
     }
 
     @Test

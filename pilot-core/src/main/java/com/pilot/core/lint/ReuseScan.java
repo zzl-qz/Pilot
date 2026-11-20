@@ -116,7 +116,9 @@ final class ReuseScan {
 
     static boolean trivial(String line) {
         String text = line.strip();
-        return text.equals("{") || text.equals("}") || text.equals(");") || text.equals(";")
+        return text.equals("{") || text.equals("}") || text.equals(");") || text.equals(";") || text.equals("try {")
+            || text.equals("else {") || text.equals("} else {") || text.equals("finally {")
+            || text.equals("} finally {") || text.equals("break;") || text.equals("continue;")
             || text.matches("return(?:\\s+(?:0|1|-1|null|true|false|this|\"\"|''))?;?");
     }
 

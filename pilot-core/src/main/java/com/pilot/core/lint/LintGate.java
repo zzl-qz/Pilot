@@ -275,8 +275,14 @@ public final class LintGate {
     private String reuseText(Path workspace, List<String> sources) {
         StringBuilder out = new StringBuilder();
         for (String path : sources) {
-            for (String item : ReuseScan.scan(path, originalOrNull(path), readCurrent(workspace, path),
-                siblings(workspace, path))) {
+            String before;
+            try {
+                before = originalText.apply(path);
+            } catch (IllegalStateException noBaseline) {
+                // 续跑时上一轮已改文件不在本轮写前快照里；缺基线时若按 null 当新文件扫描，会把整份旧代码误报成“这次新增复制”。
+                continue;
+            }
+            for (String item : ReuseScan.scan(path, before, readCurrent(workspace, path), siblings(workspace, path))) {
                 if (!out.isEmpty()) {
                     out.append('\n');
                 }
