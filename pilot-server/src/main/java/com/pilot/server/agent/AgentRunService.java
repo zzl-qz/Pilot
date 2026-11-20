@@ -51,6 +51,7 @@ import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.loop.ContextCompactor;
 import com.pilot.core.message.Attachment;
 import com.pilot.core.message.Message;
+import com.pilot.core.message.ToolCall;
 import com.pilot.core.message.ToolNames;
 import com.pilot.core.model.ContextComposition;
 import com.pilot.core.model.MeteredModelClient;
@@ -70,6 +71,7 @@ import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.skill.SkillCatalog;
+import com.pilot.core.tool.EnableToolsTool;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.UseSkillTool;
 import com.pilot.core.tool.command.CommandLogsTool;
@@ -166,6 +168,8 @@ public class AgentRunService implements RunStarter {
     private final ConcurrentMap<String, Integer> autoContinueAttempts = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, String> autoContinueSignature = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper;
+    /** 会话级已启用的延迟工具，按激活顺序保存，让续跑与追问沿用同一个尾部扩展段。 */
+    private final ConcurrentMap<String, List<String>> sessionEnabledDeferredTools = new ConcurrentHashMap<>();
     private final PilotDataDir dataDir;
     private final MultiAgentService multiAgent;
     private final MultiAgentProperties multiProperties;
@@ -962,6 +966,7 @@ public class AgentRunService implements RunStarter {
         autoContinueAttempts.remove(sessionId);
         autoContinueSignature.remove(sessionId);
         try {
+        sessionEnabledDeferredTools.remove(sessionId);
             queuedMessages.clearHold(sessionId);
         } catch (RuntimeException e) {
             log.warn("清理会话 {} 的队列暂停状态失败", sessionId, e);
@@ -1499,6 +1504,10 @@ public class AgentRunService implements RunStarter {
         };
         ToolRegistry tools =
             review.active() ? reviewTools(workspace) : sessionTools(sessionId, runId, workspace, planSink);
+        // 本会话已启用的延迟工具在这里先放回去：否则系统提示词按工具名过滤的段落与首条请求对不上。
+        // 审查 run 用独立只读工具表，不继承写/扩展工具。
+        List<String> inheritedDeferred = review.active() ? List.of() : inheritedDeferredTools(sessionId, history);
+        tools.enable(inheritedDeferred);
         // 本地工具保留供同一轮自动降级；原生客户端只在请求序列化时隐藏对应定义。
         // 初始目录用于系统提示词；use_skill 每次读取当前目录，让本轮新安装的技能立即可用。
         SkillCatalog catalog = skills.catalogFor(workspace);
@@ -1603,6 +1612,8 @@ public class AgentRunService implements RunStarter {
                         ? com.pilot.core.permission.PermissionMode.AUTO : null));
             }
         }
+        // 再补一次：dispatch_agents 这类延迟工具只在 config 之后注册，第一遍 enable 时还不存在。
+        tools.enable(inheritedDeferred);
         // 与会话数据库、快照保持一致，统一落在数据目录（默认项目下的 .pilot）
         JsonlTraceRecorder traceRecorder =
             new JsonlTraceRecorder(dataDir.file("traces", sessionId + ".jsonl"), objectMapper);
@@ -1679,6 +1690,9 @@ public class AgentRunService implements RunStarter {
             publish(sessionId, runId, new RunFailed(RunFailureCode.INTERNAL_ERROR, "执行失败：" + reason, false));
             return TaskControlStatus.FAILED.name();
         } finally {
+            if (!review.active()) {
+                sessionEnabledDeferredTools.put(sessionId, tools.enabledDeferredTools());
+            }
             try {
                 finishSnapshots(runId);
             } finally {
@@ -2010,6 +2024,42 @@ public class AgentRunService implements RunStarter {
         // 浏览器与 MCP：始终注册，是否可见由工具自己的 availability 在运行时决定。
         toolFactory.sessionExtras(sessionId, workspace).forEach(tools::register);
         return tools;
+    }
+
+    /**
+     * 续跑、手动继续、后续追问要沿用的延迟工具集合。
+     *
+     * <p>内存里有记录就直接用；进程重启后接着跑旧会话时没有记录，从历史恢复：
+     * 既包括 {@code enable_tools} 当时打开的名字，也包括已经直接调用过的延迟工具
+     * （能出现在历史里说明那一轮已经打开过）。
+     * 这里不预先做延迟工具名单过滤：{@link ToolRegistry#enable} 会再筛一次，并忽略未注册的名字。
+     */
+    private List<String> inheritedDeferredTools(String sessionId, List<Message> history) {
+        List<String> remembered = sessionEnabledDeferredTools.get(sessionId);
+        if (remembered != null) {
+            return remembered;
+        }
+        ArrayList<String> called = new ArrayList<>();
+        for (Message message : history) {
+            for (ToolCall call : message.toolCalls()) {
+                if (EnableToolsTool.NAME.equals(call.name())) {
+                    openedNames(call).stream().filter(name -> !called.contains(name)).forEach(called::add);
+                } else if (!called.contains(call.name())) {
+                    called.add(call.name());
+                }
+            }
+        }
+        return List.copyOf(called);
+    }
+
+    /** {@code enable_tools} 调用参数里点名的工具名；格式不对就当成没打开过。 */
+    private static List<String> openedNames(ToolCall call) {
+        Object raw = call.args() == null ? null : call.args().get("names");
+        if (raw instanceof List<?> values) {
+            return values.stream().filter(Objects::nonNull).map(value -> value.toString().strip())
+                .filter(name -> !name.isEmpty()).toList();
+        }
+        return raw == null || raw.toString().isBlank() ? List.of() : List.of(raw.toString().strip());
     }
 
     private void publish(String sessionId, String runId, SessionEvent event) {

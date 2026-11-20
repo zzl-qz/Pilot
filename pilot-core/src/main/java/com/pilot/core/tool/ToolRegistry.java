@@ -10,7 +10,9 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import com.pilot.core.model.ToolDefinition;
 
@@ -30,7 +32,11 @@ public final class ToolRegistry {
     private static final Set<String> DEFERRED = Set.of("office", "browser", "prepare_runtime", "local_resources",
         "publish_artifact", "dispatch_agents", "mcp_tools", "mcp_call", "code_diagnostics");
     private final ConcurrentMap<String, Tool> tools = new ConcurrentHashMap<>();
-    private final Set<String> enabled = ConcurrentHashMap.newKeySet();
+    /**
+     * 已启用的延迟工具，按激活顺序保存。
+     * 顺序就是请求里的追加顺序：中途打开一个工具只在末尾新增一项，前面已有的定义一个字节都不动。
+     */
+    private final CopyOnWriteArrayList<String> enabled = new CopyOnWriteArrayList<>();
 
     public void register(Tool tool) {
         Objects.requireNonNull(tool, "tool must not be null");
@@ -56,9 +62,16 @@ public final class ToolRegistry {
         return List.copyOf(result);
     }
 
-    /** 当前可用、并且已经向模型公开 schema 的工具。 */
+    /**
+     * 当前可用、并且已经向模型公开 schema 的工具。
+     *
+     * <p>两段式稳定顺序：核心工具按名称升序在前，已启用的延迟工具按激活顺序追加在后。
+     * 这样中途打开 {@code browser} 只在尾部多一项，不会把它后面按字母序排的核心工具整体推移。
+     */
     public List<Tool> availableTools() {
-        return tools().stream().filter(this::listed).toList();
+        List<Tool> core = tools().stream().filter(tool -> !DEFERRED.contains(tool.name()) && listed(tool)).toList();
+        List<Tool> extended = enabled.stream().map(tools::get).filter(tool -> tool != null && listed(tool)).toList();
+        return Stream.concat(core.stream(), extended.stream()).toList();
     }
 
     /** 把延迟工具加入后续请求。未知名字忽略，避免模型打错一个名字就把整次调用变成失败。 */
@@ -73,7 +86,7 @@ public final class ToolRegistry {
             }
             String key = name.strip();
             if (DEFERRED.contains(key)) {
-                enabled.add(key);
+                enabled.addIfAbsent(key);
                 opened.add(key);
             }
         }
@@ -83,8 +96,13 @@ public final class ToolRegistry {
     /** 模型直接调用了还没公开的延迟工具时，当场打开，这一次调用照常执行。 */
     public void enableIfDeferred(String name) {
         if (name != null && DEFERRED.contains(name) && tools.containsKey(name)) {
-            enabled.add(name);
+            enabled.addIfAbsent(name);
         }
+    }
+
+    /** 本会话已启用的延迟工具，按激活顺序；上层在续跑时原样回灌 {@link #enable(List)}。 */
+    public List<String> enabledDeferredTools() {
+        return List.copyOf(enabled);
     }
 
     private boolean listed(Tool tool) {
@@ -106,7 +124,10 @@ public final class ToolRegistry {
         return Map.copyOf(result);
     }
 
-    /** 名称与定义按名称排序，保证相同工具集的请求体稳定（便于缓存与测试）。 */
+    /**
+     * 工具定义按 {@link #availableTools()} 的两段顺序输出：核心工具名称升序在前，已启用延迟工具按激活顺序在后。
+     * 相同工具集的请求体因此稳定（便于缓存与测试）。
+     */
     public List<ToolDefinition> definitions() {
         return availableTools().stream()
             .map(tool -> new ToolDefinition(tool.name(), tool.description(), tool.parameters())).toList();

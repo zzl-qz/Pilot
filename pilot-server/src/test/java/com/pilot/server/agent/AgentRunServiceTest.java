@@ -54,7 +54,12 @@ import com.pilot.core.session.InMemoryPlanRepository;
 import com.pilot.core.session.RunRepository;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;
+import com.pilot.core.tool.ReadTracker;
+import com.pilot.core.tool.SnapshotSink;
+import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolRegistry;
+import com.pilot.core.tool.UpdatePlanTool;
+import com.pilot.core.tool.code.CodeSymbolTool;
 import com.pilot.core.tool.file.ReadFileTool;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.common.data.PilotDataDir;
@@ -600,6 +605,153 @@ class AgentRunServiceTest {
     }
 
     /** 请求里的 system 提示词（第一条 system 消息）。 */
+    /**
+     * 延迟工具只在尾部追加：第一轮打开 browser 以后核心工具的位置与内容不能变；
+     * 同会话第二次 run 的首条请求就要带上已启用的集合，不再退回精简工具表。
+     */
+    @Test
+    void continuationInheritsDeferredToolsEnabledByThePreviousRun() throws Exception {
+        CopyOnWriteArrayList<List<Message>> requests = new CopyOnWriteArrayList<>();
+        CopyOnWriteArrayList<List<ToolDefinition>> toolSets = new CopyOnWriteArrayList<>();
+        AtomicInteger calls = new AtomicInteger();
+        ModelClient model = (messages, tools) -> {
+            requests.add(messages);
+            toolSets.add(tools);
+            return calls.getAndIncrement() == 0 ? new ModelResponse("先打开浏览器",
+                List.of(new ToolCall("open", "enable_tools", Map.of("names", List.of("browser"))))) : done();
+        };
+        try (Fixture fixture = new Fixture(model, 8)) {
+            fixture.sessionExtras = List.of(deferredTool("browser"));
+            fixture.start();
+            fixture.awaitFinished("COMPLETED");
+
+            List<String> before = toolNames(toolSets.getFirst());
+            assertFalse(before.contains("browser"), "打开前不声明延迟工具：" + before);
+            List<String> opened = toolNames(toolSets.get(1));
+            assertEquals("browser", opened.getLast(), "已启用的延迟工具应追加在核心工具之后：" + opened);
+            assertEquals(before, opened.subList(0, before.size()), "打开延迟工具不能挪动已有工具");
+
+            String secondRun = fixture.service.claimRun(fixture.sessionId).orElseThrow();
+            fixture.service.start(fixture.sessionId, secondRun, "接着处理下一件事");
+            fixture.awaitFinished("COMPLETED");
+
+            int firstRequest = requestWith(requests, "接着处理下一件事");
+            assertTrue(firstRequest >= 0, requests.toString());
+            List<String> inherited = toolNames(toolSets.get(firstRequest));
+            assertEquals("browser", inherited.getLast(), "续跑首条请求即应带上已启用的延迟工具：" + inherited);
+            assertEquals(opened, inherited, "已启用集合不变时两次请求的工具表应逐项一致");
+        }
+    }
+
+    /**
+     * 服务重启后内存记录已没了，续跑要能从落盘历史里认出上一轮打开过的延迟工具，
+     * 而不是让模型重新 enable_tools 一遍。
+     */
+    @Test
+    void restoresDeferredToolsFromPersistedHistoryWhenTheProcessRestarted() throws Exception {
+        CopyOnWriteArrayList<List<ToolDefinition>> toolSets = new CopyOnWriteArrayList<>();
+        ModelClient model = (messages, tools) -> {
+            toolSets.add(tools);
+            return done();
+        };
+        try (Fixture fixture = new Fixture(model, 8)) {
+            fixture.sessionExtras = List.of(deferredTool("browser"));
+            fixture.conversations.save(fixture.sessionId,
+                List.of(Message.user("先看看页面"),
+                    Message.assistant("",
+                        List.of(new ToolCall("open", "enable_tools", Map.of("names", List.of("browser"))))),
+                    Message.tool("open", "已打开：browser")));
+
+            fixture.start();
+            fixture.awaitFinished("COMPLETED");
+
+            List<String> names = toolNames(toolSets.getFirst());
+            assertEquals("browser", names.getLast(), "历史里打开过的延迟工具应在首条请求就位于尾部扩展段：" + names);
+        }
+    }
+
+    /** `/review` 只读模式不继承写/扩展工具，也不能把会话已启用的集合洗掉。 */
+    @Test
+    void reviewRunsDoNotInheritDeferredToolsAndKeepTheSessionSet() throws Exception {
+        CopyOnWriteArrayList<List<Message>> requests = new CopyOnWriteArrayList<>();
+        CopyOnWriteArrayList<List<ToolDefinition>> toolSets = new CopyOnWriteArrayList<>();
+        AtomicInteger calls = new AtomicInteger();
+        ModelClient model = (messages, tools) -> {
+            requests.add(messages);
+            toolSets.add(tools);
+            return calls.getAndIncrement() == 0 ? new ModelResponse("先打开浏览器",
+                List.of(new ToolCall("open", "enable_tools", Map.of("names", List.of("browser"))))) : done();
+        };
+        try (Fixture fixture = new Fixture(model, 8)) {
+            fixture.sessionExtras = List.of(deferredTool("browser"));
+            fixture.start();
+            fixture.awaitFinished("COMPLETED");
+
+            String reviewRun = fixture.service.claimRun(fixture.sessionId).orElseThrow();
+            fixture.sessions.publish(fixture.sessionId, reviewRun, new RunStarted("/review 重点看登录模块"));
+            fixture.service.start(fixture.sessionId, reviewRun, "/review 重点看登录模块");
+            fixture.awaitFinished("COMPLETED");
+            int reviewRequest = requestWith(requests, "/review 重点看登录模块");
+            assertTrue(reviewRequest >= 0, requests.toString());
+            List<String> review = toolNames(toolSets.get(reviewRequest));
+            assertFalse(review.contains("browser"), "审查 run 只读，不继承扩展工具：" + review);
+
+            String thirdRun = fixture.service.claimRun(fixture.sessionId).orElseThrow();
+            fixture.service.start(fixture.sessionId, thirdRun, "回到普通任务");
+            fixture.awaitFinished("COMPLETED");
+            int thirdRequest = requestWith(requests, "回到普通任务");
+            assertTrue(thirdRequest >= 0, requests.toString());
+            assertTrue(toolNames(toolSets.get(thirdRequest)).contains("browser"),
+                "审查 run 不能清掉会话已启用的延迟工具：" + toolNames(toolSets.get(thirdRequest)));
+        }
+    }
+
+    /** 第一条带指定用户输入的请求下标：用于定位某次 run 的首条请求。 */
+    private static int requestWith(List<List<Message>> requests, String text) {
+        for (int index = 0; index < requests.size(); index++) {
+            if (requests.get(index).stream()
+                .anyMatch(message -> "user".equals(message.role()) && text.equals(message.content()))) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    /** 请求里工具定义的名称顺序。 */
+    private static List<String> toolNames(List<ToolDefinition> tools) {
+        return tools.stream().map(ToolDefinition::name).toList();
+    }
+
+    /** 一个可用的延迟工具，用来验证 enable_tools 之后的排序与会话继承。 */
+    private static Tool deferredTool(String name) {
+        return new Tool() {
+            @Override
+            public String name() {
+                return name;
+            }
+
+            @Override
+            public String description() {
+                return "test deferred tool";
+            }
+
+            @Override
+            public Map<String, Object> parameters() {
+                return Map.of("type", "object");
+            }
+
+            @Override
+            public boolean readOnly() {
+                return true;
+            }
+
+            @Override
+            public String execute(Map<String, Object> args) {
+                return "ok";
+            }
+        };
+    }
+
     private static String systemOf(List<Message> messages) {
         return messages.stream().filter(message -> "system".equals(message.role())).map(Message::content).findFirst()
             .orElse("");
@@ -967,6 +1119,8 @@ class AgentRunServiceTest {
         final AgentRunService service;
         final com.pilot.core.tool.command.CommandTaskManager commandTasks;
         String runId;
+        /** 会话级扩展工具：默认空，测试在 start 前覆盖成 browser 之类延迟工具。 */
+        List<com.pilot.core.tool.Tool> sessionExtras = List.of();
 
         Fixture(ModelClient model, int maxSteps) {
             this(model, maxSteps, false);
@@ -1040,6 +1194,8 @@ class AgentRunServiceTest {
                 }
                 return tools;
             });
+            // 延迟工具（browser / mcp）由 sessionExtras 注册；测试开始前可覆盖，模拟已安装的扩展
+            when(factory.sessionExtras(anyString(), anyString())).thenAnswer(invocation -> sessionExtras);
             metrics = new RunMetrics() {
                 @Override
                 public void recordRun(String status, long durationMs) {
