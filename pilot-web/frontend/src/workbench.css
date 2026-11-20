@@ -458,8 +458,9 @@ html[data-theme] .voice-settings summary { cursor: pointer; font-size: 13px; col
   html[data-theme] .queue-edit textarea { flex-basis: 100%; }
 }
 
-html[data-theme] .bubble-image { display: inline-flex; max-width: min(100%, 240px); vertical-align: middle; margin: 4px; }
-html[data-theme] .bubble-image img { max-width: 100%; max-height: 240px; object-fit: contain; border-radius: 6px; }
+html[data-theme] .bubble-image { display: block; max-width: min(100%, 360px); }
+html[data-theme] .bubble-image img { display: block; max-width: 100%; max-height: 280px; height: auto; border-radius: 6px; }
+html[data-theme] .bubble-image.is-broken { display: grid; width: 180px; height: 120px; place-items: center; border: 1px dashed var(--line); border-radius: 6px; background: var(--panel-3); color: var(--muted); font-size: 12px; }
 html[data-theme] .file-card { display: inline-flex; align-items: center; gap: 9px; max-width: min(100%, 360px); min-height: 44px; margin: 5px 4px 2px 0; padding: 6px 10px 6px 7px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); text-decoration: none; vertical-align: middle; }
 html[data-theme] a.file-card { cursor: pointer; }
 html[data-theme] a.file-card:hover { border-color: var(--accent); background: var(--panel-3); }
@@ -473,8 +474,7 @@ html[data-theme] .file-card-name { min-width: 0; overflow: hidden; color: inheri
 html[data-theme] .file-card-meta { flex: none; color: var(--muted); font-size: 11px; }
 html[data-theme] .file-card-action { flex: none; border: 0; border-radius: 5px; padding: 5px 7px; background: var(--panel-3); color: var(--ink-2); font: inherit; font-size: 11px; text-decoration: none; cursor: pointer; }
 html[data-theme] .file-card-action:hover { color: var(--ink); background: var(--line); }
-html[data-theme] .bubble-image-action { display: block; padding: 0; border: 0; border-radius: 6px; background: transparent; cursor: zoom-in; }
-html[data-theme] .bubble-image-action img { display: block; max-width: min(100%, 520px); max-height: 340px; object-fit: contain; }
+html[data-theme] .bubble-image-action { display: block; width: 100%; padding: 0; border: 0; border-radius: 6px; background: transparent; cursor: zoom-in; }
 .attachment-preview-backdrop { position: fixed; z-index: 120; inset: 0; display: grid; place-items: center; padding: 24px; background: rgb(0 0 0 / .68); }
 .attachment-preview { display: flex; flex-direction: column; width: min(1000px, 100%); height: min(850px, 90dvh); min-height: 240px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); box-shadow: 0 20px 70px rgb(0 0 0 / .45); }
 .attachment-preview > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 54px; padding: 8px 14px; border-bottom: 1px solid var(--line-soft); }

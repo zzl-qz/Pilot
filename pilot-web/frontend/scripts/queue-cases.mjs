@@ -69,6 +69,20 @@ export async function checkQueue(page, name, temp) {
     store.setState(s => { s.thread.rows = [{ key: 'guidance', type: 'user', sequence: 2, steered: true, text: '按图修改', imagePositions: [1], attachments: [{ name: '参考.png', mimeType: 'image/png', dataBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aBv8AAAAASUVORK5CYII=' }] }]; });
   });
   assert.equal(await page.locator('.bubble-image img').count(), 1);
+  // 图片是正文下方独立一块，不再按字符位置插进文字里绕排。
+  const imageLayout = await page.evaluate(() => {
+    const image = document.querySelector('.msg-user .bubble-image');
+    const flow = document.querySelector('.msg-user .bubble-flow');
+    if (!image || !flow) return null;
+    const box = image.getBoundingClientRect();
+    const text = flow.getBoundingClientRect();
+    return { display: getComputedStyle(image).display, afterText: box.top >= text.bottom - 1,
+      insideBubble: Boolean(image.closest('.bubble')), inFlow: Boolean(image.closest('.bubble-flow')) };
+  });
+  assert.ok(imageLayout, '图片渲染在用户消息气泡内');
+  assert.equal(imageLayout.display, 'block', '图片是块级元素，不参与行内绕排');
+  assert.equal(imageLayout.inFlow, false, '图片不再插在正文字符位置里');
+  assert.ok(imageLayout.afterText, '图片排在正文下方，不把正文切成上下两段');
   assert.equal(await page.getByRole('button', { name: '编辑并重新发送', exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: '回退或另开分支', exact: true }).count(), 0);
   await page.evaluate(() => { Object.assign(api, queueOriginalApi); store.setState({ running: false, queueEntries: [], queueBusy: false }); });

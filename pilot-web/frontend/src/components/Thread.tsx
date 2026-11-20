@@ -34,7 +34,7 @@ import {
   type ToolIconKind
 } from '../lib/tool-meta.js';
 import { agentMeta, agentTitle, manifestFacts, splitSubagentResult, summarizeAgents, agentStatusLabel, agentStatusDotVariant } from '../lib/agents.js';
-import { splitAttachmentMarkers, layoutMessageParts, attachmentUrl, isImageAttachment, fileBadge, formatBytes } from '../lib/attachments.js';
+import { splitAttachmentMarkers, attachmentUrl, isImageAttachment, fileBadge, formatBytes } from '../lib/attachments.js';
 import { parseDiff } from '../lib/diff.js';
 import { writeClipboard } from '../lib/clipboard.js';
 import { formatClock, formatCount, formatTime } from '../thread-utils.js';
@@ -395,7 +395,12 @@ function UserMessage({ row }: { row: UserRow }) {
     <>
     <article className="msg msg-user" tabIndex={-1} data-nav-key={row.key} data-sequence={row.sequence ?? undefined}>
       <div className="bubble">
-        <div className="bubble-flow">{renderMessageBody(parts.body, files, images, row.imagePositions, setPreviewFile)}</div>
+        {(parts.body || files.length > 0) && <div className="bubble-flow">{renderMessageBody(parts.body, files, setPreviewFile)}</div>}
+        {images.length > 0 && (
+          <div className="bubble-images">
+            {images.map((image) => <ImageThumb key={image.url || image.path || image.name} image={image} onPreview={setPreviewFile} />)}
+          </div>
+        )}
       </div>
       {canPeek && (
         <button type="button" className="msg-peek-fold" onClick={() => setOpen(false)}>收起</button>
@@ -424,21 +429,30 @@ function beginEdit(row: UserRow) {
   useStore.setState((draft) => { draft._editTarget = row.sequence ?? null; });
 }
 
-/** 消息正文：文本 + 图片缩略 + 文件卡（与旧版 layoutMessageParts 顺序一致）。 */
-function renderMessageBody(body: string, files: MessageAttachment[] = [], images: MessageAttachment[] = [], imagePositions: number[] = [], onPreview?: (file: MessageAttachment) => void) {
-  return layoutMessageParts(body, images, files, imagePositions).map((part, index) => {
-    if (part.type === 'text') return <span key={index}>{part.text}</span>;
-    if (part.type === 'image') return <ImageThumb key={index} image={part.image} onPreview={onPreview} />;
-    return <React.Fragment key={index}>{part.files.map((file, fileIndex) => <FileCard key={fileIndex} file={file} onPreview={onPreview} />)}</React.Fragment>;
-  });
+/**
+ * 消息正文只渲染文字与文件卡。
+ * 图片不再插回输入时的字符位置：粘贴位置会随之后的编辑漂移，图片一旦是行内元素就会把
+ * 正文切成绕排的碎片（文字包着图）。图片统一成正文下方一块独立区域，见 bubble-images。
+ */
+function renderMessageBody(body: string, files: MessageAttachment[] = [], onPreview?: (file: MessageAttachment) => void) {
+  return <>
+    {body && <span>{body}</span>}
+    {files.map((file, index) => <FileCard key={index} file={file} onPreview={onPreview} />)}
+  </>;
 }
 
 function ImageThumb({ image, onPreview }: { image: MessageAttachment; onPreview?: (image: MessageAttachment) => void }) {
   const sessionId = useStore((state) => state.sessionId);
+  const [broken, setBroken] = useState(false);
+  const name = image.name || '图片';
+  // 读不到图时留固定尺寸的占位，不把排版撑开也不留破图框。
+  if (broken) {
+    return <span className="bubble-image is-broken" role="img" aria-label={`${name} 加载失败`}>图片加载失败</span>;
+  }
   return (
     <span className="bubble-image">
-      <button className="bubble-image-action" type="button" aria-label={`预览图片 ${image.name || '图片'}`} onClick={event => { event.currentTarget.focus({ preventScroll: true }); onPreview?.(image); }}>
-        <img src={attachmentUrl(sessionId, image)} alt={image.name || '图片'} loading="lazy" />
+      <button className="bubble-image-action" type="button" aria-label={`预览图片 ${name}`} onClick={event => { event.currentTarget.focus({ preventScroll: true }); onPreview?.(image); }}>
+        <img src={attachmentUrl(sessionId, image)} alt={name} loading="lazy" onError={() => setBroken(true)} />
       </button>
     </span>
   );
