@@ -36,7 +36,7 @@ const invokeCases=[
   ['pilot-browser-close','fixture'],['pilot-browser-select','fixture'],['pilot-browser-detach'],['pilot-browser-menu'],
   ['pilot-browser-find','fixture'],['pilot-browser-logs',false],['pilot-browser-devtools'],['pilot-browser-pick'],
   ['pilot-browser-reset-emulation'],['pilot-workbench-reload'],['pilot-mobile-open'],['pilot-mobile-copy','invalid'],
-  ['pilot:select-directories'],
+  ['pilot:select-directories'], ['pilot:save-session-markdown', 'pilot-test.md', 'probe'],
 ];
 const probe=join(temp,'probe.cjs');
 await writeFile(probe,`const {contextBridge,ipcRenderer}=require('electron');const events=[];for(const channel of ['pilot-browser-log','pilot-browser-state','pilot-browser-download'])ipcRenderer.on(channel,()=>events.push(channel));contextBridge.exposeInMainWorld('ipcProbe',{invoke:(channel,...args)=>ipcRenderer.invoke(channel,...args),send:(channel,value)=>ipcRenderer.send(channel,value),events:()=>events});`);
@@ -57,6 +57,18 @@ try{
   assert.equal(await page.evaluate(()=>typeof pilotDesktop.logs),'function');
   await page.evaluate(async()=>{pilotDesktop.setWorkspace('security-workspace');await pilotDesktop.ensureTab('security');});
   passed.push('trusted main frame: bridge and browser controls available');
+
+  const exportPath = join(temp, '自选会话.md');
+  await desktop.evaluate(({ dialog }, filePath) => {
+    dialog.showSaveDialog = async (parent, options) => {
+      if (!parent || options.defaultPath !== 'pilot-test.md') throw Error('导出对话框参数错误');
+      return { canceled: false, filePath };
+    };
+  }, exportPath);
+  const saved = await page.evaluate(() => pilotDesktop.saveSessionMarkdown('pilot-test.md', '# 完整会话\n'));
+  assert.deepEqual(saved, { ok: true, path: exportPath });
+  assert.equal(await readFile(exportPath, 'utf8'), '# 完整会话\n');
+  passed.push('trusted save dialog: selected Markdown file contains full UTF-8 text');
 
   // 真实 preload/IPC 往返；只替换系统弹框，避免自动化弹出阻塞式原生窗口。
   await desktop.evaluate(({dialog})=>{

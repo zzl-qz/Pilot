@@ -30,20 +30,26 @@ export function buildTranscript({ title, workspace, exportedAt, messages }: { ti
 export function saveTextFile(text: string, fileName: string, doc: Document | null | undefined) {
   if (!doc || typeof doc.createElement !== 'function' || !doc.body) return false;
   const link = doc.createElement('a');
-  if (typeof link.download !== 'string') return false;
+  if (typeof link.download !== 'string' || typeof URL.createObjectURL !== 'function') return false;
   const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }));
-  link.href = url;
-  link.download = fileName;
-  doc.body.append(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-  return true;
+  try {
+    link.href = url;
+    link.download = fileName;
+    doc.body.append(link);
+    link.click();
+    return true;
+  } catch {
+    return false;
+  } finally {
+    link.remove();
+    // 下载由浏览器异步接手，立即释放可能得到空下载。
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }
 }
 
 /** 文件名里不能出现的字符替换掉，并限制长度。 */
 export function transcriptFileName(title: unknown, date = new Date()) {
-  const safe = String(title || '对话').replace(/[\\/:*?"<>|\s]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || '对话';
+  const safe = String(title || '对话').replace(/[\\/:*?"<>|\p{Cc}\s]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 40) || '对话';
   const stamp = date.toISOString().slice(0, 10);
   return `pilot-${safe}-${stamp}.md`;
 }

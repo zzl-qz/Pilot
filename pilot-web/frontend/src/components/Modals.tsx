@@ -14,6 +14,9 @@ import { useStore } from '../store.js';
 import { api } from '../api.js';
 import { Icon, FileIcon } from './Icon.jsx';
 import { writeClipboard } from '../lib/clipboard.js';
+import { downloadSessionExport, exportFailureMessage, saveSessionMarkdown } from '../lib/session-export.js';
+import { buildTranscript } from '../lib/transcript.js';
+import { SessionActionDialog } from './SessionMenu.jsx';
 import { filterPaletteActions } from '../lib/commands.js';
 import { MobileConnectionContent } from './MobileConnection.jsx';
 import { verificationLabel, verificationHint, verificationTone, verificationNeedsRerun } from '../lib/verification.js';
@@ -163,6 +166,7 @@ export function Modals() {
   const picker = useStore((state) => state.ui.picker);
   const projectEditor = useStore((state) => state.ui.projectEditor);
   const settingsOpen = useStore((state) => state.ui.settingsOpen);
+  const exportCopy = useStore(state => state.ui.exportCopy);
   const paletteOpen = useStore((state) => state.ui.paletteOpen);
   const checkpoint = useStore((state) => state.ui.checkpointDialog);
   const confirm = useStore((state) => state.ui.confirm);
@@ -172,6 +176,8 @@ export function Modals() {
       {picker && <WorkspacePicker />}
       {projectEditor && <ProjectEditor />}
       {settingsOpen && <SettingsModal />}
+      {exportCopy != null && <SessionActionDialog action={{ kind: 'copy', value: exportCopy, title: '', trigger: null }}
+        onClose={() => useStore.getState().setUi({ exportCopy: null })} />}
       {paletteOpen && <Palette />}
       {checkpoint && <CheckpointDialog key={checkpoint.sequence} />}
       {confirm && <ConfirmDialog />}
@@ -439,51 +445,33 @@ function runPaletteAction(action: string) {
   }
 }
 
-function exportTranscript() {
-  const current = useStore.getState();
-  const sessionId = current.sessionId;
-  if (sessionId) {
-    import('../lib/session-export.js').then(async ({ downloadSessionExport, exportFailureMessage }) => {
-      try {
-        const result = await downloadSessionExport(sessionId, current.sessionTitle);
-        if (result.mode === 'file') current.showNotice('会话已导出。可以把这个文件发给复查的人。');
-        else if (result.mode === 'clipboard') current.showNotice('当前环境不能直接保存文件，全文已复制，可以粘贴发给复查的人。');
-        else current.showNotice('自动保存和复制都不可用。请从会话菜单选择「导出会话」。');
-      } catch (error) {
-        current.showNotice(exportFailureMessage(error));
-      }
-    });
-    return;
+async function exportTranscript() {
+  const state = useStore.getState();
+  try {
+    const result = state.sessionId
+      ? await downloadSessionExport(state.sessionId, state.sessionTitle)
+      : await saveSessionMarkdown(state.sessionTitle, () => {
+          const rows = state.thread.rows.filter((row) => row.type === 'user' || row.type === 'turn');
+          const messages: { role: string; text?: string; summary?: string }[] = [];
+          for (const row of rows) {
+            if (row.type === 'user') {
+              messages.push({ role: 'user', text: row.text });
+            } else {
+              for (const tool of row.tools || []) {
+                messages.push({ role: 'tools', summary: `${toolLabel(tool.name)} ${toolArgsText(tool.name, tool.args) || ''}`.trim() });
+              }
+              if (row.reply?.text) {
+                messages.push({ role: 'assistant', text: row.reply.text });
+              }
+            }
+          }
+          return buildTranscript({ title: state.sessionTitle, workspace: state.workspace, exportedAt: new Date().toLocaleString(), messages });
+        });
+    if (result.mode === 'manual') state.setUi({ exportCopy: result.text });
+    else state.showNotice(result.notice);
+  } catch (error) {
+    state.showNotice(exportFailureMessage(error));
   }
-  import('../lib/transcript.js').then(({ buildTranscript, transcriptFileName }) => {
-    const state = useStore.getState();
-    const rows = state.thread.rows.filter((row) => row.type === 'user' || row.type === 'turn');
-    const messages: { role: string; text?: string; summary?: string }[] = [];
-    for (const row of rows) {
-      if (row.type === 'user') {
-        messages.push({ role: 'user', text: row.text });
-      } else {
-        for (const tool of row.tools || []) {
-          messages.push({ role: 'tools', summary: `${toolLabel(tool.name)} ${toolArgsText(tool.name, tool.args) || ''}`.trim() });
-        }
-        if (row.reply?.text) {
-          messages.push({ role: 'assistant', text: row.reply.text });
-        }
-      }
-    }
-    // buildTranscript 收的是对象参数：位置参数会让导出文件只剩「未命名对话」一行标题
-    const blob = new Blob([buildTranscript({
-      title: state.sessionTitle,
-      workspace: state.workspace,
-      exportedAt: new Date().toLocaleString(),
-      messages
-    })], { type: 'text/markdown' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = transcriptFileName(state.sessionTitle);
-    link.click();
-    URL.revokeObjectURL(link.href);
-  });
 }
 
 /* ---------- 检查点 ---------- */

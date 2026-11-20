@@ -23,6 +23,7 @@ if (window === window.top && ['http:', 'https:'].includes(location.protocol) && 
     },
     copyPairingCode: code => ipcRenderer.invoke('pilot-mobile-copy', code),
     readClipboardFiles: limits => ipcRenderer.invoke('pilot:read-clipboard-files', limits),
+    saveSessionMarkdown: (name, text) => ipcRenderer.invoke('pilot:save-session-markdown', name, text),
     selectDirectories: () => ipcRenderer.invoke('pilot:select-directories'),
     onMobileConnection: callback => {
       const listener = () => callback();

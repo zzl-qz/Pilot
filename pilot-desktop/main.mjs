@@ -1,3 +1,4 @@
+import { saveSessionMarkdown } from './session-export.mjs';
 import { selectProjectDirectories } from './directory-picker.mjs';
 import { installMicrophonePermissions } from './media-permission.mjs';
 import { configuredWorkbenchUrl, workbenchOrigin, workbenchIpc, installWorkbenchNavigation } from './workbench-security.mjs';
@@ -782,6 +783,11 @@ async function readClipboardFiles(rawLimits) {
   return { ok: true, files };
 }
 
+workbench.handle('pilot:save-session-markdown', (event, name, text) => saveSessionMarkdown(name, text, async options => {
+  const result = await dialog.showSaveDialog(shell, options);
+  if (!workbench.trusted(event)) throw new Error('工作台已关闭或切换，请重新导出。');
+  return result;
+}));
 workbench.handle('pilot:select-directories', () => selectProjectDirectories({ origin, parent: shell, dialog }));
 workbench.handle('pilot:read-clipboard-files', (_event, limits) => readClipboardFiles(limits));
 

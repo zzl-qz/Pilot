@@ -22,6 +22,7 @@ export interface ComposerBridge {
 export interface ConfirmDialog { title: string; message: string; confirmText?: string; danger?: boolean; onConfirm?: () => unknown }
 export interface CheckpointDialog { sequence?: number; loading?: boolean; applying?: boolean; error?: string; info?: S.CheckpointControllerPreview | null }
 export interface UiState {
+  exportCopy?: string | null;
   notice: { text: string; at: number } | null; noticeTimer: number | null;
   refreshing: boolean; syncError: string; lastSyncedAt: number; filesRevision: number;
   themeMode: string; accent: string; sidebarOpen: boolean; inspectorOpen: boolean; inspectorTab: string;

@@ -13,7 +13,7 @@ import { restoreFocus } from '../lib/interaction.js';
 import { supportsAnchoredLayers } from '../lib/theme.js';
 import { useStore } from '../store.js';
 import { Icon } from './Icon.jsx';
-import { Modal } from './Modals.jsx';
+import { Modal } from './Modal.jsx';
 
 type SessionActionOrigin = { trigger: HTMLElement | null; title: string };
 export type SessionAction = SessionActionOrigin & (
@@ -62,9 +62,8 @@ export function SessionMenu({ session, children, onAction }: {
       const source = origin();
       try {
         const result = await downloadSessionExport(session.id, title);
-        if (result.mode === 'file') useStore.getState().showNotice('会话已导出。可以把这个文件发给复查的人。');
-        else if (result.mode === 'clipboard') useStore.getState().showNotice('当前环境不能直接保存文件，全文已复制，可以粘贴发给复查的人。');
-        else onAction({ ...source, kind: 'copy', value: result.text });
+        if (result.mode === 'manual') onAction({ ...source, kind: 'copy', value: result.text });
+        else useStore.getState().showNotice(result.notice);
       } catch (error) {
         useStore.getState().showNotice(exportFailureMessage(error));
       }

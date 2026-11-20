@@ -1,6 +1,9 @@
 /// <reference types="vite/client" />
 
 interface Window {
+  showSaveFilePicker?(options: {
+    suggestedName: string; types: { description: string; accept: Record<string, string[]> }[];
+  }): Promise<FileSystemFileHandle>;
   pilotDesktop?: import('./types/desktop.js').DesktopBridge;
 
   mermaid?: {

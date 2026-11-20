@@ -14,6 +14,7 @@ export interface DesktopClipboardFile { name: string; mimeType: string; size: nu
 export interface DesktopClipboardFilesResult { ok: boolean; files?: DesktopClipboardFile[]; error?: string }
 export interface DesktopFileLimits { maxFiles: number; maxFileBytes: number; maxTotalBytes: number }
 export interface DesktopBridge {
+  saveSessionMarkdown?(name: string, text: string): Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }>;
   onBrowserOpen(callback: (url: string) => void): () => void;
   onNavigationNotice(callback: (message: string) => void): () => void;
   reloadWorkbench(): Promise<DesktopAction>;

@@ -42,6 +42,37 @@ async function run(page,name) {
   const action=async label=>page.getByRole('menuitem',{name:label,exact:true}).click();
   const order=()=>page.locator('.project-group > .project-sessions > .session-row').evaluateAll(rows=>rows.map(el=>el.dataset.sessionId));
   assert.deepEqual(await order(),['recent','older','third']);
+  const exported = '# 完整会话\n目标和中文回复\n';
+  await page.route('**/api/sessions/*/export', route => route.fulfill({ contentType: 'text/markdown', body: exported }));
+  if (name === 'chromium') {
+    await page.evaluate(() => Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: undefined }));
+    await open('older');
+    const downloaded = page.waitForEvent('download');
+    await action('导出会话');
+    const download = await downloaded;
+    assert.match(download.suggestedFilename(), /^pilot-检查历史会话的恢复行为-.*\.md$/);
+    const stream = await download.createReadStream();
+    const chunks = [];
+    for await (const chunk of stream) chunks.push(chunk);
+    assert.equal(Buffer.concat(chunks).toString('utf8'), exported);
+    await page.waitForFunction(() => store.getState().ui.notice?.text.includes('下载记录'));
+  }
+  // 模拟用户选择一个文件，后续使用浏览器真实的可写文件句柄。
+  await page.evaluate(() => {
+    Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: async () => {
+      if (!navigator.userActivation.isActive) throw Error('另存为缺少用户激活');
+      return (await navigator.storage.getDirectory()).getFileHandle('自选会话.md', { create: true });
+    } });
+    store.getState().setUi({ paletteOpen: true });
+  });
+  await page.getByRole('combobox', { name: '搜索命令或对话' }).fill('导出');
+  await page.getByRole('option', { name: /导出对话为 Markdown/ }).click();
+  await page.waitForFunction(() => store.getState().ui.notice?.text.includes('已保存为 自选会话.md'));
+  assert.equal(await page.evaluate(async () => {
+    const handle = await (await navigator.storage.getDirectory()).getFileHandle('自选会话.md');
+    return (await handle.getFile()).text();
+  }), exported);
+
   await open('older');await page.screenshot({path:join(output,name+'-1440-menu.png')});
   await page.keyboard.press('ArrowDown');
   await page.waitForFunction(()=>document.activeElement.textContent.trim()==='重命名');
