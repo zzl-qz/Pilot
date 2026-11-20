@@ -198,6 +198,17 @@ public final class CommandTaskManager implements AutoCloseable {
         return entry == null ? null : entry.task;
     }
 
+    /** 返回命令日志已落盘的码点总数；不存在时返回 0。 */
+    public long logLength(String sessionId, String taskId) {
+        Entry entry = owned(sessionId, taskId);
+        if (entry == null) {
+            return 0L;
+        }
+        synchronized (entry.logLock) {
+            return entry.logPoints;
+        }
+    }
+
     public List<Task> list(String sessionId) {
         sessionDirectory(sessionId);
         return entries.values().stream().map(entry -> entry.task).filter(task -> task.sessionId().equals(sessionId))

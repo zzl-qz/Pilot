@@ -26,7 +26,6 @@ import com.pilot.core.runtime.ExecutablePath;
 import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
 import com.pilot.core.tool.ProducesCheck;
 import com.pilot.core.tool.ReadGuard;
-import com.pilot.core.tool.ReadTracker;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolResult;
 import com.pilot.core.tool.ToolResults;
@@ -94,11 +93,8 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     long readOnlyCacheTtlMs = 15_000L;
     private final Map<String, CachedReadOnly> readOnlyAt = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Set<String> LIVE_PROBES = Set.of("curl", "lsof", "ss", "netstat", "ps", "tasklist");
-    private static final Set<String> FILE_DUMPS = Set.of("cat", "nl", "head", "tail", "sed", "bat", "less", "more");
-    private static final Set<String> GIT_HISTORY = Set.of("log", "show", "blame");
-    private static final int MAX_HISTORY_LOOKUPS = 4;
-    private final java.util.concurrent.atomic.AtomicInteger historyLookups =
-        new java.util.concurrent.atomic.AtomicInteger();
+    private static final Set<String> FILE_DUMPS =
+        Set.of("cat", "nl", "head", "tail", "sed", "bat", "less", "more", "type", "get-content", "gc");
 
     private record CachedReadOnly(int revision, long at) {
     }
@@ -139,16 +135,15 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     public String description() {
         return PromptLibrary.standard()
             .render("tools/run_command",
-                Map.of("inspection", inspectionList(),
-                    "development", String.join("/", CommandPolicy.DEVELOPMENT.stream().sorted().toList()), "mutators",
+                Map.of("inspection", inspectionList(), "development",
+                    String.join("/", CommandPolicy.DEVELOPMENT.stream().sorted().toList()), "mutators",
                     String.join("/", CommandPolicy.FILE_MUTATORS.stream().sorted().toList()), "gitReadonly",
                     String.join("/", CommandPolicy.GIT_READONLY.stream().sorted().toList()), "gitWrite",
                     String.join("/", CommandPolicy.GIT_WRITE.stream().sorted().toList()), "backgroundHelp",
                     commandTasks == null ? "本运行环境仅支持同步执行。"
                         : "background=true 会立即返回任务 ID，适合开发服务器或长测试。后台默认不设超时；显式 timeoutSeconds 最大 600。"
                             + "用 command_status 查询实际状态、command_logs 增量读取日志、stop_command 停止进程树。"
-                            + "启动成功不代表验证通过；测试必须等到完成并检查退出码。"
-                            + windowsFileCommandNote()))
+                            + "启动成功不代表验证通过；测试必须等到完成并检查退出码。" + windowsFileCommandNote()))
             .strip();
     }
 
@@ -311,37 +306,30 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         return new ToolResult(withTrackingWarning(text, trackingWarning), result.changedPaths(), List.of());
     }
 
-    /** 换行号、cat/sed、反复翻 git 历史，都不再把同一份材料送回去。 */
+    /** 整文件已经通过 read_file 完整交付且未变化、未因压缩失效时，不再用 cat/type/Get-Content 重复倾倒同一份全文。 */
     private String repeatedLook(String command) {
         if (command == null || command.isBlank()) {
             return null;
         }
-        if (gitHistory(command) && historyLookups.incrementAndGet() > MAX_HISTORY_LOOKUPS) {
-            return "与上次相同，未再执行。命令: " + command + "\n提交历史已经看过，不要再翻 git log、show、blame。根据已有内容修改文件。";
-        }
         for (Path file : dumpedFiles(command)) {
-            if (!reads.deliverRead(file)) {
-                return "文件未变化，沿用刚才读过的 " + paths.display(file) + "。不要再用 cat、sed、head 重读。根据上文修改，或改看别的文件。";
+            String stamp = reads.observationStamp(file);
+            if (!stamp.isEmpty() && reads.isFullyDelivered(file, stamp)) {
+                String ranges = ReadGuard.LineRange.formatAll(reads.deliveredRanges(file, stamp));
+                return "文件未变化，沿用刚才通过 read_file 读过的 " + paths.display(file) + "（已交付区间：" + ranges
+                    + "）。不要再重复倾倒全文；如需查看特定片段请用 read_file 指定行号，或改看别的文件。";
             }
         }
         return null;
     }
 
-    private static boolean gitHistory(String command) {
-        String[] tokens = command.strip().split("\\s+");
-        if (tokens.length < 2 || !"git".equals(CommandPolicy.leaf(tokens[0]))) {
-            return false;
-        }
-        return GIT_HISTORY.contains(tokens[1]);
-    }
-
     private List<Path> dumpedFiles(String command) {
         String[] tokens = command.strip().split("\\s+");
-        if (tokens.length == 0 || !FILE_DUMPS.contains(CommandPolicy.leaf(tokens[0]))) {
+        if (tokens.length == 0 || !FILE_DUMPS.contains(CommandPolicy.leaf(tokens[0]).toLowerCase(Locale.ROOT))) {
             return List.of();
         }
         List<Path> found = new ArrayList<>();
-        for (String token : tokens) {
+        for (int index = 1; index < tokens.length; index++) {
+            String token = tokens[index];
             if (token.startsWith("-") || token.contains("|") || token.contains(";") || token.contains("&")
                 || token.contains(",") || token.contains("*")) {
                 continue;
@@ -466,12 +454,10 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             Path pwsh = resolveOnPath("pwsh");
             Path shell = pwsh != null ? pwsh : resolveOnPath("powershell");
             if (shell == null) {
-                return Preparation
-                    .error("ERROR: Windows 上执行命令需要 PowerShell（powershell.exe 或 pwsh.exe），当前都没找到");
+                return Preparation.error("ERROR: Windows 上执行命令需要 PowerShell（powershell.exe 或 pwsh.exe），当前都没找到");
             }
             boolean shortCircuit = operators.contains("&&") || operators.contains("||");
-            String scriptText = shortCircuit
-                ? chainScript(resolved, checks, operators, segments)
+            String scriptText = shortCircuit ? chainScript(resolved, checks, operators, segments)
                 : script(resolved, checks, operators, segments);
             List<String> commandLine =
                 List.of(shell.toString(), "-NoProfile", "-NonInteractive", "-Command", scriptText);
@@ -543,7 +529,8 @@ public final class RunCommandTool implements Tool, ProducesCheck {
                 out.append("if ($pilotCode ").append(gate.equals("&&") ? "-eq" : "-ne").append(" 0) { ");
             }
             // 捕获放在管道单元外层：块内的 $? 会恒为 True，而管道里各段并发执行，内层赋值不可靠。
-            out.append("& { $global:LASTEXITCODE = $null; ").append(units.get(i)).append(EXIT_CODE_CAPTURE).append(" }");
+            out.append("& { $global:LASTEXITCODE = $null; ").append(units.get(i)).append(EXIT_CODE_CAPTURE)
+                .append(" }");
             if (gated) {
                 out.append(" }");
             }
@@ -562,8 +549,8 @@ public final class RunCommandTool implements Tool, ProducesCheck {
                 (name, value) -> out.append("$env:").append(name).append('=').append(psQuote(value)).append("; "));
             out.append("& ").append(psQuote(tokens.get(0)));
         } else {
-            check.env().forEach(
-                (name, value) -> out.append(name).append('=').append(CommandChain.quote(value)).append(' '));
+            check.env()
+                .forEach((name, value) -> out.append(name).append('=').append(CommandChain.quote(value)).append(' '));
             out.append(CommandChain.quote(tokens.get(0)));
         }
         for (int j = 1; j < tokens.size(); j++) {
@@ -571,7 +558,8 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         }
         if (check.redirect() != null) {
             out.append(check.append() ? " >> " : " > ");
-            out.append(WINDOWS ? psQuote(check.redirect().toString()) : CommandChain.quote(check.redirect().toString()));
+            out.append(
+                WINDOWS ? psQuote(check.redirect().toString()) : CommandChain.quote(check.redirect().toString()));
         }
         if (segment.mergeStderr()) {
             out.append(" 2>&1");
@@ -843,13 +831,46 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         if (task == null) {
             return new ManagedRun("ERROR: 命令记录已清理，无法确认最终结果：" + taskId, true);
         }
-        CommandTaskManager.LogChunk chunk = commandTasks.logs(sessionId, taskId, 0, MAX_OUTPUT_CHARS);
         String rendered = quickFailure(task) + CommandToolSupport.render(task);
-        if (chunk != null) {
-            rendered += "\n输出:\n" + chunk.text()
+        rendered += formatCompletedOutput(taskId);
+        return new ManagedRun(launch.label() + "\n" + rendered, true);
+    }
+
+    /**
+     * 已结束命令的首次日志视图：短输出原样展示；超过 6,000 字符时直接同时展示开头与结尾（Maven/JUnit/Node 的
+     * 汇总与失败栈都在尾部），避免模型为了看结尾的 BUILD SUCCESS/FAILURE 连续翻多次 command_logs。
+     */
+    private String formatCompletedOutput(String taskId) {
+        long total = commandTasks.logLength(sessionId, taskId);
+        if (total <= 6_000L) {
+            CommandTaskManager.LogChunk chunk = commandTasks.logs(sessionId, taskId, 0, MAX_OUTPUT_CHARS);
+            if (chunk == null) {
+                return "";
+            }
+            return "\n输出:\n" + chunk.text()
                 + (chunk.truncated() || !chunk.eof() ? "\n… 后续日志使用 command_logs，offset=" + chunk.nextOffset() : "");
         }
-        return new ManagedRun(launch.label() + "\n" + rendered, true);
+        int headLimit = 1_800;
+        int tailLimit = 2_400;
+        CommandTaskManager.LogChunk head = commandTasks.logs(sessionId, taskId, 0, headLimit);
+        long tailOffset = Math.max(headLimit, total - tailLimit);
+        CommandTaskManager.LogChunk tail = commandTasks.logs(sessionId, taskId, tailOffset, tailLimit + 200);
+        if (head == null && tail == null) {
+            return "";
+        }
+        String headText = head == null ? "" : head.text().replace("\r\n", "\n").replace('\r', '\n').stripTrailing();
+        String tailText = tail == null ? "" : tail.text().replace("\r\n", "\n").replace('\r', '\n').stripLeading();
+        long omitted = Math.max(0L, tailOffset - (head == null ? 0L : head.nextOffset()));
+        StringBuilder out = new StringBuilder("\n输出（完整日志共 ").append(total).append(" 字符，已展示开头与结尾）:\n");
+        out.append("[输出开头]\n").append(headText);
+        if (omitted > 0) {
+            out.append("\n\n…（中间省略约 ").append(omitted).append(" 字符；如需查看中间日志请用 command_logs，offset=")
+                .append(head == null ? headLimit : head.nextOffset()).append("）…\n\n");
+        } else {
+            out.append('\n');
+        }
+        out.append("[输出结尾]\n").append(tailText);
+        return out.toString();
     }
 
     private static String handoff(CommandTaskManager.Task task, ForegroundPace.Release release) {
@@ -859,14 +880,17 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         return reason + "\n" + CommandToolSupport.render(task);
     }
 
-    /** 几秒内就非 0 退出，多半是命令写错，不要让模型把它当成还在跑的长任务。 */
+    /** 仅对极快触发的命令/语法/可执行文件错误（exit 2/126/127）给调用方式提示，不误报正常的测试/lint/grep exit 1。 */
     private static String quickFailure(CommandTaskManager.Task task) {
-        if (task == null || task.exitCode() == null || task.exitCode() == 0 || task.startedAt() == null
-            || task.finishedAt() == null) {
+        if (task == null || task.exitCode() == null || task.startedAt() == null || task.finishedAt() == null) {
+            return "";
+        }
+        int code = task.exitCode();
+        if (code != 2 && code != 126 && code != 127) {
             return "";
         }
         long took = java.time.Duration.between(task.startedAt(), task.finishedAt()).toMillis();
-        if (took < 0 || took > ForegroundPace.QUICK_FAIL_MS) {
+        if (took < 0 || took > 1_500L) {
             return "";
         }
         return "这条命令很快就失败了，多半是调用方式不对。先根据下面的错误改命令，不要当成还在运行。\n";
@@ -875,9 +899,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     /** 可用命令清单；Windows 上不把 Unix 文件命令写成可用。 */
     private static String inspectionList() {
         return String.join("/", CommandPolicy.INSPECTION.stream()
-            .filter(name -> !WINDOWS || !UNIX_FILE_COMMANDS.contains(name))
-            .sorted()
-            .toList());
+            .filter(name -> !WINDOWS || !UNIX_FILE_COMMANDS.contains(name)).sorted().toList());
     }
 
     /** Windows 上没有这些 Unix 文件命令，工具描述里直接给出替代工具。 */
@@ -899,11 +921,10 @@ public final class RunCommandTool implements Tool, ProducesCheck {
 
     /** 缺可执行文件时的纠偏文本；连续第二次起要求换工具，不再原样重试。 */
     static String launchFailureText(String headline, int consecutiveFailures) {
-        String hint = "Windows 上请改用 list_dir / read_file / search_text，"
-                + "不要再把 " + String.join("/", UNIX_FILE_COMMANDS) + " 当成可用命令。";
+        String hint = "Windows 上请改用 list_dir / read_file / search_text，" + "不要再把 "
+            + String.join("/", UNIX_FILE_COMMANDS) + " 当成可用命令。";
         if (consecutiveFailures >= MISSING_COMMAND_ESCALATE_AT) {
-            hint += "\n同类错误已经连续出现两次：不要原样重试，换文件工具或 PowerShell 等价命令"
-                    + "（Get-ChildItem、Get-Content、Select-String）。";
+            hint += "\n同类错误已经连续出现两次：不要原样重试，换文件工具或 PowerShell 等价命令" + "（Get-ChildItem、Get-Content、Select-String）。";
         }
         return headline + "\n" + hint;
     }

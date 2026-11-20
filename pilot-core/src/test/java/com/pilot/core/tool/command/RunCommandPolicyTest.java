@@ -310,30 +310,46 @@ class RunCommandPolicyTest {
     }
 
     @Test
-    void catOfAnAlreadyReadFileIsNotPrintedAgain() throws Exception {
+    void catOfFullyDeliveredFileIsDedupedButPartialOrPostCompactReadIsAllowed() throws Exception {
         Assumptions.assumeFalse(WINDOWS);
         ReadTracker tracker = new ReadTracker();
         PathValidator validator = new PathValidator(workspace);
         ReadFileTool reader = new ReadFileTool(validator, tracker);
         RunCommandTool command = new RunCommandTool(validator).withReads(tracker);
         Files.writeString(workspace.resolve("App.java"), "one\ntwo\nthree\nfour\n");
-        reader.execute(Map.of("path", "App.java", "start_line", 1, "line_count", 1));
-        reader.execute(Map.of("path", "App.java", "start_line", 2, "line_count", 1));
-        reader.execute(Map.of("path", "App.java", "start_line", 3, "line_count", 1));
 
+        // 仅读了前 2 行时，不应拦截命令行查看剩余内容
+        reader.execute(Map.of("path", "App.java", "start_line", 1, "line_count", 2));
+        String partial = command.execute(Map.of("command", "cat App.java"));
+        assertTrue(partial.contains("退出码: 0"), partial);
+
+        // 完整交付后，重复 cat 被提示复用已交付内容
+        reader.execute(Map.of("path", "App.java", "start_line", 3, "line_count", 2));
         String dumped = command.execute(Map.of("command", "cat -n App.java | sed -n '1,4p'"));
-
         assertTrue(dumped.contains("未变化"), dumped);
+        assertTrue(dumped.contains("1-4"), dumped);
         assertFalse(dumped.contains("退出码"));
+
+        // 上下文压缩失效视图后，重新允许读取
+        tracker.invalidateDeliveredViews();
+        String afterCompact = command.execute(Map.of("command", "cat -n App.java | sed -n '1,4p'"));
+        assertTrue(afterCompact.contains("退出码: 0"), afterCompact);
     }
 
     @Test
-    void gitHistoryIsNotRereadForever() {
+    void distinctGitHistoryCommandsAreNotBlockedByHardCapWhileIdenticalCommandStillDedups() {
         Assumptions.assumeFalse(WINDOWS);
-        String last = "";
+        String fifth = "";
         for (int i = 1; i <= 5; i++) {
-            last = tool.execute(Map.of("command", "git log --oneline -" + i));
+            fifth = tool.execute(Map.of("command", "git log --oneline -" + i));
         }
-        assertTrue(last.contains("未再执行"), last);
+        assertFalse(fifth.contains("提交历史已经看过"), fifth);
+        assertFalse(fifth.startsWith("与上次相同，未再执行"), fifth);
+
+        // 相同只读命令在 TTL 内仍走缓存去重（非 git 仓库返回非 0 退出码不缓存，用 echo 锁定）
+        String first = tool.execute(Map.of("command", "echo git-cache-check"));
+        String second = tool.execute(Map.of("command", "echo git-cache-check"));
+        assertTrue(first.contains("退出码: 0"), first);
+        assertTrue(second.startsWith("与上次相同，未再执行"), second);
     }
 }

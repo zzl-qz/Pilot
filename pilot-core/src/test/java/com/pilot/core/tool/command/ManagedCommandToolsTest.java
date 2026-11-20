@@ -176,10 +176,11 @@ class ManagedCommandToolsTest {
     }
 
     @Test
-    void quickNonZeroExitIsDescribedAsABadInvocation() {
+    void ordinaryNonZeroExitIsNotDescribedAsABadInvocation() {
         try (CommandTaskManager manager = manager()) {
+            // exit 7 属于程序自身的失败（测试、lint、grep 没命中同理），只有 2/126/127 才提示调用方式可能有误
             String result = run(manager).execute(Map.of("command", command("failure")));
-            assertTrue(result.contains("调用方式不对"), result);
+            assertFalse(result.contains("调用方式不对"), result);
             assertTrue(result.contains("状态: FAILED"), result);
         }
     }

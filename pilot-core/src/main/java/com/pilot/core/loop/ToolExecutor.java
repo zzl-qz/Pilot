@@ -32,6 +32,7 @@ import com.pilot.core.lint.LintGate;
 import com.pilot.core.lint.SiblingHints;
 import com.pilot.core.message.Attachment;
 import com.pilot.core.message.ToolCall;
+import com.pilot.core.message.ToolNames;
 import com.pilot.core.permission.PermissionDecision;
 import com.pilot.core.permission.PermissionGate;
 import com.pilot.core.permission.PermissionResult;
@@ -243,20 +244,29 @@ public final class ToolExecutor {
         }
         // 存档说明只是恢复元数据，不能把空结果变成可用证据。
         OutcomeStatus status = classify(primaryResult, singleton(nativeCheck));
-        if (journalRunId != null) {
+        boolean archiveReader =
+            ToolNames.READ_TOOL_OUTPUT.equals(call.name()) || ToolNames.COMMAND_LOGS.equals(call.name());
+        boolean commandOutput = ToolNames.RUN_COMMAND.equals(call.name()) || ToolNames.COMMAND_LOGS.equals(call.name());
+        if (journalRunId != null && !ToolNames.READ_TOOL_OUTPUT.equals(call.name())) {
             try {
                 journal.recordObservation(journalRunId, call, result);
                 if (Objects.equals(result, journal.observation(journalRunId, call.callId()).orElse(null))) {
-                    // 短结果第一屏已经看全，不再提示去读存档。长结果被压缩裁掉时仍靠这句找回原文。
-                    if (result.length() >= 4_000 || result.contains("已截断") || result.contains("后续日志使用")) {
-                        result += "\n[工具输出存档 run_id=" + journalRunId + " call_id=" + call.callId()
-                            + "；使用 read_tool_output 分页读取，禁止重放原操作]";
+                    String archiveRef = "\n[工具输出存档 run_id=" + journalRunId + " call_id=" + call.callId()
+                        + "；使用 read_tool_output 分页读取，禁止重放原操作]";
+                    if (commandOutput && result.length() > ToolOutputPresenter.COMPACT_TRIGGER_CHARS) {
+                        result = ToolOutputPresenter.compactCommandOutput(result, archiveRef);
+                    } else if (!archiveReader
+                        && (result.length() >= 4_000 || result.contains("已截断") || result.contains("后续日志使用"))) {
+                        // 短结果第一屏已经看全，不再提示去读存档。长结果被压缩裁掉时仍靠这句找回原文。
+                        result += archiveRef;
                     }
-                } else {
-                    result += "\n[工具输出未归档，禁止清理原文]";
+                } else if (!archiveReader) {
+                    result += "\n" + ContextCompactor.UNARCHIVED_MARKER;
                 }
             } catch (RuntimeException ignored) {
-                result += "\n[工具输出未归档，禁止清理原文]";
+                if (!archiveReader) {
+                    result += "\n" + ContextCompactor.UNARCHIVED_MARKER;
+                }
             }
         }
         events.accept(new ToolCompleted(call.callId(), Texts.oneLine(result, 120), latencyMs));
