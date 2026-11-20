@@ -778,8 +778,17 @@ html[data-theme] .sidebar.rail { padding: 8px 10px 0; background: var(--side-bg)
 html[data-theme] .sidebar-head.rail-head { height: 44px; padding-inline: 4px; }
 html[data-theme] .new-task { min-height: 34px; border-radius: 6px; }
 html[data-theme] .project-head { min-height: 28px; }
-html[data-theme] .session-item { min-height: 30px; border-radius: 5px; }
-html[data-theme] .session-item.is-active { box-shadow: inset 2px 0 var(--accent); }
+html[data-theme] .session-item { position: relative; min-height: 30px; border-radius: 6px; transition: background-color 0.12s ease, color 0.12s ease; }
+html[data-theme] .session-item.is-active { box-shadow: none; font-weight: 520; }
+html[data-theme] .session-item.is-active::before {
+  content: '';
+  position: absolute;
+  inset-block: 6px;
+  inset-inline-start: 0;
+  width: 2.5px;
+  border-radius: 99px;
+  background: var(--accent);
+}
 html[data-theme] .app > .topbar { background: var(--toolbar-bg); }
 html[data-theme] .crumbs { gap: 8px; }
 html[data-theme] .crumb-title { font-size: 13px; font-weight: 500; }
@@ -803,14 +812,43 @@ html[data-theme] .task-contract {
   background: transparent;
   box-shadow: none;
 }
-html[data-theme] .task-contract > summary { min-height: 30px; padding: 4px 2px; }
+html[data-theme] .task-contract > summary {
+  min-height: 32px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  list-style: none;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+html[data-theme] .task-contract > summary::-webkit-details-marker { display: none; }
+html[data-theme] .task-contract > summary:hover {
+  background: color-mix(in srgb, var(--ink) 4.5%, transparent);
+  color: var(--ink);
+}
+html[data-theme] .task-contract > summary::after {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-inline: 2px;
+  border-right: 1.5px solid var(--dim);
+  border-bottom: 1.5px solid var(--dim);
+  transform: rotate(-45deg);
+  transition: transform 0.16s ease, border-color 0.14s ease;
+}
+html[data-theme] .task-contract > summary:hover::after { border-color: var(--muted); }
+html[data-theme] .task-contract[open] > summary::after { transform: rotate(45deg); border-color: var(--muted); }
 html[data-theme] .task-contract[open] {
   margin-top: 6px;
   border: 1px solid var(--line-soft);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--bg-soft);
 }
-html[data-theme] .task-contract[open] > summary { padding: 6px 10px; }
+html[data-theme] .task-contract[open] > summary { padding: 7px 10px; }
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme] .session-item,
+  html[data-theme] .task-contract > summary,
+  html[data-theme] .task-contract > summary::after { transition: none; }
+}
 
 /* Execution trace: compact grouped rows with clear type/state contrast. */
 html[data-theme] .tool-group {

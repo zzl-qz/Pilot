@@ -14,11 +14,19 @@
   font-variant-numeric: tabular-nums;
   user-select: text;
 }
-.runtime-footer-sep { color: var(--dim); }
+.runtime-footer-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.runtime-footer-sep { color: var(--dim); opacity: 0.72; }
 
 html[data-theme="light"] .navigation-rail {
   background: #f7f8fa;
-  border-right: 0;
+  border-right: 1px solid #eceff4;
+}
+html[data-theme="light"] .app.sidebar-open:not(.review-expanded) .navigation-rail {
+  border-right-color: transparent;
 }
 html[data-theme="light"] .sidebar.rail {
   background: #f7f8fa;

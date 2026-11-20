@@ -39,6 +39,15 @@ const paths: Record<string, string> = {
   plug: 'M5 1v4 M11 1v4 M3 5h10v2a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z M8 11v4',
 };
 export function Icon({ name, className = '' }: { name: string; className?: string }) {
+  if (name === 'more') {
+    return (
+      <svg className={`ui-icon ${className}`} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+        <circle cx="3.2" cy="8" r="1.25" />
+        <circle cx="8" cy="8" r="1.25" />
+        <circle cx="12.8" cy="8" r="1.25" />
+      </svg>
+    );
+  }
   return <svg className={`ui-icon ${className}`} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name] || paths.file} /></svg>;
 }
 
