@@ -510,7 +510,15 @@ function wsCreate(taskId, baseRef = 'df/runner') {
   if (fs.existsSync(wsPath)) {
     throw new Error(`目标 worktree 已存在: ${wsPath}`);
   }
-  runChecked('git', ['-C', RUNNER_DIR, 'worktree', 'add', '-b', branch, wsPath, baseRef]);
+  runChecked('git', ['-C', RUNNER_DIR, 'config', 'extensions.worktreeConfig', 'true']);
+  runChecked('git', ['-C', RUNNER_DIR, 'worktree', 'add', '--no-checkout', '-b', branch, wsPath, baseRef]);
+  runChecked('git', ['-C', wsPath, 'sparse-checkout', 'init', '--no-cone']);
+  runChecked('git', ['-C', wsPath, 'sparse-checkout', 'set', '--no-cone', '/*', '!/evaluation/dogfood/']);
+  runChecked('git', ['-C', wsPath, 'checkout', branch]);
+  const leaked = path.join(wsPath, 'evaluation', 'dogfood');
+  if (fs.existsSync(leaked)) {
+    throw new Error(`worktree 隔离校验失败：仍存在 ${leaked}`);
+  }
   const feModulesSrc = path.join(MAIN_REPO, 'pilot-web', 'frontend', 'node_modules');
   const feModulesDst = path.join(wsPath, 'pilot-web', 'frontend', 'node_modules');
   if (fs.existsSync(feModulesSrc) && !fs.existsSync(feModulesDst)) {
