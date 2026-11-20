@@ -11,6 +11,12 @@
   flex-direction: column;
   align-items: center;
   color: var(--ink-2);
+  opacity: 0.42;
+  transition: opacity 0.16s ease;
+}
+.thread-navigator:hover,
+.thread-navigator:focus-within {
+  opacity: 1;
 }
 .thread-navigator :is(.thread-nav-menu, .thread-nav-tick) { width: 32px; }
 .thread-nav-menu[aria-expanded="true"] { background: var(--ui-selected); }
