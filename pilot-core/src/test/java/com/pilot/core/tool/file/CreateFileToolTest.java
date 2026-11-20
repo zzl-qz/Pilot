@@ -30,15 +30,14 @@ class CreateFileToolTest {
     }
 
     @Test
-    void newCodeFileIncludesQualityHintWithoutChangingFile() throws IOException {
+    void newCodeFileWritesCleanlyWithoutBuiltinMagicHint() throws IOException {
         CreateFileTool tool = new CreateFileTool(new PathValidator(workspace));
         String content = "class Order {\n    int timeout = 86400;\n}\n";
 
         String result = tool.execute(Map.of("path", "src/main/Order.java", "content", content));
 
         assertTrue(result.contains("已创建"), result);
-        assertTrue(result.contains("[代码质量提醒]"), result);
-        assertTrue(result.contains("86400"), result);
+        assertFalse(result.contains("[代码质量提醒]"), "内置魔法值扫描已迁至 LintGate，建文件工具不再附带旧提醒: " + result);
         assertEquals(content, Files.readString(workspace.resolve("src/main/Order.java")));
     }
 

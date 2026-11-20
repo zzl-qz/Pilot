@@ -181,14 +181,14 @@ class EditFileToolTest {
     }
 
     @Test
-    void addedMagicValueIsReportedAfterSuccessfulEdit() throws IOException {
+    void editWritesCodeCleanlyWithoutBuiltinMagicHint() throws IOException {
         Files.writeString(workspace.resolve("Order.java"), "class Order {\n    int value = 1;\n}\n");
 
         String result = tool.execute(Map.of("path", "Order.java", "old_string", "int value = 1;", "new_string",
             "int value = 1;\n    int timeout = 86400;"));
 
         assertTrue(result.contains("已修改"), result);
-        assertTrue(result.contains("86400"), result);
+        assertFalse(result.contains("[代码质量提醒]"), "内置魔法值扫描已迁至 LintGate，编辑工具本身不再附带旧提醒: " + result);
         assertTrue(Files.readString(workspace.resolve("Order.java")).contains("86400"));
     }
 

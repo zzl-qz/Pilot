@@ -237,7 +237,8 @@ class ManagedCommandToolsTest {
         try (CommandTaskManager manager = manager()) {
             RunCommandTool legacy = new RunCommandTool(new PathValidator(workspace));
             RunCommandTool managed = run(manager);
-            for (String command : List.of("rm -rf /", "/bin/java -version", "git status && rm -rf build",
+            // 危险命令与非法 shell 替换语法在三种执行模式启动前都必须统一拒绝（绝对路径命令已按 10a7b2f3 允许，见 RunCommandToolTest）
+            for (String command : List.of("rm -rf /", "sudo java -version", "echo $(whoami)", "git status && rm -rf /",
                 "git add ../outside", "git commit")) {
                 String expected = legacy.execute(Map.of("command", command));
                 assertTrue(expected.startsWith("ERROR:"), expected);

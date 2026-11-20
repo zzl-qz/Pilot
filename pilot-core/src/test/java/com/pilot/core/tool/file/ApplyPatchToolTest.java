@@ -288,7 +288,7 @@ class ApplyPatchToolTest {
     }
 
     @Test
-    void addedCodeCarriesQualityHintAfterAtomicApply() throws IOException {
+    void addedCodeWritesAtomicallyWithoutBuiltinMagicHint() throws IOException {
         ToolResult result = apply("""
             *** Begin Patch
             *** Add File: src/main/Order.java
@@ -299,7 +299,8 @@ class ApplyPatchToolTest {
             """);
 
         assertTrue(result.text().contains("已应用补丁"), result.text());
-        assertTrue(result.text().contains("[代码质量提醒]"), result.text());
+        assertFalse(result.text().contains("[代码质量提醒]"), "内置魔法值扫描已迁至 LintGate，写工具本身不附带伪质量提醒: " + result.text());
+        assertEquals(List.of("src/main/Order.java"), result.changedPaths());
         assertTrue(Files.readString(workspace.resolve("src/main/Order.java")).contains("86400"));
     }
 
