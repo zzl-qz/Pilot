@@ -18,22 +18,23 @@
 | D-009 | P2 | D 编辑噪音 | 工具设计 | `ReuseScan` 将流式 setter/方法体误报为重复工具函数，干扰编辑收尾 | `385f4032` | V1 通过；待 V4 观察 | 观察中 |
 | D-010 | P2 | F 日志翻页 | 工具设计 | `ToolExecutor` 误截断用户显式请求的 `command_logs` 小切片（<= 8192 字符） | `385f4032` | V1 通过；待 V4 观察 | 观察中 |
 | D-011 | P2 | E 核验误读 | 工具设计 | `CommandToolSupport`/`RunCommandTool` 命令摘要仅截前 120 字符，丢弃末尾目标测试类名 | `385f4032` | V1 通过；待 V4 观察 | 观察中 |
-| D-012 | P2 | C 临时文件遗留 | 工具设计/运行时 | Pilot 运行过程可能在工作区遗留 `.tmp-verify/*` 等未清理临时文件（已在历史 `ses_c502a2ef` 轨迹确认：Pilot 用 `mkdir -p .tmp-verify` 暂存回退文件） | 待修 | Stage 2.2 增加收尾未跟踪临时目录提醒/检查 | 定位中 |
-| D-013 | P1 | E 验证缺失 | 流程/循环策略 | 改动工具或规则后未跑全量 `mvn test`，漏改历史断言（如 `8025dfad`/`10a7b2f3` 遗留 4 处单测失配） | `cdbe4aa9`（基线已修绿） | Stage 2.2 固化 V1 全量门禁检查脚本 | 定位中 |
-| D-014 | P1 | B 调研瘫痪 | 循环策略 | `T001`（36 行 L1 文件）在 req 1–4 已读完核心文件后仍持续只读 17 轮 / 34 次工具调用不编辑；`req-11.json` 带 `[调查收敛提醒]` 重放 5/5（100%）仍不编辑 | 待修 | `replay.mjs --repeat 5` 基线已锁定 5/5 缺陷率；需改 `InvestigationTracker` 触发时机、冷却与无逃生口行动引导并过 V1+V2+V3 | 新建 |
-| D-015 | P1 | F 命令解析 Bug | 工具设计 | `CommandChain.parse()` 在双引号内未处理 `\"` 转义，导致 `grep -l "failures=\"[1-9]\|errors=\"[1-9]"` 提前闭合引号并误报 `不允许通过命令前缀设置 errors` | 待修 | `T001` seq 522 复现；确定性解析器缺陷，需修 `CommandChain` + 跨平台单测 | 新建 |
+| D-012 | P2 | C 临时文件遗留 | 工具设计/运行时 | Pilot 运行过程可能在工作区遗留 `.tmp-verify/*` 等未清理临时文件（已在历史 `ses_c502a2ef` 轨迹确认：Pilot 用 `mkdir -p .tmp-verify` 暂存回退文件） | `8d587064` | `CompletionGate` 新增本轮残留 `.tmp/.tmp-*/.tmp_*` 及 `.tmp/.bak/.orig/.rej` 清理门禁且不标脏已通过测试；V1 全绿（`CompletionGateTest` 37/37 + 全量 1091） | 观察中（待 V4） |
+| D-013 | P1 | E 验证缺失 | 流程/循环策略 | 改动工具或规则后未跑全量 `mvn test`，漏改历史断言（如 `8025dfad`/`10a7b2f3` 遗留 4 处单测失配） | `cdbe4aa9` / `43b541ac` | 已固化 `runner-ctl.mjs v1-verify`（全量 `pilot-core,pilot-server` `test` + `spotless:check` + `checkstyle:check` + `quality-gate.mjs`），并在 D-015/R-01/D-012/D-014/D-019 连续 5 次落地强制执行 | 观察中（待 V4） |
+| D-014 | P1 | B 调研瘫痪 | 循环策略 | `T001`（36 行 L1 文件）在 req 1–4 已读完核心文件后仍持续只读 17 轮 / 34 次工具调用不编辑；`req-11.json` 带 `[调查收敛提醒]` 重放 5/5（100%）仍不编辑 | `c405e8e8` | 跨任务 V2 5x 重放通过（`T001 req-11` `5/5 → 0/5`，`X1-T3 req-16` `5/5 → 1/5`）；全量 V1 全绿（`CacheWireTest`/`CacheContextTest`/`InvestigationTrackerTest`/`GoalExecutionPolicyTest` + 1091）；待 V3 重启与 V4 观察 | 观察中（待 V3/V4） |
+| D-015 | P1 | F 命令解析 Bug | 工具设计 | `CommandChain.parse()` 在双引号内未处理 `\"` 转义，导致 `grep -l "failures=\"[1-9]\|errors=\"[1-9]"` 提前闭合引号并误报 `不允许通过命令前缀设置 errors` | `d196d69d` | 同步修复 `CommandChain.parse()`（含重定向目标）与 `RunCommandTool.tokenize()`，跨平台兼容 Windows 路径与正则 `\|`；V1 全绿（`CommandChainTest` 7/7 + 全量 1090） | 观察中（待 V4） |
 | D-016 | P2 | E/B 沙箱嵌套排错空转 | 工具设计/运行时 | macOS Seatbelt 沙箱内跑 `mvn test` 触发嵌套 `sandbox-exec: Operation not permitted` 失败时无环境提示，导致模型白耗 22 轮追查无关单测 | 待修 | `T001` req 62–84 复现 | 新建 |
 | D-017 | P2 | C 评测泄露风险 | 自举工具 | 任务 worktree 中 `search_text` 命中 `evaluation/dogfood/tasks/`，可能暴露 S4 剧本答案 | `eb5e0a85` | S4 答案已迁至仓库外 `~/pilot-dogfood/supervisor-s4-scripts.md` | 已关闭 |
 | D-018 | P2 | G 计划门禁多余续跑 | 循环策略 | 验证已全部通过且模型给出完整答复时，仅因未把 plan 末项标 `completed` 被 `PlanGate` 触发 `RUN_CONTINUED` 多跑 3 轮与重复测试 | 待评估 | `T001` seq 707–716 复现，观察后续任务复现频率 | 新建 |
+| D-019 | P2 | A 预定位超时丢分 | 运行时/工具设计 | `PreFlightLocator.scanGitFileNames()` 对 `git ls-files` 全仓文件先做约 4,500 次磁盘校验再匹配文件名，高负载下 120ms 超时丢掉 `+90` 定义文件加分 | `e203e19a` | 改为先纯内存 `matchesAnyFileOrStem()` 初筛再校验命中候选并将路径子预算放宽至 200ms；实测 `PreFlightLocatorTest` 300ms→127ms、`InvestigationDisciplineVerificationTest` 2.10s→0.92s；V1 全绿（1092 用例） | 观察中（待 V4） |
 
 ## 二、待复核疑点（R-01～R-04）
 
 | 编号 | 关注点 | 涉及位置 | 复核计划 | 当前状态 |
 |---|---|---|---|---|
-| R-01 | `GoalExecutionPolicy.researchOnlyGoal()` 使用关键字表匹配用户原话，存在过拟合与误判风险 | `pilot-server/.../GoalExecutionPolicy.java` | Stage 2.2 审视并评估通用替代方案（如显式工具/声明或 `ask_user`，不继续堆砌关键字） | 待复核 |
+| R-01 | `GoalExecutionPolicy.researchOnlyGoal()` 使用关键字表匹配用户原话，存在过拟合与误判风险 | `pilot-core/.../GoalIntent.java`、`pilot-server/.../GoalExecutionPolicy.java` | 已在 `X1-T3` 轨迹实测证实误杀（提示词含“避免只读 `configured()`”被误判为只读分析任务）；已于 `c411bfe3` 改为结构性信号优先（`readOnlySession` + `availableTools` 写能力）+ 尊重 steering + 与 `CompletionGate` 共享 `GoalIntent`，V1 全绿 | 已修复观察中（待 V4） |
 | R-02 | `ContextBudget` 清理水位、滞回区间与冷却参数是否最优 | `pilot-core/.../ContextBudget.java` | X1 3v3 实测验证：80% prune / 90% pre-compact / 16% cooldown 在 106–120 轮 L3 任务全程仅压缩 1 次、稳态缓存命中 97.7%–98.1%、未命中 token 降 77.2%，按数据决定维持当前水位不调参 | 已核查保留 |
-| R-03 | Pre-flight 预定位默认注入范围、命中质量与噪声比 | `pilot-server/.../AgentRunService.java` / `PreFlightLocator` | Stage 3.2 通过 X2 3v3 开关对照验证 | 待复核 |
-| R-04 | `workflow.md` 新增指导引入的 system prompt token 增量及是否存在冗余/矛盾表述 | `pilot-core/src/main/resources/prompts/.../workflow.md` | Stage 2.2 量化 token 增量，按提示词精简原则核查并记录 | 待复核 |
+| R-03 | Pre-flight 预定位默认注入范围、命中质量与噪声比 | `pilot-server/.../AgentRunService.java` / `PreFlightLocator` | 已顺带修复 `D-019` 扫描热点；Stage 3.2 继续通过 X2 3v3 开关对照验证注入净收益 | 待 X2 复核 |
+| R-04 | `workflow.md` 新增指导引入的 system prompt token 增量及是否存在冗余/矛盾表述 | `pilot-core/src/main/resources/prompts/.../workflow.md` | 量化核查（`0caa2257..HEAD`）：`workflow.md` 从 `2,350` 字符 / `6,012` B / `~2,327` estTokens 增至 `2,914` 字符 / `7,400` B / `~2,860` estTokens，净增 `+564` 字符 / `+533` estTokens（占全部 `system/*.md` `7,676→8,208` 约 `+6.9%`，占 55k+ 稳态缓存前缀 `<1%` 且首轮后 ~98% 命中缓存）；且新增「首轮最小证据集」删掉了旧版制造调研瘫痪的“缺一项就先搜索或读取确认”矛盾句。按“无因果重放证据不盲动提示词”原则保留现状 | 已核查保留 |
 
 ## 三、自举过程中新发现的产品缺陷（转化为真实任务卡）
 
