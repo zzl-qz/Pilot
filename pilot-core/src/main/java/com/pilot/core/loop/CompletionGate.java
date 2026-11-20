@@ -291,10 +291,15 @@ final class CompletionGate {
         }
         if (!independentReview && changed && codeReviewer != null && !independentCodeReviewed) {
             independentCodeReviewed = true;
+            boolean reviewedDiff = IndependentCodeReviewer.shouldReview(qualityChanges);
             String refactorGuidance = codeReviewer.review(goal, qualityChanges);
             if (refactorGuidance != null && !refactorGuidance.isBlank()) {
                 reviewPrompts = MAX_REVIEW_PROMPTS;
                 return new Nudge(refactorGuidance, "独立代码精简审查发现可安全收敛的重复逻辑或魔法值", 1, 1);
+            }
+            // 独立代码审查已审阅本次变更并放行，且测试已通过、计划无剩余步骤时，不再追加冗余自审轮次打断最终答复。
+            if (reviewedDiff && !needsVerify && openSteps.isEmpty()) {
+                reviewPrompts = MAX_REVIEW_PROMPTS;
             }
         }
         if (!independentReview && reviewPrompts < MAX_REVIEW_PROMPTS) {

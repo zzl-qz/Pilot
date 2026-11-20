@@ -825,16 +825,18 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private boolean finishDirect(TaskControlService.Execution state, TaskControlService.TaskContract requirements) {
         Map<String, TaskControlService.Evidence> checks = GoalEvidence.latestChecks(state.evidence());
         String version = sourceVersion();
-        boolean failed = checks.values().stream()
-            .anyMatch(e -> version.equals(e.endVersion())
+        List<String> failedChecks = checks.values().stream()
+            .filter(e -> version.equals(e.endVersion())
                 && !WireEnum.in(e.status(), EvidenceStatus.STALE, EvidenceStatus.RUNNING)
-                && !GoalEvidence.isQualifyingVerification(e));
+                && !GoalEvidence.isQualifyingVerification(e))
+            .map(e -> Objects.toString(e.check(), "").strip()).filter(s -> !s.isBlank()).toList();
+        boolean failed = !failedChecks.isEmpty();
         boolean running = checks.values().stream().anyMatch(e -> EvidenceStatus.RUNNING.is(e.status()));
         boolean stale = checks.values().stream()
             .anyMatch(e -> EvidenceStatus.STALE.is(e.status()) || !version.equals(e.endVersion()));
         ExecutionPhase phase = failed ? ExecutionPhase.CHECKS_FAILED : running ? ExecutionPhase.UNVERIFIED : stale
             ? ExecutionPhase.CHECKS_STALE : checks.isEmpty() ? ExecutionPhase.UNVERIFIED : ExecutionPhase.CHECKS_PASSED;
-        String detail = failed ? "当前版本仍有未通过的检查；执行已结束，不能声称验证通过。"
+        String detail = failed ? "当前版本仍有未通过的检查（" + String.join("；", failedChecks) + "）；执行已结束，不能声称验证通过。"
             : running ? "验证命令仍在后台运行，尚未取得终态与退出码。" : stale ? "部分检查早于当前代码或用户要求，不能用旧结果证明当前版本。"
                 : checks.isEmpty() ? "未记录测试、构建或静态检查证据；执行结束不等于已核验。" : "已记录的当前版本检查通过；结果仅覆盖实际检查范围，不代表全部目标已独立验收。";
         var finished = copy(state, state.mode(), phase, detail, state.evidence(), state.idleReviews(), state.progress(),

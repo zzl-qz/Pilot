@@ -412,6 +412,25 @@ class CompletionGateTest {
     }
 
     @Test
+    void passingIndependentCodeReviewWithPassingTestsAndCompletePlanSkipsDuplicateSelfReview() {
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "实现订单与退款服务");
+        Set<String> changed = Set.of("src/main/OrderService.java", "src/main/RefundService.java");
+        Map<String, TextChange> cleanChanges =
+            Map.of("src/main/OrderService.java", new TextChange(null, "class OrderService {}\n"),
+                "src/main/RefundService.java", new TextChange(null, "class RefundService {}\n"));
+        gate.recordOutcome(changed, List.of());
+        gate.recordOutcome(List.of(), List.of("mvnw test → exit 0"));
+
+        IndependentCodeReviewer passingReviewer = new IndependentCodeReviewer(
+            (messages, tools) -> new ModelResponse("",
+                List.of(new ToolCall("r1", "submit_code_review", Map.of("verdict", "PASS", "issues", List.of())))),
+            null, PROMPTS, () -> false);
+
+        assertNull(gate.evaluate(changed, List.of("mvnw test → exit 0"),
+            List.of(new PlanItem("完成服务", PlanItem.COMPLETED)), List.of(), false, cleanChanges, null, passingReviewer));
+    }
+
+    @Test
     void planProgressAppearsInReviewPrompt() {
         CompletionGate gate = new CompletionGate(PROMPTS, true, "做三件事");
         List<PlanItem> plan = List.of(new PlanItem("第一步", PlanItem.COMPLETED), new PlanItem("第二步", PlanItem.PENDING));
