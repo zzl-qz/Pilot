@@ -84,7 +84,7 @@ html[data-theme] .session-more[aria-expanded="true"] { opacity: 1; }
 .session-row.is-unread .session-title { color: var(--ink); font-weight: 600; }
 .session-action-error { margin: 8px 0; color: var(--err); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .session-rename-form textarea { width: 100%; min-height: 60px; padding: 10px 12px; color: var(--ink); background: var(--ui-field); border: 1px solid var(--line); border-radius: 12px; font: 13px/1.6 var(--sans); resize: vertical; appearance: none; }
-.session-rename-form textarea:focus { outline: none; border-color: rgba(123, 140, 255, 0.45); box-shadow: 0 0 0 3px rgba(123, 140, 255, 0.12); }
+.session-rename-form textarea:focus { outline: none; border-color: var(--accent-line); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
 .session-rename-form { padding: 16px 20px 0; }
 .session-rename-form p { font-size: 12px; overflow-wrap: anywhere; }
 .session-rename-form .modal-foot { padding-inline: 0; }
@@ -201,7 +201,7 @@ html[data-theme] .model-picker-search input { width: 100%; min-width: 0; min-hei
 .model-discovery { min-width: 0; display: grid; gap: 8px; margin: 12px 0; }
 .model-discovery .model-options-head { margin: 0; padding: 0; font-size: 12px; color: var(--muted); }
 .model-discovery > input { width: 100%; min-width: 0; min-height: 34px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--ui-field); color: var(--ink); font: 13px var(--sans); appearance: none; }
-.model-discovery > input:focus { outline: none; border-color: rgba(123, 140, 255, 0.45); box-shadow: 0 0 0 3px rgba(123, 140, 255, 0.12); }
+.model-discovery > input:focus { outline: none; border-color: var(--accent-line); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
 .model-discovery .model-options { flex-wrap: nowrap; max-height: min(240px, 35vh); overflow: auto; overscroll-behavior: contain; }
 .model-discovery .model-option { flex-shrink: 0; min-height: 36px; padding: 8px 10px; }
 .model-discovery .model-option.is-on { background: var(--ui-selected); color: var(--ink); }
@@ -296,7 +296,7 @@ html[data-theme] .browser-reason, html[data-theme] .chip-hint { font-size: 12px;
 .settings-body > .settings-section-head + div > h3:first-child { margin-top: 0; }
 .task-field { display: grid; gap: 7px; font-size: 13px; color: var(--ink-2); margin: 16px 0; min-width: 0; }
 html[data-theme] .task-field :where(input, textarea, select), html[data-theme] .picker-toolbar input { width: 100%; min-width: 0; min-height: 36px; border: 1px solid var(--line); border-radius: 12px; background: var(--ui-field); color: var(--ink); padding: 7px 12px; font: 13px/20px var(--sans); appearance: none; }
-html[data-theme] .task-field :where(input, textarea, select):focus, html[data-theme] .picker-toolbar input:focus { outline: none; border-color: rgba(123, 140, 255, 0.45); box-shadow: 0 0 0 3px rgba(123, 140, 255, 0.12); }
+html[data-theme] .task-field :where(input, textarea, select):focus, html[data-theme] .picker-toolbar input:focus { outline: none; border-color: var(--accent-line); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
 .task-field textarea { resize: vertical; }
 .settings-body .theme-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 html[data-theme] .theme-card { min-width: 0; width: 100%; border-radius: 8px; padding: 10px; }

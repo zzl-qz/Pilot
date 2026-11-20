@@ -169,8 +169,8 @@
 }
 .fw input[type="text"]:focus, .fw input:not([type]):focus, .fw textarea:focus, .fw select:focus {
   outline: none;
-  border-color: rgba(123, 140, 255, 0.45);
-  box-shadow: 0 0 0 3px rgba(123, 140, 255, 0.12);
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 .fw textarea { min-height: 60px; resize: vertical; }

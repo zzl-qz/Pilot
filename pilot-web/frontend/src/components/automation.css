@@ -51,8 +51,8 @@
 .automation-confirm { overflow-wrap: anywhere; }
 .automation-native-control:focus {
   outline: none;
-  border-color: rgba(123, 140, 255, 0.45);
-  box-shadow: 0 0 0 3px rgba(123, 140, 255, 0.12);
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 .automation-task-row:focus-visible,
 .automation-disclosure summary:focus-visible, .automation-body [tabindex="-1"]:focus-visible {

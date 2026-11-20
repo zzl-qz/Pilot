@@ -138,7 +138,7 @@
   resize: vertical;
   appearance: none;
 }
-.queue-edit textarea:focus { outline: none; border-color: rgba(123, 140, 255, 0.45); box-shadow: 0 0 0 3px rgba(123, 140, 255, 0.12); }
+.queue-edit textarea:focus { outline: none; border-color: var(--accent-line); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
 .queue-edit-actions { display: flex; gap: 8px; justify-content: flex-end; }
 
 .approval-card {
@@ -735,7 +735,7 @@
 }
 .browser-find { display: flex; gap: 6px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line-soft); }
 .browser-find input { flex: 1; height: 30px; border: 1px solid var(--line); border-radius: 999px; background: var(--ui-field, var(--panel)); color: var(--ink); padding: 0 12px; appearance: none; }
-.browser-find input:focus { outline: none; border-color: rgba(123, 140, 255, 0.45); box-shadow: 0 0 0 3px rgba(123, 140, 255, 0.12); }
+.browser-find input:focus { outline: none; border-color: var(--accent-line); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
 .browser-find button { border: 0; background: transparent; color: var(--muted); font-size: 12px; }
 .browser-panel .browser-recent img {
   width: 16px;
@@ -1852,7 +1852,7 @@ html[data-theme='light'] .cap-tag[data-tone='error'] { background: rgba(183, 53,
 }
 .skills-install-row { display: flex; gap: 6px; }
 .skills-install-row input { flex: 1; min-width: 0; min-height: 34px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--ui-field, var(--panel)); color: var(--ink); font: 13px/1.5 var(--sans); appearance: none; }
-.skills-install-row input:focus { outline: none; border-color: rgba(123, 140, 255, 0.45); box-shadow: 0 0 0 3px rgba(123, 140, 255, 0.12); }
+.skills-install-row input:focus { outline: none; border-color: var(--accent-line); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
 .skills-install-candidates { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; margin: 6px 0; }
 .skills-install-item {
   display: grid;
@@ -1934,7 +1934,7 @@ html[data-theme='light'] .cap-tag[data-tone='error'] { background: rgba(183, 53,
   font-size: 12px;
   appearance: none;
 }
-.activity-search-input:focus { outline: none; border-color: rgba(123, 140, 255, 0.45); box-shadow: 0 0 0 3px rgba(123, 140, 255, 0.12); }
+.activity-search-input:focus { outline: none; border-color: var(--accent-line); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
 .activity-search-count { flex: none; color: var(--dim); font-family: var(--mono); font-size: 11px; }
 .timeline .event { cursor: pointer; }
 .timeline .event.is-open .event-title,
@@ -2023,7 +2023,7 @@ html[data-theme="dark"] .file-ref-line { color: #d0d0d0; background: #333; }
 .review-feedback { padding: 8px 12px; display: flex; align-items: end; gap: 8px; flex-wrap: wrap; background: var(--panel-2); }
 .review-feedback label { flex: 1 1 200px; font-size: 12px; }
 .review-feedback textarea { display: block; width: 100%; margin-top: 6px; min-height: 56px; background: var(--ui-field, var(--panel)); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; font: 12.5px/1.6 var(--sans); resize: vertical; appearance: none; }
-.review-feedback textarea:focus { outline: none; border-color: rgba(123, 140, 255, 0.45); box-shadow: 0 0 0 3px rgba(123, 140, 255, 0.12); }
+.review-feedback textarea:focus { outline: none; border-color: var(--accent-line); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
 .diff-line button.n { cursor: pointer; border: 0; border-right: 1px solid var(--line); background: transparent; border-radius: 0; font: inherit; }
 .diff-line.is-selected { background: var(--accent-soft) !important; box-shadow: inset 3px 0 var(--accent); }
 html .app.review-expanded { grid-template-columns: minmax(0, 1fr); }

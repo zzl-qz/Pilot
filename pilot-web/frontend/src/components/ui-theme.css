@@ -4,3 +4,11 @@
   --font-family-heading: var(--sans, system-ui, sans-serif);
   --font-family-mono: var(--mono, ui-monospace, monospace);
 }
+
+/* 深色模式下工具提示采用深色浮层 + 细边框，避免纯白反色气泡刺眼 */
+html[data-theme="dark"] [role="tooltip"] {
+  background: var(--panel-2, #222327) !important;
+  color: var(--ink, #eceef2) !important;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12)) !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.42) !important;
+}
