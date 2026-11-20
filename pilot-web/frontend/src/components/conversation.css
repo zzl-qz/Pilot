@@ -15,7 +15,7 @@ html[data-theme] .conversation-thread .thread-column { gap: 20px; }
 html[data-theme] .conversation-thread .turn-shell { gap: 8px; }
 html[data-theme] .conversation-thread :is(.turn-shell, .turn-card, .changed-card) + .msg-user { margin-top: 6px; }
 .conversation-thread > .thread:focus-visible { outline: 2px solid var(--ink-2); outline-offset: -2px; }
-.conversation-thread:has(.conversation-latest) { padding-block-end: calc(var(--conversation-control) + 20px); }
+html[data-theme] .conversation-thread:has(.conversation-latest) > .thread { padding-block-end: calc(var(--conversation-control) + 20px); }
 .conversation-thread .conversation-latest {
   position: absolute;
   z-index: 5;

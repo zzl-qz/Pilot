@@ -59,7 +59,7 @@ async function assertLatestPosition(page, label) {
       return { x, y, width, height };
     };
     const thread = document.querySelector('.thread');
-    return { button: rect('.conversation-latest'), column: rect('.thread-column'), region: rect('.thread-scroll-region'), scroll: rect('.thread'), composer: rect('.conversation-composer'), scrollbar: thread.offsetWidth - thread.clientWidth };
+    return { button: rect('.conversation-latest'), column: rect('.thread-column'), region: rect('.thread-scroll-region'), scroll: rect('.thread'), composer: rect('.conversation-composer'), scrollbar: thread.offsetWidth - thread.clientWidth, scrollPaddingBottom: parseFloat(getComputedStyle(thread).paddingBottom) };
   });
   const { button: b, column: c, region: r, composer } = bounds;
   // 部分平台的常驻滚动条会占据消息列右侧空间；按钮与输入列共用对称留白。
@@ -67,7 +67,8 @@ async function assertLatestPosition(page, label) {
     label + ': 回底按钮对齐消息列中心 ' + JSON.stringify(bounds));
   assert.ok(b.y >= r.y && b.y + b.height <= r.y + r.height && b.y + b.height <= composer.y,
     label + ': 回底按钮位于消息区内，不遮挡输入框');
-  assert.ok(b.y >= bounds.scroll.y + bounds.scroll.height - 1, label + ': 回底按钮不遮挡正在阅读的文字 ' + JSON.stringify(bounds));
+  assert.ok(b.y >= bounds.scroll.y + bounds.scroll.height - bounds.scrollPaddingBottom && b.y + b.height <= bounds.scroll.y + bounds.scroll.height,
+    label + ': 回底按钮只占用消息列表预留的底部空白 ' + JSON.stringify(bounds));
   assert.ok(b.width >= 32 && b.height >= 32, label + ': 保留按钮点击区域');
 }
 async function run(page, name) {
