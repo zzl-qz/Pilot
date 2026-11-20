@@ -507,6 +507,25 @@ html .conversation-thread .turn-process .conversation-tool-attention:focus-visib
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--warn) 36%, transparent);
 }
 
+html .conversation-thread .turn-process .tool-group-jump {
+  flex: none;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: 11px/1.3 var(--sans);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+html .conversation-thread .turn-process .tool-group-jump:hover {
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  border-color: var(--line);
+  color: var(--ink);
+}
+
 /* 限高滚动壳：上下柔和渐隐遮罩 + 跨三平台一致的悬浮细胶囊滚动条 */
 html .conversation-thread .process-scroll-shell {
   --scroll-fade-bg: var(--bg);
@@ -1149,7 +1168,7 @@ html[data-theme] .conversation-thread .turn-stats-detail .turn-stat-note {
   line-height: 1.4;
 }
 
-/* 固定在对话区顶部的单份执行计划卡：随长任务更新，不再在消息流里重复渲染多份 */
+/* 固定在输入框正上方的单份执行计划条（对齐 DSH / CodeBuddy 底部停靠布局） */
 html .thread-scroll-region.conversation-thread {
   flex-direction: column;
 }
@@ -1157,12 +1176,24 @@ html .thread-scroll-region.conversation-thread {
 html .conversation-thread .thread-pinned-plan {
   flex: none;
   z-index: 3;
-  padding: 8px max(24px, calc((100% - 820px) / 2)) 4px;
-  background: linear-gradient(to bottom, var(--bg) 82%, transparent);
+  padding: 4px var(--conversation-gutter) 4px;
+  background: linear-gradient(to top, var(--bg) 86%, transparent);
 }
 
 html .conversation-thread .thread-pinned-plan .plan-card {
   margin: 0;
+  padding: 6px 12px;
+  border-radius: 10px;
+  border-color: color-mix(in srgb, var(--line) 82%, transparent);
+  background: color-mix(in srgb, var(--panel) 86%, var(--bg));
+}
+
+html .conversation-thread .thread-pinned-plan .plan-card .plan-head {
+  min-height: 24px;
+}
+
+html .conversation-thread .thread-pinned-plan .plan-card .plan-list {
+  max-height: min(210px, 32dvh);
 }
 
 /* 执行计划卡：中性克制卡片 + 状态分级 + 进度细条 + 完成态安静收起 */
@@ -1527,7 +1558,21 @@ html .conversation-thread .turn-card-more > summary:hover {
   }
 }
 
+html[data-theme] .conversation-thread .turn-card.is-compact {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  max-width: 100%;
+  margin-top: 2px;
+  padding: 5px 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 56%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ink) 2.5%, transparent);
+}
 html[data-theme] .conversation-thread .turn-card.is-compact .turn-card-title { font-size: 12px; }
+html[data-theme] .conversation-thread .turn-card.is-compact .turn-card-more { margin: 0; }
+html[data-theme] .conversation-thread .turn-card.is-compact .turn-card-more > summary { padding: 0; min-height: 20px; }
 
 html[data-theme] .composer-wrap.conversation-composer {
   padding: 6px var(--conversation-gutter) max(14px, env(safe-area-inset-bottom));

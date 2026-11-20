@@ -130,5 +130,26 @@ export function buildThreadDisplay(rows: readonly ThreadRow[]): ThreadDisplayMod
     compact.push(row);
   }
 
+  // 三次收敛：如果一个无回复过程回合后紧跟压缩记录（且其后只有结果卡或已到末尾），
+  // 避免同一操作组上下被两条「较早上下文已自动整理」夹击，把尾部压缩并入前一条压缩记录。
+  for (let i = compact.length - 1; i >= 1; i -= 1) {
+    const row = compact[i];
+    if (row.type !== 'compaction-group') continue;
+    const hasLaterWork = compact.slice(i + 1).some(item => item.type === 'user' || item.type === 'turn');
+    if (hasLaterWork) continue;
+    const prev = compact[i - 1];
+    if (prev && prev.type === 'turn' && !hasVisibleReply(prev)) {
+      const beforeTurn = i >= 2 ? compact[i - 2] : null;
+      if (beforeTurn && beforeTurn.type === 'compaction-group') {
+        compact[i - 2] = {
+          ...beforeTurn,
+          end: Math.max(beforeTurn.end, row.end),
+          items: [...beforeTurn.items, ...row.items]
+        };
+        compact.splice(i, 1);
+      }
+    }
+  }
+
   return { pinnedPlan, rows: compact };
 }

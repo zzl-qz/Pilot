@@ -224,11 +224,6 @@ export function Thread() {
 
   return (
     <div className="thread-scroll-region conversation-thread">
-      {display.pinnedPlan && (
-        <div className="thread-pinned-plan">
-          <PlanCard row={display.pinnedPlan} />
-        </div>
-      )}
       <div className="thread" ref={scrollRef} role="region" aria-label="消息记录" tabIndex={0} onScroll={handleScroll} onWheel={handleWheel}>
         <div className="thread-column" ref={contentRef}>
           {history.hasMore && (
@@ -252,6 +247,11 @@ export function Thread() {
           )}
         </div>
       </div>
+      {display.pinnedPlan && (
+        <div className="thread-pinned-plan">
+          <PlanCard row={display.pinnedPlan} />
+        </div>
+      )}
       <ThreadNavigator rows={rows} scrollRef={scrollRef} contentRef={contentRef} stopFollowing={stopScroll} beforeJump={beforeNavigation} />
       <ThreadBottomButton visible={!isAtBottom} onJump={() => scrollToBottom({ animation: latestAnimation() })} />
     </div>
@@ -921,6 +921,7 @@ const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] }) {
   const shouldReveal = needsAttention || hasActiveAsk;
   const [open, setOpen] = useState(shouldReveal);
   const [attentionOnly, setAttentionOnly] = useState(false);
+  const detailsRef = useRef<HTMLDetailsElement>(null);
   const autoOpened = useRef(shouldReveal);
   useSecondTick(running > 0);
   // 需要处理（失败/审批/中断/提问）时仅提示一次，不覆盖用户手动收起或展开的选择。
@@ -950,8 +951,15 @@ const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] }) {
       setAttentionOnly(prev => !prev);
     }
   };
+  const jumpToLatest = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const list = detailsRef.current?.querySelector<HTMLElement>('.tool-group-list');
+    if (list) list.scrollTop = list.scrollHeight;
+  };
   return (
     <details
+      ref={detailsRef}
       className={`tool-group conversation-tools${running > 0 ? ' is-live' : ''}`}
       open={open}
       onToggle={event => setOpen(event.currentTarget.open)}
@@ -972,6 +980,16 @@ const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] }) {
           >
             <StatusDot variant={failed ? 'error' : 'warning'} label="需要留意" aria-hidden="true" />
             {filterAttention ? `仅看 ${attention.length} 项` : `${attention.length} 项需留意`}
+          </button>
+        )}
+        {open && !filterAttention && tools.length >= 25 && (
+          <button
+            type="button"
+            className="tool-group-jump"
+            title="滚动到最近一条操作"
+            onClick={jumpToLatest}
+          >
+            跳到最新
           </button>
         )}
         <span className="tool-group-chevron" aria-hidden="true"><ProcessChevron /></span>

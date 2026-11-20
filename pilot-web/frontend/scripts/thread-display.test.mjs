@@ -45,4 +45,17 @@ assert.equal(interleavedCmps[0].items.length, 3, '保留全部 3 次压缩计数
 assert.equal(interleavedDisplay.rows.filter(r => r.type === 'turn').length, 1, '4 段过程回合合并为 1 个操作组');
 assert.equal(interleavedDisplay.rows.find(r => r.type === 'turn').tools.length, 4, '合并保留全部 4 项工具');
 
+// 回归验证：过程回合上下都被压缩夹击且后面只有 result 时，尾部压缩并入前置压缩，不再上下双线夹击
+const sandwiched = [
+  { type: 'user', key: 'u1', sequence: 1, text: '长任务', attachments: [], imagePositions: [], start: 1, end: 1 },
+  { type: 'compaction', key: 'c1', start: 2, end: 2, coveredMessages: 16, charactersBefore: 50000, charactersAfter: 10000, summary: 's1' },
+  { type: 'turn', key: 't1', runIds: ['r1'], start: 3, end: 4, tools: [{ callId: 'a1', name: 'run_command', args: 'test', status: 'ok' }], toolIndex: {}, thinking: null, reply: emptyReply(), stats: null, agents: {} },
+  { type: 'compaction', key: 'c2', start: 5, end: 5, coveredMessages: 2, charactersBefore: 20000, charactersAfter: 8000, summary: 's2' },
+  { type: 'result', key: 'res1', start: 6, end: 6, tone: 'warn', title: '运行已取消', detail: null, changedFiles: [], runIds: ['r1'] }
+];
+const sandwichedDisplay = buildThreadDisplay(sandwiched);
+const sandCmps = sandwichedDisplay.rows.filter(r => r.type === 'compaction-group');
+assert.equal(sandCmps.length, 1, '尾部压缩并入前置压缩，不上下夹击操作组');
+assert.equal(sandCmps[0].items.length, 2, '保留合并后的压缩总数');
+
 console.log('PASS thread-display.test.mjs');
