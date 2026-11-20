@@ -247,7 +247,7 @@ function isOutsideWorkspacePath(rawPath, workspace) {
   return false;
 }
 
-function analyze({ session, runs, events, messages, trace, diagnostics, gitInfo }) {
+function analyze({ session, runs, events, messages, trace, diagnostics, gitInfo, debugRequestsDir }) {
   const workspace = gitInfo?.workspace || session.workspace || '';
   const traceByCallId = new Map();
   for (const t of trace.entries) {
@@ -521,13 +521,39 @@ function analyze({ session, runs, events, messages, trace, diagnostics, gitInfo 
       }
     }
     if (m.role === 'tool') {
-      if (content.includes('[已裁剪') || content.includes('[pruned') || content.startsWith('（已裁剪')) {
+      if (content.includes('[已裁剪') || content.includes('[旧工具输出已清理') || content.includes('[pruned') || content.startsWith('（已裁剪')) {
         prunedToolMessages++;
       }
       if (content.includes('已截断') || content.includes('truncated')) {
         truncatedToolMessages++;
       }
     }
+  }
+
+  // Also scan dumped debug-requests (captures ephemeral [调查收敛提醒] and in-memory prune markers)
+  if (debugRequestsDir && fs.existsSync(debugRequestsDir)) {
+    let maxWirePruned = 0;
+    const runDirs = fs.readdirSync(debugRequestsDir, { withFileTypes: true }).filter((d) => d.isDirectory());
+    for (const rd of runDirs) {
+      const fullRunDir = path.join(debugRequestsDir, rd.name);
+      for (const file of fs.readdirSync(fullRunDir).filter((f) => /^req-\d+\.json$/.test(f))) {
+        const parsed = safeJsonParse(fs.readFileSync(path.join(fullRunDir, file), 'utf8'));
+        const seq = parsed?.body?.messages || parsed?.body?.input || [];
+        if (!Array.isArray(seq)) continue;
+        let wirePrunedInReq = 0;
+        for (const item of seq) {
+          const text = typeof item?.content === 'string' ? item.content : typeof item?.output === 'string' ? item.output : '';
+          if (!text) continue;
+          if (text.includes('[旧工具输出已清理')) wirePrunedInReq++;
+        }
+        if (wirePrunedInReq > maxWirePruned) maxWirePruned = wirePrunedInReq;
+        const tail = seq[seq.length - 1];
+        const tailText = typeof tail?.content === 'string' ? tail.content : '';
+        if (tailText.includes('[调查收敛提醒]')) investigationReminders++;
+        if (tailText.includes('重复调用') || tailText.includes('连续多次')) repeatReminders++;
+      }
+    }
+    if (maxWirePruned > prunedToolMessages) prunedToolMessages = maxWirePruned;
   }
 
   // G: Plan & subagent stats
@@ -809,7 +835,8 @@ async function main() {
   const trace = readTraceJsonl(opts.dataDir, session.id);
   const diagnostics = await fetchDiagnostics(opts.baseUrl, session.id);
   const gitInfo = opts.workspace ? inspectWorkspaceGit(opts.workspace, opts.base, opts.allowedPrefixes) : null;
-  const report = analyze({ session, runs, events, messages, trace, diagnostics, gitInfo });
+  const debugRequestsDir = path.join(opts.dataDir, 'debug-requests', session.id);
+  const report = analyze({ session, runs, events, messages, trace, diagnostics, gitInfo, debugRequestsDir });
 
   if (opts.jsonOut) {
     fs.mkdirSync(path.dirname(path.resolve(opts.jsonOut)), { recursive: true });
