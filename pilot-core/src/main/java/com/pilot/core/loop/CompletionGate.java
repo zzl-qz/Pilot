@@ -1,5 +1,6 @@
 package com.pilot.core.loop;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collection;
 import java.util.HashMap;
@@ -42,6 +43,9 @@ final class CompletionGate {
     /** 实现类目标却没有任何改动就想收尾时，只推一次让它直接动手。 */
     private static final int MAX_ACTION_PROMPTS = 1;
     private static final int MAX_EVIDENCE_PROMPTS = 1;
+    /** 本轮产生的临时/备份文件残留最多提醒清理一次，避免误拦用户明确要求的产物。 */
+    private static final int MAX_SCRATCH_PROMPTS = 1;
+    private static final List<String> SCRATCH_SUFFIXES = List.of(".tmp", ".bak", ".orig", ".rej");
     /** 只改这些后缀的文档不算「改了代码」，不强制跑构建。 */
     private static final Set<String> DOC_SUFFIXES = Set.of(".md", ".txt", ".rst", ".adoc");
     /** 这些后缀是图片/字体/锁文件等非代码资源，不触发构建或测试门。 */
@@ -72,6 +76,7 @@ final class CompletionGate {
     private int reviewPrompts;
     private int actionPrompts;
     private int evidencePrompts;
+    private int scratchPrompts;
     private boolean independentCodeReviewed;
     /** 记录最近一次通过的构建/测试之后是否又改了代码，防止收尾重构改坏原有功能却漏跑验证。 */
     private boolean codeDirtySincePassingCheck;
@@ -220,6 +225,15 @@ final class CompletionGate {
         }
         Path workspace =
             workspaceRoot != null ? workspaceRoot : codeReviewer == null ? null : codeReviewer.workspaceRoot();
+        if (changed && scratchPrompts < MAX_SCRATCH_PROMPTS) {
+            List<String> scratchFiles = remainingScratchFiles(changedFiles, workspace);
+            if (!scratchFiles.isEmpty()) {
+                scratchPrompts++;
+                String prompt = "本轮改动中仍残留以下临时/备份文件：\n" + bullets(scratchFiles)
+                    + "\n若它们仅用于中途暂存或验证，请先删除清理并确认工作区干净后再交付；若确为任务要求的产物，请说明用途。";
+                return new Nudge(prompt, "工作区残留本轮产生的临时文件，已要求清理", scratchPrompts, MAX_SCRATCH_PROMPTS);
+            }
+        }
         if (changed) {
             boolean verified = hasPassingCheck(checks) && !codeDirtySincePassingCheck;
             boolean countStyleRound = !lintGate.retriesOnFailure() || verified;
@@ -310,13 +324,57 @@ final class CompletionGate {
         return values.stream().map(value -> "- " + value).collect(Collectors.joining("\n"));
     }
 
-    /** 改动里是否包含代码文件；纯文档改动不强制跑构建。 */
+    /** 改动里是否包含代码文件；纯文档、非代码资源与临时暂存文件不强制跑构建。 */
     private static boolean touchesCode(Collection<String> changedFiles) {
         return changedFiles.stream().anyMatch(path -> {
+            if (scratchToken(path) != null) {
+                return false;
+            }
             String lower = path.toLowerCase(Locale.ROOT);
             return DOC_SUFFIXES.stream().noneMatch(lower::endsWith)
                 && ASSET_SUFFIXES.stream().noneMatch(lower::endsWith);
         });
+    }
+
+    private List<String> remainingScratchFiles(Set<String> changedFiles, Path workspace) {
+        String lowerGoal = goal == null ? "" : goal.toLowerCase(Locale.ROOT);
+        Path root = workspace == null ? null : workspace.toAbsolutePath().normalize();
+        return changedFiles.stream().filter(path -> {
+            String token = scratchToken(path);
+            if (token == null) {
+                return false;
+            }
+            if (!lowerGoal.isEmpty() && lowerGoal.contains(token)) {
+                return false;
+            }
+            if (root == null) {
+                return true;
+            }
+            Path resolved = root.resolve(path).normalize();
+            return resolved.startsWith(root) && Files.exists(resolved);
+        }).sorted().toList();
+    }
+
+    /** 命中临时目录段（.tmp、.tmp- 前缀或 .tmp_ 前缀）或备份后缀（.tmp/.bak/.orig/.rej）时返回对应标识词。 */
+    static String scratchToken(String rawPath) {
+        if (rawPath == null || rawPath.isBlank()) {
+            return null;
+        }
+        String normalized = rawPath.strip().replace('\\', '/');
+        String[] segments = normalized.split("/");
+        for (String segment : segments) {
+            String lower = segment.toLowerCase(Locale.ROOT);
+            if (lower.equals(".tmp") || lower.startsWith(".tmp-") || lower.startsWith(".tmp_")) {
+                return lower;
+            }
+        }
+        String lowerLeaf = segments[segments.length - 1].toLowerCase(Locale.ROOT);
+        for (String suffix : SCRATCH_SUFFIXES) {
+            if (lowerLeaf.endsWith(suffix)) {
+                return suffix;
+            }
+        }
+        return null;
     }
 
     void baseline(List<String> checks) {

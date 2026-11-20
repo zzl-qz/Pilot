@@ -538,4 +538,52 @@ class CompletionGateTest {
         assertTrue(nudge.halt(), nudge.reason());
         assertTrue(nudge.prompt().contains("被改过"), nudge.prompt());
     }
+
+    @Test
+    void leftoverScratchFilesCreatedDuringRunPromptCleanupOnceWithoutDirtyingPassingTests() throws Exception {
+        Path root = Files.createTempDirectory("scratch-hygiene");
+        Files.createDirectories(root.resolve(".tmp-verify"));
+        Path tmpFile = root.resolve(".tmp-verify/AgentLoop.java");
+        Files.writeString(tmpFile, "class AgentLoop {}\n");
+        Files.createDirectories(root.resolve("src"));
+        Files.writeString(root.resolve("src/AgentLoop.java"), "class AgentLoop {}\n");
+
+        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复 AgentLoop.java 的超时处理");
+        gate.recordOutcome(List.of("src/AgentLoop.java", ".tmp-verify/AgentLoop.java"), List.of());
+        gate.recordOutcome(List.of(), List.of("mvnw test → exit 0"));
+
+        Set<String> changed = Set.of("src/AgentLoop.java", ".tmp-verify/AgentLoop.java");
+        CompletionGate.Nudge nudge =
+            gate.evaluate(changed, List.of("mvnw test → exit 0"), List.of(), List.of(), true, Map.of(), root, null);
+        assertNotNull(nudge, "遗留 .tmp-verify 临时文件应提醒清理");
+        assertFalse(nudge.halt());
+        assertTrue(nudge.reason().contains("临时文件"), nudge.reason());
+        assertTrue(nudge.prompt().contains(".tmp-verify/AgentLoop.java"), nudge.prompt());
+
+        // 清理临时文件后不使已通过的测试变脏，且能干净放行
+        Files.delete(tmpFile);
+        gate.recordOutcome(List.of(".tmp-verify/AgentLoop.java"), List.of());
+        assertNull(gate.evaluate(Set.of("src/AgentLoop.java"), List.of("mvnw test → exit 0"), List.of(), List.of(),
+            true, Map.of(), root, null));
+    }
+
+    @Test
+    void scratchCheckIgnoresAlreadyDeletedOrGoalRequestedFilesAndSupportsWindowsSeparators() throws Exception {
+        Path root = Files.createTempDirectory("scratch-hygiene-edge");
+        // 1. 磁盘上已不存在的临时文件不应误报
+        CompletionGate deletedGate = new CompletionGate(PROMPTS, true, "修复构建脚本");
+        assertNull(deletedGate.evaluate(Set.of(".tmp-verify/gone.java"), List.of("mvnw test → exit 0"), List.of(),
+            List.of(), true, Map.of(), root, null));
+
+        // 2. 用户目标明确要求生成 .bak 文件时不应误报
+        Files.writeString(root.resolve("config.bak"), "backup\n");
+        CompletionGate requestedGate = new CompletionGate(PROMPTS, true, "生成 config.bak 备份文件");
+        assertNull(requestedGate.evaluate(Set.of("config.bak"), List.of("mvnw test → exit 0"), List.of(), List.of(),
+            true, Map.of(), root, null));
+
+        // 3. Windows 分隔符路径同样识别临时目录段与备份后缀
+        assertEquals(".tmp-verify", CompletionGate.scratchToken(".tmp-verify\\AgentLoop.java"));
+        assertEquals(".bak", CompletionGate.scratchToken("src\\main\\App.java.bak"));
+        assertNull(CompletionGate.scratchToken("src/main/Template.java"));
+    }
 }
