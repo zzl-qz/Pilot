@@ -1,4 +1,4 @@
-import type { CompactionRow, PlanRow, ThreadRow, TurnRow } from '../types/thread.js';
+import type { CompactionRow, PlanRow, RunUsage, ThreadRow, TurnRow } from '../types/thread.js';
 
 export interface CompactionGroupRow {
   type: 'compaction-group';
@@ -17,6 +17,20 @@ export interface ThreadDisplayModel {
 
 function hasVisibleReply(turn: TurnRow): boolean {
   return Boolean((turn.reply?.text || '').trim() || (turn.reply?.preview || '').trim() || turn.reply?.live);
+}
+
+/**
+ * 同一段操作可能被历史翻页拆成多段，越靠后的段里 run.started 往往不在本页，
+ * 它的 startedAt 会退化成页内首个事件时间，直接沿用就会把耗时算成 0:00。
+ * 合并时取最早的开始、最晚的结束，token 与费用仍用最新一段。
+ */
+function mergeStats(base: RunUsage | null | undefined, next: RunUsage | null | undefined): RunUsage | null {
+  if (!base) return next ?? null;
+  if (!next) return base;
+  const start = !base.startedAt ? next.startedAt
+    : !next.startedAt ? base.startedAt : Math.min(base.startedAt, next.startedAt);
+  const ends = [base.finishedAt, next.finishedAt].filter((value): value is number => typeof value === 'number');
+  return { ...next, startedAt: start, finishedAt: ends.length ? Math.max(...ends) : next.finishedAt ?? base.finishedAt };
 }
 
 function mergeTurns(base: TurnRow, next: TurnRow): TurnRow {
@@ -50,7 +64,7 @@ function mergeTurns(base: TurnRow, next: TurnRow): TurnRow {
     thinking: next.thinking || base.thinking,
     agents: { ...(base.agents || {}), ...(next.agents || {}) },
     requests: mergedRequests.length ? mergedRequests : undefined,
-    stats: next.stats || base.stats
+    stats: mergeStats(base.stats, next.stats)
   };
 }
 

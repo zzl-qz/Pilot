@@ -1,4 +1,4 @@
-import type { ReducerState, ThreadState, ThreadRow, TurnRow, PlanRow, UserRow, ToolRow, TimelineInput, TimelineItem, ArbitrationRow, ResultRow } from './types/thread.js';
+import type { ReducerState, ThreadState, ThreadRow, TurnRow, PlanRow, UserRow, ToolRow, TimelineInput, TimelineItem, ArbitrationRow, ResultRow, RunUsage } from './types/thread.js';
 import type { EventEnvelope, EventMetadata, LiveOutput } from './types/events.js';
 import type { MessageAttachment } from './types/runtime.js';
 /**
@@ -987,6 +987,29 @@ function trimThreadWindow(draft: ReducerState) {
   thread.rows = thread.rows.slice(removeCount);
 }
 
+/**
+ * 一页事件共用的运行态。隔离重放要按事件顺序延续 running / runId / runUsage，
+ * 否则每个事件都从「根状态 + 本事件时间」重新开始，耗时和用量会被算成本页首个事件的时刻。
+ */
+interface ReplayScope {
+  running?: boolean;
+  cancelling?: boolean;
+  runId?: string | null;
+  runStartedAt?: number;
+  runUsage?: RunUsage | null;
+}
+
+function openReplayScope(root: ReducerState): ReplayScope {
+  return {
+    running: root.running,
+    cancelling: root.cancelling,
+    runId: root.runId,
+    runStartedAt: root.runStartedAt,
+    // 用量要隔一份副本：直接改根用量会把本页的中间值写回去。
+    runUsage: root.runUsage ? { ...root.runUsage } : null
+  };
+}
+
 /** 历史页（更早）前插：合并事件窗口 + 行注册表，位置由浏览器 scroll anchoring 保持。 */
 export function prependHistoryPage(draft: ReducerState, events: EventEnvelope[]) {
   const thread = draft.thread;
@@ -995,8 +1018,9 @@ export function prependHistoryPage(draft: ReducerState, events: EventEnvelope[])
   const added = thread.windowEvents.length - before;
   // 新行插到最前面（按事件顺序重建前段）
   const replayed: ThreadRow[] = [];
+  const scope = openReplayScope(draft);
   for (const event of events) {
-    applyEventInto(draft, event, replayed);
+    applyEventInto(draft, event, replayed, scope);
   }
   thread.rows = [...replayed, ...thread.rows];
   void added;
@@ -1006,8 +1030,11 @@ export function prependHistoryPage(draft: ReducerState, events: EventEnvelope[])
  * 在隔离区里重放一页事件，产出的行收集进 bucket，不污染现有行，
  * 也不会误写根级状态（running/pendingApprovals 等）——历史重放只负责产出行。
  */
-/** 翻历史时不能借用当前这次运行的 runId，否则旧回合会被盖上新运行的编号。 */
-function replayRunId(bucket: ThreadRow[], event: EventEnvelope) {
+/**
+ * 翻历史时不能借用当前这次运行的 runId，否则旧回合会被盖上新运行的编号。
+ * 页内先用前一事件留下的 runId，跨页才退回根状态。
+ */
+function replayRunId(bucket: ThreadRow[], event: EventEnvelope, fallback: string | null | undefined): string | null | undefined {
   if (event.runId) {
     return event.runId;
   }
@@ -1020,10 +1047,10 @@ function replayRunId(bucket: ThreadRow[], event: EventEnvelope) {
       return row.runIds[row.runIds.length - 1];
     }
   }
-  return null;
+  return fallback;
 }
 
-function applyEventInto(root: ReducerState, event: EventEnvelope, bucket: ThreadRow[]) {
+function applyEventInto(root: ReducerState, event: EventEnvelope, bucket: ThreadRow[], scope: ReplayScope) {
   const thread = root.thread;
   const isolated: ReducerState = {
     thread: {
@@ -1034,11 +1061,12 @@ function applyEventInto(root: ReducerState, event: EventEnvelope, bucket: Thread
       history: thread.history,
       activityCount: thread.activityCount
     },
-    running: root.running,
-    cancelling: root.cancelling,
-    runId: replayRunId(bucket, event),
+    running: scope.running,
+    cancelling: scope.cancelling,
+    runId: replayRunId(bucket, event, scope.runId),
     turnRuns: root.turnRuns,
-    runUsage: root.runUsage,
+    runStartedAt: scope.runStartedAt,
+    runUsage: scope.runUsage,
     requestReports: [...(root.requestReports || [])],
     latestContextReport: root.latestContextReport,
     liveOutputTokens: root.liveOutputTokens,
@@ -1060,6 +1088,12 @@ function applyEventInto(root: ReducerState, event: EventEnvelope, bucket: Thread
     ui: { attentionKind: root.ui?.attentionKind, notice: null, browserDot: root.ui?.browserDot }
   };
   applyEvent(isolated, event, { live: false });
+  // 本页内延续运行态，跨页时由根状态重新播种。
+  scope.running = isolated.running;
+  scope.cancelling = isolated.cancelling;
+  scope.runId = isolated.runId;
+  scope.runStartedAt = isolated.runStartedAt;
+  scope.runUsage = isolated.runUsage;
   // activityCount 单调递增，回传避免 key 冲突
   thread.activityCount = isolated.thread.activityCount;
   // 预算卡片只写根级 timeline 而不产生 row；真实历史回放需要把它合并回根状态，否则翻页后卡片消失
@@ -1082,8 +1116,9 @@ export function appendHistoryPage(draft: ReducerState, events: EventEnvelope[]) 
   const thread = draft.thread;
   thread.windowEvents = mergeHistoryEvents(thread.windowEvents, events);
   const bucket: ThreadRow[] = [];
+  const scope = openReplayScope(draft);
   for (const event of events) {
-    applyEventInto(draft, event, bucket);
+    applyEventInto(draft, event, bucket, scope);
   }
   thread.rows = [...thread.rows, ...bucket];
 }
