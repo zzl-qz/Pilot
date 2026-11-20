@@ -73,8 +73,16 @@ export function TaskContract() {
     ? '执行结束'
     : (TASK_STATUS_LABELS[status] || status || '已保存');
   const execution = task.execution || null;
+  const hasExplicitContract = Boolean(
+    (task.constraints || []).length
+    || items.length
+    || (task.corrections || []).length
+    || execution?.gap
+    || (execution?.criteria || []).length
+    || ['AWAITING_REVIEW', 'FAILED', 'BLOCKED', 'UNVERIFIED', 'NO_PROGRESS', 'BUDGET_LIMITED', 'NEED_INPUT'].includes(status)
+  );
   return (
-    <details id="task-contract" className="task-contract" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <details id="task-contract" className={`task-contract${hasExplicitContract ? '' : ' is-quiet'}`} open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary id="task-contract-summary">
         <span className="task-contract-label">任务契约</span>
         <span className="task-contract-goal" title={displayGoal}>{summaryGoal || '未设定目标'}</span>

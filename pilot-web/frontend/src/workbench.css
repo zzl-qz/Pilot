@@ -856,10 +856,22 @@ html[data-theme] .task-contract > summary::after {
 html[data-theme] .task-contract > summary:hover::after { border-color: var(--muted); }
 html[data-theme] .task-contract[open] > summary::after { transform: rotate(45deg); border-color: var(--muted); }
 html[data-theme] .task-contract[open] {
+  opacity: 1;
   margin-top: 6px;
   border: 1px solid var(--line-soft);
   border-radius: 10px;
   background: var(--bg-soft);
+}
+html[data-theme] .task-contract.is-quiet:not([open]) {
+  background: transparent;
+  border-color: transparent;
+  opacity: 0.58;
+  transition: opacity 0.16s ease, background-color 0.16s ease;
+}
+html[data-theme] .task-contract.is-quiet:not([open]):hover,
+html[data-theme] .task-contract.is-quiet:not([open]):focus-within {
+  opacity: 1;
+  background: color-mix(in srgb, var(--ink) 3%, transparent);
 }
 html[data-theme] .task-contract[open] > summary { padding: 7px 10px; }
 @media (prefers-reduced-motion: reduce) {

@@ -69,6 +69,8 @@ function RunningStatus() {
   }, []);
   if (hasApprovals) return null;
   const clock = startedAt ? formatClock(Math.round((Date.now() - startedAt) / 1000)) : '';
+  // 顶栏已展示「正在思考」，没有正在执行的工具详情与计时时不再重复画一条占位横条。
+  if (!detail && !clock) return null;
   const text = detail ? `${phase} · ${detail}` : phase;
   return (
     <section id="verification-strip" className="verification-strip" data-tone="running" aria-label="任务状态">
