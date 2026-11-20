@@ -223,6 +223,22 @@ export function ChangesPanel() {
       )}
       <div className="changes-body">
         {!scoped && state === 'loading' && empty && <p className="panel-empty change-empty">读取变更中…</p>}
+        {empty && !loading && !(scoped ? runError : state === 'error') && (
+          <div className="changes-empty-state">
+            <span className="changes-empty-icon" aria-hidden="true">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="10" cy="10" r="7.5" />
+                <path d="M7 10.2l2 2 4-4.2" />
+              </svg>
+            </span>
+            <p className="changes-empty-title">{emptyMessage}</p>
+            <p className="changes-empty-hint">
+              {scoped && runActive
+                ? '当前轮次仍在执行，完成后将展示逐行差异。'
+                : 'AI 修改文件后，这里会自动展示文件列表、逐行差异与单文件撤销。'}
+            </p>
+          </div>
+        )}
         {!empty && (
           <div id="change-files" className="change-files">
             {visibleTracked.map((file) => (

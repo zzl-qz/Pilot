@@ -2015,6 +2015,43 @@ html[data-theme="dark"] .file-ref-line { color: #d0d0d0; background: #333; }
 }
 #panel-changes .changes-bar { padding: 6px 12px; }
 #panel-changes .changes-body { flex: 1; min-height: 0; }
+#panel-changes .changes-empty-state {
+  grid-column: 1 / -1;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 40px 24px;
+  text-align: center;
+}
+#panel-changes .changes-empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 4px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  background: color-mix(in srgb, var(--ink) 3.5%, transparent);
+  color: var(--muted);
+}
+#panel-changes .changes-empty-icon svg { width: 18px; height: 18px; }
+#panel-changes .changes-empty-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 560;
+  color: var(--ink-2);
+}
+#panel-changes .changes-empty-hint {
+  margin: 0;
+  max-width: 240px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dim);
+}
 #panel-changes:has(.change-view) #change-files { max-height: 20vh; flex: 0 1 auto; padding-block: 4px; }
 #panel-changes .change-item { min-height: 30px; padding-block: 4px; }
 #panel-changes .change-view { flex: 1; min-height: 180px; }
