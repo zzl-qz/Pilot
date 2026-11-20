@@ -1254,21 +1254,33 @@ html .conversation-thread .ctx-body {
   overscroll-behavior: contain;
 }
 
-html .conversation-thread .turn-card:not(.is-compact) {
+html[data-theme] .conversation-thread .turn-card:not(.is-compact) {
+  padding: 11px 14px;
   border-radius: 10px;
   background: color-mix(in srgb, var(--ink) 3%, var(--bg));
   border-color: var(--line-soft);
 }
 
-html .conversation-thread .turn-card:not(.is-compact).is-warn {
-  background: color-mix(in srgb, var(--warn) 7%, var(--bg));
-  border-color: color-mix(in srgb, var(--warn) 28%, var(--line-soft));
+html[data-theme] .conversation-thread .turn-card:not(.is-compact).is-ok {
+  background: color-mix(in srgb, var(--ok) 6%, var(--bg));
+  border-color: color-mix(in srgb, var(--ok) 28%, var(--line-soft));
+  box-shadow: inset 3px 0 var(--ok);
 }
+html[data-theme] .conversation-thread .turn-card:not(.is-compact).is-ok .turn-card-title { color: var(--ok); font-weight: 560; }
 
-html .conversation-thread .turn-card:not(.is-compact).is-error {
-  background: color-mix(in srgb, var(--err) 7%, var(--bg));
-  border-color: color-mix(in srgb, var(--err) 28%, var(--line-soft));
+html[data-theme] .conversation-thread .turn-card:not(.is-compact).is-warn {
+  background: color-mix(in srgb, var(--warn) 7%, var(--bg));
+  border-color: color-mix(in srgb, var(--warn) 32%, var(--line-soft));
+  box-shadow: inset 3px 0 var(--warn);
 }
+html[data-theme] .conversation-thread .turn-card:not(.is-compact).is-warn .turn-card-title { color: var(--warn); font-weight: 560; }
+
+html[data-theme] .conversation-thread .turn-card:not(.is-compact):is(.is-error, .is-err) {
+  background: color-mix(in srgb, var(--err) 7%, var(--bg));
+  border-color: color-mix(in srgb, var(--err) 34%, var(--line-soft));
+  box-shadow: inset 3px 0 var(--err);
+}
+html[data-theme] .conversation-thread .turn-card:not(.is-compact):is(.is-error, .is-err) .turn-card-title { color: var(--err); font-weight: 560; }
 
 html .conversation-thread .turn-card-head {
   display: flex;
