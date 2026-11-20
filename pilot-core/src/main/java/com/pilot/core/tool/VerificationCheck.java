@@ -260,7 +260,19 @@ public final class VerificationCheck {
         if (args.contains("--test") || args.stream().anyMatch(token -> token.startsWith("--test="))) {
             return Kind.TEST;
         }
-        return args.contains("--check") ? Kind.STATIC_ANALYSIS : Kind.OTHER;
+        if (args.contains("--check")) {
+            return Kind.STATIC_ANALYSIS;
+        }
+        if (args.isEmpty()) {
+            return Kind.OTHER;
+        }
+        String script = scriptName(bare(args.getFirst()));
+        return Set.of("check", "typecheck").contains(script) ? Kind.STATIC_ANALYSIS : Kind.OTHER;
+    }
+
+    private static String scriptName(String path) {
+        int dot = path.lastIndexOf('.');
+        return dot > 0 ? path.substring(0, dot) : path;
     }
 
     private static Kind classifyPython(List<String> args) {

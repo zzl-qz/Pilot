@@ -23,6 +23,14 @@ class VerificationCheckTest {
         assertEquals(VerificationCheck.Kind.TEST, VerificationCheck.passingKind(".\\mvnw.cmd test → exit 0"));
         assertEquals(VerificationCheck.Kind.STATIC_ANALYSIS,
             VerificationCheck.passingKind("npm --prefix pilot-web run check → exit 0"));
+        assertEquals(VerificationCheck.Kind.STATIC_ANALYSIS,
+            VerificationCheck.passingKind("node scripts/check.mjs → exit 0"));
+        assertEquals(VerificationCheck.Kind.STATIC_ANALYSIS,
+            VerificationCheck.passingKind("node scripts/typecheck.mjs → exit 0"));
+        assertEquals(VerificationCheck.Kind.OTHER,
+            VerificationCheck.passingKind("node scripts/check.mjs → exit 1"));
+        assertEquals(VerificationCheck.Kind.OTHER,
+            VerificationCheck.passingKind("node scripts/notcheck.mjs → exit 0"));
         assertEquals(VerificationCheck.Kind.TEST, VerificationCheck.classifyCommand("pnpm -C packages/ui test"));
         assertEquals(VerificationCheck.Kind.TEST, VerificationCheck.classifyCommand("npm --prefix=pilot-web test"));
         assertEquals(VerificationCheck.Kind.BUILD, VerificationCheck.classifyCommand("javac Main.java"));
