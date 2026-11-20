@@ -26,6 +26,8 @@ public final class ToolResults {
     public static final String CHANGE_TRACKING_PARTIAL = "NOTE: 部分文件没有进入命令前文件基线，其改动不在本轮差异/回滚追踪内，不能据此认为它们没有改动";
     /** 被运行策略或中断信号跳过，工具没有执行。 */
     public static final String SKIPPED = "SKIPPED:";
+    /** 外层系统沙箱内再次创建子沙箱失败时的环境提示固定前缀（由命令工具写入头部，不来自命令标准输出）。 */
+    public static final String NESTED_SANDBOX_HINT_PREFIX = "[环境提示] 检测到嵌套 OS 沙箱失败";
 
     private ToolResults() {
     }
@@ -54,5 +56,27 @@ public final class ToolResults {
 
     public static boolean isChangeTrackingIncomplete(String result) {
         return result != null && result.startsWith(CHANGE_TRACKING_INCOMPLETE);
+    }
+
+    /** 仅识别命令工具头部（输出正文之前）由运行时写入的嵌套 OS 沙箱环境提示，防止被命令输出内容伪造。 */
+    public static boolean isNestedSandboxFailure(String result) {
+        if (result == null || result.isEmpty()) {
+            return false;
+        }
+        int outputIndex = result.indexOf("\n输出:\n");
+        String header = outputIndex >= 0 ? result.substring(0, outputIndex) : result;
+        int start = 0;
+        while (start <= header.length()) {
+            int end = header.indexOf('\n', start);
+            String line = end < 0 ? header.substring(start) : header.substring(start, end);
+            if (line.startsWith(NESTED_SANDBOX_HINT_PREFIX)) {
+                return true;
+            }
+            if (end < 0) {
+                break;
+            }
+            start = end + 1;
+        }
+        return false;
     }
 }
