@@ -26,7 +26,8 @@
 | D-017 | P2 | C 评测泄露风险 | 自举工具 | 任务 worktree 中 `search_text` 命中 `evaluation/dogfood/tasks/`，可能暴露 S4 剧本答案 | `eb5e0a85` | S4 答案已迁至仓库外 `~/pilot-dogfood/supervisor-s4-scripts.md` | 已关闭 |
 | D-018 | P2 | G 计划门禁多余续跑 | 循环策略 | 验证已全部通过且模型给出完整答复时，仅因未把 plan 末项标 `completed` 被 `PlanGate` 触发 `RUN_CONTINUED` 多跑 3 轮与重复测试 | 待评估 | `T001` seq 707–716 复现，观察后续任务复现频率 | 新建 |
 | D-019 | P2 | A 预定位超时丢分 | 运行时/工具设计 | `PreFlightLocator.scanGitFileNames()` 对 `git ls-files` 全仓文件先做约 4,500 次磁盘校验再匹配文件名，高负载下 120ms 超时丢掉 `+90` 定义文件加分 | `e203e19a` | 改为先纯内存 `matchesAnyFileOrStem()` 初筛再校验命中候选并将路径子预算放宽至 200ms；实测 `PreFlightLocatorTest` 300ms→127ms、`InvestigationDisciplineVerificationTest` 2.10s→0.92s；V1 全绿（1092 用例） | 观察中（待 V4） |
-| D-020 | P1 | L 非法工具参数 JSON 误杀运行 | 运行时/模型适配 | `T002`（`ses_acfeb9f3` req 70）实测暴露：模型偶发返回非合法 JSON 工具调用参数时，适配器将其抛出为 `PERMANENT` 直接终结 70 步任务 | `a91bb586` | `ModelFailureKind` 新增 `MALFORMED_TOOL_CALL(retryable=true)`，`AgentLoop` 最多 3 次带 JSON 修正提示的有界重试；V1 全绿（108 定向 + 全量 1092） | 观察中（待 V3/V4） |
+| D-020 | P1 | L 非法工具参数 JSON 误杀运行 | 运行时/模型适配 | `T002`（`ses_acfeb9f3` req 70）实测暴露：模型偶发返回非合法 JSON 工具调用参数时，适配器将其抛出为 `PERMANENT` 直接终结 70 步任务 | `a91bb586` | `ModelFailureKind` 新增 `MALFORMED_TOOL_CALL(retryable=true)`，`AgentLoop` 最多 3 次带 JSON 修正提示的有界重试；V1 全绿（108 定向 + 全量 1092）+ V3 原会话 `/continue` 验收通过 | 观察中（待 V4） |
+| D-021 | P2 | D/G 续跑 ReuseScan 误报 | 工具设计/循环策略 | `T002` `/continue` 续跑收尾（`run_8796cefd` req-22/25）时，`LintGate.reuseText()` 把缺本轮写前快照的既有文件按 `before=null` 当全新文件扫描，将旧代码 4 处 `try {` 误报成新增复制两度打断收尾 | `f351513e` | `LintGate.reuseText()` 对齐 `addedSuppressions()` 跳过无本轮基线文件，`ReuseScan.trivial()` 排除 `try {` / `} else {` 等语法块关键字；V1 全绿（1,098 用例） | 观察中（待 V3/V4） |
 
 ## 二、待复核疑点（R-01～R-04）
 
@@ -42,5 +43,5 @@
 | 编号 | 发现来源 | 简要描述 | 对应任务卡 | 状态 |
 |---|---|---|---|---|
 | P-001 | Stage 1.1 实机切换 `runner/` 启动日志 | 显式设置 `PILOT_DATA_DIR` 后，`BrowserHome` 仍强制使用仓库 `.pilot/browser`，触发 400MB Chromium 重复下载且桌面端点路径分离 | `T001` | 已由 Pilot 修复并合入 `df/runner`（`2a020f1d`） |
-| P-002 | Stage 1.1 实机切换 `runner/` 启动日志 | 显式设置 `PILOT_DATA_DIR` 后，`BundledRuntime` 未接入 `PilotDataDir`，仍向当前 worktree `.pilot/runtime` 重复下载 Python 3.12 | `T002` | 待派发 |
+| P-002 | Stage 1.1 实机切换 `runner/` 启动日志 | 显式设置 `PILOT_DATA_DIR` 后，`BundledRuntime` 未接入 `PilotDataDir`，仍向当前 worktree `.pilot/runtime` 重复下载 Python 3.12 | `T002` | 已由 Pilot 修复并合入 `df/runner`（`f1646c33`） |
 | P-003 | Stage 1.1 实机运行 `java -jar pilot-server` 启动日志 | 打包后的 Spring Boot 4 嵌套 jar 启动时仍触发 `FrontendDepsPrompt` 20 秒「是否更新前端依赖」询问，违背“仅开发态提示”契约 | `T003` | 待派发 |
