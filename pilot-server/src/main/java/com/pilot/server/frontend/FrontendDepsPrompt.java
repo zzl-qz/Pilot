@@ -4,7 +4,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.URISyntaxException;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -194,13 +194,36 @@ public final class FrontendDepsPrompt {
 
     /** 从 jar 里启动（打包分发）时不提问：classes 目录才是开发态。 */
     static boolean runningFromClasses() {
+        return runningFromClasses(FrontendDepsPrompt.class.getProtectionDomain().getCodeSource());
+    }
+
+    /** 拆出来源参数，让「jar 里启动」这条路能直接断言，不用真去跑一个 fat jar。 */
+    static boolean runningFromClasses(CodeSource source) {
+        return source != null && source.getLocation() != null
+            && isDevelopmentLocation(String.valueOf(source.getLocation()));
+    }
+
+    /**
+     * 只有 {@code file:} 协议且指向真实目录才算开发态。
+     *
+     * <p>不能只看 {@code Files.isDirectory}：Spring Boot 4 把类位置报成
+     * {@code jar:nested:/…/app.jar/!BOOT-INF/classes/!/}，加载器注册的 {@code jar} 文件系统
+     * 把它解析成归档根目录，{@code Files.isDirectory} 于是返回 true——打包后跑 jar 也被当成开发态，
+     * 白白等 {@link #DEFAULT_TIMEOUT_SECONDS} 秒。老式的 {@code jar:file:/…/app.jar!/BOOT-INF/classes!/}
+     * 同理。这里先按 scheme 挡掉：只要不是 {@code file:}，一律不是开发态。
+     *
+     * <p>用字符串而不用 {@link java.net.URL} 是因为 Spring Boot 4 的 {@code jar:nested:} 形式
+     * 调 {@code toURL()} 会抛 {@code MalformedURLException}，{@code file:} 形式再交给
+     * {@link java.net.URI} 处理，Windows 的 {@code file:/C:/…} 与 macOS/Linux 的 {@code file:/…} 都适用。
+     */
+    static boolean isDevelopmentLocation(String location) {
+        if (location == null || !location.regionMatches(true, 0, "file:", 0, 5)) {
+            return false;
+        }
         try {
-            CodeSource source = FrontendDepsPrompt.class.getProtectionDomain().getCodeSource();
-            if (source == null || source.getLocation() == null) {
-                return false;
-            }
-            return Files.isDirectory(Path.of(source.getLocation().toURI()));
-        } catch (URISyntaxException | RuntimeException e) {
+            return Files.isDirectory(Path.of(URI.create(location)));
+        } catch (RuntimeException e) {
+            // 非法/无法转换的 URI 只说明「不是可用的开发目录」，不该让启动失败
             return false;
         }
     }
