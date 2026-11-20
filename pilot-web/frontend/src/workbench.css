@@ -770,13 +770,31 @@ html[data-theme="light"] {
   --accent-soft: color-mix(in srgb, var(--accent) 11%, transparent);
 }
 
-html[data-theme] .navigation-rail { background: var(--side-bg); }
-html[data-theme] .rail-button { width: 36px; height: 36px; border-radius: 6px; }
+html[data-theme="dark"] .navigation-rail { background: color-mix(in srgb, var(--bg) 55%, var(--side-bg)); }
+html[data-theme="light"] .navigation-rail { background: color-mix(in srgb, var(--ink) 3.5%, var(--side-bg)); }
+html[data-theme] .rail-button {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  color: var(--muted);
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+html[data-theme] .rail-button:hover,
+html[data-theme] .rail-button.is-active { color: var(--ink); }
 html[data-theme] .rail-button.is-active { background: var(--panel-3); }
-html[data-theme] .rail-button.is-active::after { left: 0; width: 2px; height: 18px; bottom: auto; border-radius: 2px; }
+html[data-theme] .rail-button.is-active::after { left: 0; width: 2.5px; height: 18px; bottom: auto; border-radius: 99px; }
 html[data-theme] .sidebar.rail { padding: 8px 10px 0; background: var(--side-bg); }
 html[data-theme] .sidebar-head.rail-head { height: 44px; padding-inline: 4px; }
-html[data-theme] .new-task { min-height: 34px; border-radius: 6px; }
+html[data-theme] .new-task {
+  min-height: 34px;
+  border-radius: 8px;
+  font-weight: 520;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+html[data-theme="light"] .new-task {
+  background: var(--bg);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
 html[data-theme] .project-head { min-height: 28px; }
 html[data-theme] .session-item { position: relative; min-height: 30px; border-radius: 6px; transition: background-color 0.12s ease, color 0.12s ease; }
 html[data-theme] .session-item.is-active { box-shadow: none; font-weight: 520; }
