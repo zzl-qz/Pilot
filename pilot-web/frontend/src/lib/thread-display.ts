@@ -62,7 +62,8 @@ function mergeTurns(base: TurnRow, next: TurnRow): TurnRow {
  */
 export function buildThreadDisplay(rows: readonly ThreadRow[]): ThreadDisplayModel {
   let pinnedPlan: PlanRow | null = null;
-  for (let i = rows.length - 1; i >= 0; i -= 1) {
+  const latestUserIndex = rows.findLastIndex(row => row.type === 'user');
+  for (let i = rows.length - 1; i > latestUserIndex; i -= 1) {
     const row = rows[i];
     if (row.type === 'plan') {
       const valid = (row.items || []).some(item => (item.step || item.text || '').trim());

@@ -84,7 +84,7 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
             const existing = planInOpenSegment(draft.thread.rows);
             if (existing) {
               existing.items = data.plan;
-            } else {
+            } else if (!draft.thread.rows.some(row => row.type === 'user')) {
               draft.thread.rows.push({
                 key: `plan:live:${draft.thread.cursor}`,
                 type: 'plan',

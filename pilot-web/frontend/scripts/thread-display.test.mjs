@@ -17,6 +17,12 @@ const display = buildThreadDisplay(raw);
 assert.equal(display.pinnedPlan?.key, 'p2', '只固定展示最新一条执行计划');
 assert.equal(display.rows.some(r => r.type === 'plan'), false, '消息流中不再重复渲染计划卡');
 
+const afterNewQuestion = buildThreadDisplay([
+  ...raw,
+  { type: 'user', key: 'u2', sequence: 10, text: '查看缓存命中率', attachments: [], imagePositions: [], start: 10, end: 10 }
+]);
+assert.equal(afterNewQuestion.pinnedPlan, null, '新问题之后没有计划更新时，不显示上一轮计划');
+
 const compactions = display.rows.filter(r => r.type === 'compaction-group');
 assert.equal(compactions.length, 1, '连续压缩记录合并为一条');
 assert.equal(compactions[0].items.length, 2, '合并组内保留全部 2 条压缩摘要');
