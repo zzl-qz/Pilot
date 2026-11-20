@@ -17,16 +17,22 @@ import org.springframework.stereotype.Component;
 @Component
 public class PilotDataDir {
     private final Path root;
+    private final boolean explicitlyConfigured;
     private final DataMaintenance maintenance = new DataMaintenance();
 
     public PilotDataDir(@Value("${pilot.data.dir:}") String configured) {
-        Path base = configured == null || configured.isBlank() ? Path.of(System.getProperty("user.dir", "."), ".pilot")
-            : Path.of(configured);
+        explicitlyConfigured = configured != null && !configured.isBlank();
+        Path base = explicitlyConfigured ? Path.of(configured) : Path.of(System.getProperty("user.dir", "."), ".pilot");
         this.root = base.toAbsolutePath().normalize();
     }
 
     public Path root() {
         return root;
+    }
+
+    /** 是否由用户显式指定（{@code pilot.data.dir} / {@code PILOT_DATA_DIR}），而不是默认的项目目录。 */
+    public boolean explicitlyConfigured() {
+        return explicitlyConfigured;
     }
 
     public DataMaintenance maintenance() {

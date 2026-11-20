@@ -42,8 +42,9 @@ import lombok.extern.slf4j.Slf4j;
  * 安装依赖（首次）→ 与 sidecar 握手并真的启动一次浏览器。只有握手成功，{@link #availability()}
  * 才返回可用，{@code browser} 工具才会向模型声明；失败时原因会保留下来原样告知模型。
  *
- * <p>浏览器来源：Chromium 完整收进仓库的 {@code .pilot/browser/browsers}
- * （{@code PLAYWRIGHT_BROWSERS_PATH} 指向该处，下载也落这里，删 {@code .pilot} 即全量清理），
+ * <p>浏览器来源：Chromium 默认收进 {@code .pilot/browser/browsers}（显式配 {@code pilot.browser.home}
+ * 或 {@code PILOT_DATA_DIR} 时改用对应目录，见 {@link BrowserHome}），
+ * {@code PLAYWRIGHT_BROWSERS_PATH} 指向该处，下载也落这里，删 {@code .pilot} 即全量清理；
  * 优先于系统 Chrome / Edge 使用——版本配套、行为跨机器一致；
  * {@code pilot.browser.prefer-bundled=false} 可反转。
  *
@@ -53,7 +54,9 @@ import lombok.extern.slf4j.Slf4j;
  * 空闲回收：无头 10 分钟（面板正在显示该页面时不回收），有头默认不回收（可用
  * {@code pilot.browser.idle-shutdown-seconds} 显式控制）。
  *
- * <p>运行时目录放在仓库的 {@code .pilot/browser}（与内置 Node/Python 同处，不进 git），找不到仓库根则用数据目录。
+ * <p>运行时目录默认是仓库根的 {@code .pilot/browser}（与内置 Node/Python 同处，不进 git）；
+ * 显式配了 {@code pilot.data.dir}/{@code PILOT_DATA_DIR} 时改用它下面的 {@code browser}，
+ * 找不到仓库根时也用数据目录。详见 {@link BrowserHome}。
  */
 @Component
 @Slf4j

@@ -51,7 +51,9 @@ pilot:
   data:
     # 会话库、快照、trace、附件默认放在项目下的 .pilot
     # 要换位置：环境变量 PILOT_DATA_DIR，或启动参数 -Dpilot.data.dir=...
-    dir: ${PILOT_DATA_DIR:${user.dir}/.pilot}
+    # 留空表示用户没显式指定，由 PilotDataDir 回落到 ${user.dir}/.pilot；
+    # 两者结果一样，但留空才能让 BrowserHome 这类组件区分「用户配过目录」和「只是默认值」。
+    dir: ${PILOT_DATA_DIR:}
   # 附件请求边界：单条消息的文件数、单文件大小与解码后总量。
   # 移动端能力值由此派生，默认最多 16 个文件、单文件 2MB、总量 6MB。
   # 限额可通过 pilot.attachments.* 或 PILOT_ATTACHMENTS_* 配置，默认值由 AttachmentLimits 提供
