@@ -116,10 +116,14 @@ function cloneOrCopy(src, dst) {
   return true;
 }
 
-function syncAssets({ force = false } = {}) {
+function syncAssets({ force = false, skipStatic = false } = {}) {
   const items = [
-    { rel: path.join('pilot-web', 'src', 'main', 'resources', 'static', 'index.html'), always: true },
-    { rel: path.join('pilot-web', 'src', 'main', 'resources', 'static', 'assets'), always: true },
+    ...(skipStatic
+      ? []
+      : [
+          { rel: path.join('pilot-web', 'src', 'main', 'resources', 'static', 'index.html'), always: false },
+          { rel: path.join('pilot-web', 'src', 'main', 'resources', 'static', 'assets'), always: false },
+        ]),
     { rel: path.join('pilot-web', 'frontend', 'node_modules'), always: false },
     { rel: path.join('pilot-desktop', 'node_modules'), always: false },
     { rel: path.join('pilot-desktop', 'out'), always: false },
@@ -142,6 +146,40 @@ function syncAssets({ force = false } = {}) {
   if (dirty.length > 0) {
     throw new Error(`[sync-assets] 意外污染 git status:\n${dirty.join('\n')}`);
   }
+}
+
+function buildFrontendIfAvailable() {
+  const feDir = path.join(RUNNER_DIR, 'pilot-web', 'frontend');
+  if (!fs.existsSync(path.join(feDir, 'node_modules'))) {
+    return false;
+  }
+  const npmCmd = IS_WIN ? 'npm.cmd' : 'npm';
+  console.log(`[build] 在 ${RUNNER_DIR} 构建最新前端 UI 产物...`);
+  runChecked(npmCmd, ['--prefix', feDir, 'run', 'build'], { cwd: RUNNER_DIR });
+  return true;
+}
+
+function runV1Verify() {
+  syncAssets();
+  const env = { ...process.env };
+  const javaHome = resolveJavaHome();
+  if (javaHome) env.JAVA_HOME = javaHome;
+  const cmd = IS_WIN ? 'mvnw.cmd' : 'sh';
+  const args = IS_WIN
+    ? ['-pl', 'pilot-core,pilot-server', '-DskipFrontend=true', 'test', 'spotless:check', 'checkstyle:check']
+    : ['./mvnw', '-pl', 'pilot-core,pilot-server', '-DskipFrontend=true', 'test', 'spotless:check', 'checkstyle:check'];
+  console.log(`[v1-verify] 在 ${RUNNER_DIR} 执行全量 V1（pilot-core + pilot-server 全量单测 + spotless + checkstyle + quality-gate）...`);
+  runChecked(cmd, args, { cwd: RUNNER_DIR, env });
+  runChecked(process.execPath, [path.join('scripts', 'quality-gate.mjs')], { cwd: RUNNER_DIR, env });
+  const headSha = (runCapture('git', ['-C', RUNNER_DIR, 'rev-parse', 'HEAD']).stdout || '').trim();
+  const stamp = path.join(DOGFOOD_ROOT, 'v1-verified.json');
+  fs.mkdirSync(DOGFOOD_ROOT, { recursive: true });
+  fs.writeFileSync(
+    stamp,
+    JSON.stringify({ verifiedAt: new Date().toISOString(), runnerDir: RUNNER_DIR, headSha }, null, 2) + '\n',
+    'utf8'
+  );
+  console.log(`[v1-verify] 全量 V1 通过并落盘验证锚点: ${headSha}`);
 }
 
 async function fetchJson(urlPath, timeoutMs = 4000) {
@@ -309,8 +347,11 @@ async function stopCurrentServer({ closeDesktop = false } = {}) {
   }
 }
 
-function buildRunner() {
-  syncAssets();
+function buildRunner({ buildFrontend = true } = {}) {
+  syncAssets({ skipStatic: buildFrontend });
+  if (buildFrontend && !buildFrontendIfAvailable()) {
+    syncAssets({ skipStatic: false });
+  }
   const env = { ...process.env };
   const javaHome = resolveJavaHome();
   if (javaHome) env.JAVA_HOME = javaHome;
@@ -507,9 +548,10 @@ async function main() {
     console.log(
       [
         '用法: node runner-ctl.mjs <command> [options]',
-        '  sync-assets [--force]                               同步 Web 静态产物与 Electron 壳到 runner/',
+        '  sync-assets [--force]                               同步依赖与桌面壳到 runner/',
+        '  v1-verify                                           在 runner/ 强制执行全量 V1（pilot-core+pilot-server test + spotless + checkstyle + quality-gate）',
         '  check-safe [--allow-dogfood-active]                 检查是否有非 dogfood: 用户活跃会话',
-        '  build                                               sync-assets + 在 runner/ 打包 pilot-server jar',
+        '  build [--no-frontend-build]                         构建最新前端并打包 pilot-server jar',
         '  restart [--no-dump] [--no-desktop] [--reopen-desktop] [--allow-dogfood-active]',
         '  rebuild-restart [同上]                              build + restart',
         '  status                                              查看端口、进程、模型设置与桌面窗口状态',
@@ -524,13 +566,16 @@ async function main() {
     case 'sync-assets':
       syncAssets({ force: flags.has('--force') });
       break;
+    case 'v1-verify':
+      runV1Verify();
+      break;
     case 'check-safe': {
       const r = await checkSafe({ allowDogfoodActive: flags.has('--allow-dogfood-active') });
       if (!r.safe) process.exit(2);
       break;
     }
     case 'build':
-      buildRunner();
+      buildRunner({ buildFrontend: !flags.has('--no-frontend-build') });
       break;
     case 'restart':
       await startRunner({
@@ -541,7 +586,7 @@ async function main() {
       });
       break;
     case 'rebuild-restart':
-      buildRunner();
+      buildRunner({ buildFrontend: !flags.has('--no-frontend-build') });
       await startRunner({
         dumpRequests: !flags.has('--no-dump'),
         desktop: !flags.has('--no-desktop'),
