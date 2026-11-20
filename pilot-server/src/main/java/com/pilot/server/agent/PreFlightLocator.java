@@ -195,7 +195,7 @@ final class PreFlightLocator {
         }
         if ((!unresolvedFileNames.isEmpty() || !stemAnchors.isEmpty()) && System.nanoTime() < base.deadline()) {
             long pathDeadline =
-                Math.min(base.deadline(), startedNs + TimeUnit.MILLISECONDS.toNanos(Math.min(120L, softBudgetMs)));
+                Math.min(base.deadline(), startedNs + TimeUnit.MILLISECONDS.toNanos(Math.min(200L, softBudgetMs)));
             ScanContext scan = new ScanContext(base.root(), base.validator(), base.excluded(), pathDeadline,
                 base.timedOut(), base.scores(), base.reasons());
             scanFileNames(scan, unresolvedFileNames, stemAnchors);
@@ -407,6 +407,12 @@ final class PreFlightLocator {
                 if (relative.isEmpty()) {
                     continue;
                 }
+                int slash = relative.lastIndexOf('/');
+                String fileName = slash >= 0 ? relative.substring(slash + 1) : relative;
+                // 先在纯内存完成文件名/类型定义名匹配，再对命中的极少数候选执行磁盘路径与权限校验，避免全仓上千次系统调用拖慢超时。
+                if (!matchesAnyFileOrStem(relative, fileName, fileAnchors, stemAnchors)) {
+                    continue;
+                }
                 Path resolved;
                 try {
                     resolved = scan.validator().resolve(relative);
@@ -439,6 +445,26 @@ final class PreFlightLocator {
             scan.timedOut()[0] = true;
             return false;
         }
+    }
+
+    private static boolean matchesAnyFileOrStem(String display, String fileName, List<Anchor> fileAnchors,
+        List<Anchor> stemAnchors) {
+        String lowerDisplay = display.toLowerCase(Locale.ROOT);
+        String lowerName = fileName.toLowerCase(Locale.ROOT);
+        String lowerStem = fileStem(lowerName);
+        for (Anchor anchor : fileAnchors) {
+            String target = anchor.text().toLowerCase(Locale.ROOT);
+            if (target.contains("/") ? lowerDisplay.equals(target) || lowerDisplay.endsWith("/" + target)
+                : lowerName.equals(target)) {
+                return true;
+            }
+        }
+        for (Anchor anchor : stemAnchors) {
+            if (lowerStem.equals(anchor.text().toLowerCase(Locale.ROOT))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void matchFileCandidate(String display, String fileName, List<Anchor> fileAnchors,

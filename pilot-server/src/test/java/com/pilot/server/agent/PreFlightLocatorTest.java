@@ -117,4 +117,25 @@ class PreFlightLocatorTest {
             result.candidates().toString());
         assertTrue(result.elapsedMs() <= 500L, "真实仓库预定位耗时应在 500ms 内，实际: " + result.elapsedMs() + "ms");
     }
+
+    @Test
+    void exactStemDefinitionOutranksMultipleTestReferences() throws Exception {
+        Files.createDirectories(workspace.resolve("src/main/java/demo"));
+        Files.createDirectories(workspace.resolve("src/test/java/demo"));
+        Files.writeString(workspace.resolve("src/main/java/demo/ReadTracker.java"), "public class ReadTracker {}\n");
+        Files.writeString(workspace.resolve("src/main/java/demo/ReadFileTool.java"),
+            "public class ReadFileTool { static final int DEFAULT_LINES = 200; ReadTracker tracker; }\n");
+        for (int i = 1; i <= 7; i++) {
+            Files.writeString(workspace.resolve("src/test/java/demo/Caller" + i + "Test.java"),
+                "class Caller" + i + "Test { ReadFileTool tool; ReadTracker tracker; }\n");
+        }
+        PreFlightLocator locator = new PreFlightLocator(false, 300, 500, 6);
+        PreFlightLocator.Result result = locator.locate(workspace, new PathValidator(workspace),
+            "修复 ReadTracker 的区间覆盖和 ReadFileTool 的 DEFAULT_LINES", Set.of());
+
+        assertTrue(result.candidatePaths().contains("src/main/java/demo/ReadTracker.java"),
+            "类型定义文件 ReadTracker.java 不应被多个引用两者的测试文件挤出前 6 名: " + result.candidates());
+        assertTrue(result.candidatePaths().contains("src/main/java/demo/ReadFileTool.java"),
+            result.candidates().toString());
+    }
 }
