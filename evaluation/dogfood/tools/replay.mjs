@@ -130,14 +130,15 @@ function sanitizeUrl(urlStr) {
 
 async function applyPatches(baseBody, opts) {
   const body = structuredClone(baseBody);
+  const seq = Array.isArray(body.messages) ? body.messages : Array.isArray(body.input) ? body.input : null;
   if (opts.systemReplaceFile) {
     const newSys = fs.readFileSync(opts.systemReplaceFile, 'utf8');
-    if (Array.isArray(body.messages) && body.messages[0]?.role === 'system') {
-      body.messages[0].content = newSys;
+    if (seq && seq[0]?.role === 'system') {
+      seq[0].content = newSys;
     } else if (typeof body.system === 'string') {
       body.system = newSys;
-    } else if (Array.isArray(body.messages)) {
-      body.messages.unshift({ role: 'system', content: newSys });
+    } else if (seq) {
+      seq.unshift({ role: 'system', content: newSys });
     }
   }
   for (const sub of opts.systemSub) {
@@ -145,8 +146,8 @@ async function applyPatches(baseBody, opts) {
     if (idx < 0) throw new Error(`--system-sub 格式应为 <regex>:::<replacement>: ${sub}`);
     const re = new RegExp(sub.slice(0, idx), 'g');
     const repl = sub.slice(idx + 3);
-    if (Array.isArray(body.messages) && body.messages[0]?.role === 'system' && typeof body.messages[0].content === 'string') {
-      body.messages[0].content = body.messages[0].content.replace(re, repl);
+    if (seq && seq[0]?.role === 'system' && typeof seq[0].content === 'string') {
+      seq[0].content = seq[0].content.replace(re, repl);
     } else if (typeof body.system === 'string') {
       body.system = body.system.replace(re, repl);
     }
@@ -167,10 +168,15 @@ async function applyPatches(baseBody, opts) {
   for (const item of opts.replaceMessage) {
     const sep = item.indexOf(':');
     if (sep < 0) throw new Error(`--replace-message 格式应为 <index>:<textFile>: ${item}`);
-    const index = Number(item.slice(0, sep));
+    const rawIndex = Number(item.slice(0, sep));
     const textPath = item.slice(sep + 1);
-    if (Array.isArray(body.messages) && body.messages[index]) {
-      body.messages[index].content = fs.readFileSync(textPath, 'utf8');
+    if (seq) {
+      const idx = rawIndex < 0 ? seq.length + rawIndex : rawIndex;
+      if (seq[idx]) {
+        const nextText = fs.readFileSync(textPath, 'utf8');
+        if ('output' in seq[idx]) seq[idx].output = nextText;
+        else seq[idx].content = nextText;
+      }
     }
   }
   if (opts.patchModule) {
@@ -222,6 +228,39 @@ function parseSseCompletion(rawText) {
 }
 
 function parseJsonCompletion(obj) {
+  // OpenAI Responses API (/v1/responses)
+  if (Array.isArray(obj.output)) {
+    let text = '';
+    let reasoning = '';
+    const toolCalls = [];
+    for (const item of obj.output) {
+      if (item.type === 'message' && Array.isArray(item.content)) {
+        for (const part of item.content) {
+          if (part.type === 'output_text' || part.type === 'text') {
+            text += part.text || '';
+          }
+        }
+      } else if (item.type === 'function_call') {
+        toolCalls.push({
+          name: item.name || '',
+          arguments: typeof item.arguments === 'string' ? item.arguments : JSON.stringify(item.arguments || {}),
+        });
+      } else if (item.type === 'reasoning') {
+        if (Array.isArray(item.summary)) {
+          reasoning += item.summary.map((s) => s.text || '').join('\n');
+        } else if (typeof item.content === 'string') {
+          reasoning += item.content;
+        }
+      }
+    }
+    return {
+      text,
+      reasoning,
+      toolCalls,
+      finishReason: obj.status || null,
+      usage: obj.usage || null,
+    };
+  }
   // OpenAI Chat Completions
   if (Array.isArray(obj.choices)) {
     const choice = obj.choices[0] || {};
