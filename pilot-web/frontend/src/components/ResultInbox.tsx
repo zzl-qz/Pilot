@@ -18,7 +18,20 @@ import { updateResultUnread } from '../lib/result-unread.js';
 import { Icon } from './Icon.jsx';
 import './results.css';
 
-const labels: Record<string, string> = { COMPLETED: '执行结束', NEEDS_ATTENTION: '需要处理', AWAITING_REVIEW: '待验收' };
+const labels: Record<string, string> = {
+  COMPLETED: '执行结束',
+  NEEDS_ATTENTION: '需要处理',
+  AWAITING_REVIEW: '待验收',
+  FAILED: '待处理',
+  NEED_INPUT: '需要输入',
+  BLOCKED: '遇到阻塞',
+  BUDGET_LIMITED: '已达预算'
+};
+function formatResultTime(value?: string | number | null): string {
+  if (value == null || value === '') return '';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString();
+}
 export default function ResultInbox() {
   const target = useStore(s => s.ui.resultTarget);
   return <InboxDialog target={target} />;
@@ -116,11 +129,15 @@ function InboxDialog({ target }: { target?: string | null }) {
     <div className={`results-layout${selected ? ' has-detail' : ''}`}>
       <section className="results-list" aria-label="结果列表" aria-busy={loading}>
         {hasLoaded && !loading && !listError && !visible.length && <EmptyState title={`暂无${filter === 'handled' ? '已处理' : filter === 'unread' ? '未读' : filter === 'pending' ? '待处理' : ''}结果`} description={filter === 'all' ? '任务完成或需要处理时，结果会显示在这里。' : '可以切换到全部查看其他结果。'} isCompact />}
-        {visible.map(row => <button key={row.id} ref={node => { if (node) rowRefs.current.set(row.id, node); else rowRefs.current.delete(row.id); }} className={`result-card${row.id === selected ? ' is-selected' : ''}`} disabled={busy} aria-pressed={row.id === selected} onClick={() => { lastRow.current = row.id; listScroll.current = bodyRef.current?.scrollTop || 0; setSelected(row.id); }}>
-          <span className="result-card-head"><strong className="result-card-title">{!row.read && <span className="result-unread" aria-label="未读" />}{row.title || '未命名任务'}</strong><Badge label={row.handled ? '已处理' : labels[row.state] || row.state} variant={row.state === 'NEEDS_ATTENTION' && !row.handled ? 'warning' : 'neutral'} /></span>
+        {visible.map(row => {
+          const stateLabel = row.handled ? '已处理' : labels[row.state] || row.state || '待查看';
+          const timeText = formatResultTime(row.at);
+          return <button key={row.id} ref={node => { if (node) rowRefs.current.set(row.id, node); else rowRefs.current.delete(row.id); }} className={`result-card${row.id === selected ? ' is-selected' : ''}`} disabled={busy} aria-pressed={row.id === selected} onClick={() => { lastRow.current = row.id; listScroll.current = bodyRef.current?.scrollTop || 0; setSelected(row.id); }}>
+          <span className="result-card-head"><strong className="result-card-title">{!row.read && <span className="result-unread" aria-label="未读" />}{row.title || '未命名任务'}</strong><Badge label={stateLabel} variant={row.state === 'NEEDS_ATTENTION' && !row.handled ? 'warning' : 'neutral'} /></span>
           <small className="result-card-summary">{row.summary || '暂无摘要'}</small>
-          <small className="result-card-meta">{row.source === 'SCHEDULE' ? '定时任务' : '对话任务'} · {new Date(row.at).toLocaleString()}</small>
-        </button>)}
+          <small className="result-card-meta">{row.source === 'SCHEDULE' ? '定时任务' : '对话任务'}{timeText ? ` · ${timeText}` : ''}</small>
+        </button>;
+        })}
       </section>
       {selected && <section ref={detailRef} className="result-detail" tabIndex={-1} aria-label="结果详情" aria-busy={detailLoading}>
         <Button className="results-back" label="返回结果列表" variant="ghost" isDisabled={busy} onClick={() => { lastRow.current = selected; setSelected(null); }} />
