@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
+import com.pilot.core.message.ToolNames;
 import com.pilot.core.model.MeteredModelClient;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelPricing;
@@ -450,6 +451,44 @@ class CacheContextTest {
         assertTrue(requests.get(0).getLast().content().contains("<candidate-targets>"));
         assertFalse(requests.get(1).stream().anyMatch(m -> m.content().contains("<candidate-targets>")),
             "首轮已读取候选文件后，第 2 轮应清退尾部引导以保持严格 append_only");
+        assertEquals(requests.get(1), requests.get(2).subList(0, requests.get(1).size()));
+    }
+
+    @Test
+    void phaseHintClearsAfterNonCandidateExplorationSoNextTurnsStayAppendOnly() {
+        var requests = new ArrayList<List<Message>>();
+        ModelClient model = new ModelClient() {
+            public ModelProfile profile() {
+                return ModelProfile.resolve(null, "test", "generic", "auto", "", true, null, "short", null);
+            }
+
+            public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
+                requests.add(List.copyOf(messages));
+                return switch (requests.size()) {
+                    case 1 -> new ModelResponse("",
+                        List.of(new ToolCall("s1", ToolNames.SEARCH_TEXT, Map.of("pattern", "needle"))));
+                    case 2 -> new ModelResponse("",
+                        List.of(new ToolCall("r1", ToolNames.READ_FILE, Map.of("path", "RealTarget.java"))));
+                    default -> new ModelResponse("done", List.of());
+                };
+            }
+        };
+        var tools = new ToolRegistry();
+        tools.register(stubTool(ToolNames.SEARCH_TEXT, true, "RealTarget.java:1: needle", List.of()));
+        tools.register(stubTool(ToolNames.READ_FILE, true, "class RealTarget {}", List.of()));
+        var config = new AgentLoop.Config(6, 0, 5, "stable-system", List::of, 0, 100_000, false);
+        var loop =
+            new AgentLoop(model, tools, new PolicyPermissionGate(PermissionMode.AUTO), config).withInitialPhaseHint(
+                "<candidate-targets>\n- WrongGuess.java\n</candidate-targets>", Set.of("WrongGuess.java"));
+
+        var result = loop.run("find needle without path", List.of(), ignored -> {
+        });
+
+        assertNull(result.failureCode());
+        assertEquals(3, requests.size());
+        assertTrue(requests.get(0).getLast().content().contains("<candidate-targets>"));
+        assertFalse(requests.get(1).stream().anyMatch(m -> m.content().contains("<candidate-targets>")),
+            "首轮执行 search_text 后应立即清退未命中的候选尾部提示，避免后续多轮连续移位破缓存");
         assertEquals(requests.get(1), requests.get(2).subList(0, requests.get(1).size()));
     }
 

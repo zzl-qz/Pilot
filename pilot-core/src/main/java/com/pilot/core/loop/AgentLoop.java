@@ -210,8 +210,10 @@ public final class AgentLoop {
     private static final int MAX_MALFORMED_TOOL_RETRIES = 3;
     /** 同一地址连续这么多次快照都没有可点击元素，就停止验收，不再重开页面。 */
     private static final int MAX_EMPTY_BROWSER_SNAPSHOTS = 3;
-    /** 阶段尾部候选提示默认存活的模型请求次数；首次文件编辑后会提前清退。 */
-    static final int DEFAULT_PHASE_HINT_TURNS = 3;
+    /** 阶段尾部候选提示默认存活的模型请求次数；进入探索或首次编辑后立即清退以保持前缀 append_only。 */
+    static final int DEFAULT_PHASE_HINT_TURNS = 2;
+    private static final Set<String> PHASE_HINT_EXPLORE_TOOLS =
+        Set.of(ToolNames.READ_FILE, ToolNames.SEARCH_TEXT, ToolNames.GLOB_FILES, "code_symbol", "file_outline");
     private static final String REPEAT_GUIDANCE = "上一次回复陷入逐行重复（同一行连续出现多次），已中止。" + "请重新组织答案：不要重复相同句子或列表项，直接推进未完成的部分。";
     private static final String MALFORMED_TOOL_GUIDANCE =
         "上一次响应的工具调用参数不是合法 JSON，本次调用未执行。请重新输出严格合法的 JSON 对象参数（注意转义双引号与换行），或将较大补丁拆小后分次提交。";
@@ -1131,7 +1133,7 @@ public final class AgentLoop {
         if (!outcome.changedPaths().isEmpty()) {
             clearPhaseHint();
         } else if (!ToolResults.isError(outcome.result()) && !ToolResults.isSkipped(outcome.result())) {
-            clearPhaseHintIfCandidateRead(call);
+            clearPhaseHintIfExplored(call);
         }
         for (String check : outcome.checks()) {
             if (!checks.contains(check)) {
@@ -1471,12 +1473,18 @@ public final class AgentLoop {
         phaseHint = next > 0 ? new PhaseHint(current.content(), next, current.candidates()) : null;
     }
 
-    private void clearPhaseHintIfCandidateRead(ToolCall call) {
+    private void clearPhaseHintIfExplored(ToolCall call) {
         PhaseHint current = phaseHint;
-        if (current == null || current.candidates().isEmpty() || call == null || call.args() == null) {
+        if (current == null || call == null) {
             return;
         }
-        if (!ToolNames.READ_FILE.equals(call.name()) && !"code_symbol".equals(call.name())) {
+        // 模型只要已经发起有效代码读取或检索（无论是否命中候选清单），首轮预定位提示就已经完成使命，
+        // 立即清退可避免无路径任务里尾部提示连续多轮移位破坏前缀缓存。
+        if (PHASE_HINT_EXPLORE_TOOLS.contains(call.name())) {
+            clearPhaseHint();
+            return;
+        }
+        if (current.candidates().isEmpty() || call.args() == null) {
             return;
         }
         Object raw = call.args().get("path");

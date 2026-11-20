@@ -1,9 +1,18 @@
 package com.pilot.core.tool.command;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import com.pilot.core.tool.ToolResults;
 import com.pilot.core.util.WireEnum;
@@ -18,8 +27,14 @@ final class CommandToolSupport {
     private static final int CHECK_COMMAND_TAIL_CHARS = 70;
     private static final int SANDBOX_LOG_TAIL_CHARS = 8_000;
     private static final int MAC_SEATBELT_EX_OSERR = 71;
+    private static final int MAX_REPORT_FILES = 24;
+    private static final int MAX_REPORT_READ_BYTES = 256 * 1024;
+    private static final long REPORT_MTIME_SKEW_MILLIS = 2_000L;
+    private static final Pattern TEST_REPORT_FAIL_ATTR = Pattern.compile("(?:failures|errors)=\"[1-9][0-9]*\"");
+    private static final Pattern CONSOLE_TEST_FAILURE = Pattern.compile(
+        "(?i)(?:surefire-reports|failsafe-reports|\\[ERROR\\]\\s+(?:Failures|Errors):|Failures:\\s*[1-9]|Errors:\\s*[1-9])");
     static final String NESTED_SANDBOX_HINT =
-        "[环境提示] 检测到嵌套 OS 沙箱失败（当前命令已在系统沙箱内运行，macOS Seatbelt / Linux bwrap 禁止在沙箱内再次创建子沙箱），"
+        ToolResults.NESTED_SANDBOX_HINT_PREFIX + "（当前命令已在系统沙箱内运行，macOS Seatbelt / Linux bwrap 禁止在沙箱内再次创建子沙箱），"
             + "这属于外层沙箱环境限制而非业务代码缺陷。请优先运行与本次改动直接相关的定向单测并明确区分环境限制，不要反复排查无关的沙箱隔离测试。";
 
     private CommandToolSupport() {
@@ -130,7 +145,111 @@ final class CommandToolSupport {
         if (tail == null) {
             return "";
         }
+        if (task.workdir() != null && !task.workdir().isBlank() && CONSOLE_TEST_FAILURE.matcher(tail.text()).find()) {
+            Boolean allReportsSandboxBlocked = inspectFailingTestReports(Path.of(task.workdir()), task.startedAt());
+            if (allReportsSandboxBlocked != null) {
+                return allReportsSandboxBlocked ? NESTED_SANDBOX_HINT : "";
+            }
+        }
         return nestedSandboxHint(tail.text(), task.exitCode());
+    }
+
+    /**
+     * Maven/Gradle 测试 runner 常把子进程 stderr 收进 XML 报告而不在主控制台输出。
+     * 仅当本次命令期间生成的全部失败测试报告都命中嵌套沙箱特征时才提示环境限制；
+     * 只要有任意一份失败报告属于普通业务失败，立即返回空串，绝不掩盖真实缺陷。
+     */
+    static String nestedSandboxHintFromTestReports(Path workdir, Instant startedAt) {
+        return Boolean.TRUE.equals(inspectFailingTestReports(workdir, startedAt)) ? NESTED_SANDBOX_HINT : "";
+    }
+
+    /**
+     * @return {@code Boolean.TRUE} 表示所有新失败报告都因嵌套沙箱失败；{@code Boolean.FALSE} 表示存在非沙箱真实失败；
+     *         {@code null} 表示未发现新失败 XML 报告，由调用方回退到控制台输出检测。
+     */
+    private static Boolean inspectFailingTestReports(Path workdir, Instant startedAt) {
+        if (workdir == null || !Files.isDirectory(workdir)) {
+            return null;
+        }
+        long minMtime = startedAt == null ? 0L : Math.max(0L, startedAt.toEpochMilli() - REPORT_MTIME_SKEW_MILLIS);
+        List<Path> reportDirs = findTestReportDirs(workdir);
+        int failingReports = 0;
+        for (Path dir : reportDirs) {
+            List<Path> xmls = recentXmlReports(dir, minMtime);
+            for (Path xml : xmls) {
+                String text = readBounded(xml);
+                if (!TEST_REPORT_FAIL_ATTR.matcher(text).find()) {
+                    continue;
+                }
+                failingReports++;
+                if (nestedSandboxHint(text, null).isEmpty()) {
+                    return Boolean.FALSE;
+                }
+            }
+        }
+        return failingReports > 0 ? Boolean.TRUE : null;
+    }
+
+    private static List<Path> findTestReportDirs(Path workdir) {
+        List<Path> found = new ArrayList<>();
+        collectTestReportDirs(workdir, found);
+        try (Stream<Path> children = Files.list(workdir)) {
+            children.filter(Files::isDirectory).filter(p -> !isIgnoredSubdir(p.getFileName()))
+                .forEach(child -> collectTestReportDirs(child, found));
+        } catch (IOException | RuntimeException ignored) {
+            return found;
+        }
+        return found;
+    }
+
+    private static void collectTestReportDirs(Path moduleRoot, List<Path> found) {
+        for (Path candidate : List.of(moduleRoot.resolve("target").resolve("surefire-reports"),
+            moduleRoot.resolve("target").resolve("failsafe-reports"),
+            moduleRoot.resolve("build").resolve("test-results"))) {
+            if (Files.isDirectory(candidate)) {
+                found.add(candidate);
+            }
+        }
+    }
+
+    private static boolean isIgnoredSubdir(Path name) {
+        if (name == null) {
+            return true;
+        }
+        String n = name.toString();
+        return n.startsWith(".") || "node_modules".equals(n) || "target".equals(n) || "build".equals(n);
+    }
+
+    private static List<Path> recentXmlReports(Path dir, long minMtime) {
+        List<Path> files = new ArrayList<>();
+        try (Stream<Path> walk = Files.walk(dir, 2)) {
+            walk.filter(Files::isRegularFile).filter(p -> {
+                Path fn = p.getFileName();
+                return fn != null && fn.toString().startsWith("TEST-") && fn.toString().endsWith(".xml");
+            }).filter(p -> modifiedAtLeast(p, minMtime)).limit(MAX_REPORT_FILES).forEach(files::add);
+        } catch (IOException | RuntimeException ignored) {
+            return List.of();
+        }
+        return files;
+    }
+
+    private static boolean modifiedAtLeast(Path file, long minMtime) {
+        if (minMtime <= 0L) {
+            return true;
+        }
+        try {
+            return Files.getLastModifiedTime(file).toMillis() >= minMtime;
+        } catch (IOException ignored) {
+            return false;
+        }
+    }
+
+    private static String readBounded(Path file) {
+        try (InputStream in = Files.newInputStream(file)) {
+            return new String(in.readNBytes(MAX_REPORT_READ_BYTES), StandardCharsets.UTF_8);
+        } catch (IOException ignored) {
+            return "";
+        }
     }
 
     static long integerArg(Map<String, Object> args, String name, long fallback, long min, long max) {

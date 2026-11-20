@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.pilot.core.message.ToolCall;
+import com.pilot.core.tool.ToolResults;
 import com.pilot.core.workspace.AgentScope;
 import com.pilot.core.workspace.PathValidator;
 
@@ -416,6 +418,44 @@ class RunCommandToolTest {
         // 普通测试或编译失败不能误报为嵌套沙箱环境问题
         assertEquals("", CommandToolSupport.nestedSandboxHint("AssertionFailedError: expected <1> but was <2>", 1));
         assertEquals("", CommandToolSupport.nestedSandboxHint("BUILD SUCCESS", 0));
+    }
+
+    @Test
+    void detectsNestedSandboxFromFreshSurefireReportsOnlyWhenAllFailuresAreSandboxBlocked() throws Exception {
+        Path reports = Files.createDirectories(workspace.resolve("pilot-server/target/surefire-reports"));
+        Instant startedAt = Instant.now().minusSeconds(1);
+        Path sandboxFail = reports.resolve("TEST-com.example.BackgroundCommandRunTest.xml");
+        Files.writeString(sandboxFail, """
+            <testsuite name="BackgroundCommandRunTest" tests="1" failures="1" errors="0">
+              <testcase name="runs"><failure>sandbox-exec: sandbox_apply: Operation not permitted</failure></testcase>
+            </testsuite>
+            """);
+
+        String detected = CommandToolSupport.nestedSandboxHintFromTestReports(workspace, startedAt);
+        assertTrue(detected.startsWith(ToolResults.NESTED_SANDBOX_HINT_PREFIX), detected);
+
+        // 只要同一次运行中混入真实业务失败报告，就绝不能误判成纯环境限制
+        Path realFail = reports.resolve("TEST-com.example.BusinessLogicTest.xml");
+        Files.writeString(realFail, """
+            <testsuite name="BusinessLogicTest" tests="1" failures="1" errors="0">
+              <testcase name="calculates"><failure>expected &lt;2&gt; but was &lt;3&gt;</failure></testcase>
+            </testsuite>
+            """);
+        assertEquals("", CommandToolSupport.nestedSandboxHintFromTestReports(workspace, startedAt));
+
+        // 清理真实失败报告，但将时间锚点设为未来，验证旧历史报告不会被误命中
+        Files.delete(realFail);
+        assertEquals("", CommandToolSupport.nestedSandboxHintFromTestReports(workspace, Instant.now().plusSeconds(30)));
+    }
+
+    @Test
+    void toolResultsNestedSandboxCheckOnlyInspectsTrustedHeaderNotCommandOutput() {
+        String trusted = "隔离：macOS Seatbelt\n" + CommandToolSupport.NESTED_SANDBOX_HINT + "\nERROR: 命令未成功完成\n输出:\nfail";
+        assertTrue(ToolResults.isNestedSandboxFailure(trusted));
+
+        // 命令标准输出里出现相同字样不能伪造外层沙箱环境提示
+        String spoofed = "隔离：macOS Seatbelt\nERROR: 命令未成功完成\n输出:\n" + CommandToolSupport.NESTED_SANDBOX_HINT;
+        assertFalse(ToolResults.isNestedSandboxFailure(spoofed));
     }
 
     private RunCommandTool tool() {
