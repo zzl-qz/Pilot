@@ -451,7 +451,7 @@ function ScheduleDialog({ seed }: { seed?: string | null }) {
                 }}>
                 <span className="schedule-row-name"><strong>{row.name}</strong><small className="automation-meta">{row.message}</small></span>
                 <span className="schedule-row-date"><time dateTime={row.runAt}>{stamp(row.runAt, row.timezone)}</time><small className="automation-meta">{row.timezone || 'UTC'}</small></span>
-                <Badge variant={row.state === 'NEEDS_ATTENTION' ? 'warning' : 'neutral'} label={labels[row.state] || row.state} />
+                <Badge variant={row.state === 'NEEDS_ATTENTION' ? 'warning' : 'neutral'} label={labels[row.state] || row.state || '待执行'} />
               </button>)}
             </section>
             {job ? (

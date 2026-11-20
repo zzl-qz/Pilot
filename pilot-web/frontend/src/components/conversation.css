@@ -195,9 +195,11 @@ html[data-theme] .conversation-thread .conversation-reply-head .reply-actions {
   transition: opacity 0.14s ease;
 }
 @media (hover: hover) and (pointer: fine) {
-  html[data-theme] .conversation-thread .msg-user:not(:hover):not(:focus-within) .msg-actions,
+  html[data-theme] .conversation-thread .msg-user:not(:hover):not(:focus-within) .msg-actions {
+    opacity: 0.35;
+  }
   html[data-theme] .conversation-thread .msg-assistant:not(:hover):not(:focus-within) .reply-actions {
-    opacity: 0;
+    opacity: 0.48;
   }
 }
 html[data-theme] .conversation-thread .message-action { width: 28px; height: 28px; border-radius: 6px; }
