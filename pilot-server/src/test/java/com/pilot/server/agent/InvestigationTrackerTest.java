@@ -1,5 +1,6 @@
 package com.pilot.server.agent;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -87,6 +88,45 @@ class InvestigationTrackerTest {
             new ToolExecutor.Outcome(ToolNames.RUN_COMMAND, "AssertionError at AppTest:15", List.of(),
                 List.of("mvn test → exit 1"), ToolExecutor.OutcomeStatus.PERMANENT_FAILURE));
         assertNull(tracker.nextNudge(false));
+    }
+
+    @Test
+    void temporaryProbeWritesDoNotResetStallWindowButRealEditsDo() {
+        InvestigationTracker tracker = new InvestigationTracker();
+        for (int i = 1; i <= 6; i++) {
+            tracker.observe(new ToolCall("s" + i, ToolNames.SEARCH_TEXT, Map.of("pattern", "miss" + i)),
+                new ToolExecutor.Outcome(ToolNames.SEARCH_TEXT, "未找到匹配项: miss" + i, null, null));
+        }
+        assertNotNull(tracker.nextNudge(false));
+
+        tracker.observe(new ToolCall("probe", ToolNames.EDIT_FILE, Map.of("path", ".analysis/inspect.py")),
+            new ToolExecutor.Outcome(ToolNames.EDIT_FILE, "已修改", List.of(".analysis/inspect.py"), List.of(),
+                ToolExecutor.OutcomeStatus.SUCCESS));
+        assertEquals(6, tracker.phaseObservations(), "临时探针写入不能清空调查计数");
+
+        tracker.observe(new ToolCall("real", ToolNames.EDIT_FILE, Map.of("path", "src/App.java")),
+            new ToolExecutor.Outcome(ToolNames.EDIT_FILE, "已修改", List.of("src/App.java"), List.of(),
+                ToolExecutor.OutcomeStatus.SUCCESS));
+        assertEquals(0, tracker.phaseObservations(), "实际源码改动应开启新阶段");
+        assertEquals(0, tracker.consecutiveLowGainNudges(), "实际源码改动应清除连续提醒数");
+    }
+
+    @Test
+    void threeLowGainNudgesAreCountedAndResetBySteeringOrProgress() {
+        InvestigationTracker tracker = new InvestigationTracker();
+        for (int nudge = 1; nudge <= 3; nudge++) {
+            int observations = nudge == 1 ? 6 : 4;
+            for (int i = 0; i < observations; i++) {
+                String id = nudge + "-" + i;
+                tracker.observe(new ToolCall(id, ToolNames.SEARCH_TEXT, Map.of("pattern", "miss-" + id)),
+                    new ToolExecutor.Outcome(ToolNames.SEARCH_TEXT, "未找到匹配项: " + id, null, null));
+            }
+            assertNotNull(tracker.nextNudge(false));
+            assertEquals(nudge, tracker.consecutiveLowGainNudges());
+        }
+
+        tracker.reset();
+        assertEquals(0, tracker.consecutiveLowGainNudges(), "steering 重置阶段时应清除连续提醒数");
     }
 
     @Test

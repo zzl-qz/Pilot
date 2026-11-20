@@ -20,19 +20,14 @@
             <groupId>org.yaml</groupId>
             <artifactId>snakeyaml</artifactId>
         </dependency>
-        <!-- 单模块构建也直接编译 core 的沙箱 diff 源码。 -->
         <dependency>
             <groupId>io.github.java-diff-utils</groupId>
             <artifactId>java-diff-utils</artifactId>
         </dependency>
-        <!-- 本模块通过 build-helper 直接编译 core 源码；单模块启动时本地 core POM
-             可能仍是旧版，因此新增 Office 运行依赖必须直接声明，不能只靠其传递依赖。
-             版本由父 POM 统一管理，无需先 install core，也无需嵌套启动 Maven。 -->
         <dependency>
             <groupId>org.apache.poi</groupId>
             <artifactId>poi-ooxml</artifactId>
         </dependency>
-        <!-- office 的 PDF 生成/渲染在 core 源码里，单模块编译时必须直接可见。 -->
         <dependency>
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
@@ -106,25 +101,6 @@
                             <environmentVariables>
                                 <CI>true</CI>
                             </environmentVariables>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-            <!-- 同一进程里编译 core 源码，不再另起一次 Maven 去 install。
-                 另起的 Maven 会和 IDEA 这次构建抢 ~/.m2 的锁，启动直接失败。 -->
-            <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>build-helper-maven-plugin</artifactId>
-                <version>3.6.0</version>
-                <executions>
-                    <execution>
-                        <id>add-core-sources</id>
-                        <phase>generate-sources</phase>
-                        <goals><goal>add-source</goal></goals>
-                        <configuration>
-                            <sources>
-                                <source>${project.basedir}/../pilot-core/src/main/java</source>
-                            </sources>
                         </configuration>
                     </execution>
                 </executions>

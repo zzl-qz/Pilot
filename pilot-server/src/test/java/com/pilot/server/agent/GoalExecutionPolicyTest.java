@@ -1168,4 +1168,24 @@ class GoalExecutionPolicyTest {
         }
         assertNull(policy.requestGuidance(), "steering 重置后未满阈值不应误触发");
     }
+
+    @Test
+    void repeatedLowGainNudgesStopRunWithNoProgress() {
+        GoalExecutionPolicy policy = policy((messages, tools) -> new ModelResponse("unused", List.of()), 30);
+        policy.beforeRequest(history);
+
+        for (int nudge = 1; nudge <= 3; nudge++) {
+            int observations = nudge == 1 ? 6 : 4;
+            for (int i = 0; i < observations; i++) {
+                observe(policy, ToolNames.SEARCH_TEXT, "", "未找到匹配项: miss-" + nudge + "-" + i, null);
+            }
+            if (nudge < 3) {
+                assertNotNull(policy.requestGuidance());
+            } else {
+                ExecutionPolicy.Stop stop = assertThrows(ExecutionPolicy.Stop.class, policy::requestGuidance);
+                assertEquals("NO_PROGRESS", stop.code());
+                assertTrue(stop.getMessage().contains("连续 3 次"), stop.getMessage());
+            }
+        }
+    }
 }

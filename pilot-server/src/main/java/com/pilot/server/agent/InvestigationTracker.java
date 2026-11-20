@@ -42,6 +42,7 @@ final class InvestigationTracker {
     static final int BROAD_NUDGE_MIN_FILES = 8;
     /** 即使只围绕少数核心文件，持续零编辑观察达到此值也应发出非阻断收敛检查点。 */
     static final int PROLONGED_NO_EDIT_AT = 14;
+    static final int NO_PROGRESS_STOP_AFTER_NUDGES = 3;
     /** 同一文件在本阶段被反复读取/检索达到该次数，记为高频热点文件。 */
     static final int HOTSPOT_FILE_OBS = 4;
     private static final int DISPLAY_HOTSPOT_MIN_OBS = 3;
@@ -78,6 +79,7 @@ final class InvestigationTracker {
     private final Set<String> verificationHashes = new HashSet<>();
     private int phaseObservations;
     private int zeroGainStreak;
+    private int consecutiveLowGainNudges;
     private int lastLowGainNudgeAt = -LOW_GAIN_COOLDOWN;
     private int nextBroadNudgeAt = BROAD_NUDGE_FIRST_AT;
 
@@ -91,6 +93,7 @@ final class InvestigationTracker {
         commandOutputHashes.clear();
         phaseObservations = 0;
         zeroGainStreak = 0;
+        consecutiveLowGainNudges = 0;
         lastLowGainNudgeAt = -LOW_GAIN_COOLDOWN;
         nextBroadNudgeAt = BROAD_NUDGE_FIRST_AT;
     }
@@ -99,9 +102,14 @@ final class InvestigationTracker {
         if (call == null || outcome == null) {
             return;
         }
-        // 1. 实质性文件写入立即开启新阶段
-        if (!outcome.changedPaths().isEmpty()
-            || (ToolNames.FILE_EDITS.contains(call.name()) && outcome.status() == ToolExecutor.OutcomeStatus.SUCCESS)) {
+        // 临时诊断脚本不是任务产物，不能清空调查停滞窗口。
+        boolean substantiveWrite = outcome.changedPaths().stream().anyMatch(path -> !isTemporaryPath(path));
+        if (!substantiveWrite && ToolNames.FILE_EDITS.contains(call.name())
+            && outcome.status() == ToolExecutor.OutcomeStatus.SUCCESS) {
+            String target = normalizePath(arg(call, "path"));
+            substantiveWrite = !target.isEmpty() && !isTemporaryPath(target);
+        }
+        if (substantiveWrite) {
             verificationHashes.clear();
             reset();
             return;
@@ -135,6 +143,7 @@ final class InvestigationTracker {
             && phaseObservations - lastLowGainNudgeAt >= LOW_GAIN_COOLDOWN;
         if (lowGainHit) {
             lastLowGainNudgeAt = phaseObservations;
+            consecutiveLowGainNudges++;
             String breakdown = formatBreakdown();
             String hotspots = formatHotspots();
             if (readOnlyOrResearch) {
@@ -183,6 +192,21 @@ final class InvestigationTracker {
 
     synchronized int distinctReadFiles() {
         return readFiles.size();
+    }
+
+    synchronized int consecutiveLowGainNudges() {
+        return consecutiveLowGainNudges;
+    }
+
+    private static boolean isTemporaryPath(String raw) {
+        String path = normalizePath(raw);
+        for (String part : path.split("/")) {
+            String name = part.toLowerCase(java.util.Locale.ROOT);
+            if (name.equals(".analysis") || name.equals(".pilot") || name.startsWith("tmp-") || name.endsWith(".tmp")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean isResettingVerification(ToolExecutor.Outcome outcome) {

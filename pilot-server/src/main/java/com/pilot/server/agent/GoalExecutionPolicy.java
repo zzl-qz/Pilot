@@ -261,6 +261,12 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         if (nudge == null) {
             return null;
         }
+        if (nudge.lowGain()
+            && investigation.consecutiveLowGainNudges() >= InvestigationTracker.NO_PROGRESS_STOP_AFTER_NUDGES) {
+            throw new Stop(RunFailureCode.NO_PROGRESS,
+                "连续 " + investigation.consecutiveLowGainNudges() + " 次调查收敛提醒后仍无实质性改动或验证，已停止以避免空转。"
+                    + "最近诊断：" + nudge.summary());
+        }
         log.info("Investigation nudge: session={} lowGain={} obs={} files={} diag={} summary={}", session,
             nudge.lowGain(), investigation.phaseObservations(), investigation.distinctReadFiles(), nudge.diagnostics(),
             nudge.summary());
