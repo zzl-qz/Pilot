@@ -1475,11 +1475,25 @@ html[data-theme] .conversation-composer :is(.task-live-controls, .approval-card,
   background: var(--bg-soft);
   box-shadow: none;
 }
-.conversation-composer .approval-dock { display: grid; gap: 4px; }
-.conversation-composer .approval-card { padding: 8px 10px; }
-.conversation-composer .approval-title { display: flex; align-items: center; gap: 7px; color: var(--ink); font-size: 13px; }
-.conversation-composer .approval-args { max-height: 6em; padding: 5px 8px; font-size: 12px; }
-.conversation-composer .approval-actions { align-items: center; justify-content: flex-end; gap: 6px; }
+.conversation-composer .approval-dock { display: grid; gap: 6px; }
+html[data-theme] .conversation-composer .approval-card {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border-color: color-mix(in srgb, var(--warn) 42%, var(--line-soft));
+  background: color-mix(in srgb, var(--warn) 6%, var(--bg-soft));
+}
+.conversation-composer .approval-title { display: flex; align-items: center; gap: 7px; color: var(--ink); font-size: 13px; font-weight: 560; }
+.conversation-composer .approval-args {
+  max-height: 7em;
+  padding: 7px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow: auto;
+}
+.conversation-composer .approval-actions { align-items: center; justify-content: flex-end; gap: 8px; }
 .conversation-composer .approval-actions > [role="status"] { margin-inline-end: auto; color: var(--muted); font-size: 12px; }
 .conversation-composer .queue-actions button[data-variant] { border: 0; }
 .conversation-composer .queue-steer-action { font-size: 12px; white-space: nowrap; }

@@ -28,7 +28,8 @@ export { Modal };
 
 /** 任务契约状态 → 中文（与旧版 renderTaskContract 的映射一致）。 */
 const TASK_STATUS_LABELS: Record<string, string> = {
-  ACTIVE: '执行中', PAUSED: '已暂停', INTERRUPTED: '已中断',
+  ACTIVE: '执行中', RUNNING: '执行中', WAITING_APPROVAL: '等待批准',
+  PAUSED: '已暂停', INTERRUPTED: '已中断', CANCELLED: '已取消',
   AWAITING_REVIEW: '待验收', COMPLETED: '已验收', FAILED: '待处理',
   BLOCKED: '遇到阻塞', BUDGET_LIMITED: '已达预算',
   WAITING: '等待外部事件', NEED_INPUT: '需要输入',

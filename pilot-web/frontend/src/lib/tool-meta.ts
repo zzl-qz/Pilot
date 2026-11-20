@@ -89,9 +89,18 @@ function shortId(value: string) {
 }
 
 function toolArgsText(name: string, args: unknown) {
-  const raw = String(args || '').trim();
+  const obj = args && typeof args === 'object' && !Array.isArray(args) ? (args as Record<string, unknown>) : null;
+  const raw = obj
+    ? (() => {
+        for (const key of ['command', 'path', 'file', 'pattern', 'query', 'url', 'question', 'task']) {
+          if (obj[key] != null && String(obj[key]).trim()) return String(obj[key]).trim();
+        }
+        try { return JSON.stringify(obj); } catch { return ''; }
+      })()
+    : String(args || '').trim();
   if (!raw) return '';
   const field = (key: string) => {
+    if (obj && obj[key] != null) return String(obj[key]).trim();
     const match = raw.match(new RegExp(`(?:^|[{,\\s])${key}=([^,}\\s]+)`));
     return match ? match[1].trim().replace(/^["']|["']$/g, '') : '';
   };

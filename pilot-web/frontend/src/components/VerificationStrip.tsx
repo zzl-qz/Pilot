@@ -58,6 +58,7 @@ export function VerificationStrip() {
 
 /** 任务还在跑：只报当前动作，不给验证结论，也不提供「重新验证」。 */
 function RunningStatus() {
+  const hasApprovals = useStore(state => Object.keys(state.pendingApprovals || {}).length > 0);
   const phase = useStore(runPhase);
   const startedAt = useStore(state => state.runStartedAt);
   const detail = useStore(state => currentAction(state.thread));
@@ -66,6 +67,7 @@ function RunningStatus() {
     const timer = setInterval(() => setTick(value => value + 1), 1000);
     return () => clearInterval(timer);
   }, []);
+  if (hasApprovals) return null;
   const clock = startedAt ? formatClock(Math.round((Date.now() - startedAt) / 1000)) : '';
   const text = detail ? `${phase} · ${detail}` : phase;
   return (
@@ -78,9 +80,9 @@ function RunningStatus() {
   );
 }
 
-function currentAction(thread: { rows?: { type?: string; tools?: { status?: string; name?: string; args?: string }[] }[] } | null | undefined) {
+function currentAction(thread: { rows?: { type?: string; tools?: { status?: string; name?: string; args?: unknown }[] }[] } | null | undefined) {
   const turn = [...(thread?.rows || [])].reverse().find(row => row.type === 'turn');
-  const tool = [...(turn?.tools || [])].reverse().find(item => item.status === 'run');
+  const tool = [...(turn?.tools || [])].reverse().find(item => item.status === 'run' || item.status === 'running');
   if (!tool) return '';
   const args = toolArgsText(tool.name || '', tool.args).replace(/\s+/g, ' ').trim();
   if (!args) return toolLabel(tool.name || '');

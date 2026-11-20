@@ -142,3 +142,9 @@ test('summarizeActiveTool 提取当前运行中工具的简短摘要', () => {
     ''
   );
 });
+
+test('toolArgsText 收到结构化对象参数时提取核心字段而不输出 [object Object]', () => {
+  assert.equal(toolArgsText('run_command', { command: 'mvn test' }), 'mvn test');
+  assert.equal(toolArgsText('edit_file', { path: 'src/App.tsx' }), 'src/App.tsx');
+  assert.equal(toolArgsText('command_status', { taskId: 'abc1234567890', waitSeconds: 10 }), 'abc12345… · 最多等 10 秒');
+});

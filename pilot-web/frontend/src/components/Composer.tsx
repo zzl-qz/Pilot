@@ -941,6 +941,16 @@ function ResumeBar() {
 }
 
 /** 底部审批 dock：需要人工批准的工具调用。 */
+function formatApprovalArgs(name: string, raw: unknown): string {
+  const fromMeta = toolArgsText(name, raw);
+  if (fromMeta) return fromMeta;
+  if (typeof raw === 'string') return raw;
+  if (raw && typeof raw === 'object') {
+    try { return JSON.stringify(raw, null, 2); } catch { return ''; }
+  }
+  return '';
+}
+
 function ApprovalDock() {
   const pending = useStore((state) => state.pendingApprovals);
   const resolve = useStore((state) => state.resolveApproval);
@@ -957,15 +967,17 @@ function ApprovalDock() {
         const tool = typeof item.structuredArgs?.tool === 'string' ? item.structuredArgs.tool as string : '';
         const configHash = typeof item.structuredArgs?.configHash === 'string' ? item.structuredArgs.configHash : '';
         const toolHash = typeof item.structuredArgs?.toolHash === 'string' ? item.structuredArgs.toolHash : '';
-        const isMcp = item.name === 'mcp_tools' || item.name === 'mcp_call';
+        const toolName = item.name || (item as { tool?: string }).tool || '';
+        const formattedArgs = formatApprovalArgs(toolName, item.args);
+        const isMcp = toolName === 'mcp_tools' || toolName === 'mcp_call';
         return (
-          <article key={item.callId} className="approval-card" data-tool-name={item.name} aria-busy={item.busy}>
-            <h3 className="approval-title"><StatusDot variant="warning" label="待审批" aria-hidden="true" />需要你批准：{toolLabel(item.name)}</h3>
-            <pre className="approval-args" tabIndex={0} aria-label="操作参数">{toolArgsText(item.name, item.args) || item.args}</pre>
+          <article key={item.callId || toolName} className="approval-card" data-tool-name={toolName} aria-busy={item.busy}>
+            <h3 className="approval-title"><StatusDot variant="warning" label="待审批" aria-hidden="true" />需要你批准：{toolLabel(toolName)}</h3>
+            {formattedArgs && <pre className="approval-args" tabIndex={0} aria-label="操作参数">{formattedArgs}</pre>}
             <div className="approval-actions">
               {item.busy && <span role="status">正在确认审批…</span>}
               <Button label="拒绝" size="sm" variant="ghost" isDisabled={item.busy} onClick={() => resolve(item.callId, false)} />
-              <Button label="批准" size="sm" isDisabled={item.busy} onClick={() => resolve(item.callId, true)} />
+              <Button label="批准" size="sm" variant="primary" isDisabled={item.busy} onClick={() => resolve(item.callId, true)} />
               {isMcp && server && configHash && (
                 <Button label="批准并信任服务器" size="sm" variant="ghost" isDisabled={item.busy}
                   aria-label={`记住 ${server} 当前这条启动命令，之后再启动不再询问`}
