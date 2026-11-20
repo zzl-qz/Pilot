@@ -126,15 +126,9 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     }
 
     Map<String, Object> requestBody(List<Message> messages, List<ToolDefinition> definitions, boolean streaming) {
-        ModelCapacity capacity = ModelCapacity.configured();
+        ModelCapacity capacity = ModelCapacity.active();
         RequestBudget.enforce(messages, definitions, capacity);
-        Map<String, Object> body = new LinkedHashMap<>();
-        int lastUser = -1;
-        for (int i = 0; i < messages.size(); i++) {
-            if ("user".equals(messages.get(i).role())) {
-                lastUser = i;
-            }
-        }
+        int lastUser = Message.lastRealUserTurnIndex(messages);
         List<Map<String, Object>> items = new ArrayList<>();
         for (int i = 0; i < messages.size(); i++) {
             // 只有当前用户轮次里的思考要回传。更早的思考留着会占窗口，而且供应商也不再要求。
@@ -142,6 +136,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         }
         List<Map<String, Object>> tools = definitions == null ? new ArrayList<>()
             : new ArrayList<>(definitions.stream().map(this::toolPayload).map(LinkedHashMap::new).toList());
+        Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
         String outputParameter = System.getProperty("pilot.model.chat-output-parameter",
             ModelProfile.PROVIDER_OPENAI.equals(profile.provider()) ? "max_completion_tokens" : "max_tokens");

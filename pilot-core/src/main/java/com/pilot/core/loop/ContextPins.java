@@ -17,9 +17,6 @@ final class ContextPins {
     private static final String END = "</pilot_context_metadata>";
     private static final String HANDOFF_PREFIX = "[上下文交接摘要";
     private static final String DROPPED_PREFIX = "[更早的 ";
-    private static final String RUNTIME_REMINDER_PREFIX = "<system-reminder>";
-    private static final String RUNTIME_CONTEXT_MARKER = "[Runtime task context]";
-    private static final String SYSTEM_INJECTION_PREFIX = "[系统";
     private static final String REPOSITORY_SNAPSHOT_PREFIX = "## 仓库现状";
     private static final String TRUNCATED_GOAL_MARK = "\n…（超长目标已截断）\n";
     /** 旧版脏记录实测最多嵌套十几层；剥到上限即停，病态输入也不会耗尽栈。 */
@@ -177,12 +174,9 @@ final class ContextPins {
         return text.startsWith(HANDOFF_PREFIX) || text.startsWith(DROPPED_PREFIX);
     }
 
-    /** 框架以 user 角色注入的提醒、截图、仓库快照和临时系统提示都不是用户目标。 */
+    /** 框架以 user 角色注入的提醒、截图、模型切换提醒和临时系统提示都不是用户目标；仓库快照另外单独识别。 */
     private static boolean isInternal(String content) {
-        String trimmed = content.stripLeading();
-        return trimmed.startsWith(Message.TOOL_IMAGE_MARKER) || trimmed.startsWith(RUNTIME_REMINDER_PREFIX)
-            || trimmed.contains(RUNTIME_CONTEXT_MARKER) || trimmed.startsWith(SYSTEM_INJECTION_PREFIX)
-            || trimmed.startsWith(REPOSITORY_SNAPSHOT_PREFIX);
+        return Message.isInternalUserText(content) || content.stripLeading().startsWith(REPOSITORY_SNAPSHOT_PREFIX);
     }
 
     private static void addReference(String text, LinkedHashSet<String> references) {

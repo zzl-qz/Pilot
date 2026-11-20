@@ -123,7 +123,7 @@ public final class OpenAiResponsesModelClient implements ModelClient {
     }
 
     Map<String, Object> requestBody(List<Message> messages, List<ToolDefinition> definitions) {
-        ModelCapacity capacity = ModelCapacity.configured();
+        ModelCapacity capacity = ModelCapacity.active();
         RequestBudget.enforce(messages, definitions, capacity);
         List<Map<String, Object>> input = new ArrayList<>();
         for (Message message : messages) {

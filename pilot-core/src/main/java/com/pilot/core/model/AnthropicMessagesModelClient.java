@@ -121,15 +121,20 @@ public final class AnthropicMessagesModelClient implements ModelClient {
     }
 
     Map<String, Object> requestBody(List<Message> messages, List<ToolDefinition> definitions) {
-        ModelCapacity capacity = ModelCapacity.configured();
+        ModelCapacity capacity = ModelCapacity.active();
         RequestBudget.enforce(messages, definitions, capacity);
-        List<String> system = new ArrayList<>();
+        String topSystem =
+            messages.isEmpty() || !"system".equals(messages.getFirst().role()) ? "" : messages.getFirst().content();
+        List<String> tailGuidance = new ArrayList<>();
         List<Map<String, Object>> conversation = new ArrayList<>();
+        int lastUser = Message.lastRealUserTurnIndex(messages);
         for (int index = 0; index < messages.size(); index++) {
             Message message = messages.get(index);
             if ("system".equals(message.role())) {
-                if (!message.content().isBlank()) {
-                    system.add(message.content());
+                // 只把主 system 写进顶层字段：尾部临时引导（phaseHint、运行时引导、路径规则）进 messages，
+                // 否则它一出现/消失就会改写顶层 system 的字节，打断供应商的 prompt cache 前缀。
+                if (index > 0 && !message.content().isBlank()) {
+                    tailGuidance.add(message.content());
                 }
             } else if ("tool".equals(message.role())) {
                 List<Map<String, Object>> results = new ArrayList<>();
@@ -142,7 +147,7 @@ public final class AnthropicMessagesModelClient implements ModelClient {
                 conversation.add(Map.of("role", "user", "content", results));
             } else if (message.hasToolCalls()) {
                 List<Map<String, Object>> blocks = new ArrayList<>();
-                if (index > lastUser(messages)) {
+                if (index > lastUser) {
                     Map<String, Object> replay = thinkingBlock(message.reasoningContent());
                     if (replay != null) {
                         blocks.add(replay);
@@ -163,9 +168,10 @@ public final class AnthropicMessagesModelClient implements ModelClient {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
         body.put("max_tokens", capacity.outputTokens());
-        if (!system.isEmpty()) {
-            body.put("system", String.join("\n\n", system));
+        if (!topSystem.isBlank()) {
+            body.put("system", topSystem);
         }
+        appendTailGuidance(conversation, tailGuidance);
         body.put("messages", conversation);
         List<Map<String, Object>> requestTools = new ArrayList<>();
         if (definitions != null) {
@@ -189,14 +195,34 @@ public final class AnthropicMessagesModelClient implements ModelClient {
     /** 思考正文和签名用这个分隔，只在当前用户轮次回传。 */
     static final String THINKING_SPLIT = "\u001e";
 
-    private static int lastUser(List<Message> messages) {
-        int last = -1;
-        for (int index = 0; index < messages.size(); index++) {
-            if ("user".equals(messages.get(index).role())) {
-                last = index;
-            }
+    /**
+     * 把尾部临时 system 引导并进 messages 末尾，并遵守 user/assistant 交替：
+     * 上一条已经是 user（含 tool_result）时并入它，否则单独追加一条 user 消息。
+     */
+    private static void appendTailGuidance(List<Map<String, Object>> conversation, List<String> guidance) {
+        if (guidance.isEmpty()) {
+            return;
         }
-        return last;
+        List<Object> blocks = new ArrayList<>(List.of(Map.of("type", "text", "text", String.join("\n\n", guidance))));
+        if (!conversation.isEmpty() && "user".equals(conversation.getLast().get("role"))) {
+            Map<String, Object> previous = conversation.removeLast();
+            List<Object> merged = new ArrayList<>(blocksOf(previous.get("content")));
+            merged.addAll(blocks);
+            conversation.add(Map.of("role", "user", "content", merged));
+            return;
+        }
+        conversation.add(Map.of("role", "user", "content", blocks));
+    }
+
+    /** 把任意 content（纯文本或块数组）展开成可合并的块列表。 */
+    private static List<Object> blocksOf(Object content) {
+        if (content instanceof List<?> parts) {
+            return new ArrayList<>(parts);
+        }
+        if (content == null || content.toString().isBlank()) {
+            return new ArrayList<>();
+        }
+        return new ArrayList<>(List.of(Map.of("type", "text", "text", content)));
     }
 
     private static Map<String, Object> thinkingBlock(String stored) {

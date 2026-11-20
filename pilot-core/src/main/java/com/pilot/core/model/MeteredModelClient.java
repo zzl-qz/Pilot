@@ -115,7 +115,7 @@ public final class MeteredModelClient implements ModelClient {
         List<Message> outbound = messages;
         if (model != null && !model.isBlank() && previousModel != null && !previousModel.equals(model)) {
             outbound = new ArrayList<>(messages);
-            outbound.add(Message.user("模型已切换为 " + model + "。按新模型继续，不要重做已完成的步骤。"));
+            outbound.add(Message.user(Message.MODEL_SWITCH_MARKER + " 模型已切换为 " + model + "。按新模型继续，不要重做已完成的步骤。"));
         }
         if (model != null && !model.isBlank()) {
             previousModel = model;
