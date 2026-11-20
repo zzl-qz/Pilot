@@ -1205,18 +1205,24 @@ function elapsedSeconds(startedAt?: number, finishedAt?: number | null) {
 }
 
 const AgentGroup = memo(function AgentGroup({ agents }: { agents: Record<string, AgentView> }) {
+  const sessionLive = useStore(state => state.running);
   const list = Object.values(agents || {});
   const [open, setOpen] = useState(false);
   if (!list.length) return null;
-  const summary = summarizeAgents(list);
+  const effective = sessionLive
+    ? list
+    : list.map(agent => (agent.status === 'running' ? { ...agent, status: 'stopped' as const } : agent));
+  const summary = summarizeAgents(effective);
   return (
     <details
-      className="agent-group"
+      className={`agent-group${summary.running > 0 ? ' is-live' : ''}`}
       open={open}
       onToggle={event => setOpen(event.currentTarget.open)}
     >
       <summary className="agent-group-head">
-        <span>{summary.text}</span>
+        {summary.running > 0 && <Spinner size="sm" shade="subtle" aria-hidden="true" />}
+        {!summary.running && summary.failed > 0 && <StatusDot variant="error" label="有子智能体失败" aria-hidden="true" />}
+        <span className="agent-group-label">{summary.text}</span>
         <span className="tool-group-chevron" aria-hidden="true"><ProcessChevron /></span>
       </summary>
       <ProcessScrollViewport active={open} className="agent-group-list" followKey={list.length}>

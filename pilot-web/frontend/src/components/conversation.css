@@ -377,7 +377,8 @@ html .conversation-thread .turn-process .think-block.is-live > summary::before {
 }
 
 html .conversation-thread .turn-process .think-block.is-live > summary,
-html .conversation-thread .turn-process .conversation-tools.is-live > .tool-group-head {
+html .conversation-thread .turn-process .conversation-tools.is-live > .tool-group-head,
+html .conversation-thread .turn-process .agent-group.is-live > .agent-group-head {
   color: var(--ink-2);
 }
 
