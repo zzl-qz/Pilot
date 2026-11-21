@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   changeHint, emptyPdfForm, formatBytes, formatLabel, parsePageList, pdfOperations
-} from '../../../frontend/src/lib/file-workbench.js';
+} from '../../../frontend/src/components/files/file-workbench.js';
 
 test('页码解析：逗号、中文逗号、区间与去重排序', () => {
   assert.deepEqual(parsePageList('1,3,5-8，7'), [1, 3, 5, 6, 7, 8]);

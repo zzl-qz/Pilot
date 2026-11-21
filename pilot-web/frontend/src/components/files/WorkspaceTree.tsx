@@ -1,12 +1,12 @@
-import type { SessionFilesControllerEntry } from '../types/server.js';
-import { errorInfo } from '../lib/errors.js';
+import type { SessionFilesControllerEntry } from '../../types/server.js';
+import { errorInfo } from '../../lib/errors.js';
 type TreeEntry = SessionFilesControllerEntry & { type?: string };
 interface DirectoryData { entries: TreeEntry[]; status: string; error?: string; truncated?: boolean }
 interface TreeContext { sessionId: string | null; workspace: string; revision: number; focused: React.MutableRefObject<string | null>; previewPath: string; refresh: () => void; ensureFocus: () => void }
 import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { api } from '../api.js';
-import { useStore } from '../store.js';
-import { FileIcon, Icon } from './Icon.jsx';
+import { api } from '../../api.js';
+import { useStore } from '../../store.js';
+import { FileIcon, Icon } from '.././Icon.jsx';
 
 // 每个目录独立加载，折叠目录不请求。工作区切换/刷新时丢弃旧响应。
 function useDirectory(sessionId: string | null, workspace: string, path: string, enabled: boolean, revision: number) {

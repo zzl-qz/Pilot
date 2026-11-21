@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useStore } from '../store.js';
-import { api } from '../api.js';
-import { submissions } from '../lib/submissions.js';
-import { errorInfo } from '../lib/errors.js';
+import { useStore } from '../../store.js';
+import { api } from '../../api.js';
+import { submissions } from '../../lib/submissions.js';
+import { errorInfo } from '../../lib/errors.js';
 import type {
   WorkbenchAnnotation, WorkbenchFile, WorkbenchPreview, WorkbenchVersion
-} from '../types/api.js';
+} from '../../types/api.js';
 import {
   changeHint, emptyPdfForm, formatBytes, formatLabel, formatMoment, pdfOperations, type PdfForm
-} from '../lib/file-workbench.js';
+} from './file-workbench.js';
 import { StructuredDocumentView } from './StructuredDocumentView.jsx';
 import './file-workbench.css';
 

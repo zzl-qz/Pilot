@@ -19,7 +19,7 @@ import { useStore } from '../store.js';
 import { api, apiFetch } from '../api.js';
 import { historyPrefetchDistance } from '../lib/history.js';
 import { MarkdownBody } from './MarkdownBody.jsx';
-import { StructuredDocumentView, isStructuredDocumentFormat } from './StructuredDocumentView.jsx';
+import { StructuredDocumentView, isStructuredDocumentFormat } from './files/StructuredDocumentView.jsx';
 import {
   TOOL_STATUS_TITLES,
   computeToolSpanSeconds,

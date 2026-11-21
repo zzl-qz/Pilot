@@ -262,7 +262,7 @@
         "components/NavigationRail.jsx",
         "components/Sidebar.jsx",
         "components/SessionMenu.jsx",
-        "components/WorkspaceTree.jsx",
+        "components/files/WorkspaceTree.jsx",
         "components/Notifications.jsx"
       ],
       "features": [

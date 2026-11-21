@@ -6,7 +6,7 @@ import { ErrorBoundary } from './ErrorBoundary.jsx';
 import { isCommandActive } from '../lib/command-tasks.js';
 import { supportsAnchoredLayers } from '../lib/theme.js';
 import { SideChatPanel } from './SideChat.jsx';
-import FileWorkbench from './FileWorkbench.js';
+import FileWorkbench from './files/FileWorkbench.js';
 import ResearchPanel from './ResearchPanel.jsx';
 import WorkProductsPanel from './WorkProductsPanel.jsx';
 

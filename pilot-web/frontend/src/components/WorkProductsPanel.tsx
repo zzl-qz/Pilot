@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useStore } from '../store.js';
 import { MarkdownBody } from './MarkdownBody.jsx';
-import { StructuredDocumentView, isStructuredDocumentFormat } from './StructuredDocumentView.jsx';
+import { StructuredDocumentView, isStructuredDocumentFormat } from './files/StructuredDocumentView.jsx';
 import { formatDateTime } from '../lib/date-format.js';
 import './work-products.css';
 

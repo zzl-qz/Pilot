@@ -5,7 +5,7 @@ import { useStore } from '../../store.js';
 import { writeClipboard } from '../../lib/clipboard.js';
 import { sortChangeFiles, splitPath, statusKind } from '../../lib/changes.js';
 import { MarkdownBody } from '../MarkdownBody.jsx';
-import { StructuredDocumentView } from '../StructuredDocumentView.jsx';
+import { StructuredDocumentView } from '../files/StructuredDocumentView.jsx';
 
 /* ---------- 预览面板 ---------- */
 

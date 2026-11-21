@@ -3,7 +3,7 @@ import { TextInput } from '@astryxdesign/core/TextInput';
 import { shortcut } from '../lib/interaction.js';
 import { useMemo, useState } from 'react';
 import { useStore } from '../store.js';
-import { WorkspaceTree } from './WorkspaceTree.jsx';
+import { WorkspaceTree } from './files/WorkspaceTree.jsx';
 import { groupSessionsByProject } from '../lib/project/sessions.js';
 import { Icon } from './Icon.jsx';
 import { SessionMenu, SessionActionDialog, type SessionAction } from './SessionMenu.jsx';
