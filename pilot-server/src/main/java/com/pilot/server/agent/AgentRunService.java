@@ -81,6 +81,7 @@ import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.core.tool.command.RunCommandTool;
 import com.pilot.core.tool.command.StopCommandTool;
 import com.pilot.core.trace.JsonlTraceRecorder;
+import com.pilot.core.util.Sha256;
 import com.pilot.core.util.WireEnum;
 import com.pilot.core.workspace.AgentScope;
 import com.pilot.core.workspace.PathValidator;
@@ -145,9 +146,13 @@ public class AgentRunService implements RunStarter {
     private static final int MAX_TREE_ENTRIES = 30;
     private static final int MAX_GIT_CHANGES = 12;
     private static final long GIT_TIMEOUT_MS = 2_000L;
+    /** 非 git 工作区在快照里的分支占位，用来区分「没有仓库」和「读不出改动」。 */
+    private static final String NON_GIT = "<no-git>";
     private static final Set<String> IGNORED_ENTRIES = Set.of(".git", ".pilot", ".idea", ".vscode", ".gradle", ".venv",
         "__pycache__", "node_modules", "target", "build", "dist", "out");
     private final PreFlightLocator preFlightLocator = new PreFlightLocator();
+    /** 仓库快照按工作区指纹复用：状态没变就不重复跑 git / 目录遍历 / lint 发现。 */
+    private final RepositoryBriefCache repositoryBriefs;
 
     private final SessionService sessions;
     private final ModelClient modelClient;
@@ -295,6 +300,7 @@ public class AgentRunService implements RunStarter {
         this.runRepository = runRepository;
         this.objectMapper = objectMapper;
         this.dataDir = dataDir;
+        this.repositoryBriefs = new RepositoryBriefCache(dataDir == null ? null : dataDir.file("repository-briefs"));
         this.queuedMessages = queuedMessages;
         this.multiAgent = multiAgent;
         this.multiProperties = multiProperties;
@@ -1319,8 +1325,13 @@ public class AgentRunService implements RunStarter {
      *
      * <p>模型不用从零摸索，也不会覆盖用户手上的未提交改动。
      * 仅在会话首条 run 时生成一次，此后模型按提示词要求用工具实查。
+     * 同一工作区在状态没变时复用上次生成的正文（{@link RepositoryBriefCache}），
+     * 档位由 {@code pilot.agent.repository-brief} 决定：full 带目录树，brief 只留分支与脏文件数，off 不注入。
      */
     private String repositoryBrief(String workspace) {
+        if (!properties.repositoryBriefEnabled()) {
+            return "";
+        }
         Path root;
         try {
             root = toolFactory.resolve(workspace);
@@ -1330,9 +1341,25 @@ public class AgentRunService implements RunStarter {
         if (!Files.isDirectory(root)) {
             return "";
         }
+        boolean detailed = properties.repositoryBriefDetailed();
+        boolean git = Files.isDirectory(root.resolve(".git"));
+        String branch = git ? branchName(root) : NON_GIT;
+        String status = git ? runGit(root, "status", "--porcelain=v1", "-uall") : null;
+        String tree = detailed ? workspaceTree(root) : "";
+        String build = buildHint(root);
+        String key = RepositoryBriefCache.key(root);
+        // 指纹只覆盖最终会进快照的输入：分支、改动清单、顶层条目、构建方式。都不变就不必重新生成。
+        String fingerprint = Sha256.hex(branch + "\u0000" + status + "\u0000" + tree + "\u0000" + build);
+        String cached = repositoryBriefs.cached(key, fingerprint);
+        if (cached != null) {
+            return cached;
+        }
         try {
-            return PROMPTS.render("context/repository", Map.of("tree", workspaceTree(root), "git", gitState(root),
-                "build", buildHint(root), "lint", lintNote(root))).strip();
+            String text = PROMPTS.render(detailed ? "context/repository" : "context/repository-brief",
+                Map.of("tree", tree, "git", gitState(branch, status, detailed), "build", build,
+                    "lint", lintNote(root))).strip();
+            repositoryBriefs.store(key, fingerprint, text);
+            return text;
         } catch (RuntimeException e) {
             log.debug("生成仓库摘要失败", e);
             return "";
@@ -1373,18 +1400,22 @@ public class AgentRunService implements RunStarter {
         }
     }
 
-    private static String gitState(Path root) {
-        if (!Files.isDirectory(root.resolve(".git"))) {
-            return "不是 git 仓库";
-        }
-        String branch = branchName(root);
-        String status = runGit(root, "status", "--porcelain=v1", "-uall");
+    /**
+     * Git 现状正文。
+     *
+     * @param status {@code git status --porcelain} 的原始输出；{@code null} 表示不是 git 仓库或读取失败
+     * @param detailed 为 false 时只报脏文件数量，不列文件名（brief 档给长会话省 token）
+     */
+    private static String gitState(String branch, String status, boolean detailed) {
         if (status == null) {
-            return "分支 `" + branch + "`（无法读取未提交改动）";
+            return NON_GIT.equals(branch) ? "不是 git 仓库" : "分支 `" + branch + "`（无法读取未提交改动）";
         }
         List<String> lines = status.lines().filter(line -> !line.isBlank()).toList();
         if (lines.isEmpty()) {
             return "分支 `" + branch + "`，工作区干净";
+        }
+        if (!detailed) {
+            return "分支 `" + branch + "`，有 " + lines.size() + " 个文件未提交（用 `git status` 看清单）";
         }
         String listed =
             lines.stream().limit(MAX_GIT_CHANGES).map(line -> "- " + line.strip()).collect(Collectors.joining("\n"));

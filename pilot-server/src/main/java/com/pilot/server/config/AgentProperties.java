@@ -1,6 +1,8 @@
 package com.pilot.server.config;
 
 import java.nio.file.Path;
+import java.util.Locale;
+import java.util.Set;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -29,6 +31,7 @@ import com.pilot.core.permission.PermissionMode;
  * @param lintGateEnabled      收尾时是否运行当前仓库的 lint。默认开启，设为 false 可做对照
  * @param lintOnFailure        规范没过时的处理：retry 先改，次数用尽且测试通过才放行（默认）；pass 直接记录并放行；stop 直接终止
  * @param preflightLocalizationEnabled 是否在每次新用户消息进入循环前执行确定性候选目标预定位；默认开启，设为 false 可做对照
+ * @param repositoryBrief      会话首条 run 注入的仓库快照档位：full 带目录树（默认）；brief 只留分支、脏文件数、构建与 lint；off 不注入
  */
 @ConfigurationProperties(prefix = "pilot.agent")
 public record AgentProperties(String workspace, PermissionMode permissionMode, int maxSteps, Integer repeatRemindAt,
@@ -36,7 +39,8 @@ public record AgentProperties(String workspace, PermissionMode permissionMode, i
     Integer contextMaxChars, Boolean completionChecks, Boolean goalModeEnabled, Integer directMaxRequests,
     Long directMaxInputTokens, Long directMaxOutputTokens, Long directMaxActiveMillis,
     Integer directMaxInvestigationTools, Long goalMaxInputTokens, Long goalMaxOutputTokens, Long goalMaxActiveMillis,
-    Boolean lintGateEnabled, String lintOnFailure, Boolean preflightLocalizationEnabled) {
+    Boolean lintGateEnabled, String lintOnFailure, Boolean preflightLocalizationEnabled, String repositoryBrief) {
+    private static final Set<String> REPOSITORY_BRIEF_MODES = Set.of("full", "brief", "off");
     private static final int DEFAULT_MAX_STEPS = 1_000;
     /** 单个普通任务的模型请求收敛上限；对齐 OpenHands 的 max_iterations 默认值 500，继续执行会开新一段额度。 */
     private static final int DEFAULT_DIRECT_MAX_REQUESTS = 500;
@@ -47,13 +51,13 @@ public record AgentProperties(String workspace, PermissionMode permissionMode, i
     public AgentProperties(String workspace, PermissionMode mode, int steps, Integer remind, Integer abort, int timeout,
         int threads, Integer continues, Integer chars, Boolean checks) {
         this(workspace, mode, steps, remind, abort, timeout, threads, continues, chars, checks, false, null, null, null,
-            null, null, null, null, null, null, null, null);
+            null, null, null, null, null, null, null, null, null);
     }
 
     public AgentProperties(String workspace, PermissionMode mode, int steps, Integer remind, Integer abort, int timeout,
         int threads, Integer continues, Integer chars, Boolean checks, Boolean goals) {
         this(workspace, mode, steps, remind, abort, timeout, threads, continues, chars, checks, goals, null, null, null,
-            null, null, null, null, null, null, null, null);
+            null, null, null, null, null, null, null, null, null);
     }
 
     public AgentProperties(String workspace, PermissionMode mode, int steps, Integer remind, Integer abort, int timeout,
@@ -64,7 +68,19 @@ public record AgentProperties(String workspace, PermissionMode permissionMode, i
         this(workspace, mode, steps, remind, abort, timeout, threads, continues, chars, checks, goals,
             directMaxRequests, directMaxInputTokens, directMaxOutputTokens, directMaxActiveMillis,
             directMaxInvestigationTools, goalMaxInputTokens, goalMaxOutputTokens, goalMaxActiveMillis, lintGateEnabled,
-            lintOnFailure, null);
+            lintOnFailure, null, null);
+    }
+
+    /** 显式指定仓库快照档位的装配入口；其余字段照旧走默认值。 */
+    public AgentProperties(String workspace, PermissionMode mode, int steps, Integer remind, Integer abort, int timeout,
+        int threads, Integer continues, Integer chars, Boolean checks, Boolean goals, Integer directMaxRequests,
+        Long directMaxInputTokens, Long directMaxOutputTokens, Long directMaxActiveMillis,
+        Integer directMaxInvestigationTools, Long goalMaxInputTokens, Long goalMaxOutputTokens,
+        Long goalMaxActiveMillis, Boolean lintGateEnabled, String lintOnFailure, String repositoryBrief) {
+        this(workspace, mode, steps, remind, abort, timeout, threads, continues, chars, checks, goals,
+            directMaxRequests, directMaxInputTokens, directMaxOutputTokens, directMaxActiveMillis,
+            directMaxInvestigationTools, goalMaxInputTokens, goalMaxOutputTokens, goalMaxActiveMillis, lintGateEnabled,
+            lintOnFailure, null, repositoryBrief);
     }
 
     public boolean goalModeEnabledValue() {
@@ -130,6 +146,23 @@ public record AgentProperties(String workspace, PermissionMode permissionMode, i
             String flag = System.getProperty("pilot.agent.preflight-localization-enabled");
             preflightLocalizationEnabled = flag == null || flag.isBlank() || !"false".equalsIgnoreCase(flag.strip());
         }
+        // 仓库快照档位：写错就启动失败，不静默当成 full 把目录树塞给模型。
+        repositoryBrief = repositoryBrief == null || repositoryBrief.isBlank() ? "full"
+            : repositoryBrief.strip().toLowerCase(Locale.ROOT);
+        if (!REPOSITORY_BRIEF_MODES.contains(repositoryBrief)) {
+            throw new IllegalArgumentException(
+                "pilot.agent.repository-brief 只能是 full、brief 或 off（当前 " + repositoryBrief + "）");
+        }
+    }
+
+    /** 仓库快照是否注入。off 时首条 run 也不带快照。 */
+    public boolean repositoryBriefEnabled() {
+        return !"off".equals(repositoryBrief);
+    }
+
+    /** full 带目录树；brief 只留分支、脏文件数、构建与 lint。 */
+    public boolean repositoryBriefDetailed() {
+        return "full".equals(repositoryBrief);
     }
 
     /** 确定性 Pre-flight 候选目标预定位默认开启。 */

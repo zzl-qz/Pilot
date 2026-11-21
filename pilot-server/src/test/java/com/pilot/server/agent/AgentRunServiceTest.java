@@ -605,6 +605,85 @@ class AgentRunServiceTest {
             .filter(message -> message.content().startsWith("## 仓库现状")).count();
     }
 
+    /** 首条请求里的仓库快照正文；没有快照时返回 null。 */
+    private static String snapshotOf(List<Message> messages) {
+        return messages.stream().filter(message -> "user".equals(message.role()))
+            .map(Message::content).filter(content -> content.startsWith("## 仓库现状")).findFirst().orElse(null);
+    }
+
+    @Test
+    void briefModeKeepsHeadlineFactsButDropsDirectoryTree() throws Exception {
+        Files.writeString(workspace.resolve("only-in-full.txt"), "evidence");
+        var requests = new CopyOnWriteArrayList<List<Message>>();
+        ModelClient model = (messages, tools) -> {
+            requests.add(messages);
+            return done();
+        };
+        try (Fixture fixture = new Fixture(model, 8, false, 1, PermissionMode.READ_ONLY, null, "brief")) {
+            fixture.start();
+            fixture.awaitFinished("COMPLETED");
+
+            String snapshot = snapshotOf(requests.getFirst());
+            assertTrue(snapshot != null, "brief 档仍要注入快照");
+            assertTrue(snapshot.contains("构建："), "brief 保留构建方式");
+            assertTrue(snapshot.contains("规范检查"), "brief 保留 lint 档位");
+            assertFalse(snapshot.contains("only-in-full.txt"), "brief 不带目录树：" + snapshot);
+        }
+    }
+
+    @Test
+    void offModeInjectsNoSnapshotAtAll() throws Exception {
+        var requests = new CopyOnWriteArrayList<List<Message>>();
+        ModelClient model = (messages, tools) -> {
+            requests.add(messages);
+            return done();
+        };
+        try (Fixture fixture = new Fixture(model, 8, false, 1, PermissionMode.READ_ONLY, null, "off")) {
+            fixture.start();
+            fixture.awaitFinished("COMPLETED");
+
+            assertEquals(0, snapshotCount(requests.getFirst()), "off 档首条 run 也不注入");
+            assertTrue(requests.getFirst().stream()
+                .anyMatch(message -> "user".equals(message.role()) && "原任务".equals(message.content())));
+        }
+    }
+
+    @Test
+    void reusesSnapshotWhileWorkspaceIsUnchangedAndRegeneratesAfterEdits() throws Exception {
+        Files.writeString(workspace.resolve("preexisting.txt"), "evidence");
+        List<String> snapshots = new CopyOnWriteArrayList<>();
+        ModelClient model = (messages, tools) -> {
+            snapshots.add(snapshotOf(messages));
+            return done();
+        };
+        try (Fixture fixture = new Fixture(model, 8)) {
+            fixture.start();
+            fixture.awaitFinished("COMPLETED");
+            // 同一工作区第二个会话：状态没变，正文直接复用缓存
+            String second = fixture.sessions.createSession("另一件任务", workspace.toString()).id();
+            String secondRun = fixture.service.claimRun(second).orElseThrow();
+            fixture.sessions.publish(second, secondRun, new RunStarted("另一件任务"));
+            fixture.service.start(second, secondRun, "另一件任务");
+            fixture.awaitFinished("COMPLETED");
+
+            try (var briefs = Files.list(dataRoot.resolve("repository-briefs"))) {
+                List<String> files = briefs.map(path -> path.getFileName().toString()).toList();
+                assertEquals(1, files.size(), "快照按工作区只存一份，实际：" + files);
+            }
+            assertEquals(snapshots.get(0), snapshots.get(1), "工作区没变时复用同一份快照正文");
+
+            Files.writeString(workspace.resolve("brand-new-file.txt"), "evidence");
+            String third = fixture.sessions.createSession("第三件任务", workspace.toString()).id();
+            String thirdRun = fixture.service.claimRun(third).orElseThrow();
+            fixture.sessions.publish(third, thirdRun, new RunStarted("第三件任务"));
+            fixture.service.start(third, thirdRun, "第三件任务");
+            fixture.awaitFinished("COMPLETED");
+
+            assertNotEquals(snapshots.get(1), snapshots.get(2), "工作区变了要重新生成");
+            assertTrue(snapshots.get(2).contains("brand-new-file.txt"), "新文件要出现在新快照里");
+        }
+    }
+
     /**
      * 延迟工具只在尾部追加：第一轮打开 browser 以后核心工具的位置与内容不能变；
      * 同会话第二次 run 的首条请求就要带上已启用的集合，不再退回精简工具表。
@@ -1142,9 +1221,14 @@ class AgentRunServiceTest {
 
         Fixture(ModelClient model, int maxSteps, boolean goals, int runThreads, PermissionMode mode,
             Integer directMaxRequests) {
+            this(model, maxSteps, goals, runThreads, mode, directMaxRequests, null);
+        }
+
+        Fixture(ModelClient model, int maxSteps, boolean goals, int runThreads, PermissionMode mode,
+            Integer directMaxRequests, String repositoryBrief) {
             AgentProperties properties =
                 new AgentProperties(workspace.toString(), mode, maxSteps, 3, 5, 300, runThreads, 0, 60_000, false,
-                    goals, directMaxRequests, null, null, null, null, null, null, null, null, null);
+                    goals, directMaxRequests, null, null, null, null, null, null, null, null, null, repositoryBrief);
             JsonMapper mapper = JsonMapper.builder().build();
             PilotDataDir dataDir = new PilotDataDir(dataRoot.toString());
             commandTasks = new com.pilot.core.tool.command.CommandTaskManager(dataDir.file("commands"), mapper);
@@ -1353,7 +1437,7 @@ class AgentRunServiceTest {
             return reg;
         });
         AgentProperties props = new AgentProperties(workspace.toString(), PermissionMode.AUTO, 10, 3, 5, 300, 1, 0,
-            60_000, false, false, null, null, null, null, null, null, null, null, null, null, true);
+            60_000, false, false, null, null, null, null, null, null, null, null, null, null, true, null);
         JsonMapper mapper = JsonMapper.builder().build();
         PilotDataDir dir = new PilotDataDir(dataRoot.resolve("preflight").toString());
         RunMetrics metrics = new RunMetrics() {
@@ -1398,7 +1482,7 @@ class AgentRunServiceTest {
 
         try (Fixture fixture = new Fixture(model, 5, false, 1, PermissionMode.AUTO)) {
             AgentProperties disabled = new AgentProperties(workspace.toString(), PermissionMode.AUTO, 5, 3, 5, 300, 1,
-                0, 60_000, false, false, null, null, null, null, null, null, null, null, null, null, false);
+                0, 60_000, false, false, null, null, null, null, null, null, null, null, null, null, false, null);
             JsonMapper mapper = JsonMapper.builder().build();
             PilotDataDir dir = new PilotDataDir(dataRoot.resolve("preflight-off").toString());
             BlockingQueue<String> doneStatuses = new LinkedBlockingQueue<>();

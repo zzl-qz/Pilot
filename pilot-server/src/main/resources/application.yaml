@@ -82,6 +82,9 @@ pilot:
     # 规范没过时：retry 先改，同一问题到次数上限且测试或构建已通过才放行（默认）。
     # pass 直接记录并放行。stop 直接终止。改 lint 规则或加抑制注释不会因为次数用尽而放行。
     lint-on-failure: ${PILOT_AGENT_LINT_ON_FAILURE:retry}
+    # 会话首条消息前的仓库快照档位。full 带顶层目录树；brief 只留分支、脏文件数、构建与 lint；
+    # off 完全不注入。工作区指纹没变时复用上次生成的正文，不重复跑 git。
+    repository-brief: ${PILOT_AGENT_REPOSITORY_BRIEF:full}
     # 工具能碰到的根目录，默认是进程工作目录。建议显式指到项目根
     workspace: ${PILOT_WORKSPACE:${user.dir}}
     # 单轮步数上限，只当事故熔断。触顶后界面可以继续接着跑

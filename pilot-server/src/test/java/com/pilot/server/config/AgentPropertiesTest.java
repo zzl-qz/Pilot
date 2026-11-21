@@ -33,11 +33,34 @@ class AgentPropertiesTest {
 
         assertEquals(PermissionMode.AUTO, properties.permissionMode(), "默认完全放行");
         assertEquals(1_000, properties.maxSteps());
+        assertEquals("full", properties.repositoryBrief(), "仓库快照默认带目录树");
+        assertTrue(properties.repositoryBriefEnabled());
+        assertTrue(properties.repositoryBriefDetailed());
         assertEquals(500, properties.directMaxRequests());
         assertEquals(400_000, properties.contextMaxChars());
         assertEquals(0, properties.maxPlanContinues(), "计划不再自动催继续");
         assertTrue(properties.completionChecksEnabled(), "收尾门默认开启");
         assertTrue(properties.preflightLocalizationEnabledValue(), "Pre-flight 预定位默认开启");
+    }
+
+    @Test
+    void repositoryBriefHasThreeModesAndRejectsUnknownValues() {
+        var off = new AgentProperties(".", null, 0, null, null, 0, 0, null, null, null, null, null, null, null, null,
+            null, null, null, null, null, null, " OFF ");
+        assertEquals("off", off.repositoryBrief(), "大小写与空白被规范化");
+        assertFalse(off.repositoryBriefEnabled(), "off 时首条 run 也不注入");
+        assertFalse(off.repositoryBriefDetailed());
+
+        var brief = new AgentProperties(".", null, 0, null, null, 0, 0, null, null, null, null, null, null, null,
+            null, null, null, null, null, null, null, "brief");
+        assertTrue(brief.repositoryBriefEnabled());
+        assertFalse(brief.repositoryBriefDetailed(), "brief 不带目录树");
+
+        var error = assertThrows(IllegalArgumentException.class,
+            () -> new AgentProperties(".", null, 0, null, null, 0, 0, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, "false"),
+            "写错的档位要启动失败，不能静默退回 full");
+        assertTrue(error.getMessage().contains("pilot.agent.repository-brief"));
     }
 
     @Test
