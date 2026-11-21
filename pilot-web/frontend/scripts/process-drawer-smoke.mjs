@@ -180,20 +180,26 @@ async function verify(page, name) {
   // 1. 默认收起：思考块和操作组默认不展开；计划卡正确渲染各状态分级与进度条
   assert.equal(await page.locator('.think-block').getAttribute('open'), null, '思考块默认收起');
   assert.equal(await page.locator('.tool-group.conversation-tools').getAttribute('open'), null, '操作组默认收起');
-  assert.equal(await page.locator('.tool-row:visible').count(), 0, '收起时不展示步骤列表');
+  assert.equal(await page.locator('.tool-group.conversation-tools .tool-row').count(), 0, '收起时组内操作行完全不挂载');
+  assert.equal(await page.locator('.think-body').count(), 0, '收起时思考正文不挂载');
+  assert.equal(await page.locator('.plan-card .plan-list').count(), 0, '收起时计划步骤不挂载');
   assert.match(await page.locator('.tool-group-duration').innerText(), /20m 27s/);
-  assert.equal(await page.locator('.plan-item.is-completed').count(), 1, '已完成计划项应用状态类');
-  assert.equal(await page.locator('.plan-item.is-in_progress').count(), 1, '进行中计划项应用状态类');
-  assert.equal(await page.locator('.plan-item.is-pending').count(), 1, '未开始计划项应用状态类');
   assert.equal(await page.locator('.changed-card .process-kind-icon').count(), 3, '改动文件卡展示对应文件图标');
   if (name === 'chromium') {
     await page.screenshot({ path: join(output, `${name}-collapsed-dark.png`), animations: 'disabled' });
   }
+  // 1b. 展开计划卡才构建步骤节点，状态分级与进度条回填正确
+  await page.locator('.plan-card summary').click();
+  assert.equal(await page.locator('.plan-item.is-completed').count(), 1, '已完成计划项应用状态类');
+  assert.equal(await page.locator('.plan-item.is-in_progress').count(), 1, '进行中计划项应用状态类');
+  assert.equal(await page.locator('.plan-item.is-pending').count(), 1, '未开始计划项应用状态类');
+  await page.locator('.plan-card summary').click();
 
   // 2. 点击展开操作组 -> 限高可滚动（非无限高度），初始在顶部只有底部渐隐
   await page.locator('.tool-group.conversation-tools > summary').click();
   const list = page.locator('.tool-group.conversation-tools .tool-group-list');
   await list.waitFor({ state: 'visible' });
+  assert.ok(await page.locator('.tool-group.conversation-tools .tool-row').count() > 0, '展开后才构建操作行');
   const box = await list.boundingBox();
   assert.ok(box && box.height <= 324, `操作列表限高滚动，实际高度 ${box?.height}`);
   const scrollMetrics = await list.evaluate(el => ({ scrollHeight: el.scrollHeight, clientHeight: el.clientHeight }));
@@ -248,7 +254,11 @@ async function verify(page, name) {
   await editRow.locator('button.conversation-tool-line').click();
   await editRow.locator('.tool-body').waitFor({ state: 'visible' });
   assert.match(await editRow.locator('.tool-body-target').innerText(), /pilot-server\/src\/main\/java\/com\/pilot\/server\/agent\/PreFlightLocator\.java/);
-  assert.deepEqual(await editRow.locator('.tool-body-action').allInnerTexts(), ['预览文件', '复制']);
+  // 详情按钮允许随功能扩展追加（如「查看差异」），只校验必需动作仍在。
+  const bodyActions = await editRow.locator('.tool-body-action').allInnerTexts();
+  for (const required of ['预览文件', '复制']) {
+    assert.ok(bodyActions.includes(required), `详情操作按钮包含「${required}」：${bodyActions.join('、')}`);
+  }
   if (name === 'chromium') {
     await page.screenshot({ path: join(output, `${name}-row-detail-dark.png`), animations: 'disabled' });
   }

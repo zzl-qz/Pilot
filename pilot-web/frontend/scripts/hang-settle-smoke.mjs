@@ -148,6 +148,9 @@ await page.evaluate(() => {
 });
 
 await page.waitForSelector('.tool-group-label');
+// 操作组默认收起时不挂载行，验证行内文案前先展开。
+await page.locator('.tool-group.conversation-tools > summary').click();
+await page.locator('.conversation-tool-name').first().waitFor();
 await page.waitForTimeout(400);
 
 const ui = await page.evaluate(() => ({

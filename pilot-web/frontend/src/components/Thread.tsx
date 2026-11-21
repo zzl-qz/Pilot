@@ -922,6 +922,15 @@ const ExploreCluster = memo(function ExploreCluster({ tools }: { tools: ToolView
 
 const INITIAL_TOOL_SEGMENTS = 40;
 const TOOL_SEGMENT_STEP = 80;
+/**
+ * 受控 <details> 的展开开关只看 summary 上的点击：Electron 内嵌 Chromium 与独立 Chromium 的 toggle 派发时机不一致，
+ * 靠 onToggle 回写会出现“点了不开”；默认 toggle 也会和状态回写互相抵消，所以交给点处理阻止默认行为。
+ */
+function isSummaryClick(event: React.MouseEvent<HTMLDetailsElement>) {
+  if (!(event.target as HTMLElement).closest('summary')) return false;
+  event.preventDefault();
+  return true;
+}
 /** 只有失败和等待批准会在展开组内自动露出详情；「已中断」只是收尾常态，不替用户撑开行。 */
 const AUTO_REVEAL_STATUS = new Set(['error', 'wait']);
 
@@ -1020,28 +1029,32 @@ const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] }) {
         )}
         <span className="tool-group-chevron" aria-hidden="true"><ProcessChevron /></span>
       </summary>
-      <ProcessScrollViewport
-        active={open}
-        className="tool-group-list"
-        autoFollow={running > 0 && !needsAttention && !hasActiveAsk}
-        followKey={`${visibleTools.length}:${lastTool?.callId ?? ''}:${lastTool?.status ?? ''}:${filterAttention ? 'attn' : 'all'}`}
-        focusSelector={focusSelector}
-      >
-        {hiddenSegments > 0 && (
-          <button
-            type="button"
-            className="tool-group-earlier"
-            onClick={() => setVisibleLimit(prev => prev + TOOL_SEGMENT_STEP)}
-          >
-            显示更早的 {hiddenSegments} 组记录（当前优先展示最近步骤）
-          </button>
-        )}
-        {renderedSegments.map(seg => (
-          seg.kind === 'cluster'
-            ? <ExploreCluster key={seg.key} tools={seg.tools} />
-            : <ToolRow key={seg.tool.callId} tool={seg.tool} />
-        ))}
-      </ProcessScrollViewport>
+      {/* 收起时不挂载内部行：<details> 只负责隐藏，React 仍会为每行跑正文解析、diff 高亮和 Markdown，
+          上滑加载历史要为这些默认看不见的内容白付成本，所以只在展开后构建。 */}
+      {open && (
+        <ProcessScrollViewport
+          active
+          className="tool-group-list"
+          autoFollow={running > 0 && !needsAttention && !hasActiveAsk}
+          followKey={`${visibleTools.length}:${lastTool?.callId ?? ''}:${lastTool?.status ?? ''}:${filterAttention ? 'attn' : 'all'}`}
+          focusSelector={focusSelector}
+        >
+          {hiddenSegments > 0 && (
+            <button
+              type="button"
+              className="tool-group-earlier"
+              onClick={() => setVisibleLimit(prev => prev + TOOL_SEGMENT_STEP)}
+            >
+              显示更早的 {hiddenSegments} 组记录（当前优先展示最近步骤）
+            </button>
+          )}
+          {renderedSegments.map(seg => (
+            seg.kind === 'cluster'
+              ? <ExploreCluster key={seg.key} tools={seg.tools} />
+              : <ToolRow key={seg.tool.callId} tool={seg.tool} />
+          ))}
+        </ProcessScrollViewport>
+      )}
     </details>
   );
 });
@@ -1264,15 +1277,18 @@ const ThinkingBlock = memo(function ThinkingBlock({ thinking }: { thinking: Thin
         <span className="think-summary-text">{live ? `思考中${duration}${action}` : `已思考${duration}`}</span>
         <span className="process-chevron" aria-hidden="true"><ProcessChevron /></span>
       </summary>
-      <ProcessScrollViewport
-        active={open}
-        className="think-body"
-        autoFollow={live}
-        followKey={thinking.text.length}
-        tabIndex={0}
-      >
-        {thinking.text}
-      </ProcessScrollViewport>
+      {/* 思考正文同样只在展开后挂载，收起的历史回合不留正文节点。 */}
+      {open && (
+        <ProcessScrollViewport
+          active
+          className="think-body"
+          autoFollow={live}
+          followKey={thinking.text.length}
+          tabIndex={0}
+        >
+          {thinking.text}
+        </ProcessScrollViewport>
+      )}
     </details>
   );
 });
@@ -1317,9 +1333,11 @@ const AgentGroup = memo(function AgentGroup({ agents }: { agents: Record<string,
         <span className="agent-group-label">{summary.text}</span>
         <span className="tool-group-chevron" aria-hidden="true"><ProcessChevron /></span>
       </summary>
-      <ProcessScrollViewport active={open} className="agent-group-list" followKey={list.length}>
-        {list.map(agent => <AgentCard key={agent.id} agent={agent} />)}
-      </ProcessScrollViewport>
+      {open && (
+        <ProcessScrollViewport active className="agent-group-list" followKey={list.length}>
+          {list.map(agent => <AgentCard key={agent.id} agent={agent} />)}
+        </ProcessScrollViewport>
+      )}
     </details>
   );
 });
@@ -1334,8 +1352,10 @@ const AgentCard = memo(function AgentCard({ agent }: { agent: AgentView }) {
   const tools = (agent.tools || []).length;
   const ms = agent.startedAt ? ((live ? Date.now() : (agent.finishedAt || Date.now())) - agent.startedAt) : null;
   const status = live ? agent.status : (agent.status === 'running' ? 'stopped' : agent.status);
+  const [open, setOpen] = useState(false);
   return (
-    <details className={`tool-group agent-card is-${status || 'stopped'}`}>
+    <details className={`tool-group agent-card is-${status || 'stopped'}`} open={open}
+      onClick={event => { if (isSummaryClick(event)) setOpen(!open); }}>
       <summary className="tool-group-head agent-head">
         <StatusDot variant={agentStatusDotVariant(status)}
           label={agentStatusLabel(status)} aria-hidden="true" />
@@ -1346,7 +1366,7 @@ const AgentCard = memo(function AgentCard({ agent }: { agent: AgentView }) {
         <span className="tool-group-count">{agentMeta({ tools, ms, status })}</span>
         <span className="tool-group-chevron" aria-hidden="true"><ProcessChevron /></span>
       </summary>
-      <div className="agent-body">
+      {open && <div className="agent-body">
         <p className="agent-brief">{agent.task}</p>
         {tools > 0 && (
           <div className="tool-group-list agent-tools">
@@ -1379,7 +1399,7 @@ const AgentCard = memo(function AgentCard({ agent }: { agent: AgentView }) {
           </>
         )}
         {facts.length > 0 && <p className="agent-result-facts">{facts.join(' · ')}</p>}
-      </div>
+      </div>}
     </details>
   );
 });
@@ -1492,9 +1512,12 @@ const PlanCard = memo(function PlanCard({ row }: { row: PlanRow }) {
   const activeStep = activeItem ? (activeItem.step || activeItem.text || '').trim() : '';
   // 已完成、已结束或长计划（>4 步）默认收成单行进度胶囊，避免霸占半屏；点开仍可看全部步骤。
   const defaultOpen = running && !finished && items.length <= 4;
+  // 用户没亲自点过就跟随默认值（进行中自动展开、结束自动收起）；步骤列表只在展开时挂载。
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
+  const open = userOpen ?? defaultOpen;
   return (
     <aside className={`plan-card${finished ? ' is-complete' : ''}`}>
-      <details open={defaultOpen}>
+      <details open={open} onClick={event => { if (isSummaryClick(event)) setUserOpen(!open); }}>
       <summary className="plan-head">
         <span className="plan-title">执行计划</span>
         <span className="plan-mini-bar" aria-hidden="true"><i style={{ width: `${pct}%` }} /></span>
@@ -1502,6 +1525,8 @@ const PlanCard = memo(function PlanCard({ row }: { row: PlanRow }) {
         {activeStep && <span className="plan-current" title={activeStep}>{activeStep}</span>}
         <span className="process-chevron" aria-hidden="true"><ProcessChevron /></span>
       </summary>
+      {/* 收起时不留步骤节点：计划条数多时这里就是上滑成本的主项之一。 */}
+      {open && (<>
       {!finished && <div className="plan-bar" aria-hidden="true"><i style={{ width: `${pct}%` }} /></div>}
       <ol className="plan-list">
         {items.map((item, index) => {
@@ -1518,6 +1543,7 @@ const PlanCard = memo(function PlanCard({ row }: { row: PlanRow }) {
           );
         })}
       </ol>
+      </>)}
       </details>
     </aside>
   );
@@ -1537,8 +1563,9 @@ function CompactionGroupCard({ row }: { row: CompactionGroupRow }) {
   const count = row.items.length;
   const latest = row.items[count - 1];
   const totalMessages = row.items.reduce((sum, item) => sum + (item.coveredMessages || 0), 0);
+  const [open, setOpen] = useState(false);
   return (
-    <details className="ctx-card is-divider">
+    <details className="ctx-card is-divider" open={open} onClick={event => { if (isSummaryClick(event)) setOpen(!open); }}>
       <summary className="ctx-head">
         <span className="ctx-line" aria-hidden="true" />
         <span className="ctx-pill">
@@ -1547,12 +1574,12 @@ function CompactionGroupCard({ row }: { row: CompactionGroupRow }) {
         </span>
         <span className="ctx-line" aria-hidden="true" />
       </summary>
-      <div className="ctx-panel">
+      {open && <div className="ctx-panel">
         <p className="ctx-note">
           共整理 {totalMessages} 条较早消息{count > 1 ? `（最近一次：${latest.charactersBefore} → ${latest.charactersAfter} 字符）` : `（${latest.charactersBefore} → ${latest.charactersAfter} 字符）`}。
         </p>
         <pre className="ctx-body">{latest.summary}</pre>
-      </div>
+      </div>}
     </details>
   );
 }

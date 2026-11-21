@@ -82,6 +82,7 @@ async function run(page, name) {
   assert.equal(await sub.locator('.request-item:visible').count(), 0);
   await page.locator('.agent-group > summary').click();
   assert.equal(await page.locator('.agent-card:visible').count(), 2);
+  assert.equal(await page.locator('.agent-body').count(), 0, '智能体卡收起时不挂载正文');
   const agent = page.locator('.agent-card.is-failed');
   await agent.locator('summary').click(); assert.match(await agent.innerText(), /缺少测试依赖/);
   await page.locator('.agent-group > summary').click();

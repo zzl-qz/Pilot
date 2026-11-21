@@ -243,14 +243,17 @@ async function run(page,name,url) {
   assert.equal(await page.locator('.plan-card').count(),0);assert.equal(await page.getByText('唯一结论',{exact:true}).count(),1);
   assert.equal(await page.locator('.turn-stats-detail').getAttribute('open'),null);
   assert.equal(await page.locator('.tool-group').getAttribute('open'),null,'操作组默认收起，失败也不替他撑开');
+  assert.equal(await page.locator('.tool-row').count(),0,'收起时组内不挂载操作行，上滑历史不为它付出渲染成本');
+  await page.locator('.tool-group.conversation-tools > summary').click();
   assert.equal(await page.locator('.tool-row.is-open').count(),1,'组内只有失败行自动露出详情');
+  await page.locator('.tool-group.conversation-tools > summary').click();
   // 已中断只是收尾常态，不该把单行详情撑开（上滑历史时尤其不该顶走阅读位置）。
   await page.evaluate(()=>{store.setState(s=>{s.thread.rows=[
     {key:'u',type:'user',text:'检查',sequence:1},
     {key:'t',type:'turn',tools:[{callId:'t2',name:'grep',args:'cacheHit',status:'interrupted',body:'已中断：这一轮结束时没有收到结果'}],reply:{text:'唯一结论'},stats:{inputTokens:12,outputTokens:4,finishedAt:Date.now()}}
   ];});});
-  await page.locator('.tool-row').first().waitFor({ state: 'attached' });
   await page.locator('.tool-group.conversation-tools > summary').click();
+  await page.locator('.tool-row').first().waitFor({ state: 'attached' });
   assert.equal(await page.locator('.tool-group').getAttribute('open'), '', '点组头才展开操作组');
   assert.equal(await page.locator('.tool-row.is-open').count(), 0, '已中断的行保持收起');
   assert.match(await page.locator('.conversation-tool-state.is-interrupted').innerText(),/已中断/,'收起时仍在行内标出已中断');
