@@ -182,8 +182,8 @@ export function ChangesPanel() {
                 {tracked.length > 0 && (totals.known ? (
                   <span className="changes-line-counts" title="已跟踪文件的增删行数"><span className="add">+{totals.added}</span><span className="del">−{totals.removed}</span></span>
                 ) : (
-                  // 有一条算不出逐行差异时，合计里的 0 是假的：显示 — 并说明原因
-                  <span className="changes-line-counts" title={totals.note || '部分文件没算出逐行差异'}><span className="changes-unknown">—</span></span>
+                  // 部分改动无逐行差异时，标注总行数未知。
+                  <span className="changes-line-counts" title={totals.note || '部分文件没算出逐行差异'}><span className="changes-unknown">行数未知</span></span>
                 ))}
               </span>
               {untracked.length > 0 && (
@@ -323,13 +323,13 @@ const UNTRACKED_LIMIT = 80;
  * 单文件的增删行。
  *
  * <p>后端算不出逐行差异时给 {@code countsKnown: false}（文件太大、二进制、副本被清掉），
- * 那时的 0 不是「没改」，显示 — 并把原因放进悬停提示，避免看起来像真的没动。
+ * 界面标注行数未知，悬停时显示原因。
  */
 function lineStat(file: ChangeFile, className: string) {
   if (file.countsKnown === false) {
     return (
       <span className={className} title={file.note || '没算出这个文件的逐行差异'}>
-        <span className="change-unknown">—</span>
+        <span className="change-unknown">行数未知</span>
       </span>
     );
   }
@@ -406,7 +406,7 @@ function DiffView({ report, scoped, path, change, prevPath, nextPath, index, tot
     const parsed = parseDiff(summary);
     const file = scoped ? parsed[0] : parsed.find((item) => normalizePath(item.path) === normalizePath(path));
     // 运行报告逐文件返回补丁，只有工作区的整份补丁需要把末尾提示归到最后一个文件。
-    const truncated = hasDiffTruncation(summary) && (scoped || (file !== undefined && file === parsed.at(-1)));
+    const truncated = hasDiffTruncation(summary ?? undefined) && (scoped || (file !== undefined && file === parsed.at(-1)));
     return { summaryFile: file, summaryTruncated: truncated };
   }, [summary, scoped, path]);
   const [confirming, setConfirming] = useState(false);
@@ -473,7 +473,9 @@ function DiffView({ report, scoped, path, change, prevPath, nextPath, index, tot
     useStore.getState().setUi({ changeView: target });
   };
   // 能解析出这个文件的补丁时，行数来自补丁本身，一定可信；否则用报告里的结论
-  const viewFile = file && { ...file, added: change?.added ?? file.added, removed: change?.removed ?? file.removed, countsKnown: change ? true : file.countsKnown };
+  const viewFile = change?.countsKnown === false && (!file?.lines.some(line => line.kind === 'hunk') || truncated)
+    ? change
+    : file && (change?.countsKnown !== false && change?.added != null && change.removed != null ? change : file);
   const viewStat = viewFile ? lineStat(viewFile, 'change-view-stat') : null;
   return (
     <div className="change-view">

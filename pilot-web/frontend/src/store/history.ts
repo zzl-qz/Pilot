@@ -45,7 +45,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
       jobs.push({ key: row.key, runId, token });
     }
     for (const job of jobs) {
-      void api.runChanges(job.runId).then((report) => {
+      void api.runChanges(job.runId, true).then((report) => {
         if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
         const files = sortChangeFiles(report?.files || []);
         if (!files.length) return;

@@ -273,7 +273,7 @@ function appendRunResult(draft: ReducerState, event: Extract<EventEnvelope, { ty
       tone: 'warn',
       title,
       detail: ended.summary || null,
-      changedFiles: (ended.changedFiles || []).map(path => ({ path })),
+      changedFiles: (ended.changedFiles || []).map(path => ({ path, countsKnown: false })),
       resumable: ended.resumable !== false
     });
     status = result.resumable ? '可继续' : '结束';

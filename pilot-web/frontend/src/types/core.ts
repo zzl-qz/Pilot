@@ -27,7 +27,8 @@ export interface ChangeFile {
   status?: string;
   added?: number;
   removed?: number;
-  diff?: string;
+  /** null 表示报告只返回统计，补丁可以按需读取。 */
+  diff?: string | null;
   note?: string | null;
   /** 行数是否可信；为 false 时 added/removed 的 0 不是「没改」，界面按其显示为未知。 */
   countsKnown?: boolean;

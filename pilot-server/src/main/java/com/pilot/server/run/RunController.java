@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -46,18 +47,24 @@ public class RunController {
      * 优先读取运行结束时保存的逐行差异。旧运行沿用原先的工作区查询方式。
      */
     @GetMapping("/{runId}/changes")
-    public ChangeService.RunChangeReport changes(@PathVariable String runId) {
+    public ChangeService.RunChangeReport changes(@PathVariable String runId,
+        @RequestParam(name = "summary", defaultValue = "false") boolean summary) {
         try {
             ChangeService.RunChangeReport report = snapshots.changes(runId);
-            if (report != null) {
-                return report;
+            if (report == null) {
+                RunSnapshotService.SnapshotMeta meta = snapshots.meta(runId);
+                if (meta == null || !runId.equals(meta.runId())) {
+                    return new ChangeService.RunChangeReport(runId, null, false, List.of(), 0, 0, false, null);
+                }
+                report = changes.inspectRun(runId, Path.of(meta.workspace()),
+                    meta.files().stream().map(RunSnapshotService.SnapshotEntry::path).toList());
             }
-            RunSnapshotService.SnapshotMeta meta = snapshots.meta(runId);
-            if (meta == null || !runId.equals(meta.runId())) {
-                return new ChangeService.RunChangeReport(runId, null, false, List.of(), 0, 0, false, null);
-            }
-            return changes.inspectRun(runId, Path.of(meta.workspace()),
-                meta.files().stream().map(RunSnapshotService.SnapshotEntry::path).toList());
+            if (!summary) return report;
+            var files = report.files().stream().map(file -> file.diff() == null || file.diff().isEmpty() ? file
+                : new ChangeService.RunFileChange(file.path(), file.status(), file.added(), file.removed(), null,
+                    file.note(), file.countsKnown())).toList();
+            return new ChangeService.RunChangeReport(report.runId(), report.workspace(), report.gitRepository(),
+                files, report.added(), report.removed(), report.truncated(), report.error(), report.snapshot());
         } catch (RuntimeException e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage());
         }

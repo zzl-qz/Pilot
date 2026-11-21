@@ -222,7 +222,7 @@ export const api = {
   mcpTrust: (id: string, body: Update<S.McpTrustControllerTrustRequest>) => apiJson<ApiResults['mcpTrust']>(`/api/sessions/${encodeURIComponent(id)}/mcp/trust`, jsonBody('POST', body)),
   browserStatus: (id: string) => apiJson<ApiResults['browserStatus']>(`/api/sessions/${encodeURIComponent(id)}/browser/status`),
   stopCommand: (id: string, taskId: string) => apiJson<ApiResults['stopCommand']>(`/api/sessions/${encodeURIComponent(id)}/commands/${encodeURIComponent(taskId)}/stop`, { method: 'POST' }),
-  runChanges: (runId: string) => apiJson<ApiResults['runChanges']>(`/api/runs/${encodeURIComponent(runId)}/changes`),
+  runChanges: (runId: string, summary = false) => apiJson<ApiResults['runChanges']>(`/api/runs/${encodeURIComponent(runId)}/changes${summary ? '?summary=true' : ''}`),
   rollbackRun: (runId: string) => apiJson<ApiResults['rollbackRun']>(`/api/runs/${encodeURIComponent(runId)}/rollback`, { method: 'POST' }),
   branch: (id: string, name: string) => apiJson<ApiResults['branch']>(`/api/sessions/${encodeURIComponent(id)}/branch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }),
   files: (id: string, path?: string) => apiJson<ApiResults['files']>(`/api/sessions/${encodeURIComponent(id)}/files?path=${encodeURIComponent(path || '')}`),

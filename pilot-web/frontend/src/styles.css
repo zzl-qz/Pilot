@@ -3180,8 +3180,8 @@ html[data-theme="light"] .subagent-card.is-failed .subagent-head { color: #b3392
 .change-view-stat { display: inline-flex; flex: none; gap: 5px; font-family: var(--mono); font-size: 11px; }
 .change-view-stat .add { color: var(--ok); }
 .change-view-stat .del { color: var(--err); }
-/* 行数没算出来时用 — 代替假 0，颜色淡于增删数字 */
-.change-row-stat .change-unknown, .change-view-stat .change-unknown { color: var(--muted); }
+/* 无法确认的行数使用次要文字。 */
+.change-row-stat .change-unknown, .change-view-stat .change-unknown { color: var(--muted); font-family: inherit; font-size: 10px; }
 
 .change-diff {
   flex: 1;

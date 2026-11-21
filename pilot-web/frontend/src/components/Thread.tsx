@@ -1573,7 +1573,7 @@ function changedCount(value: number) {
  * 改动卡的增删行。
  *
  * <p>后端算不出逐行差异时（文件太大、二进制、完成态副本对不上）给的是「未知」，
- * 这里显示一个破折号并把原因放进悬停说明——写 +0 -0 会让人误以为这一轮什么都没改。
+ * 界面标注行数未知，悬停时显示原因。
  */
 function ChangedCounts({ added, removed, known = true, note }: {
   added: number;
@@ -1584,7 +1584,7 @@ function ChangedCounts({ added, removed, known = true, note }: {
   if (!known) {
     return (
       <span className="changed-counts" title={note || '行数未知'}>
-        <span className="changed-unknown">—</span>
+        <span className="changed-unknown">行数未知</span>
       </span>
     );
   }
@@ -1629,14 +1629,28 @@ function pointerCanHover(event: React.PointerEvent) {
   return true;
 }
 
-function ChangedFilePreview({ file }: { file: ChangedFile }) {
-  const parsed = parseDiff(file.diff || '')[0];
+function ChangedFilePreview({ file, runId }: { file: ChangedFile; runId?: string }) {
+  const [patch, setPatch] = useState<string>();
+  const [failed, setFailed] = useState(false);
+  const deferred = file.diff === null && Boolean(runId);
+  useEffect(() => {
+    if (!deferred || !runId) return;
+    let active = true;
+    api.runChanges(runId).then(report => {
+      const diff = report?.files?.find(item => item.path === file.path)?.diff;
+      if (active) setPatch(diff ?? '');
+    }).catch(() => { if (active) setFailed(true); });
+    return () => { active = false; };
+  }, [deferred, file.path, runId]);
+  const parsed = parseDiff(file.diff ?? patch)[0];
   const lines = (parsed?.lines || []).filter((line) => line.kind === 'add' || line.kind === 'del' || line.kind === 'ctx').slice(0, 240);
   return (
     <div className="changed-hover" data-changes-hover-preview>
       <div className="changed-hover-path" data-changes-preview-path>{file.path}</div>
-      {lines.length === 0
-        ? <p className="changed-hover-empty" data-diff-note="empty">{file.note || '两边的内容一样'}</p>
+      {deferred && patch === undefined
+        ? <p className="changed-hover-empty" role="status">{failed ? '预览加载失败，可点击文件查看变更。' : '正在加载差异…'}</p>
+        : lines.length === 0
+        ? <p className="changed-hover-empty" data-diff-note="empty">{file.note || '暂无逐行差异'}</p>
         : (
           <div className="changed-hover-body" data-review-view="unified">
             {lines.map((line, index) => (
@@ -1653,8 +1667,9 @@ function ChangedFilePreview({ file }: { file: ChangedFile }) {
   );
 }
 
-function ChangedFilesCard({ files, canRollback, onOpen, onRollback }: {
+function ChangedFilesCard({ files, runId, canRollback, onOpen, onRollback }: {
   files: ResultRow['changedFiles'];
+  runId?: string;
   canRollback: boolean;
   onOpen: (file: ChangedFile) => void;
   onRollback: () => void;
@@ -1838,7 +1853,7 @@ function ChangedFilesCard({ files, canRollback, onOpen, onRollback }: {
           onPointerEnter={() => { clearClose(); setClosing(false); }}
           onPointerLeave={() => armClose()}
         >
-          <ChangedFilePreview file={files[preview]} />
+          <ChangedFilePreview key={files[preview].path} file={files[preview]} runId={runId} />
         </div>,
         document.body
       )}
@@ -1858,6 +1873,7 @@ function ResultCard({ row, duplicate, hasPrecedingReply = false }: { row: Result
   const filesCard = files.length > 0 && (
     <ChangedFilesCard
       files={files}
+      runId={row.runIds.at(-1)}
       canRollback={!row.continued}
       onRollback={() => {
         const runId = row.key.startsWith('result:run_') ? row.key.slice('result:'.length) : row.runIds.at(-1);

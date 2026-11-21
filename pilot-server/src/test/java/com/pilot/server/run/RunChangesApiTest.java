@@ -93,6 +93,11 @@ class RunChangesApiTest {
             .andExpect(jsonPath("$.files[1].diff", containsString("+new\n")))
             .andExpect(jsonPath("$.files[2].status").value("D"))
             .andExpect(jsonPath("$.files[2].diff", containsString("+++ /dev/null\n@@ -1,1 +0,0 @@\n-removed\n")));
+
+        mvc.perform(get("/api/runs/{runId}/changes", runId).param("summary", "true"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.files.length()").value(3))
+            .andExpect(jsonPath("$.files[0].added").value(1)).andExpect(jsonPath("$.files[0].removed").value(1))
+            .andExpect(jsonPath("$.files[0].diff").value(org.hamcrest.Matchers.nullValue()));
     }
 
     @Test
