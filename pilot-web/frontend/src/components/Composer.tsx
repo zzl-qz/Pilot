@@ -27,6 +27,7 @@ import { readAttachmentFile, readDesktopClipboardFiles } from '../lib/attachment
 import { checkIncomingFile, requireAttachmentLimits } from '../lib/attachments.js';
 import { writeDraft, readDraft, dropDraft, readDraftSnapshot, writeDraftSnapshot, dropDraftSnapshot } from '../lib/drafts.js';
 import { resumeBar } from '../lib/queue.js';
+import { latestRunResult } from '../lib/events.js';
 import { toolArgsText, toolLabel } from '../lib/tool-meta.js';
 import { PERMISSION_MODES, normalizePermission, permissionLabel } from '../lib/permission.js';
 import { ModelPicker } from './ModelPicker.jsx';
@@ -922,8 +923,9 @@ function ResumeBar() {
   const running = useStore((state) => state.running);
   const lastOutcome = useStore((state) => state.lastOutcome);
   const rows = useStore((state) => state.thread?.rows || []);
-  const resumable = rows.some((row) => row.type === 'result' && row.resumable && !row.continued);
-  const bar = resumeBar({ running, needInput: lastOutcome === 'NEED_INPUT', resumable });
+  const latestResult = latestRunResult(rows);
+  const resumable = Boolean(latestResult?.resumable && !latestResult.continued);
+  const bar = resumeBar({ running, needInput: lastOutcome === 'NEED_INPUT', resumable, outcome: latestResult?.outcome || latestResult?.errorCode || '' });
   const barKey = bar ? bar.label : '';
   useEffect(() => {
     document.body.classList.toggle('has-resume-bar', Boolean(barKey));

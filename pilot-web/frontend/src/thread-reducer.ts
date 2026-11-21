@@ -247,16 +247,18 @@ function appendRunResult(draft: ReducerState, event: Extract<EventEnvelope, { ty
   let status: string;
   if (event.type === 'run.completed') {
     draft.lastOutcome = 'completed';
+    result.outcome = 'COMPLETED';
     result.detail = event.payload?.summary || null;
     if (turn?.runIds?.length) result.runIds = turn.runIds;
     status = '结束';
   } else if (event.type === 'run.cancelled') {
-    Object.assign(result, { tone: 'warn', title: '运行已取消', detail: event.payload?.reason || null, resumable: true });
+    Object.assign(result, { tone: 'warn', title: '运行已取消', detail: event.payload?.reason || null, outcome: 'CANCELLED', resumable: true });
     status = '取消';
   } else if (event.type === 'run.ended') {
     // 部分交付/阻塞/等用户：不是失败，卡片必须带改动与下一步。
     const ended = event.payload;
     const outcome = String(ended.outcome || 'PARTIAL');
+    result.outcome = outcome;
     const blocked = outcome === 'BLOCKED';
     const partial = outcome === 'PARTIAL';
     const title = blocked ? '任务遇到阻塞'
@@ -280,6 +282,7 @@ function appendRunResult(draft: ReducerState, event: Extract<EventEnvelope, { ty
   } else {
     const code = String(event.payload?.code || '');
     const failure = classifyRunFailure(code);
+    result.outcome = failure.outcome || code;
     const label = OUTCOME_LABELS[failure.outcome] || '';
     result.title = label ? `本轮结束 · ${label}`
       : failure.incomplete ? '还有步骤没做完'

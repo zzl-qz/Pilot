@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store.js';
 import { REVERIFY_TEXT, stripView } from '../lib/validation-strip.js';
+import { latestRunResult } from '../lib/events.js';
 import './verification-strip.css';
 
 /**
@@ -18,7 +19,10 @@ export function VerificationStrip() {
   const validation = useStore(state => state.validation);
   const hasRun = useStore(state => state.hasRun);
   const running = useStore(state => state.running);
-  const resumable = useStore(state => (state.thread?.rows || []).some(row => row.type === 'result' && row.resumable && !row.continued));
+  const resumable = useStore(state => {
+    const latest = latestRunResult(state.thread?.rows);
+    return Boolean(latest?.resumable && !latest.continued);
+  });
   const [open, setOpen] = useState(false);
 
   // 换会话时收起：展开状态跟内容走，不跟着组件实例走。

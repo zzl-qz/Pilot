@@ -108,12 +108,28 @@ function isVagueName(body: string): boolean {
 }
 
 /** 输入框上方的继续条。需要补充和可续跑共用一个入口。 */
-export function resumeBar({ running = false, needInput = false, resumable = false }: { running?: boolean; needInput?: boolean; resumable?: boolean } = {}) {
+export function resumeBar({ running = false, needInput = false, resumable = false, outcome = '' }: { running?: boolean; needInput?: boolean; resumable?: boolean; outcome?: string } = {}) {
   if (running || (!needInput && !resumable)) {
     return null;
   }
+  const messages: Record<string, string> = {
+    PAUSED: '本轮已暂停，进度已保留，可以继续执行。',
+    MAX_STEPS: '本轮达到步数上限，进度已保留，可以继续执行。',
+    INTERRUPTED: '运行中断，进度已保留，可以继续执行。',
+    CANCELLED: '本轮已取消，进度已保留，可以继续执行。',
+    BLOCKED: '任务遇到阻塞，处理阻塞原因后可以继续。',
+    PARTIAL: '本轮部分交付，还有步骤待处理。',
+    TASK_INCOMPLETE: '还有步骤没完成，进度已保留，可以继续执行。',
+    BUDGET_LIMITED: '本轮达到预算上限，进度已保留，可以继续执行。',
+    BUDGET_EXHAUSTED: '本轮达到预算上限，进度已保留，可以继续执行。',
+    WAITING: '本轮正在等待外部事件，也可以手动继续。',
+    UNVERIFIED: '本轮结果尚未验证，可以继续补充验证。',
+    VERIFICATION_FAILED: '本轮验证未通过，可以继续处理。',
+    REVIEW_UNAVAILABLE: '本轮核验暂不可用，可以继续处理。',
+    NO_PROGRESS: '本轮未取得有效进展，可以调整方向后继续。'
+  };
   return {
-    text: needInput ? '需要你补充。写完发送会继续这一轮。' : '这一轮停住了，可以接着跑。',
+    text: needInput ? '需要你补充。写完发送会继续这一轮。' : messages[outcome] || '本轮尚未完成，可以继续执行。',
     label: needInput ? '继续当前任务' : '继续执行'
   };
 }

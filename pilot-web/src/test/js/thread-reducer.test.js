@@ -201,12 +201,14 @@ test('暂停/中断不是失败：标题与可继续按钮按失败码区分', (
   assert.equal(pausedResult.tone, 'warn');
   assert.equal(pausedResult.resumable, true);
   assert.equal(pausedResult.errorCode, 'MAX_STEPS');
+  assert.equal(pausedResult.outcome, 'MAX_STEPS');
 
   const needInput = draft();
   applyEvent(needInput, { type: 'run.failed', sequence: 3, payload: { code: 'NEED_INPUT', message: '等你确认' } }, { live: true });
   const inputResult = needInput.thread.rows.find((row) => row.type === 'result');
   assert.match(inputResult.title, /需要输入/);
   assert.equal(inputResult.resumable, false, '需要的是新信息，不是原样重跑');
+  assert.equal(inputResult.outcome, 'NEED_INPUT');
 });
 
 test('计划进度用完成数/总数，不再是空串', () => {

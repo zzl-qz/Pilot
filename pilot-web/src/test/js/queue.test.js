@@ -41,5 +41,8 @@ test('resume bar is the only continue entry, and it stays hidden while a run is 
   assert.equal(resumeBar({ running: true, resumable: true }), null);
   assert.equal(resumeBar({ running: false }), null);
   assert.equal(resumeBar({ needInput: true }).label, '继续当前任务');
+  assert.equal(resumeBar({ resumable: true, outcome: 'BUDGET_LIMITED' }).text, '本轮达到预算上限，进度已保留，可以继续执行。');
+  assert.equal(resumeBar({ resumable: true, outcome: 'BLOCKED' }).text, '任务遇到阻塞，处理阻塞原因后可以继续。');
+  assert.equal(resumeBar({ resumable: true, outcome: 'PARTIAL' }).text, '本轮部分交付，还有步骤待处理。');
   assert.equal(resumeBar({ resumable: true }).label, '继续执行');
 });

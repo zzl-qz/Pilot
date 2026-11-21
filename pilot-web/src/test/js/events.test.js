@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { applyRule, classifyRunFailure, planProgressLabel } from '../../../frontend/src/lib/events.js';
+import { applyRule, classifyRunFailure, latestRunResult, planProgressLabel } from '../../../frontend/src/lib/events.js';
 
 test('applyRule 推进游标并应用新事件', () => {
   assert.deepEqual(applyRule({ type: 'tool.started', sequence: 5 }, 4), { apply: true, cursor: 5 });
@@ -32,10 +32,10 @@ test('applyRule 容忍非数字游标与空事件', () => {
 
 test('classifyRunFailure 区分取消、暂停、中断与真失败', () => {
   assert.deepEqual(classifyRunFailure('MAX_STEPS'), {
-    cancelled: false, paused: true, interrupted: false, blocked: false, budgetLimited: false, outcome: '', resumable: true
+    cancelled: false, paused: true, interrupted: false, blocked: false, budgetLimited: false, incomplete: false, outcome: '', resumable: true
   });
   assert.deepEqual(classifyRunFailure('INTERRUPTED'), {
-    cancelled: false, paused: false, interrupted: true, blocked: false, budgetLimited: false, outcome: '', resumable: true
+    cancelled: false, paused: false, interrupted: true, blocked: false, budgetLimited: false, incomplete: false, outcome: '', resumable: true
   });
   assert.equal(classifyRunFailure('CANCELLED').cancelled, true);
   assert.equal(classifyRunFailure('CANCELLED').resumable, false);
@@ -49,19 +49,28 @@ test('planProgressLabel 没有计划时不显示进度', () => {
   assert.equal(planProgressLabel(undefined, 2), ' · 计划 0/2');
 });
 
+test('最近一轮终态覆盖旧的可继续结果', () => {
+  const old = { type: 'result', resumable: true, continued: false };
+  const completed = { type: 'result', resumable: false, outcome: 'COMPLETED' };
+  assert.equal(latestRunResult([old, { type: 'user' }, completed]), completed);
+  assert.equal(latestRunResult([old, { type: 'user' }, completed]).resumable, false);
+  assert.equal(latestRunResult([old]), old);
+  assert.equal(latestRunResult([]), null);
+});
+
 
 test('用户暂停保留续跑入口，不显示为取消或失败', () => {
   assert.deepEqual(classifyRunFailure('PAUSED'), {
-    cancelled: false, paused: true, interrupted: false, blocked: false, budgetLimited: false, outcome: '', resumable: true
+    cancelled: false, paused: true, interrupted: false, blocked: false, budgetLimited: false, incomplete: false, outcome: '', resumable: true
   });
 });
 
 test('目标阻塞和预算用尽是可恢复状态，不显示为程序失败', () => {
   assert.deepEqual(classifyRunFailure('BLOCKED'), {
-    cancelled: false, paused: false, interrupted: false, blocked: true, budgetLimited: false, outcome: '', resumable: true
+    cancelled: false, paused: false, interrupted: false, blocked: true, budgetLimited: false, incomplete: false, outcome: '', resumable: true
   });
   assert.deepEqual(classifyRunFailure('BUDGET_LIMITED'), {
-    cancelled: false, paused: false, interrupted: false, blocked: false, budgetLimited: true, outcome: '', resumable: true
+    cancelled: false, paused: false, interrupted: false, blocked: false, budgetLimited: true, incomplete: false, outcome: '', resumable: true
   });
 });
 

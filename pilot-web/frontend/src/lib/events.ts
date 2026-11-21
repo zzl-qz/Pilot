@@ -1,3 +1,5 @@
+import type { ResultRow, ThreadRow } from '../types/thread.js';
+
 /**
  * 事件流的纯逻辑：游标去重与失败码归类。
  *
@@ -22,6 +24,15 @@ export const RUN_END_EVENTS = ['run.completed', 'run.failed', 'run.ended', 'run.
 
 export function isRunEnd(type: string | undefined): type is typeof RUN_END_EVENTS[number] {
   return RUN_END_EVENTS.some(event => event === type);
+}
+
+/** 终态提示只由最近一轮决定，避免旧的可恢复结果覆盖新结果。 */
+export function latestRunResult(rows: readonly ThreadRow[] | null | undefined): ResultRow | null {
+  for (let index = (rows?.length || 0) - 1; index >= 0; index -= 1) {
+    const row = rows![index];
+    if (row.type === 'result') return row;
+  }
+  return null;
 }
 
 /**
