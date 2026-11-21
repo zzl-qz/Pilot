@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join, posix, resolve, win32 } from 'node:path';
+import { posix, resolve, win32 } from 'node:path';
 
 /**
  * 各平台常见的 Google Chrome 安装位置。
