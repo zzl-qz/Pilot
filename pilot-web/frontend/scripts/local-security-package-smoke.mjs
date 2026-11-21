@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { browserOptions } from './browser-options.mjs';
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const output = await mkdtemp(join(tmpdir(), 'pilot-local-security-'));
 const workspace = join(output, 'workspace'); await mkdir(workspace);
@@ -34,7 +35,7 @@ try {
   });
   // 命令行无 Origin、原生同源页面都保持可用。
   assert.equal((await fetch(base + '/api/sessions')).status, 200);
-  browser = await chromium.launch({ channel: 'chrome', headless: true,
+  browser = await chromium.launch({ ...browserOptions({ headless: true }),
     args: ['--no-proxy-server', '--host-resolver-rules=MAP rebound.test 127.0.0.1'] });
   const page = await browser.newPage();
   await page.goto(base);

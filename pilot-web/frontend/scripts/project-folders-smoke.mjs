@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { build, preview } from 'vite';
 import { chromium, _electron } from 'playwright-core';
+import { browserOptions } from './browser-options.mjs';
 import { mkdtemp, writeFile, rm, cp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -96,7 +97,7 @@ async function run(page, name) {
 }
 
 try {
-  browser = await chromium.launch({ channel: 'chrome', headless: true });
+browser = await chromium.launch(browserOptions({ headless: true }));
   await run(await browser.newPage(), 'chrome');
   await browser.close(); browser = null;
   const main = join(output, 'electron-fixture.cjs');

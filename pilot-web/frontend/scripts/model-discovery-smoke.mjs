@@ -2,6 +2,7 @@ import { openGlobalFunction } from './global-navigation.mjs';
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
 import { chromium, _electron } from 'playwright-core';
+import { browserOptions } from './browser-options.mjs';
 import { prepareDevelopmentHost } from '../../../pilot-desktop/brand-host.mjs';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -378,7 +379,7 @@ async function run(page, name) {
   console.log(`${name}: PASS 模型设置、快速搜索切换、键盘/IME/焦点、失败重试/写入锁/重开竞态、深浅主题/三个宽度/短窗口/长模型名`);
 }
 try {
-  browser = await chromium.launch({ channel: 'chrome', headless: true });
+browser = await chromium.launch(browserOptions({ headless: true }));
   await run(await browser.newPage(), 'chromium'); await browser.close(); browser = null;
   const env = { ...process.env, PILOT_URL: url, PILOT_BROWSER_HOME: join(output, 'browser') };
   delete env.ELECTRON_RUN_AS_NODE; delete env.PILOT_DESKTOP_SMOKE;

@@ -2,6 +2,7 @@ import { openGlobalFunction } from './global-navigation.mjs';
 import assert from 'node:assert/strict';
 import { build, preview } from 'vite';
 import { chromium, _electron } from 'playwright-core';
+import { browserOptions } from './browser-options.mjs';
 import { prepareDevelopmentHost } from '../../../pilot-desktop/brand-host.mjs';
 import { mkdtemp, writeFile, rm, cp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -65,7 +66,7 @@ async function routes(page) {
   });
 }
 try {
-  browser = await chromium.launch({ channel: 'chrome', headless: true });
+browser = await chromium.launch(browserOptions({ headless: true }));
   const page = await browser.newPage(); page.setDefaultTimeout(10000);
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await routes(page);

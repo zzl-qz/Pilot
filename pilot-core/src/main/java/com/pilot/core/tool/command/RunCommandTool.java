@@ -60,6 +60,8 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     private static final boolean WINDOWS = HostOs.isWindows();
     /** Windows 上常见的 Unix 文件命令：没有对应的可执行文件，原样重试不会变好。 */
     private static final List<String> UNIX_FILE_COMMANDS = List.of("ls", "cat", "head", "tail", "find", "dir");
+    /** 各平台都可能有、但未必安装的搜索命令：缺失时改用 search_text 更可靠。 */
+    private static final List<String> SEARCH_COMMANDS = List.of("rg", "grep");
     /** 启动失败里代表「可执行文件不存在」的两种写法（Windows 与 POSIX）。 */
     private static final Pattern MISSING_EXECUTABLE = Pattern.compile("CreateProcess error=2|Cannot run program");
     /**
@@ -288,6 +290,11 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             text = managed.text();
             terminal = managed.terminal();
         }
+        // 三平台都在结果尾部标明这次交给谁执行：直接启动、cmd、PowerShell 或 /bin/sh。
+        // 必须追加而不是加在开头：结果以 ERROR: 开头是全仓判断失败的口径（succeeded、DocumentIntake 等）。
+        if (!prepared.shell().isEmpty() && !text.isEmpty()) {
+            text = text + "\nShell: " + prepared.shell();
+        }
         if (prepared.readOnly() && !prepared.background() && succeeded(text) && cachesReadOnlyCommand(raw)) {
             readOnlyAt.put(cacheKey, new CachedReadOnly(reads.revision(), System.currentTimeMillis()));
         }
@@ -462,8 +469,9 @@ public final class RunCommandTool implements Tool, ProducesCheck {
 
         if (!chained && !redirected) {
             SegmentCheck only = checks.getFirst();
-            return new Preparation(new Prepared(withWrapper(only.tokens()), only.tokens(), workdir, background,
-                timeoutMs, trackChanges, readOnly, only.env(), interactive), null);
+            List<String> command = withWrapper(only.tokens());
+            return new Preparation(new Prepared(command, only.tokens(), workdir, background,
+                timeoutMs, trackChanges, readOnly, only.env(), interactive, shellLabel(command)), null);
         }
         // 串联或重定向才进 shell。每段仍用解析出的绝对路径，shell 只负责连接符和已经校验过的重定向。
         List<List<String>> checked = checks.stream().map(SegmentCheck::tokens).toList();
@@ -481,11 +489,11 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             List<String> commandLine =
                 List.of(shell.toString(), "-NoProfile", "-NonInteractive", "-Command", scriptText);
             return new Preparation(new Prepared(commandLine, List.of(display), workdir, background, timeoutMs,
-                trackChanges, readOnly, Map.of(), false), null);
+                trackChanges, readOnly, Map.of(), false, shellLabel(commandLine)), null);
         }
         String scriptText = script(withWrapperSegments(checked), checks, operators, segments);
         return new Preparation(new Prepared(List.of("/bin/sh", "-c", scriptText), List.of(display), workdir, background,
-            timeoutMs, trackChanges, readOnly, Map.of(), false), null);
+            timeoutMs, trackChanges, readOnly, Map.of(), false, shellLabel(List.of("/bin/sh"))), null);
     }
 
     private List<List<String>> withWrapperSegments(List<List<String>> checked) {
@@ -939,17 +947,37 @@ public final class RunCommandTool implements Tool, ProducesCheck {
 
     /** 这次启动失败是不是「Unix 文件命令在当前系统上不存在」。 */
     static boolean missingFileCommand(String executable, String message) {
-        return UNIX_FILE_COMMANDS.contains(executable) && MISSING_EXECUTABLE.matcher(message).find();
+        boolean fileCommand = UNIX_FILE_COMMANDS.contains(executable) || SEARCH_COMMANDS.contains(executable);
+        return fileCommand && MISSING_EXECUTABLE.matcher(message).find();
     }
 
     /** 缺可执行文件时的纠偏文本；连续第二次起要求换工具，不再原样重试。 */
-    static String launchFailureText(String headline, int consecutiveFailures) {
-        String hint = "Windows 上请改用 list_dir / read_file / search_text，" + "不要再把 "
-            + String.join("/", UNIX_FILE_COMMANDS) + " 当成可用命令。";
+    static String launchFailureText(String headline, String executable, int consecutiveFailures) {
+        String hint = fileToolHint(executable);
         if (consecutiveFailures >= MISSING_COMMAND_ESCALATE_AT) {
-            hint += "\n同类错误已经连续出现两次：不要原样重试，换文件工具或 PowerShell 等价命令" + "（Get-ChildItem、Get-Content、Select-String）。";
+            hint += "\n同类错误已经连续出现两次：不要原样重试，" + fileToolEscalation(executable);
         }
         return headline + "\n" + hint;
+    }
+
+    /** 按缺失的命令和当前系统给替代方式，三平台都给对应建议。 */
+    private static String fileToolHint(String executable) {
+        if (SEARCH_COMMANDS.contains(executable)) {
+            return "当前环境找不到 " + executable + "，搜内容改用 search_text，找文件用 glob_files，不要再重试这个名字。";
+        }
+        if (WINDOWS) {
+            return "Windows 上 ls/cat/head/tail/find/dir 没有对应可执行文件，请改用 list_dir / read_file / search_text，"
+                + "不要再把它们当成可用命令。";
+        }
+        return "当前环境找不到 " + executable + "，列目录用 list_dir、读文件用 read_file，比依赖系统命令更可靠。";
+    }
+
+    /** 连续失败后的升级建议，同样按系统区分 shell 等价命令。 */
+    private static String fileToolEscalation(String executable) {
+        if (SEARCH_COMMANDS.contains(executable) || !WINDOWS) {
+            return "不再依赖系统命令，直接用 list_dir / read_file / search_text 完成任务。";
+        }
+        return "换文件工具或 PowerShell 等价命令（Get-ChildItem、Get-Content、Select-String）。";
     }
 
     /**
@@ -966,7 +994,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             return headline;
         }
         missingCommandFailures++;
-        return launchFailureText(headline, missingCommandFailures);
+        return launchFailureText(headline, executable, missingCommandFailures);
     }
 
     private String run(List<String> command, List<String> displayTokens, Path workdir, long timeoutMs,
@@ -1120,6 +1148,21 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         return lower.endsWith(".cmd") || lower.endsWith(".bat");
     }
 
+    /**
+     * 结果里展示的 shell 标识。直接启动、cmd 包装、PowerShell 与 POSIX sh 四种形态各自可辨，
+     * 三平台都能看出这次到底把命令交给了谁——只看「实际执行」里的一串参数看不出这件事。
+     */
+    private static String shellLabel(List<String> command) {
+        if (command.isEmpty()) return "直接执行";
+        String head = executableName(command.get(0)).toLowerCase(Locale.ROOT);
+        return switch (head) {
+            case "cmd" -> "cmd";
+            case "pwsh", "powershell" -> HostOs.isWindows() ? "PowerShell" : "pwsh";
+            case "sh", "bash", "zsh", "dash" -> "/bin/sh";
+            default -> "直接执行";
+        };
+    }
+
     private static List<String> withShell(List<String> command) {
         List<String> wrapped = new ArrayList<>(command.size() + 2);
         wrapped.add("cmd.exe");
@@ -1130,8 +1173,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
 
     /** 在 PATH 中查找可执行文件；Windows 需要补全 .exe/.cmd/.bat 后缀。 */
     static Path resolveOnPath(String name) {
-        boolean windows = HostOs.isWindows();
-        return resolveOnPath(name, effectivePath(), windows);
+        return resolveOnPath(name, effectivePath(), HostOs.isWindows());
     }
 
     static Path resolveOnPath(String name, String path, boolean windows) {
@@ -1203,7 +1245,8 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     }
 
     private record Prepared(List<String> command, List<String> displayTokens, Path workdir, boolean background,
-        long timeoutMs, boolean trackChanges, boolean readOnly, Map<String, String> env, boolean interactive) {
+        long timeoutMs, boolean trackChanges, boolean readOnly, Map<String, String> env, boolean interactive,
+        String shell) {
     }
 
     private record Preparation(Prepared prepared, String error) {

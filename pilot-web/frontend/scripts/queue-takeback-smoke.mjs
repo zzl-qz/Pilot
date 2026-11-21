@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
 import { chromium } from 'playwright-core';
+import { browserOptions } from './browser-options.mjs';
 import { fileURLToPath } from 'node:url';
 
 // 取回排队消息：带附件、已有草稿、读取失败三种情况。
@@ -75,7 +76,7 @@ await server.listen();
 const url = `http://127.0.0.1:${server.httpServer.address().port}/__takeback`;
 let browser;
 try {
-  browser = await chromium.launch({ channel: 'chrome', headless: true });
+browser = await chromium.launch(browserOptions({ headless: true }));
   const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
   page.setDefaultTimeout(8000);
   const errors = [];

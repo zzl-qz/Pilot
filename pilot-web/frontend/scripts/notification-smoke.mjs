@@ -2,6 +2,7 @@ import { checkDialogLayout } from './dialog-layout.mjs';
 import assert from 'node:assert/strict';
 import { build, preview } from 'vite';
 import { chromium, _electron } from 'playwright-core';
+import { browserOptions } from './browser-options.mjs';
 import { electronBinary } from '../../../pilot-desktop/brand-host.mjs';
 import { mkdtemp, writeFile, rm, cp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -102,7 +103,7 @@ async function run(page, name) {
   console.log(`${name}: PASS permission/save failure/show timeout/lost receipt/stable tag/result target/retry/error boundary/responsive (Notification API simulated)`);
 }
 try {
-  browser = await chromium.launch({ channel: 'chrome', headless: true }); await run(await browser.newPage(), 'chromium'); await browser.close(); browser = null;
+browser = await chromium.launch(browserOptions({ headless: true })); await run(await browser.newPage(), 'chromium'); await browser.close(); browser = null;
   const main = join(output, 'main.cjs'); await writeFile(main, `const{app,BrowserWindow}=require('electron');app.setPath('userData',${JSON.stringify(join(output,'electron-profile'))});app.whenReady().then(()=>{const w=new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}});w.loadURL(${JSON.stringify(url)});});`);
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
   desktop = await _electron.launch({ executablePath: electronBinary(), args: [main], env }); await run(await desktop.firstWindow(), 'electron');

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
 import { chromium, _electron } from 'playwright-core';
+import { browserOptions } from './browser-options.mjs';
 import { electronBinary } from '../../../pilot-desktop/brand-host.mjs';
 import { mkdtemp, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -158,7 +159,7 @@ async function run(page, name, url) {
 }
 try {
   await server.listen(); const url=`http://127.0.0.1:${server.httpServer.address().port}/__products`;
-  browser=await chromium.launch({channel:'chrome',headless:true}); await run(await browser.newPage(),'chromium',url); await browser.close(); browser=null;
+browser=await chromium.launch(browserOptions({headless:true})); await run(await browser.newPage(),'chromium',url); await browser.close(); browser=null;
   if(!process.argv.includes('--web-only')) {
     const main=join(output,'main.cjs'); await writeFile(main,`const {app,BrowserWindow}=require('electron');app.whenReady().then(()=>{const w=new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}});w.loadURL(${JSON.stringify(url)});});`);
     const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;

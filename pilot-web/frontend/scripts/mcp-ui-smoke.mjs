@@ -4,7 +4,7 @@ import { chromium } from 'playwright-core';
 import { mkdtemp, writeFile, rm, cp } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { artifactDirectory } from './browser-options.mjs';
+import { artifactDirectory, browserOptions } from './browser-options.mjs';
 
 // 审批卡的 MCP 信任按钮：必须带上审批时看到的 configHash/toolHash，且先批准再写信任。
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -35,7 +35,7 @@ const server = await preview({ root, build: { outDir: output }, preview: { host:
 const url = `http://127.0.0.1:${server.httpServer.address().port}/${entry}`;
 let browser;
 try {
-  browser = await chromium.launch({ channel: 'chrome', headless: true });
+browser = await chromium.launch(browserOptions({ headless: true }));
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   page.setDefaultTimeout(8000);
   await page.goto(url);

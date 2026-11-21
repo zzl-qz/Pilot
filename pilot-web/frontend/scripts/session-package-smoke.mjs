@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { browserOptions } from './browser-options.mjs';
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const output = await mkdtemp(join(tmpdir(), 'pilot-packaged-session-'));
 await mkdir(join(output, '中文 空格工作区')); const workspace = await realpath(join(output, '中文 空格工作区'));
@@ -42,7 +43,7 @@ try {
     child.stdout.on('data', capture); child.stderr.on('data', capture);
     child.once('error', error => { clearTimeout(timer); reject(error); }); child.once('exit', code => { clearTimeout(timer); reject(Error(`服务退出 ${code}`)); });
   });
-  browser = await chromium.launch({ channel: 'chrome', headless: true }); page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+browser = await chromium.launch(browserOptions({ headless: true })); page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   page.setDefaultTimeout(20000); const errors = []; page.on('pageerror', error => errors.push(error.message));
   page.on('request', request => { if (request.url().includes('/api/')) browserRequests.push({ method: request.method(), path: new URL(request.url()).pathname }); });
   page.on('console', message => { if (message.type() === 'error') browserErrors.push(message.text()); });

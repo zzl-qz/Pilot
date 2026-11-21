@@ -1,5 +1,6 @@
 import { build, preview } from 'vite';
 import { chromium, _electron } from 'playwright-core';
+import { browserOptions } from './browser-options.mjs';
 import { electronBinary } from '../../../pilot-desktop/brand-host.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm, cp } from 'node:fs/promises';
@@ -210,7 +211,7 @@ async function run(page,name){
 }
 try{
  if(process.argv.includes('--serve')){console.log(url);await new Promise(()=>{});}
- browser=await chromium.launch({channel:'chrome',headless:true});await run(await browser.newPage(),'chromium');
+browser=await chromium.launch(browserOptions({headless:true}));await run(await browser.newPage(),'chromium');
  const touchContext=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
  const touchPage=await touchContext.newPage();await touchPage.route('**/api/**',route=>route.fulfill({json:{}}));await touchPage.goto(url);
  await touchPage.evaluate(()=>store.getState().setUi({inspectorOpen:true,inspectorTab:'preview'}));

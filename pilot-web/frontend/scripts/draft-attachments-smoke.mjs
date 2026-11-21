@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
 import { chromium } from 'playwright-core';
+import { browserOptions } from './browser-options.mjs';
 import { fileURLToPath } from 'node:url';
 
 // 刷新后恢复未发送的附件（文件 + 图片 + 图片位置），移除或发送后清理副本。
@@ -45,7 +46,7 @@ await server.listen();
 const url = `http://127.0.0.1:${server.httpServer.address().port}/__draft`;
 let browser;
 try {
-  browser = await chromium.launch({ channel: 'chrome', headless: true });
+browser = await chromium.launch(browserOptions({ headless: true }));
   const page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
   page.setDefaultTimeout(8000);
   const errors = [];

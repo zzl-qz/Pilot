@@ -57,8 +57,8 @@ class RunCommandToolTest {
 
     @Test
     void missingUnixFileCommandPointsAtFileTools() {
-        String text =
-            RunCommandTool.launchFailureText("ERROR: 无法启动命令 ls：Cannot run program \"ls\": CreateProcess error=2", 1);
+        String text = RunCommandTool.launchFailureText(
+            "ERROR: 无法启动命令 ls：Cannot run program \"ls\": CreateProcess error=2", "ls", 1);
 
         assertTrue(text.contains("list_dir / read_file / search_text"), text);
         assertFalse(text.contains("不要原样重试"), "第一次不该升级成「不要重试」: " + text);
@@ -66,17 +66,35 @@ class RunCommandToolTest {
 
     @Test
     void secondMissingUnixFileCommandAsksToStopRetrying() {
-        String text =
-            RunCommandTool.launchFailureText("ERROR: 无法启动命令 cat：Cannot run program \"cat\": CreateProcess error=2", 2);
+        String text = RunCommandTool.launchFailureText(
+            "ERROR: 无法启动命令 cat：Cannot run program \"cat\": CreateProcess error=2", "cat", 2);
 
         assertTrue(text.contains("不要原样重试"), text);
-        assertTrue(text.contains("PowerShell 等价命令"), text);
+        // Windows 给 PowerShell 等价命令；macOS/Linux 上 cat 本来就有，不能再写「Windows 上」。
+        if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")) {
+            assertTrue(text.contains("PowerShell 等价命令"), text);
+        } else {
+            assertFalse(text.contains("Windows"), text);
+        }
+    }
+
+    /** 缺 rg 在三个系统上都可能发生，纠偏该指向 search_text 而不是只提文件工具。 */
+    @Test
+    void missingSearchCommandPointsAtSearchText() {
+        String text = RunCommandTool.launchFailureText(
+            "ERROR: 无法启动命令 rg：Cannot run program \"rg\": CreateProcess error=2", "rg", 1);
+
+        assertTrue(text.contains("search_text"), text);
+        assertTrue(text.contains("glob_files"), text);
+        assertFalse(text.contains("Windows 上 ls"), text);
     }
 
     @Test
     void onlyMissingUnixFileCommandsCountAsCorrectable() {
         assertTrue(RunCommandTool.missingFileCommand("ls",
             "Cannot run program \"ls\" (in directory \"E:\\work\"): CreateProcess error=2, 系统找不到指定的文件。"));
+        assertTrue(RunCommandTool.missingFileCommand("rg",
+            "Cannot run program \"rg\": error=2, No such file or directory"));
         assertFalse(RunCommandTool.missingFileCommand("mvn", "Cannot run program \"mvn\": CreateProcess error=2"));
         assertFalse(RunCommandTool.missingFileCommand("cat", "Not a directory"));
     }
@@ -246,6 +264,28 @@ class RunCommandToolTest {
         assertTrue(result.contains("退出码: 0"), result);
         assertTrue(result.contains("耗时:"), result);
         assertFalse(tool.readOnly());
+    }
+
+    /** 结果尾部的 Shell 行要说清这次是怎么执行的；单条命令直接启动，不经过 shell。 */
+    @Test
+    void reportsTheShellActuallyUsed() {
+        String direct = tool().execute(Map.of("command", "java -version", "timeoutSeconds", 60));
+        assertTrue(direct.contains("Shell: 直接执行"), direct);
+
+        // 串联必然经过 shell：Windows 是 PowerShell，macOS/Linux 是 /bin/sh。
+        String chained = tool().execute(Map.of("command", "echo ok && echo ok", "timeoutSeconds", 30));
+        String expected = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")
+            ? "Shell: PowerShell" : "Shell: /bin/sh";
+        assertTrue(chained.contains(expected), chained);
+        assertTrue(chained.contains("退出码: 0"), chained);
+    }
+
+    /** Shell 行只是附注：不能顶掉结果首行，也不能把「ERROR: 命令执行被中断」这类前缀挤走。 */
+    @Test
+    void shellNoteDoesNotDisplaceTheResultHeader() {
+        String failed = tool().execute(Map.of("command", "java MissingMain", "timeoutSeconds", 60));
+        assertFalse(failed.lines().findFirst().orElse("").contains("Shell:"), failed);
+        assertTrue(failed.strip().endsWith("Shell: 直接执行"), failed);
     }
 
     @Test

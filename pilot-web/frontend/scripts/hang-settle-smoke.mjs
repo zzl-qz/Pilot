@@ -5,14 +5,9 @@ import { createServer } from 'vite';
 import { chromium } from 'playwright-core';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { browserOptions } from './browser-options.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const chromeCandidates = [
-  process.env.CHROME,
-  join(root, '../../.pilot/browser/browsers/chromium-1248/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing'),
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-].filter(Boolean);
 
 const fixture = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
 <body><div id="root"></div><script type="module">
@@ -75,21 +70,8 @@ await server.listen();
 const port = server.httpServer.address().port;
 const url = `http://127.0.0.1:${port}/__hang`;
 
-let executablePath;
-for (const candidate of chromeCandidates) {
-  try {
-    const { access } = await import('node:fs/promises');
-    await access(candidate);
-    executablePath = candidate;
-    break;
-  } catch {
-    // 试下一个
-  }
-}
-
 const browser = await chromium.launch({
-  headless: true,
-  executablePath,
+  ...browserOptions({ headless: true }),
   args: ['--no-sandbox', '--disable-dev-shm-usage'],
 });
 const page = await browser.newPage();

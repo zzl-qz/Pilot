@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
 import { chromium } from 'playwright-core';
+import { browserOptions } from './browser-options.mjs';
 import { fileURLToPath } from 'node:url';
 
 // 选中文字保存想法：来源记录、预填、来源可用/不可用展示。
@@ -68,7 +69,7 @@ await server.listen();
 const base = `http://127.0.0.1:${server.httpServer.address().port}`;
 let browser;
 try {
-  browser = await chromium.launch({ channel: 'chrome', headless: true });
+browser = await chromium.launch(browserOptions({ headless: true }));
   const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
   page.setDefaultTimeout(8000);
   const errors = [];

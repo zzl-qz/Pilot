@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
 import { chromium } from 'playwright-core';
+import { browserOptions } from './browser-options.mjs';
 import { fileURLToPath } from 'node:url';
 
 // 队列刷新/队首被取走时，编辑必须继续命中最初选中的那条消息，且没保存的文字不能丢。
@@ -52,7 +53,7 @@ await server.listen();
 const url = `http://127.0.0.1:${server.httpServer.address().port}/__queue`;
 let browser;
 try {
-  browser = await chromium.launch({ channel: 'chrome', headless: true });
+browser = await chromium.launch(browserOptions({ headless: true }));
   const tab = await browser.newPage({ viewport: { width: 1000, height: 700 } });
   tab.setDefaultTimeout(8000);
   const errors = [];

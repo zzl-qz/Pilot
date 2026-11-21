@@ -2,6 +2,7 @@ import { openGlobalFunction } from './global-navigation.mjs';
 import { checkDialogLayout } from './dialog-layout.mjs';
 import { createServer, build, preview } from 'vite';
 import { chromium, _electron } from 'playwright-core';
+import { browserOptions } from './browser-options.mjs';
 import { electronBinary } from '../../../pilot-desktop/brand-host.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm, cp } from 'node:fs/promises';
@@ -161,7 +162,7 @@ async function run(page, name, url) {
 try {
   await server.listen();const url=`http://127.0.0.1:${server.httpServer.address().port}/${entry}`;
   if(process.argv.includes('--serve')) {console.log(url+'?preview=1');await new Promise(()=>{});}
-  browser=await chromium.launch({channel:'chrome',headless:true}); await run(await browser.newPage(),'chromium',url); await browser.close();browser=null;
+browser=await chromium.launch(browserOptions({headless:true})); await run(await browser.newPage(),'chromium',url); await browser.close();browser=null;
   const main=join(output,'main.cjs'); await writeFile(main,`const {app,BrowserWindow}=require('electron');app.setPath('userData',${JSON.stringify(join(output,'electron-profile'))});app.whenReady().then(()=>{let w=new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}});w.loadURL(${JSON.stringify(url)});});`);
   const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;
   electron=await _electron.launch({executablePath:electronBinary(),args:[main],env});await run(await electron.firstWindow(),'electron',url);

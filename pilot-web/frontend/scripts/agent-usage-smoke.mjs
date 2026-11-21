@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { build, preview } from 'vite';
 import { chromium, _electron } from 'playwright-core';
 import { electronBinary } from '../../../pilot-desktop/brand-host.mjs';
+import { browserOptions } from './browser-options.mjs';
 import { mkdtemp, writeFile, rm, cp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -121,7 +122,7 @@ async function run(page, name) {
   console.log(`${name}: PASS 请求与智能体计数、分组折叠、费用缺失/失败、键盘、长列表、明暗主题及三种宽度`);
 }
 try {
-  browser = await chromium.launch({ channel: 'chrome', headless: true }); await run(await browser.newPage(), 'chromium');
+browser = await chromium.launch(browserOptions({ headless: true })); await run(await browser.newPage(), 'chromium');
   await browser.close(); browser = null;
   if (!process.argv.includes('--before')) {
     const main = join(output, 'main.cjs');

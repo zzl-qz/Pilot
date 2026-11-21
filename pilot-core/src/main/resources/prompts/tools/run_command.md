@@ -6,6 +6,9 @@
 - 写文件的基础命令（按权限档位审批，路径限工作区内）：{{mutators}}；git 另允许 {{gitWrite}}，以及 push、fetch、pull、checkout、switch、reset、clean、rebase、merge、stash、tag、cherry-pick、revert。完全放行时这些直接执行；逐次批准和自动改文件会先问。改源码请用 edit_file / apply_patch，不要用这些命令改代码。
 - 可以用 `&&`、`||`、`;`、`|` 串联最多 8 条，例如 `git diff --stat | head -20`；每一段都单独校验。
 - 不是 shell：没有重定向（只放行 `2>&1`）、命令替换、`$变量`、`~`、通配符展开（`*` 原样传给程序），后台运行用 `background=true`。需要通配时让 rg / find / glob_files 自己处理。
+- 单条命令直接启动进程、不经过 shell；只有串联或重定向才会交给 shell（Windows 用 PowerShell，macOS/Linux 用 `/bin/sh`）。结果末尾的 `Shell:` 一行就是这次实际用的执行方式。
+- 列目录、读文件、搜内容一律优先用 list_dir / read_file / search_text / glob_files，它们在三个系统上表现一致，也不依赖系统里装了什么。
+- 确实要用系统命令时按平台写：Windows 用 `Get-ChildItem` / `Get-Content` / `Select-String`，不要写 `dir` / `cat` / `ls` / `find`（Windows 上没有这些可执行文件，单条调用必然启动失败）；macOS 与 Linux 上 `ls` / `cat` / `grep` 可用，但 `rg` 不一定装了，缺了就用 search_text。
 - 文件类命令（cat、ls、cp 等）的路径必须在工作区内；`find` 不能带 -exec / -delete；`curl` 只能访问 localhost / 127.0.0.1 / [::1]，外部网页用 web_fetch。
 - 发布包（publish）和全局安装（-g）不会直接执行，界面会先请用户确认。
 

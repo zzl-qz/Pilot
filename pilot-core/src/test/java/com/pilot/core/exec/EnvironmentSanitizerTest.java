@@ -59,4 +59,41 @@ class EnvironmentSanitizerTest {
         assertEquals(List.of("AWS_SECRET_ACCESS_KEY", "DB_PASSWORD", "GITHUB_TOKEN", "OPENAI_API_KEY"),
             EnvironmentSanitizer.defaults().rejectedNames(env()).stream().sorted().toList());
     }
+
+    @Test
+    void keepsWindowsDirectoryVariablesNeededToLocateInstalledBrowsers() {
+        Map<String, String> host = new LinkedHashMap<>();
+        host.put("ProgramFiles", "C:\\Program Files");
+        host.put("ProgramFiles(x86)", "C:\\Program Files (x86)");
+        host.put("ProgramW6432", "C:\\Program Files");
+        host.put("ProgramData", "C:\\ProgramData");
+        host.put("LOCALAPPDATA", "C:\\Users\\dev\\AppData\\Local");
+        host.put("APPDATA", "C:\\Users\\dev\\AppData\\Roaming");
+        host.put("SystemDrive", "C:");
+        host.put("PROCESSOR_ARCHITECTURE", "AMD64");
+
+        Map<String, String> inherited = EnvironmentSanitizer.defaults().inherit(host);
+
+        // %ProgramFiles% 缺失会让 Playwright 拼出 undefined\Program Files\... 并误报浏览器未安装。
+        assertEquals("C:\\Program Files", inherited.get("ProgramFiles"));
+        assertEquals("C:\\Program Files (x86)", inherited.get("ProgramFiles(x86)"));
+        assertEquals("C:\\Users\\dev\\AppData\\Local", inherited.get("LOCALAPPDATA"));
+        assertEquals("C:", inherited.get("SystemDrive"));
+    }
+
+    @Test
+    void directoryAllowListDoesNotLetCredentialNamesThrough() {
+        Map<String, String> host = new LinkedHashMap<>();
+        host.put("LOCALAPPDATA", "C:\\Users\\dev\\AppData\\Local");
+        host.put("APPDATA_TOKEN", "secret");
+        host.put("PROGRAMDATA_PASSWORD", "secret");
+        host.put("LOCALAPPDATA_CREDENTIAL", "secret");
+
+        Map<String, String> inherited = EnvironmentSanitizer.defaults().inherit(host);
+
+        assertTrue(inherited.containsKey("LOCALAPPDATA"));
+        assertFalse(inherited.containsKey("APPDATA_TOKEN"));
+        assertFalse(inherited.containsKey("PROGRAMDATA_PASSWORD"));
+        assertFalse(inherited.containsKey("LOCALAPPDATA_CREDENTIAL"));
+    }
 }

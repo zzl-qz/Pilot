@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { chromium } from 'playwright-core';
+import { browserOptions } from './browser-options.mjs';
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const output = await mkdtemp(join(tmpdir(), 'pilot-packaged-login-'));
 const workspace = join(output, 'workspace'); await mkdir(workspace);
@@ -31,7 +32,7 @@ try {
     child.once('error',error=>{clearTimeout(timeout);reject(error);});
     child.once('exit',code=>{clearTimeout(timeout);reject(new Error(`测试服务退出 ${code}`));});
   });
-  browser = await chromium.launch({channel:'chrome',headless:true});
+browser = await chromium.launch(browserOptions({headless:true}));
   const context = await browser.newContext({viewport:{width:390,height:844}});
   const page = await context.newPage(), errors=[]; page.on('pageerror',e=>errors.push(e.message));
   await page.goto(base); await page.getByRole('heading',{name:'连接你的工作区'}).waitFor();

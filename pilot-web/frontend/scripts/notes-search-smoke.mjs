@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
 import { chromium } from 'playwright-core';
+import { browserOptions } from './browser-options.mjs';
 import { fileURLToPath } from 'node:url';
 
 // 项目内想法搜索：结果、无结果、点击定位（切换会话 + 高亮想法）。
@@ -54,18 +55,21 @@ await server.listen();
 const url = `http://127.0.0.1:${server.httpServer.address().port}/__search`;
 let browser;
 try {
-  browser = await chromium.launch({ channel: 'chrome', headless: true });
+browser = await chromium.launch(browserOptions({ headless: true }));
   const page = await browser.newPage({ viewport: { width: 1000, height: 800 } });
   page.setDefaultTimeout(8000);
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(url);
+  // 搜索区默认折叠，先点开再等输入框，否则 #notes-search-input 不会渲染。
+  await page.locator('.notes-search-toggle').click();
   const input = page.locator('#notes-search-input');
+  const searchButton = page.locator('.notes-search-row').getByRole('button', { name: '搜索', exact: true });
   await input.waitFor();
 
   // 命中：展示会话名与片段
   await input.fill('登录');
-  await page.getByRole('button', { name: '搜索', exact: true }).click();
+  await searchButton.click();
   await page.waitForFunction(() => window.calls.length === 1);
   assert.deepEqual(await page.evaluate(() => window.calls[0]), { projectId: 'project-a', q: '登录' });
   const hits = page.locator('.notes-search-hits li button');
@@ -75,18 +79,18 @@ try {
 
   // 无结果
   await input.fill('空');
-  await page.getByRole('button', { name: '搜索', exact: true }).click();
+  await searchButton.click();
   await page.waitForFunction(() => window.calls.length === 2);
   await page.waitForFunction(() => document.querySelector('.notes-search-hits')?.innerText.includes('没有匹配的想法'));
 
   // 搜索失败提示
   await input.fill('出错');
-  await page.getByRole('button', { name: '搜索', exact: true }).click();
+  await searchButton.click();
   await page.waitForFunction(() => document.querySelector('.notes-search .notes-status.is-error')?.textContent.includes('搜索服务暂不可用'));
 
   // 点击结果：切换会话并定位想法
   await input.fill('登录');
-  await page.getByRole('button', { name: '搜索', exact: true }).click();
+  await searchButton.click();
   await page.waitForFunction(() => document.querySelectorAll('.notes-search-hits li button').length === 2);
   await page.evaluate(() => {
     window.scrolled = [];

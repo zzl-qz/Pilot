@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
 import { chromium } from 'playwright-core';
+import { browserOptions } from './browser-options.mjs';
 import { fileURLToPath } from 'node:url';
 
 // 「纠正本轮」：运行中直接提交纠正、不清空失败文本、本轮结束未应用时把内容放回输入框。
@@ -50,7 +51,7 @@ await server.listen();
 const url = `http://127.0.0.1:${server.httpServer.address().port}/__steer`;
 let browser;
 try {
-  browser = await chromium.launch({ channel: 'chrome', headless: true });
+browser = await chromium.launch(browserOptions({ headless: true }));
   const page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
   page.setDefaultTimeout(8000);
   const errors = [];
