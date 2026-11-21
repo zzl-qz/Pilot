@@ -33,6 +33,9 @@ final class CommandToolSupport {
     private static final Pattern TEST_REPORT_FAIL_ATTR = Pattern.compile("(?:failures|errors)=\"[1-9][0-9]*\"");
     private static final Pattern CONSOLE_TEST_FAILURE = Pattern.compile(
         "(?i)(?:surefire-reports|failsafe-reports|\\[ERROR\\]\\s+(?:Failures|Errors):|Failures:\\s*[1-9]|Errors:\\s*[1-9])");
+    /** command_status / command_logs / stop_command 共用的跨会话归属参数。 */
+    static final Map<String, Object> OWNER_SESSION_PARAMETER = Map.of("type", "string", "description",
+        "可选：该任务所属会话 ID（command_tasks 输出里的会话列）。只在操作不属于当前会话的任务时传；不传就只找当前会话。");
     static final String NESTED_SANDBOX_HINT =
         ToolResults.NESTED_SANDBOX_HINT_PREFIX + "（当前命令已在系统沙箱内运行，macOS Seatbelt / Linux bwrap 禁止在沙箱内再次创建子沙箱），"
             + "这属于外层沙箱环境限制而非业务代码缺陷。请优先运行与本次改动直接相关的定向单测并明确区分环境限制，不要反复排查无关的沙箱隔离测试。";
@@ -42,6 +45,13 @@ final class CommandToolSupport {
 
     static boolean running(CommandTaskManager.Task task) {
         return task != null && CommandTaskStatus.active(task.status());
+    }
+
+    /** 读取跨会话归属参数；空串视为未传。 */
+    static String ownerSession(Map<String, Object> args) {
+        Object value = args == null ? null : args.get("ownerSessionId");
+        String owner = value == null ? "" : value.toString().strip();
+        return owner.isEmpty() ? null : owner;
     }
 
     static String render(CommandTaskManager.Task task) {
@@ -132,16 +142,22 @@ final class CommandToolSupport {
         return macSeatbelt || linuxBwrap ? NESTED_SANDBOX_HINT : "";
     }
 
-    static String nestedSandboxHint(CommandTaskManager tasks, String sessionId, CommandTaskManager.Task task) {
+    static String nestedSandboxHint(CommandTaskManager tasks, CommandTaskManager.Task task) {
+        return nestedSandboxHint(tasks, task, null);
+    }
+
+    /** ownerSessionId 非空时表示任务属于另一个会话，日志也要按那个会话去读。 */
+    static String nestedSandboxHint(CommandTaskManager tasks, CommandTaskManager.Task task, String ownerSessionId) {
         if (tasks == null || task == null || running(task) || CommandTaskStatus.COMPLETED.is(task.status())) {
             return "";
         }
-        long total = tasks.logLength(sessionId, task.taskId());
+        String session = ownerSessionId == null ? task.sessionId() : ownerSessionId;
+        long total = tasks.logLength(session, task.taskId());
         if (total <= 0L) {
             return "";
         }
         long offset = Math.max(0L, total - SANDBOX_LOG_TAIL_CHARS);
-        CommandTaskManager.LogChunk tail = tasks.logs(sessionId, task.taskId(), offset, SANDBOX_LOG_TAIL_CHARS + 200);
+        CommandTaskManager.LogChunk tail = tasks.logs(session, task.taskId(), offset, SANDBOX_LOG_TAIL_CHARS + 200);
         if (tail == null) {
             return "";
         }

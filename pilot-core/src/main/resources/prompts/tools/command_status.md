@@ -3,3 +3,4 @@
 - waitSeconds 可设 0 到 5；任务仍在运行时用 5 做有界等待，避免连续无等待轮询。
 - RUNNING 或 STOPPING 不表示验证通过；只有 COMPLETED 且退出码为 0 才可报告命令成功。失败、超时、取消、输出超限或服务重启中断要明确说明。
 - 使用 command_logs 和上次返回的 nextOffset 继续读取日志。开发服务通常需要保持运行；长测试必须等到终态后再总结验证结果。
+- 任务不属于当前会话时（换会话接手、command_tasks 里看到的旧任务），把它的会话 ID 作为 `ownerSessionId` 一起传。

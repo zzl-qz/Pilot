@@ -371,6 +371,40 @@ class ManagedCommandToolsTest {
         }
     }
 
+    @Test
+    void listsAndTakesOverTasksFromAnotherSessionByOwner() throws Exception {
+        try (CommandTaskManager manager = manager()) {
+            RunCommandTool ownerRun = new RunCommandTool(new PathValidator(workspace), manager, "session_owner");
+            String launched =
+                ownerRun.execute(Map.of("command", command("wait"), "background", true));
+            CommandTaskManager.Task task = manager.list("session_owner").getFirst();
+            assertTrue(launched.contains("任务ID: " + task.taskId()), launched);
+
+            // 新会话默认看不到旧会话的任务，但 command_tasks 能列出来
+            assertNull(manager.get(SESSION, task.taskId()));
+            String listed = new CommandTasksTool(manager).execute(Map.of());
+            assertTrue(listed.contains(task.taskId()), listed);
+            assertTrue(listed.contains("session_owner"), listed);
+            assertTrue(listed.contains("RUNNING"), listed);
+
+            // 带上归属会话才能读状态与日志
+            CommandStatusTool status = new CommandStatusTool(manager, SESSION);
+            assertTrue(status.execute(Map.of("taskId", task.taskId())).startsWith("ERROR"), "未带 owner 时不应读到别人的任务");
+            assertTrue(status.execute(Map.of("taskId", task.taskId(), "ownerSessionId", "session_owner"))
+                .contains("状态: RUNNING"));
+            await(() -> manager.logs("session_owner", task.taskId(), 0, 1000).text().contains("READY"));
+            String logs = new CommandLogsTool(manager, SESSION)
+                .execute(Map.of("taskId", task.taskId(), "limit", 1000, "ownerSessionId", "session_owner"));
+            assertTrue(logs.contains("READY"), logs);
+
+            // 带上归属会话也能停掉
+            new StopCommandTool(manager, SESSION).execute(Map.of("taskId", task.taskId(), "ownerSessionId", "session_owner"));
+            await(() -> manager.get("session_owner", task.taskId()).status().equals("CANCELLED"));
+            String running = new CommandTasksTool(manager).execute(Map.of("includeFinished", false));
+            assertTrue(running.contains("共 0 条") || !running.contains(task.taskId()), running);
+        }
+    }
+
     private CommandTaskManager manager() {
         return new CommandTaskManager(data, JsonMapper.builder().build());
     }

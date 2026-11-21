@@ -32,7 +32,8 @@ public final class CommandLogsTool implements Tool {
             .of("type", "object", "properties",
                 Map.of("taskId", ToolSchemas.string("run_command 返回的任务 ID"), "offset",
                     Map.of("type", "integer", "minimum", 0, "description", "首次传 0，之后原样传上次 nextOffset"), "limit", Map.of(
-                        "type", "integer", "minimum", 1, "maximum", 32000, "description", "最多读取字符数，默认 12000，最大 32000")),
+                        "type", "integer", "minimum", 1, "maximum", 32000, "description", "最多读取字符数，默认 12000，最大 32000"),
+                    "ownerSessionId", CommandToolSupport.OWNER_SESSION_PARAMETER),
                 "required", List.of("taskId"), "additionalProperties", false);
     }
 
@@ -44,7 +45,8 @@ public final class CommandLogsTool implements Tool {
         try {
             long offset = CommandToolSupport.integerArg(args, "offset", 0, 0, Long.MAX_VALUE);
             int limit = (int)CommandToolSupport.integerArg(args, "limit", 12000, 1, 32000);
-            CommandTaskManager.LogChunk chunk = tasks.logs(sessionId, id, offset, limit);
+            String owner = CommandToolSupport.ownerSession(args);
+            CommandTaskManager.LogChunk chunk = tasks.logs(sessionId, id, offset, limit, owner);
             if (chunk == null) {
                 return "ERROR: 当前会话没有该命令任务";
             }

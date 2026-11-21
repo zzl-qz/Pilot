@@ -832,7 +832,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             return new ManagedRun("ERROR: 命令记录已清理，无法确认最终结果：" + taskId, true);
         }
         String rendered = quickFailure(task) + CommandToolSupport.render(task);
-        String sandboxHint = CommandToolSupport.nestedSandboxHint(commandTasks, sessionId, task);
+        String sandboxHint = CommandToolSupport.nestedSandboxHint(commandTasks, task);
         if (!sandboxHint.isEmpty()) {
             rendered = sandboxHint + "\n" + rendered;
         }

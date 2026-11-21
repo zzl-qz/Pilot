@@ -44,7 +44,8 @@ public final class CommandStatusTool implements Tool, ProducesCheck {
     public Map<String, Object> parameters() {
         return ToolSchemas.object(
             Map.of("taskId", ToolSchemas.string("run_command 返回的任务 ID"), "waitSeconds", Map.of("type", "integer",
-                "minimum", 0, "maximum", 60, "description", "最多等待多少秒再返回，默认 0，最大 60。长测试请一次等 20 到 30 秒，命令提前结束会立刻返回")),
+                "minimum", 0, "maximum", 60, "description", "最多等待多少秒再返回，默认 0，最大 60。长测试请一次等 20 到 30 秒，命令提前结束会立刻返回"),
+                "ownerSessionId", CommandToolSupport.OWNER_SESSION_PARAMETER),
             List.of("taskId"));
     }
 
@@ -61,14 +62,15 @@ public final class CommandStatusTool implements Tool, ProducesCheck {
         try {
             // 等待和变更核对分开计时。以前共用 5 秒，长测试每 5 秒就要把模型叫醒一次，核对时间也被等光。
             long wait = CommandToolSupport.integerArg(args, "waitSeconds", 0, 0, 60);
-            CommandTaskManager.Task task = tasks.get(sessionId, id);
+            String owner = CommandToolSupport.ownerSession(args);
+            CommandTaskManager.Task task = tasks.get(sessionId, id, owner);
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(wait);
             while (CommandToolSupport.running(task) && System.nanoTime() < deadline) {
                 Thread.sleep(100);
-                task = tasks.get(sessionId, id);
+                task = tasks.get(sessionId, id, owner);
             }
             String rendered = CommandToolSupport.render(task);
-            String sandboxHint = CommandToolSupport.nestedSandboxHint(tasks, sessionId, task);
+            String sandboxHint = CommandToolSupport.nestedSandboxHint(tasks, task);
             if (!sandboxHint.isEmpty()) {
                 rendered = sandboxHint + "\n" + rendered;
             }

@@ -194,7 +194,15 @@ public final class CommandTaskManager implements AutoCloseable {
     }
 
     public Task get(String sessionId, String taskId) {
-        Entry entry = owned(sessionId, taskId);
+        return get(sessionId, taskId, null);
+    }
+
+    /**
+     * 查询命令任务。{@code ownerSessionId} 非空时按它查找，用于在新会话里接手上一个会话留下的任务；
+     * 为空或与当前会话相同则仍按当前会话隔离。
+     */
+    public Task get(String sessionId, String taskId, String ownerSessionId) {
+        Entry entry = owned(ownerOf(sessionId, ownerSessionId), taskId);
         return entry == null ? null : entry.task;
     }
 
@@ -215,8 +223,30 @@ public final class CommandTaskManager implements AutoCloseable {
             .sorted(Comparator.comparing(Task::startedAt).reversed()).toList();
     }
 
+    /**
+     * 跨会话列出本机全部命令任务，运行中的排在前面（同一组内按启动时间倒序）。
+     *
+     * <p>会话关闭会连带终止它自己的任务，所以这里看到的运行中任务通常来自另一个仍开着的会话；
+     * 要接着查日志或停止，把它的 {@code sessionId} 作为 ownerSessionId 传回来即可。
+     */
+    public List<Task> listAll() {
+        return entries.values().stream().map(entry -> entry.task)
+            .sorted(Comparator.comparing((Task task) -> !running(task))
+                .thenComparing(Task::startedAt, Comparator.reverseOrder()))
+            .toList();
+    }
+
     public LogChunk logs(String sessionId, String taskId, long offset, int limit) {
-        Entry entry = owned(sessionId, taskId);
+        Entry entry = owned(ownerOf(sessionId, null), taskId);
+        return logs(entry, taskId, offset, limit);
+    }
+
+    /** 跨会话读日志；ownerSessionId 非空时按它查找。 */
+    public LogChunk logs(String sessionId, String taskId, long offset, int limit, String ownerSessionId) {
+        return logs(owned(ownerOf(sessionId, ownerSessionId), taskId), taskId, offset, limit);
+    }
+
+    private LogChunk logs(Entry entry, String taskId, long offset, int limit) {
         if (entry == null) {
             return null;
         }
@@ -253,7 +283,12 @@ public final class CommandTaskManager implements AutoCloseable {
     }
 
     public Task stop(String sessionId, String taskId) {
-        Entry entry = owned(sessionId, taskId);
+        return stop(sessionId, taskId, null);
+    }
+
+    /** 跨会话停止；ownerSessionId 非空时按它查找，用于接手上一个会话留下的任务。 */
+    public Task stop(String sessionId, String taskId, String ownerSessionId) {
+        Entry entry = owned(ownerOf(sessionId, ownerSessionId), taskId);
         if (entry == null) {
             return null;
         }
@@ -593,6 +628,11 @@ public final class CommandTaskManager implements AutoCloseable {
         sessionDirectory(session);
         Entry entry = id == null ? null : entries.get(id);
         return entry != null && entry.task.sessionId().equals(session) ? entry : null;
+    }
+
+    /** 跨会话访问的任务所有者：明确指定了 ownerSessionId 就用它，否则仍停留在当前会话。 */
+    private static String ownerOf(String sessionId, String ownerSessionId) {
+        return ownerSessionId == null || ownerSessionId.isBlank() ? sessionId : ownerSessionId;
     }
 
     private Path sessionDirectory(String session) {

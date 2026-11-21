@@ -28,7 +28,8 @@ public final class StopCommandTool implements Tool {
     }
 
     public Map<String, Object> parameters() {
-        return ToolSchemas.object(Map.of("taskId", ToolSchemas.string("当前会话需要停止的命令任务 ID")), List.of("taskId"));
+        return ToolSchemas.object(Map.of("taskId", ToolSchemas.string("需要停止的命令任务 ID"),
+            "ownerSessionId", CommandToolSupport.OWNER_SESSION_PARAMETER), List.of("taskId"));
     }
 
     public String execute(Map<String, Object> args) {
@@ -37,7 +38,7 @@ public final class StopCommandTool implements Tool {
             return "ERROR: 缺少参数 taskId";
         }
         try {
-            return CommandToolSupport.render(tasks.stop(sessionId, id), false);
+            return CommandToolSupport.render(tasks.stop(sessionId, id, CommandToolSupport.ownerSession(args)), false);
         } catch (IllegalArgumentException e) {
             return "ERROR: " + e.getMessage();
         }

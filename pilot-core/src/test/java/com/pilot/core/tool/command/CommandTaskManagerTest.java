@@ -264,6 +264,28 @@ class CommandTaskManagerTest {
         }
     }
 
+    @Test
+    void tasksRemainVisibleAndControllableAcrossSessionsByOwner() throws Exception {
+        try (CommandTaskManager manager = manager()) {
+            CommandTaskManager.Task held = manager.start("session_a", "hold", process("hold"), true, 10_000);
+            CommandTaskManager.Task done = manager.start("session_b", "done", process("done"), true, 10_000);
+            awaitDone(manager, "session_b", done.taskId());
+
+            // 默认仍按会话隔离：别的会话查不到也不在它的列表里
+            assertNull(manager.get("session_b", held.taskId()));
+            assertTrue(manager.list("session_b").stream().noneMatch(task -> task.taskId().equals(held.taskId())));
+            // 跨会话列表能看到全部，运行中的排在前面
+            assertEquals(held.taskId(), manager.listAll().get(0).taskId());
+            assertEquals("session_a", manager.listAll().get(0).sessionId());
+            // 带上归属会话才能接管：查状态、读日志、停止
+            assertEquals("RUNNING", manager.get("session_b", held.taskId(), "session_a").status());
+            assertNotNull(manager.logs("session_b", held.taskId(), 0, 100, "session_a"));
+            assertNull(manager.logs("session_b", held.taskId(), 0, 100));
+            assertEquals("STOPPING", manager.stop("session_b", held.taskId(), "session_a").status());
+            assertEquals("CANCELLED", awaitDone(manager, "session_a", held.taskId()).status());
+        }
+    }
+
     private CommandTaskManager manager() {
         return new CommandTaskManager(storage, JsonMapper.builder().build());
     }
