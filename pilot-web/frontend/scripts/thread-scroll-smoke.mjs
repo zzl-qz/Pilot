@@ -30,6 +30,7 @@ window.send=(type,payload={},runId='latest')=>{const event={type,payload,runId,s
 send('run.started',{input:'之前的第一个问题'},'old');send('assistant.delta',{text:'之前的回答仍可查看。'},'old');send('run.completed',{summary:'之前的回答仍可查看。'},'old');
 if(mode==='long'){
   send('run.started',{input:'当前的长回复问题'});
+  send('plan.updated',{plan:[{step:'检查长回复的滚动位置',status:'completed'},{step:'核对回到底部按钮的停靠位置',status:'in_progress'},{step:'回归三种宽度与侧栏变化',status:'pending'}]});
   for(let i=0;i<330;i++)send('assistant.delta',{text:i%10===0?'\\n\\n第'+(i/10+1)+'段：检查长回复、事件窗口和历史消息。':'保留完整问答。'});
   send('run.completed',{summary:'完整结论。'.repeat(70)});
 }else{
@@ -59,16 +60,20 @@ async function assertLatestPosition(page, label) {
       return { x, y, width, height };
     };
     const thread = document.querySelector('.thread');
-    return { button: rect('.conversation-latest'), column: rect('.thread-column'), region: rect('.thread-scroll-region'), scroll: rect('.thread'), composer: rect('.conversation-composer'), scrollbar: thread.offsetWidth - thread.clientWidth, scrollPaddingBottom: parseFloat(getComputedStyle(thread).paddingBottom) };
+    const plan = document.querySelector('.thread-pinned-plan');
+    return { button: rect('.conversation-latest'), column: rect('.thread-column'), region: rect('.thread-scroll-region'), scroll: rect('.thread'), composer: rect('.conversation-composer'), plan: plan ? rect('.thread-pinned-plan') : null, scrollbar: thread.offsetWidth - thread.clientWidth };
   });
-  const { button: b, column: c, region: r, composer } = bounds;
+  const { button: b, column: c, region: r, composer, plan } = bounds;
   // 部分平台的常驻滚动条会占据消息列右侧空间；按钮与输入列共用对称留白。
   assert.ok(Math.abs(b.x + b.width / 2 - c.x - c.width / 2) <= bounds.scrollbar / 2 + 2,
     label + ': 回底按钮对齐消息列中心 ' + JSON.stringify(bounds));
   assert.ok(b.y >= r.y && b.y + b.height <= r.y + r.height && b.y + b.height <= composer.y,
     label + ': 回底按钮位于消息区内，不遮挡输入框');
-  assert.ok(b.y >= bounds.scroll.y + bounds.scroll.height - bounds.scrollPaddingBottom && b.y + b.height <= bounds.scroll.y + bounds.scroll.height,
-    label + ': 回底按钮只占用消息列表预留的底部空白 ' + JSON.stringify(bounds));
+  assert.ok(b.y >= bounds.scroll.y + bounds.scroll.height,
+    label + ': 回底按钮在消息滚动区之外，不遮正文 ' + JSON.stringify(bounds));
+  assert.ok(plan, label + ': 夹具带执行计划条，可验证按钮避让');
+  assert.ok(b.y + b.height <= plan.y,
+    label + ': 回底按钮停在计划条之上，不重叠 ' + JSON.stringify(bounds));
   assert.ok(b.width >= 32 && b.height >= 32, label + ': 保留按钮点击区域');
 }
 async function run(page, name) {

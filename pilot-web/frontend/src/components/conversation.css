@@ -15,15 +15,18 @@ html[data-theme] .conversation-thread .thread-column { gap: 20px; }
 html[data-theme] .conversation-thread .turn-shell { gap: 8px; }
 html[data-theme] .conversation-thread :is(.turn-shell, .turn-card, .changed-card) + .msg-user { margin-top: 6px; }
 .conversation-thread > .thread:focus-visible { outline: 2px solid var(--ink-2); outline-offset: -2px; }
-html[data-theme] .conversation-thread:has(.conversation-latest) > .thread { padding-block-end: calc(var(--conversation-control) + 20px); }
+/*
+ * 回到底部按钮独占 transcript 与执行计划条之间的一行停靠带（对齐 Codex 的 composer gap）：
+ * 空着也占位，因此计划条展开多高都压不到它。左右留白沿用消息列取值，按钮横向仍在消息列中心。
+ */
+html[data-theme] .conversation-thread > .thread-bottom-dock {
+  flex: none;
+  display: flex;
+  justify-content: center;
+  padding-inline: max(48px, var(--conversation-gutter)) var(--conversation-gutter);
+  padding-block: 2px 8px;
+}
 .conversation-thread .conversation-latest {
-  position: absolute;
-  z-index: 5;
-  /* 以实际消息列居中，侧栏、审阅面板和窄屏留白变化时自动跟随。 */
-  inset-inline-start: max(48px, var(--conversation-gutter));
-  inset-inline-end: var(--conversation-gutter);
-  margin-inline: auto;
-  inset-block-end: 10px;
   width: var(--conversation-control);
   min-height: var(--conversation-control);
 }

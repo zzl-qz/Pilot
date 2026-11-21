@@ -248,13 +248,13 @@ export function Thread() {
           )}
         </div>
       </div>
+      <ThreadBottomButton visible={!isAtBottom} onJump={() => scrollToBottom({ animation: latestAnimation() })} />
       {display.pinnedPlan && (
         <div className="thread-pinned-plan">
           <PlanCard row={display.pinnedPlan} />
         </div>
       )}
       <ThreadNavigator rows={rows} scrollRef={scrollRef} contentRef={contentRef} stopFollowing={stopScroll} beforeJump={beforeNavigation} />
-      <ThreadBottomButton visible={!isAtBottom} onJump={() => scrollToBottom({ animation: latestAnimation() })} />
     </div>
   );
 }
@@ -264,8 +264,10 @@ function ThreadBottomButton({ visible, onJump }: { visible: boolean; onJump: () 
     return null;
   }
   return (
-    <IconButton className="conversation-latest" label="回到底部" onClick={onJump}
-      icon={<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.5v12M5.5 11l4.5 4.5 4.5-4.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>} />
+    <div className="thread-bottom-dock">
+      <IconButton className="conversation-latest" label="回到底部" onClick={onJump}
+        icon={<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.5v12M5.5 11l4.5 4.5 4.5-4.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>} />
+    </div>
   );
 }
 
