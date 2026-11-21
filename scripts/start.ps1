@@ -90,6 +90,10 @@ if (-not $selected) {
 }
 $env:JAVA_HOME = $selected
 $env:PATH = (Join-Path $selected 'bin') + ';' + $env:PATH
+# 编译失败不阻止启动：OsSandbox 会报「未启用」并在本机执行，写入不受限。
+try { & (Join-Path $root 'scripts/build-windows-sandbox.ps1') } catch { Write-Host "Pilot: sandbox runner skipped: $($_.Exception.Message)" }
+$runner = Join-Path $root '.pilot/bin/pilot-sandbox.exe'
+if (Test-Path -LiteralPath $runner -PathType Leaf) { $env:PILOT_WINDOWS_SANDBOX_RUNNER = $runner }
 $java = Join-Path $selected 'bin/java.exe'
 $source = Join-Path $root 'pilot-core/src/main/java/com/pilot/core/runtime/bootstrap/SourceEnvironment.java'
 $mode = if ($env:PILOT_START_CHECK_ONLY -eq 'true') { 'prepare' } else { 'launch' }

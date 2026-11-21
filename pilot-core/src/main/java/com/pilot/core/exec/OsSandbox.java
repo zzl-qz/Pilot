@@ -61,7 +61,7 @@ public final class OsSandbox {
         return switch (family) {
             case MAC -> mac(command, root, writable, locked, network);
             case LINUX -> linux(command, root, writable, locked, network);
-            case WINDOWS -> windows(command, root);
+            case WINDOWS -> windows(command, root, writable);
         };
     }
 
@@ -106,9 +106,10 @@ public final class OsSandbox {
     /**
      * Windows 写入限制。没有配置运行器时在本机执行并标明未隔离，和 macOS/Linux 找不到沙箱工具时一致；
      * 配置了运行器但探测失败时返回空命令，调用方不得启动。
-     * 运行器参数：{@code --probe} 只建令牌；正式启动再带 {@code --workspace}、{@code --temp} 和命令。
+     * 运行器参数：{@code --probe} 只建令牌；正式启动再带 {@code --workspace}、{@code --temp}、
+     * 若干 {@code --write} 和命令。
      */
-    static Launch windows(List<String> command, Path workspace) {
+    static Launch windows(List<String> command, Path workspace, List<Path> writable) {
         Path runner = windowsRunner();
         if (runner == null) {
             return new Launch(List.copyOf(command), "隔离：未启用（Windows 受限令牌运行器未配置，命令在本机执行，写入不受限）", false);
@@ -133,14 +134,54 @@ public final class OsSandbox {
         argv.add(workspace.toString());
         argv.add("--temp");
         argv.add(temp.toString());
+        for (Path root : windowsWriteRoots(writable, workspace)) {
+            argv.add("--write");
+            argv.add(root.toString());
+        }
         argv.add("--");
         argv.addAll(command);
-        return new Launch(List.copyOf(argv), "隔离：Windows 受限令牌（写入已限制，工作区与本次私有临时目录可写，读盘和网络仍按系统原样）", true);
+        return new Launch(List.copyOf(argv), "隔离：Windows 受限令牌（写入已限制，工作区、构建缓存与本次私有临时目录可写，读盘和网络仍按系统原样）", true);
+    }
+
+    /**
+     * 交给运行器做 {@code --write} 的目录。工作区已由 {@code --workspace} 传过去，系统临时目录由
+     * {@code --temp} 换成这次私有的子目录，两者都不再传——尤其系统临时目录根必须排除，
+     * 否则整个用户临时目录都变成可写，私有临时目录就形同虚设。
+     * 运行器只会授权真实存在的路径，未安装的缓存目录不传，避免整条命令因路径不存在而拒跑。
+     */
+    static List<Path> windowsWriteRoots(List<Path> writable, Path workspace) {
+        Path systemTemp = real(Path.of(System.getProperty("java.io.tmpdir", "/tmp")));
+        List<Path> roots = new ArrayList<>();
+        for (Path root : writable) {
+            if (sameDirectory(root, workspace) || sameDirectory(root, systemTemp) || !Files.isDirectory(root)) {
+                continue;
+            }
+            roots.add(root);
+        }
+        return roots;
+    }
+
+    /**
+     * 同一个目录可能以短名（8.3）和长名两种形式出现，{@code Path.equals} 比不出来。
+     * Windows 上 {@code java.io.tmpdir} 默认就是短名，直接按字符串比会把系统临时目录漏进去。
+     */
+    private static boolean sameDirectory(Path left, Path right) {
+        if (left.equals(right)) {
+            return true;
+        }
+        try {
+            return Files.exists(left) && Files.exists(right) && Files.isSameFile(left, right);
+        } catch (IOException ignored) {
+            return false;
+        }
     }
 
     static Path windowsRunner() {
         String configured = System.getProperty("pilot.windows.sandbox.runner", "");
         if (configured.isBlank()) {
+            configured = System.getenv("PILOT_WINDOWS_SANDBOX_RUNNER");
+        }
+        if (configured == null || configured.isBlank()) {
             return null;
         }
         return Path.of(configured);
