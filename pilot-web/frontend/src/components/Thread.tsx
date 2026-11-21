@@ -67,8 +67,6 @@ export function Thread() {
   const bottomSignal = useStore((state) => state.ui.bottomSignal);
   const requestEarlierHistory = useStore((state) => state.requestEarlierHistory);
   const requestLaterHistory = useStore((state) => state.requestLaterHistory);
-  const prefetchEarlier = useStore((state) => state.prefetchEarlier);
-  const applyEarlierPage = useStore((state) => state.applyEarlierPage);
 
   /*
    * initial / resize 都用 'instant'：首屏直接落在最新消息；流式输出时底部内容持续长高，
@@ -80,37 +78,19 @@ export function Thread() {
   });
 
   /*
-   * 预取只在「用户自己往上滚」时触发，用方向判断而不是「接近顶部」判断：
-   * 前插历史后的位置补偿同样表现为 scrollTop 变大（等价于向下滚），
-   * 拿它当信号会把「加载 → 补偿 → 再加载」串成自我触发的死循环。
-   *
-   * 两段式：进入预取区先 prefetchEarlier() 把更早一页拉进内存（领边触发，不等滚动停稳），
-   * 滚动静默后再 requestEarlierHistory() 把它插进 DOM——插入必须是「不动的时候」，
-   * 滚动中前插内容浏览器会抑制 scroll anchoring，视口会被推走一截（实测约 200px）。
-   * 这样等待时间只剩插入本身，网络那一趟在用户手还在动的时候就跑完了。
+   * 上滑不自动加载更早的历史：用户只是往回翻看时，不该被一页页前插的内容反复顶走位置，
+   * 更早一页只在点「加载更早消息」时请求。滚动方向仍然记着，向下接近底部才补更新的消息。
    */
   const lastScrollTop = useRef(0);
-  const armed = useRef(false);
-  const earlierTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const navigationUntil = useRef(0);
   /*
-   * 惯性上滑过程中直接前插缓冲页时，部分内核会暂时抑制原生 overflow-anchor。
+   * 点击加载更早消息后前插内容时，部分内核会暂时抑制原生 overflow-anchor。
    * 在插入前后记录 scrollHeight 与 scrollTop，若浏览器未自动补偿锚点，则在 useLayoutEffect
-   * 绘制前同步补齐高度差，做到上滑翻页既不撞顶卡顿，也不发生肉眼可见跳动。
+   * 绘制前同步补齐高度差，做到前插既不撞顶卡顿，也不发生肉眼可见跳动。
    */
   const prependAnchorRef = useRef<{ scrollHeight: number; scrollTop: number; firstKey: string | null; count: number }>({
     scrollHeight: 0, scrollTop: 0, firstKey: null, count: 0
   });
-  const capturePrependAnchor = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    prependAnchorRef.current = {
-      scrollHeight: el.scrollHeight,
-      scrollTop: el.scrollTop,
-      firstKey: rows[0]?.key ?? null,
-      count: rows.length
-    };
-  }, [rows, scrollRef]);
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
@@ -135,63 +115,22 @@ export function Thread() {
   }, [rows, isAtBottom, scrollRef]);
 
   const beforeNavigation = useCallback(() => {
-    clearTimeout(earlierTimer.current);
     navigationUntil.current = performance.now() + 250;
   }, []);
-  const scheduleEarlier = useCallback(() => {
-    clearTimeout(earlierTimer.current);
-    earlierTimer.current = setTimeout(() => {
-      capturePrependAnchor();
-      void requestEarlierHistory();
-    }, 80);
-  }, [capturePrependAnchor, requestEarlierHistory]);
-  useEffect(() => () => clearTimeout(earlierTimer.current), []);
 
   const handleScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const el = event.currentTarget;
     const threshold = historyPrefetchDistance(el.clientHeight);
     const toTop = el.scrollTop;
     const toBottom = Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight);
-    const goingUp = toTop < lastScrollTop.current;
     const goingDown = toTop > lastScrollTop.current;
     lastScrollTop.current = toTop;
     if (performance.now() < navigationUntil.current) return;
-    if (toTop > threshold) {
-      // 退出去才重新武装：一次进入只预取一次，避开「插入 → 仍在区内 → 再预取」的连锁
-      armed.current = false;
-    }
-    if (goingUp && toTop <= threshold) {
-      if (!armed.current) {
-        armed.current = true;
-        void prefetchEarlier();
-      }
-      // 接近顶部缓冲区且预取页已就绪时立即无缝接入，避免惯性滚动一路撞到 scrollTop=0 硬停顿
-      if (toTop <= Math.max(120, threshold * 0.35)) {
-        capturePrependAnchor();
-        if (applyEarlierPage()) {
-          clearTimeout(earlierTimer.current);
-          return;
-        }
-      }
-      scheduleEarlier();
-    }
+    // 上滑什么都不做：更早的一页只由「加载更早消息」按钮显式请求，不再随滚动自动前插。
     if (goingDown && toBottom <= threshold) {
       void requestLaterHistory();
     }
-  }, [applyEarlierPage, capturePrependAnchor, prefetchEarlier, requestLaterHistory, scheduleEarlier]);
-
-  /* 已经贴在顶部时继续上滑不会再产生 scroll 事件，靠 wheel 兜住「还想看更早」的意图。 */
-  const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
-    if (event.deltaY >= 0 || event.currentTarget.scrollTop > 0) {
-      return;
-    }
-    stopScroll();
-    capturePrependAnchor();
-    // 顶到头还在推：缓冲里有就当场插进去，不用再等空闲计时
-    if (!applyEarlierPage()) {
-      scheduleEarlier();
-    }
-  }, [applyEarlierPage, capturePrependAnchor, scheduleEarlier, stopScroll]);
+  }, [requestLaterHistory]);
 
   /* 内容不足一屏时不会产生滚动事件，主动补更早的一页，否则历史永远加载不出来。 */
   useEffect(() => {
@@ -225,7 +164,7 @@ export function Thread() {
 
   return (
     <div className="thread-scroll-region conversation-thread">
-      <div className="thread" ref={scrollRef} role="region" aria-label="消息记录" tabIndex={0} onScroll={handleScroll} onWheel={handleWheel}>
+      <div className="thread" ref={scrollRef} role="region" aria-label="消息记录" tabIndex={0} onScroll={handleScroll}>
         <div className="thread-column" ref={contentRef}>
           {history.hasMore && (
             <RetryRow
@@ -1038,7 +977,7 @@ const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] }) {
         <span className="tool-group-chevron" aria-hidden="true"><ProcessChevron /></span>
       </summary>
       {/* 收起时不挂载内部行：<details> 只负责隐藏，React 仍会为每行跑正文解析、diff 高亮和 Markdown，
-          上滑加载历史要为这些默认看不见的内容白付成本，所以只在展开后构建。 */}
+          这些默认看不见的内容只有展开时才值得付成本，所以只在展开后构建。 */}
       {open && (
         <ProcessScrollViewport
           active

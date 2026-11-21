@@ -97,10 +97,13 @@ async function run(page, name) {
   assert.ok(Math.abs(after-reading)<3,'向上阅读不被新增内容拉回底部: '+reading+' → '+after);
   await assertLatestPosition(page, name + '-1280');
   await page.mouse.wheel(0,-100000);
-  await page.waitForFunction(()=>store.getState().thread.rows.some(row=>row.text==='之前的第一个问题'));
-  await page.mouse.wheel(0,-100000);
   await page.waitForFunction(()=>document.querySelector('.thread').scrollTop<5);
   await page.waitForTimeout(250);
+  const earlier=page.getByRole('button',{name:'加载更早消息',exact:true});
+  await earlier.waitFor();
+  assert.equal(await page.evaluate(()=>store.getState().thread.rows.some(row=>row.text==='之前的第一个问题')),false,'上滑只停在顶部，不自动加载更早消息');
+  await earlier.click();
+  await page.waitForFunction(()=>store.getState().thread.rows.some(row=>row.text==='之前的第一个问题'));
   assert.ok(await page.getByText('之前的第一个问题',{exact:true}).isVisible());
   await page.screenshot({path:join(output,name+'-earlier.png'),animations:'disabled'});
   await page.getByRole('button',{name:'回到底部',exact:true}).click();
@@ -118,6 +121,7 @@ async function run(page, name) {
   assert.equal(await page.evaluate(()=>store.getState().thread.history.hasMore),false,'末页全是不可见事件时仍能加载历史');
 
   await page.goto(url+'?mode=failure');
+  await page.getByRole('button',{name:'加载更早消息',exact:true}).click();
   const retry=page.getByRole('button',{name:'加载更早失败，点击重试',exact:true});await retry.waitFor();
   const failedCount=await page.evaluate(()=>historyCalls.length);await page.waitForTimeout(400);
   assert.equal(await page.evaluate(()=>historyCalls.length),failedCount,'失败等待重试，不循环打接口');
@@ -127,7 +131,7 @@ async function run(page, name) {
   for(const width of [1440,768,390]){
     await page.setViewportSize({width,height:840});await page.goto(url);await page.locator('.thread').waitFor();
     await page.waitForFunction(()=>{const el=document.querySelector('.thread');return el.scrollTop>500;});
-    // 直接聚焦当前窗口顶部的入口，不触发滚轮自动分页。
+    // 直接聚焦当前窗口顶部的入口，用显式按钮加载更早一页。
     await page.getByRole('button',{name:'加载更早消息',exact:true}).waitFor();
     // 显式入口也能通过键盘操作，适用于没有滚轮的设备。
     const more=page.getByRole('button',{name:'加载更早消息',exact:true});await more.focus();await page.keyboard.press('Enter');
@@ -151,7 +155,7 @@ async function run(page, name) {
     await assertLatestPosition(page, name + '-' + JSON.stringify(ui));
   }
   assert.deepEqual(errors,[]);
-  console.log(name+': PASS 长回复收尾 / 滚轮上下翻页 / 阅读中增量 / 回到底部 / 跨不可见页和空行窗口 / 失败重试 / 键盘入口 / 三种宽度');
+  console.log(name+': PASS 长回复收尾 / 上滑不自动翻页、点击加载更早 / 阅读中增量 / 回到底部 / 跨不可见页和空行窗口 / 失败重试 / 键盘入口 / 三种宽度');
 }
 try{
   if(process.argv.includes('--serve')){console.log(url);await new Promise(()=>{});}
