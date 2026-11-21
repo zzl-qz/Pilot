@@ -81,6 +81,9 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     private final String browsersDir;
     /** >=0：显式秒数；-1：自动（无头 10 分钟，有头不回收）。 */
     private final long idleShutdownSeconds;
+    /** 外网主机清单：逗号或空白分隔，{@code *.example.com} 覆盖子域；空表示不额外收紧。 */
+    private final String allowHosts;
+    private final String denyHosts;
 
     private volatile PlaywrightBackend backend;
     private volatile String pendingReason = "浏览器运行时尚未启动";
@@ -100,7 +103,9 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         @Value("${pilot.browser.headless:true}") boolean headless,
         @Value("${pilot.browser.prefer-bundled:true}") boolean preferBundled,
         @Value("${pilot.browser.browsers-dir:}") String browsersDir,
-        @Value("${pilot.browser.idle-shutdown-seconds:-1}") long idleShutdownSeconds) {
+        @Value("${pilot.browser.idle-shutdown-seconds:-1}") long idleShutdownSeconds,
+        @Value("${pilot.browser.allow-hosts:}") String allowHosts,
+        @Value("${pilot.browser.deny-hosts:}") String denyHosts) {
         this.browserHome = browserHome;
         this.mapper = mapper;
         this.mirrors = mirrors;
@@ -111,6 +116,8 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         this.preferBundled = preferBundled;
         this.browsersDir = browsersDir == null ? "" : browsersDir.strip();
         this.idleShutdownSeconds = idleShutdownSeconds;
+        this.allowHosts = allowHosts == null ? "" : allowHosts.strip();
+        this.denyHosts = denyHosts == null ? "" : denyHosts.strip();
     }
 
     @Override
@@ -386,6 +393,13 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         env.put("PILOT_BROWSER_HEADLESS", headless ? "true" : "false");
         if (!preferBundled) {
             env.put("PILOT_BROWSER_PREFER_BUNDLED", "false");
+        }
+        // 主机清单交给 sidecar 判：navigate 与页面内每个请求都过同一套规则，deny 优先。
+        if (!allowHosts.isEmpty()) {
+            env.put("PILOT_BROWSER_ALLOW_HOSTS", allowHosts);
+        }
+        if (!denyHosts.isEmpty()) {
+            env.put("PILOT_BROWSER_DENY_HOSTS", denyHosts);
         }
         return env;
     }

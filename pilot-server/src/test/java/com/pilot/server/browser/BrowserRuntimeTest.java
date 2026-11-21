@@ -76,7 +76,7 @@ class BrowserRuntimeTest {
         var mirrors = new RuntimeMirrors("https://mirror.test/npm", "https://mirror.test/chromium/",
             "https://mirror.test/electron");
         BrowserRuntime runtime = new BrowserRuntime(browserHome(home.toString()), new ObjectMapper(), mirrors, true,
-            true, true, true, true, "", -1) {
+            true, true, true, true, "", -1, "", "") {
             @Override
             int run(Path directory, Path executable, Duration timeout, List<String> command,
                 Map<String, String> environment) {
@@ -106,7 +106,7 @@ class BrowserRuntimeTest {
     @Test
     void disabledRuntimeDeclaresNoCapabilityAndExplainsWhy() {
         BrowserRuntime runtime = new BrowserRuntime(browserHome(""), new ObjectMapper(), RuntimeMirrors.defaults(),
-            false, false, false, true, true, "", -1);
+            false, false, false, true, true, "", -1, "", "");
         runtime.start();
 
         Availability availability = runtime.availability();
@@ -122,7 +122,7 @@ class BrowserRuntimeTest {
     @Test
     void toolFactoryRegistersSessionExtrasButTheyStayHiddenUntilTheirCapabilityIsReady(@TempDir Path workspace) {
         BrowserRuntime runtime = new BrowserRuntime(browserHome(""), new ObjectMapper(), RuntimeMirrors.defaults(),
-            false, false, false, true, true, "", -1);
+            false, false, false, true, true, "", -1, "", "");
         WorkspaceToolFactory factory = new WorkspaceToolFactory(
             new AgentProperties(workspace.toString(), PermissionMode.AUTO, 8, 3, 5, 300, 2, 1, 60_000, true),
             new WebSearchProperties(false, "http://127.0.0.1:9", "", ""), SnapshotSink.none(), new ObjectMapper());
@@ -168,7 +168,7 @@ class BrowserRuntimeTest {
         Assumptions.assumeTrue(Files.isDirectory(home.directory().resolve("node_modules").resolve("playwright-core")),
             "没有安装 playwright-core");
         BrowserRuntime runtime = new BrowserRuntime(home, new ObjectMapper(), RuntimeMirrors.defaults(), true, false,
-            false, true, true, "", -1);
+            false, true, true, "", -1, "", "");
         try {
             assertFalse(runtime.availability().available(), "启动之前不能声明能力");
             runtime.start();

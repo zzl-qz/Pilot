@@ -15,7 +15,8 @@
 //   PLAYWRIGHT_BROWSERS_PATH      内置缓存目录（chromium.executablePath() 由此解析）。
 
 import { createRequire } from 'node:module';
-import { publicHttps, externalRequestAllowed, externalMutations, requireExternalApproval } from './browser-policy.mjs';
+import { publicHttps, externalRequestAllowed, externalMutations, requireExternalApproval, hostDecision,
+  hostRulesFromEnv, parseHosts } from './browser-policy.mjs';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -36,6 +37,8 @@ const MAX_SCREENSHOT_BYTES = 4 * 1024 * 1024;
 const DEFAULT_VIEWPORT = Object.freeze({ width: 1280, height: 800 });
 const DEFAULT_MIRROR_WIDTH = 960;
 const DEFAULT_MIRROR_QUALITY = 55;
+// 外网主机清单由 Java 侧配置写入环境变量；进程启动时读一次，改配置后重启 sidecar 即生效。
+const HOST_RULES = hostRulesFromEnv();
 
 let playwright;
 let browserPromise = null;
@@ -70,6 +73,20 @@ function loadPlaywright() {
     playwright = require('playwright-core');
   }
   return playwright;
+}
+
+/** 打开外网被拒时按主机清单区分原因，否则模型分不清是清单外还是网址本身不合格。 */
+function externalBlockedReason(value) {
+  let host = '';
+  try {
+    host = new URL(value).hostname.toLowerCase();
+  } catch {
+    return '目标不是可访问的公开 HTTPS 域名';
+  }
+  const decision = hostDecision(host, HOST_RULES);
+  if (decision === 'deny') return `主机 ${host} 在拒绝清单（PILOT_BROWSER_DENY_HOSTS）里，不能打开`;
+  if (decision === 'blocked') return `主机 ${host} 不在放行清单（PILOT_BROWSER_ALLOW_HOSTS）里，不能打开`;
+  return '目标不是可访问的公开 HTTPS 域名';
 }
 
 function candidateExecutables() {
@@ -494,7 +511,8 @@ async function createLocalSession(id, browser) {
     const request = route.request();
     if (session.externalOrigin) {
       const allowed = await externalRequestAllowed({ url: request.url(), method: request.method(),
-        navigation: request.isNavigationRequest(), origin: session.externalOrigin, actionApproved: Boolean(session.actionApproved) });
+        navigation: request.isNavigationRequest(), origin: session.externalOrigin,
+        actionApproved: Boolean(session.actionApproved), hosts: HOST_RULES });
       if (!allowed) {
         pushLimited(session.console, { type: 'blocked', text: `已拦截未授权请求：${request.method()} ${request.url()}`, at: '' });
         return route.abort('blockedbyclient');
@@ -991,7 +1009,7 @@ const handlers = {
 
   async navigate(args, current) {
     if (args.approvedExternal) {
-      if (!await publicHttps(args.url)) throw new Error("目标不是可访问的公开 HTTPS 域名");
+      if (!await publicHttps(args.url, undefined, HOST_RULES)) throw new Error(externalBlockedReason(args.url));
       current.externalOrigin = new URL(args.url).origin;
     } else if (!args.url || !loopbackUrl(args.url) || current.externalOrigin) {
       throw new Error(`只允许打开本机地址（http(s)://localhost、127.0.0.1、[::1]）：${args.url}`);

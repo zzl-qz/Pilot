@@ -62,6 +62,12 @@ pilot:
     dir: ${PILOT_ATTACHMENTS_DIR:}                    # 留空用数据目录下的 attachments
   # 浏览器（browser 工具 + 右侧「浏览器」面板）：内置 Chromium，默认无头。
   # pilot.browser.* 可按部署覆盖。默认值由 BrowserHome、BrowserRuntime 和 BrowserControlService 提供。
+  browser:
+    # 打开外网时的主机清单，逗号或空白分隔，*.example.com 覆盖自身与所有子域。
+    # allow-hosts 留空表示不额外收紧（仍只允许公开 HTTPS）；写了清单则清单外一律拦下。
+    # deny-hosts 始终优先，写错 allow 也不会放过被拒的主机。改完重启生效。
+    allow-hosts: ${PILOT_BROWSER_ALLOW_HOSTS:}
+    deny-hosts: ${PILOT_BROWSER_DENY_HOSTS:}
   # PILOT_VOICE_MAX_RECORDING_SECONDS 可覆盖 120 秒的录音时长，PILOT_VOICE_MODEL 可设置默认转写模型。
   model:
     # endpoint 可以写服务根地址，也可以写完整的 /v1/chat/completions
