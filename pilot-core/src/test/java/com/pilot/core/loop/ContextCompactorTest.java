@@ -16,9 +16,9 @@ import com.pilot.core.message.ToolCall;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelClientException;
 import com.pilot.core.model.ModelProfile;
-import com.pilot.core.model.ModelRequestScope;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ToolDefinition;
+import com.pilot.core.model.diagnostics.ModelRequestScope;
 
 class ContextCompactorTest {
 

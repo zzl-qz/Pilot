@@ -10,6 +10,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import com.pilot.core.message.Message;
+import com.pilot.core.model.diagnostics.ModelRequestScope;
 import com.pilot.core.util.Sha256;
 
 import tools.jackson.databind.ObjectMapper;

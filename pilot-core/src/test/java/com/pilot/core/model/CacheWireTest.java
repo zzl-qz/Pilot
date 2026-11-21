@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import com.pilot.core.message.Attachment;
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
+import com.pilot.core.model.diagnostics.ModelRequestScope;
 import com.sun.net.httpserver.HttpServer;
 
 import tools.jackson.databind.JsonNode;
@@ -368,9 +369,8 @@ class CacheWireTest {
 
     private static List<Message> thinkingHistory() {
         return List.of(Message.system("rules"), Message.user("第一问"),
-            Message.assistant("", List.of(new ToolCall("c1", "read_file", Map.of())), "旧思考"),
-            Message.tool("c1", "A"), Message.user("第二问"),
-            Message.assistant("", List.of(new ToolCall("c2", "read_file", Map.of())), "新思考"),
+            Message.assistant("", List.of(new ToolCall("c1", "read_file", Map.of())), "旧思考"), Message.tool("c1", "A"),
+            Message.user("第二问"), Message.assistant("", List.of(new ToolCall("c2", "read_file", Map.of())), "新思考"),
             Message.tool("c2", "B"));
     }
 

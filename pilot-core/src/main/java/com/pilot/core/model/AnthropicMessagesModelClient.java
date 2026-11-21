@@ -11,6 +11,7 @@ import java.util.Set;
 
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
+import com.pilot.core.model.diagnostics.ModelRequestScope;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;

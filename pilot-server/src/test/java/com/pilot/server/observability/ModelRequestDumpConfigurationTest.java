@@ -16,7 +16,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.core.env.StandardEnvironment;
 import org.springframework.core.env.SystemEnvironmentPropertySource;
 
-import com.pilot.core.model.ModelRequestDumper;
+import com.pilot.core.model.diagnostics.ModelRequestDumper;
 import com.pilot.server.common.data.PilotDataDir;
 
 @ResourceLock(Resources.SYSTEM_PROPERTIES)

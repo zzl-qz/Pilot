@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.util.Map;
 
 import com.pilot.core.http.BoundedHttp;
+import com.pilot.core.model.diagnostics.ModelRequestDumper;
 import com.pilot.core.util.Texts;
 
 import tools.jackson.databind.JsonNode;

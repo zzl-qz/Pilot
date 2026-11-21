@@ -3,7 +3,7 @@ package com.pilot.server.observability;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import com.pilot.core.model.ModelRequestDumper;
+import com.pilot.core.model.diagnostics.ModelRequestDumper;
 import com.pilot.server.common.data.PilotDataDir;
 
 /**

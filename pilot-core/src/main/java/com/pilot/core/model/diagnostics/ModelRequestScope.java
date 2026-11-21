@@ -1,4 +1,4 @@
-package com.pilot.core.model;
+package com.pilot.core.model.diagnostics;
 
 import java.util.function.Supplier;
 

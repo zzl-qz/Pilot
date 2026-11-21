@@ -1,4 +1,4 @@
-package com.pilot.core.model;
+package com.pilot.core.model.diagnostics;
 
 import java.io.IOException;
 import java.net.URI;
@@ -56,7 +56,7 @@ public final class ModelRequestDumper {
         return config.enabled();
     }
 
-    static void recordIfEnabled(URI endpoint, ObjectMapper mapper, Object orderedBody) {
+    public static void recordIfEnabled(URI endpoint, ObjectMapper mapper, Object orderedBody) {
         Config current = config;
         if (!current.enabled() || current.root() == null || mapper == null) {
             return;
