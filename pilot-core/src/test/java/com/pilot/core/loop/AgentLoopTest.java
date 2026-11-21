@@ -1708,6 +1708,33 @@ class AgentLoopTest {
     }
 
     @Test
+    void preservesFinalTurnReasoningWhenCompletionPolicyRequestsAnotherTurn() {
+        ScriptedModelClient client = new ScriptedModelClient(
+            new ModelResponse("候选结果", List.of(), ModelUsage.unknown(), ModelResponse.FinishReason.STOP, "本轮思考"),
+            new ModelResponse("核验完成", List.of()));
+        AtomicInteger reviews = new AtomicInteger();
+        ExecutionPolicy policy = new ExecutionPolicy() {
+            @Override
+            public void beforeRequest(List<Message> history) {
+            }
+
+            @Override
+            public String review(List<Message> history, Set<String> changedFiles, List<String> checks) {
+                return reviews.getAndIncrement() == 0 ? "补充核验后再结束" : null;
+            }
+        };
+        AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(), config(8, 3)).withExecutionPolicy(policy);
+
+        AgentLoop.Result result = loop.run("完成任务", List.of(), events::add);
+
+        assertNull(result.failureCode());
+        Message priorAnswer = client.requests.get(1).stream()
+            .filter(message -> "assistant".equals(message.role()) && "候选结果".equals(message.content()))
+            .findFirst().orElseThrow();
+        assertEquals("本轮思考", priorAnswer.reasoningContent());
+    }
+
+    @Test
     void policyReverificationRunsThroughToolExecutorBeforeCompletion() {
         CountingTool command = new CountingTool("run_command", "测试通过");
         ScriptedModelClient client =

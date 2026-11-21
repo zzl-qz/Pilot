@@ -682,7 +682,7 @@ public final class AgentLoop {
                 outputLimitStreak = 0;
                 // 带工具调用的正文属于中间轮次，不是给用户的答复；只提交最终轮正文。
                 if (calls.isEmpty()) {
-                    Result completed = completeTurn(content, context);
+                    Result completed = completeTurn(content, reasoning, context);
                     if (completed != null) {
                         return completed;
                     }
@@ -809,14 +809,14 @@ public final class AgentLoop {
     }
 
     /** 返回 null 表示需要下一轮；只有完成门、模式审查和输入交接均通过才结束。 */
-    private Result completeTurn(String content, LoopContext context) {
+    private Result completeTurn(String content, String reasoning, LoopContext context) {
         List<Message> messages = context.messages();
         Consumer<SessionEvent> events = context.events();
         Consumer<List<Message>> checkpoint = context.checkpoint();
         Set<String> changedFiles = context.changedFiles();
         List<String> checks = context.checks();
         RuntimeGuidance runtimeGuidance = context.runtimeGuidance();
-        messages.add(Message.assistant(content, List.of()));
+        messages.add(Message.assistant(content, List.of(), reasoning));
         String summary = content.isBlank() ? "任务完成（模型未返回文本）" : content;
         List<PlanItem> plan = planSnapshot();
         int done = (int)plan.stream().filter(PlanItem::done).count();
@@ -850,7 +850,7 @@ public final class AgentLoop {
             fitHistoryToInputBudget(messages, events, null);
             if (CompletionPressure.tooFull(messages, tools.definitions(), contextLimit())) {
                 content = content + "\n\n上下文接近上限，已跳过非阻断收尾催办。";
-                messages.set(messages.size() - 1, Message.assistant(content, List.of()));
+                messages.set(messages.size() - 1, Message.assistant(content, List.of(), reasoning));
                 events.accept(new RunContinued(1, 1, "上下文接近上限，已跳过非阻断收尾催办"));
                 nudge = null;
             }
@@ -858,7 +858,7 @@ public final class AgentLoop {
         if (nudge != null) {
             if (nudge.halt()) {
                 String partial = content + "\n\n收尾门禁未通过，已停止：" + nudge.reason();
-                messages.set(messages.size() - 1, Message.assistant(partial, List.of()));
+                messages.set(messages.size() - 1, Message.assistant(partial, List.of(), reasoning));
                 events.accept(RunEnded.of(RunOutcome.BLOCKED, RunFailureCode.TASK_INCOMPLETE.name(), partial, changed,
                     checksOut, plan, List.of("修复规范检查问题后继续")));
                 return new Result(partial, RunFailureCode.TASK_INCOMPLETE.name(), conversation(messages), changed,
@@ -894,7 +894,7 @@ public final class AgentLoop {
         String lintNote = lintGate.releaseNote();
         if (lintNote != null && !lintNote.isBlank() && !lintGate.stopsOnFailure()) {
             content = content + "\n\n规范检查未通过，已记录并放行：\n" + lintNote;
-            messages.set(messages.size() - 1, Message.assistant(content, List.of()));
+            messages.set(messages.size() - 1, Message.assistant(content, List.of(), reasoning));
             summary = content;
         }
         if (config.completionChecks() && (!openSteps.isEmpty() || !blockedSteps.isEmpty())) {
@@ -903,7 +903,7 @@ public final class AgentLoop {
             if (!blockedSteps.isEmpty() && !openSteps.isEmpty()) {
                 partial = partial + "\n\n已阻塞：" + String.join("；", blockedSteps);
             }
-            messages.set(messages.size() - 1, Message.assistant(partial, List.of()));
+            messages.set(messages.size() - 1, Message.assistant(partial, List.of(), reasoning));
             events.accept(new AssistantDelta(partial));
             events.accept(RunEnded.of(RunOutcome.PARTIAL, RunFailureCode.TASK_INCOMPLETE.name(), partial, changed,
                 checksOut, plan, List.of("查看本轮差异", "继续执行未完成步骤")));
