@@ -8,7 +8,7 @@ import { useStore } from '../store.js';
 import { api } from '../api.js';
 import { errorInfo } from '../lib/errors.js';
 import { MarkdownBody } from './MarkdownBody.jsx';
-import { appendProjectFolders, folderPaths, MAX_PROJECT_FOLDERS, validateProjectFolders } from '../lib/project-folders.js';
+import { appendProjectFolders, folderPaths, MAX_PROJECT_FOLDERS, validateProjectFolders } from '../lib/project/folders.js';
 import type { ApiResults } from '../types/api.js';
 import type * as S from '../types/server.js';
 import './project-editor.css';

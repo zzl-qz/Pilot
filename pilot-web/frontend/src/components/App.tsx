@@ -17,7 +17,7 @@ import { Composer } from './Composer.jsx';
 import { TaskContract, Modals } from './Modals.jsx';
 import { SelectionQuote } from './SideChat.jsx';
 import { ErrorBoundary } from './ErrorBoundary.jsx';
-import { resolveFolders, samePath } from '../lib/projects.js';
+import { resolveFolders, samePath } from '../lib/project/sessions.js';
 import { shortcut, runPhase, runTone, isShortcutModifier } from '../lib/interaction.js';
 import { api } from '../api.js';
 import { watchWorkbench } from '../lib/workbench-sync.js';

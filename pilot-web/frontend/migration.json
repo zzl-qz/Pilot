@@ -48,7 +48,7 @@
         "lib/drafts.js",
         "lib/input-history.js",
         "lib/mention.js",
-        "lib/projects.js",
+        "lib/project/sessions.js",
         "lib/diff.js",
         "lib/changes.js",
         "lib/verification.js"

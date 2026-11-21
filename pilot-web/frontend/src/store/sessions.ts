@@ -6,7 +6,7 @@ import { errorInfo } from '../lib/errors.js';
 import { loadInputHistory } from '../lib/input-history.js';
 import { readDraft, writeDraft, dropDraft, dropDraftSnapshot } from '../lib/drafts.js';
 import { normalizePermission } from '../lib/permission.js';
-import { sortSessions } from '../lib/projects.js';
+import { sortSessions } from '../lib/project/sessions.js';
 import { NOTE_COUNT_LIMIT, createDraftNote, noteContentError, readDraftNotes, uploadDraftNotes, writeDraftNotes } from '../lib/notes.js';
 import { sideChatsFor, writeSideChats } from '../lib/side-chat.js';
 

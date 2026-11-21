@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { appendProjectFolders, folderPaths, validateProjectFolders } from '../src/lib/project-folders.js';
+import { appendProjectFolders, folderPaths, validateProjectFolders } from '../src/lib/project/folders.js';
 
 test('保留中文、空格和 POSIX 大小写，消除重复和尾部分隔符', () => {
   assert.deepEqual(folderPaths('/\n/work/资料 空间/\n/work/资料 空间\n/Work\n/work'), ['/', '/work/资料 空间', '/Work', '/work']);

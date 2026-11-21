@@ -4,7 +4,7 @@ import type { CommandTask } from '../types/store.js';
 import type * as S from '../types/server.js';
 import { errorInfo } from '../lib/errors.js';
 import { api, apiJson } from '../api.js';
-import { samePath } from '../lib/projects.js';
+import { samePath } from '../lib/project/sessions.js';
 import { mergeCommandLog } from '../lib/command-tasks.js';
 
 export function createPanelActions({ set, get }: StoreContext): StoreSlice<'loadChanges' | 'restoreChanges' | 'rollbackRun' | 'createBranch' | 'openPreview' | 'loadCommandTasks' | 'loadCommandLog' | 'stopCommand'> {

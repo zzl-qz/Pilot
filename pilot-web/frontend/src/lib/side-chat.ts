@@ -9,7 +9,7 @@ import type { SimpleEvent, SideChatTab, SideChatsState, SideTranscript } from '.
 
 import { sameUserInput } from '../thread-utils.js';
 import { isRunEnd } from './events.js';
-import { samePath } from './projects.js';
+import { samePath } from './project/sessions.js';
 
 const STORAGE_KEY = 'pilot.side-chats';
 const QUERY_KEY = 'sideChat';

@@ -6,7 +6,7 @@ import {
   partitionSessions,
   resolveFolders,
   samePath
-} from '../../../frontend/src/lib/projects.js';
+} from '../../../frontend/src/lib/project/sessions.js';
 
 test('samePath 忽略分隔符、大小写与末尾斜杠', () => {
   assert.equal(samePath('E:\\Pilot\\web', 'e:/pilot/web'), true);

@@ -1,4 +1,4 @@
-import type { ProjectSummary, SessionSummary } from '../types/core.js';
+import type { ProjectSummary, SessionSummary } from '../../types/core.js';
 /**
  * 项目制的纯逻辑：路径比较、可用文件夹、侧栏分组。
  *
