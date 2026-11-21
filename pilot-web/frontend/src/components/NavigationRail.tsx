@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { UiState } from '../types/store.js';
 import { useStore } from '../store.js';
 import { shortcut } from '../lib/interaction.js';
@@ -10,13 +10,35 @@ export function NavigationRail() {
   const unread = ui.resultUnread || 0;
   const moreRef = useRef<HTMLDetailsElement>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const closeMore = (restoreFocus = false) => {
+    const details = moreRef.current;
+    if (!details?.open) return;
+    details.open = false;
+    setMoreOpen(false);
+    if (restoreFocus) details.querySelector('summary')?.focus();
+  };
   const open = (patch: Partial<UiState>) => useStore.getState().setUi(patch);
   const invoke = (action: () => void) => {
-    if (moreRef.current) moreRef.current.open = false;
-    setMoreOpen(false);
-    moreRef.current?.querySelector('summary')?.focus();
+    closeMore(true);
     action();
   };
+  // 与成熟产品的浮层菜单一致：点菜单外任意位置、焦点移出菜单或窗口失焦即收起，不必再点一次触发按钮。
+  useEffect(() => {
+    if (!moreOpen) return;
+    const outside = (event: Event) => {
+      if (moreRef.current?.contains(event.target as Node)) return;
+      closeMore();
+    };
+    const onWindowBlur = () => closeMore();
+    document.addEventListener('pointerdown', outside, true);
+    document.addEventListener('focusin', outside);
+    window.addEventListener('blur', onWindowBlur);
+    return () => {
+      document.removeEventListener('pointerdown', outside, true);
+      document.removeEventListener('focusin', outside);
+      window.removeEventListener('blur', onWindowBlur);
+    };
+  }, [moreOpen]);
   return <nav className="navigation-rail" aria-label="全局功能">
     <div className="navigation-rail-group">
       <RailButton id="nav-new-session" icon="plus" label="新任务" hint={shortcut('N')}

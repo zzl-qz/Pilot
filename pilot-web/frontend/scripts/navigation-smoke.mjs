@@ -117,6 +117,11 @@ async function run(page,name) {
   const menu = page.getByRole('menu',{name:'更多功能',exact:true});
   await more.click();
   await page.screenshot({path:join(output,`${name}-more-menu.png`),timeout:20000,animations:'disabled'});
+  // 跟系统菜单一致：点菜单外面就收起，不用再点一次「更多功能」。
+  await page.locator('.thread').click({position:{x:24,y:24}});
+  await menu.waitFor({state:'hidden'});
+  assert.equal(await more.getAttribute('aria-expanded'),'false','点击菜单外任意位置即收起');
+  await more.click();await menu.waitFor();
   await page.getByRole('menuitem',{name:/定时任务/}).click();
   assert.equal(await page.evaluate(()=>store.getState().ui.schedulesOpen),true);
   await menu.waitFor({state:'hidden'});
