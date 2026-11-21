@@ -1,9 +1,9 @@
-import { errorInfo } from '../lib/errors.js';
+import { errorInfo } from '../../lib/errors.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { TextInput } from '@astryxdesign/core/TextInput';
-import { useStore } from '../store.js';
-import { buildModelProbe, describeModelsFetched, normalizeModelNames } from '../lib/model-settings.js';
-import { Icon } from './Icon.jsx';
+import { useStore } from '../../store.js';
+import { buildModelProbe, describeModelsFetched, normalizeModelNames } from '../../lib/model-settings.js';
+import { Icon } from '../Icon.jsx';
 
 const EMPTY: string[] = [];
 interface DiscoveryResult { endpoint: string; apiKey: string; models: string[]; probing?: boolean; hint: string; error?: boolean }

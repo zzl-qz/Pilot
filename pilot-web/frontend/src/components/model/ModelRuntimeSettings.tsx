@@ -1,17 +1,17 @@
-import type * as S from '../types/server.js';
-import type { Update } from '../types/api.js';
+import type * as S from '../../types/server.js';
+import type { Update } from '../../types/api.js';
 type RateKey = 'input' | 'cachedInput' | 'cacheWrite' | 'output';
 type PricingForm = Omit<S.ModelPricing, RateKey> & Record<RateKey, number | string | null>;
 type RuntimeOptions = Omit<S.ModelRuntimeSettingsOptions, 'pricing' | 'timeoutSeconds' | 'idleTimeoutSeconds'> & {
   pricing: PricingForm; timeoutSeconds: number | string | null; idleTimeoutSeconds: number | string | null;
 };
 type RuntimeView = Omit<S.ModelRuntimeSettingsView, 'options'> & { options: RuntimeOptions };
-import { errorInfo } from '../lib/errors.js';
-import { requestTimeoutOptions } from '../lib/model-settings.js';
+import { errorInfo } from '../../lib/errors.js';
+import { requestTimeoutOptions } from '../../lib/model-settings.js';
 import React, { useEffect, useRef, useState } from 'react';
-import { api } from '../api.js';
+import { api } from '../../api.js';
 import { Button } from '@astryxdesign/core/Button';
-import './request-usage.css';
+import '../request-usage.css';
 
 function withPricing(data: S.ModelRuntimeSettingsView): RuntimeView {
   const pricing = data.options.pricing || { currency: 'USD', source: '', input: null, cachedInput: null, cacheWrite: null, output: null };

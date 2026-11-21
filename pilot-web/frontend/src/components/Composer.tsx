@@ -30,7 +30,7 @@ import { resumeBar } from '../lib/queue.js';
 import { latestRunResult } from '../lib/events.js';
 import { toolArgsText, toolLabel } from '../lib/tool-meta.js';
 import { PERMISSION_MODES, normalizePermission, permissionLabel } from '../lib/permission.js';
-import { ModelPicker } from './ModelPicker.jsx';
+import { ModelPicker } from './model/ModelPicker.jsx';
 import { usageBudgetTitle, usageLevel, usagePercent } from '../lib/context-usage.js';
 import { agentStatusLabel, agentStatusDotVariant, summarizeAgents } from '../lib/agents.js';
 import './conversation.css';

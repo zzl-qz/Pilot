@@ -19,9 +19,9 @@ import { verificationLabel } from '../lib/verification/run.js';
 import { api } from '../api.js';
 import { Icon } from './Icon.jsx';
 import { Modal } from './Modal.jsx';
-import { ModelOptions, useModelDiscovery } from './ModelDiscovery.jsx';
-import { ModelSaveFeedback, useModelForm } from './ModelForm.jsx';
-import { ModelRuntimeSettings } from './ModelRuntimeSettings.jsx';
+import { ModelOptions, useModelDiscovery } from './model/ModelDiscovery.jsx';
+import { ModelSaveFeedback, useModelForm } from './model/ModelForm.jsx';
+import { ModelRuntimeSettings } from './model/ModelRuntimeSettings.jsx';
 import './settings.css';
 
 const SECTIONS = [

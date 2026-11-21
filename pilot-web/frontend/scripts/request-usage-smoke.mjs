@@ -21,7 +21,7 @@ const report = { id:'request-1', purpose:'main', model:'test-model', provider:'g
 const totals = {requests:1,observedCacheRequests:1,observedCacheInputTokens:61200,cacheReadTokens:48960,cacheWriteTokens:0,pricedRequests:1,costs:{USD:0.005},exact:true};
 const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Pilot 请求用量</title><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
       import React from 'react'; import {createRoot} from 'react-dom/client';
-      import {Composer} from '/src/components/Composer.jsx'; import {UiProvider} from '/src/components/UiProvider.js'; import {ModelRuntimeSettings} from '/src/components/ModelRuntimeSettings.jsx';
+      import {Composer} from '/src/components/Composer.jsx'; import {UiProvider} from '/src/components/UiProvider.js'; import {ModelRuntimeSettings} from '/src/components/model/ModelRuntimeSettings.jsx';
       import {useStore} from '/src/store.js'; import {api} from '/src/api.js';
       import {applyEvent, initialThread, prependHistoryPage} from '/src/thread-reducer.js';
       import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css'; import '/src/workbench.css';
@@ -173,7 +173,7 @@ async function run(page,name){
 try{
   url=`http://127.0.0.1:${server.httpServer.address().port}/${entry}`;
 browser=await chromium.launch(browserOptions({headless:true})); await run(await browser.newPage(),'chromium'); await browser.close(); browser=null;
-  const main=join(temp,'main.cjs'); await writeFile(main,`const {app,BrowserWindow}=require('electron');app.whenReady().then(()=>{new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}}).loadURL(${JSON.stringify(url)});});`);
+  const main=join(temp,'main.cjs'); await writeFile(main,`const {app,BrowserWindow}=require('electron');app.whenReady().then(()=>{new BrowserWindow({webPreferences:{contextIsolation:true,nodeIntegration:false}}).loadURL(${JSON.stringify(url)});});`);
   const env={...process.env}; delete env.ELECTRON_RUN_AS_NODE;
   electron=await _electron.launch({executablePath:electronBinary(),args:[main],env}); await run(await electron.firstWindow(),'electron');
   if(process.env.PILOT_UI_INSPECTOR) await new Promise((resolve,reject)=>{

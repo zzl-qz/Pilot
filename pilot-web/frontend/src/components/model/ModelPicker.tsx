@@ -1,9 +1,9 @@
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Button } from '@astryxdesign/core/Button';
-import { useStore } from '../store.js';
-import { buildModelUpdate, normalizeModelNames } from '../lib/model-settings.js';
+import { useStore } from '../../store.js';
+import { buildModelUpdate, normalizeModelNames } from '../../lib/model-settings.js';
 import { useModelDiscovery } from './ModelDiscovery.jsx';
-import { Icon } from './Icon.jsx';
+import { Icon } from '../Icon.jsx';
 import './model-picker.css';
 
 /** 输入区只负责快速切换；连接配置和手动填写统一进入模型设置。 */

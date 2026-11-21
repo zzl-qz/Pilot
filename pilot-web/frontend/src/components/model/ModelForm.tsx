@@ -1,8 +1,8 @@
-import type { StoreState } from '../types/store.js';
+import type { StoreState } from '../../types/store.js';
 import React, { useEffect, useRef, useState } from 'react';
-import { useStore } from '../store.js';
-import { buildModelUpdate } from '../lib/model-settings.js';
-import { Icon } from './Icon.jsx';
+import { useStore } from '../../store.js';
+import { buildModelUpdate } from '../../lib/model-settings.js';
+import { Icon } from '../Icon.jsx';
 
 /** 两个模型入口共用保存反馈；输入在请求期间锁定，失败保留，成功清空明文密钥。 */
 export function useModelForm({ model = '', endpoint: savedEndpoint = '', contextTokens: savedContext = '', maxOutputTokens: savedOutput = '', childModel: savedChild = '' }: { model?: string; endpoint?: string; contextTokens?: string | number | null; maxOutputTokens?: string | number | null; childModel?: string }) {

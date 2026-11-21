@@ -287,10 +287,10 @@
       "files": [
         "components/Composer.jsx",
         "components/VoiceInput.jsx",
-        "components/ModelPicker.jsx",
-        "components/ModelForm.jsx",
-        "components/ModelDiscovery.jsx",
-        "components/ModelRuntimeSettings.jsx",
+        "components/model/ModelPicker.jsx",
+        "components/model/ModelForm.jsx",
+        "components/model/ModelDiscovery.jsx",
+        "components/model/ModelRuntimeSettings.jsx",
         "components/RequestUsage.jsx"
       ],
       "features": [
