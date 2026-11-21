@@ -16,3 +16,4 @@
 - 若失败原因是目录、依赖或命令不存在，先修正运行环境再重试；这类错误不代表代码测试失败。
 - {{backgroundHelp}}
 - 开发服务器应直接运行前台命令并用 background=true 托管，不要再传守护化、脱离进程等参数，以便持续读取日志和停止进程。启动后先用 command_logs 看日志，再用 `curl -sS -i http://localhost:端口/` 确认已就绪（看状态码），若提供 browser 工具，页面行为用它验证。
+- 会一直等输入的程序（npm init、REPL、ssh 首连确认）加 `interactive=true` 并同时 `background=true`（只允许单条命令），再用 command_input 逐次写输入；不打算写输入就别加，stdin 会被立刻关闭，这类程序直接拿到 EOF 退出而不是挂到超时。

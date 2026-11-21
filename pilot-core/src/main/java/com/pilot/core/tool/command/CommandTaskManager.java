@@ -3,6 +3,7 @@ package com.pilot.core.tool.command;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.Reader;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
@@ -65,6 +66,8 @@ public final class CommandTaskManager implements AutoCloseable {
     private static final Pattern SECRET_KEY = Pattern.compile("(?i)(key|token|secret|password|credential|passwd)");
     private static final String REDACTED = "[REDACTED]";
     private static final long DEFAULT_OUTPUT_LIMIT = 10L * 1024 * 1024;
+    /** 单次写入标准输入的字符上限；一次写太多会挤满管道缓冲让写线程挂住。 */
+    static final int MAX_INPUT_CHARS = 8192;
     private final Path storage;
     private final ObjectMapper mapper;
     private final long outputLimit;
@@ -97,6 +100,15 @@ public final class CommandTaskManager implements AutoCloseable {
 
     public synchronized Task start(String sessionId, String displayCommand, ProcessBuilder builder, boolean background,
         long timeoutMillis, CommandChangeTracker.Handle changeTracking) {
+        return start(sessionId, displayCommand, builder, background, timeoutMillis, changeTracking, false);
+    }
+
+    /**
+     * @param interactive 保留标准输入不关闭，之后可用 {@link #input} 逐次写入。
+     *        默认关闭，让等输入的交互式命令立刻拿到 EOF 而不是一直挂到超时。
+     */
+    public synchronized Task start(String sessionId, String displayCommand, ProcessBuilder builder, boolean background,
+        long timeoutMillis, CommandChangeTracker.Handle changeTracking, boolean interactive) {
         sessionDirectory(sessionId);
         Objects.requireNonNull(builder, "builder must not be null");
         if (closed || Files.exists(sessionDirectory(sessionId).resolve(".closed"))) {
@@ -124,7 +136,7 @@ public final class CommandTaskManager implements AutoCloseable {
         task = new Task(task.taskId(), task.sessionId(), task.command(), task.workdir(), task.status(), task.pid(),
             task.exitCode(), task.startedAt(), task.finishedAt(), task.background(), task.timeoutSeconds(),
             task.reason(), changeTracking);
-        Entry entry = new Entry(task, secrets);
+        Entry entry = new Entry(task, secrets, interactive);
         try {
             // 元数据先于进程落盘：进程存在之前记录必须已在盘上，崩溃恢复才不会漏掉在跑的命令。
             persist(entry);
@@ -142,7 +154,9 @@ public final class CommandTaskManager implements AutoCloseable {
             // 否则「start 后立刻查 list」的调用方会拿到 pid=null 的快照（ProcessHandle.of 会 NPE）。
             // 状态先落盘再发布：观察者看到某个状态时，它的元数据一定已经在盘上。
             entries.put(id, entry);
-            entry.process.getOutputStream().close();
+            if (!interactive) {
+                entry.process.getOutputStream().close();
+            }
             entry.reader = workers.submit(() -> readOutput(entry));
             entry.discover();
             workers.submit(() -> supervise(entry, timeoutMillis));
@@ -158,6 +172,47 @@ public final class CommandTaskManager implements AutoCloseable {
             entry.task = failed;
             // 启动失败同样要可见：调用方拿到 FAILED 回执，list 也能查到，不会永远等一个不存在的任务。
             entries.putIfAbsent(id, entry);
+        }
+        return entry.task;
+    }
+
+    /**
+     * 向以 interactive 启动、仍在运行的命令写标准输入。
+     *
+     * @param endInput 为 true 时写完关闭标准输入（EOF），之后不再接受输入
+     * @return 写完后该任务的最新快照；当前会话没有该任务时返回 null
+     * @throws IllegalStateException 命令已结束，或该任务没有打开的输入通道
+     */
+    public Task input(String sessionId, String taskId, String text, boolean endInput, String ownerSessionId) {
+        Entry entry = owned(ownerOf(sessionId, ownerSessionId), taskId);
+        if (entry == null) {
+            return null;
+        }
+        if (text != null && text.length() > MAX_INPUT_CHARS) {
+            throw new IllegalArgumentException("单次输入不能超过 " + MAX_INPUT_CHARS + " 字符");
+        }
+        synchronized (entry.inputLock) {
+            if (!running(entry.task)) {
+                throw new IllegalStateException("命令已结束（" + entry.task.status() + "），不能再写输入");
+            }
+            if (!entry.stdinOpen) {
+                throw new IllegalStateException("该命令没有打开的输入通道：启动时未带 interactive=true，或输入已关闭");
+            }
+            try {
+                OutputStream stdin = entry.process.getOutputStream();
+                if (text != null && !text.isEmpty()) {
+                    stdin.write(text.getBytes(StandardCharsets.UTF_8));
+                }
+                stdin.flush();
+                if (endInput) {
+                    // 先记关闭再 close：close 抛错时通道已经不可再用，不能留在「打开」状态上。
+                    entry.stdinOpen = false;
+                    stdin.close();
+                }
+            } catch (IOException e) {
+                entry.stdinOpen = false;
+                throw new IllegalStateException("写入命令输入失败：" + e.getMessage());
+            }
         }
         return entry.task;
     }
@@ -557,7 +612,8 @@ public final class CommandTaskManager implements AutoCloseable {
             task = state(task, CommandTaskStatus.INTERRUPTED, task.pid(), null, Instant.now(),
                 "服务重启，原进程所有权已失效；未按旧 PID 操作进程");
         }
-        Entry entry = new Entry(task, List.of());
+        // 重启恢复的任务没有活进程，也就没有可写的输入通道
+        Entry entry = new Entry(task, List.of(), false);
         Path logPath = logFile(task);
         if (Files.exists(logPath)) {
             entry.logBytes = Files.size(logPath);
@@ -702,6 +758,8 @@ public final class CommandTaskManager implements AutoCloseable {
         private volatile Task task;
         private final List<String> secrets;
         private final Object logLock = new Object();
+        /** 串行化标准输入的写入与关闭，避免两次输入交错。 */
+        private final Object inputLock = new Object();
         private final Map<Long, OwnedProcess> descendants = new ConcurrentHashMap<>();
         private volatile CommandTaskStatus stopStatus;
         private volatile String stopReason;
@@ -712,10 +770,12 @@ public final class CommandTaskManager implements AutoCloseable {
         private long lastOutputNanos;
         private Process process;
         private Future<?> reader;
+        private boolean stdinOpen;
 
-        private Entry(Task task, List<String> secrets) {
+        private Entry(Task task, List<String> secrets, boolean interactive) {
             this.task = task;
             this.secrets = secrets;
+            this.stdinOpen = interactive;
         }
 
         private void remember(ProcessHandle handle) {

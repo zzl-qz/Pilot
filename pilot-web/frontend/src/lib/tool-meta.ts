@@ -20,6 +20,7 @@ const TOOL_LABELS: Record<string, string> = {
   run_command: '命令',
   command_status: '查命令',
   command_logs: '读日志',
+  command_input: '写输入',
   stop_command: '停命令',
   browser: '浏览器',
   web_search: '联网搜索',
@@ -116,6 +117,10 @@ function toolArgsText(name: string, args: unknown) {
     const id = shortId(field('taskId'));
     return id ? `${id} · 增量日志` : '读取增量日志';
   }
+  if (name === 'command_input') {
+    const id = shortId(field('taskId'));
+    return id ? `${id} · 写输入` : '写入标准输入';
+  }
   if (name === 'stop_command') {
     const id = shortId(field('taskId'));
     return id ? `停止 ${id}` : '停止后台命令';
@@ -174,6 +179,7 @@ const TOOL_ICONS: Record<string, string> = {
   run_command: '$',
   command_status: '?',
   command_logs: 'L',
+  command_input: 'I',
   stop_command: 'X',
   browser: 'B',
   mcp_tools: 'M',
@@ -322,7 +328,8 @@ function parseExitCode(body: string): number | null {
 }
 
 function iconKindForTool(name: string): ToolIconKind {
-  if (name === 'run_command' || name === 'command_status' || name === 'command_logs' || name === 'stop_command') return 'terminal';
+  if (name === 'run_command' || name === 'command_status' || name === 'command_logs' || name === 'command_input'
+    || name === 'stop_command') return 'terminal';
   if (name === 'search_text' || name === 'glob_files') return 'search';
   if (name === 'list_dir') return 'folder';
   if (name === 'browser' || name === 'web_search' || name === 'web_fetch') return 'browser';

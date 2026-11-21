@@ -21,6 +21,7 @@ public final class ToolNames {
     public static final String RUN_COMMAND = "run_command";
     public static final String COMMAND_STATUS = "command_status";
     public static final String COMMAND_LOGS = "command_logs";
+    public static final String COMMAND_INPUT = "command_input";
     public static final String STOP_COMMAND = "stop_command";
 
     public static final String WEB_SEARCH = "web_search";

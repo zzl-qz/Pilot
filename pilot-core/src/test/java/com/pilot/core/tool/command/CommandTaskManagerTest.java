@@ -286,6 +286,55 @@ class CommandTaskManagerTest {
         }
     }
 
+    @Test
+    void interactiveTaskAcceptsInputUntilEndInputClosesIt() throws Exception {
+        try (CommandTaskManager manager = manager()) {
+            CommandTaskManager.Task task =
+                manager.start("session_a", "listen", process("listen"), true, 10_000, null, true);
+            assertEquals("RUNNING", task.status());
+            manager.input("session_a", task.taskId(), "你好\n", false, null);
+            waitUntil(() -> manager.logs("session_a", task.taskId(), 0, 1024).text().contains("got:你好"));
+            assertEquals("RUNNING", manager.get("session_a", task.taskId()).status(), "写入一次后仍应保持运行");
+
+            manager.input("session_a", task.taskId(), "", true, null);
+            assertEquals("COMPLETED", awaitDone(manager, "session_a", task.taskId()).status());
+            assertTrue(manager.logs("session_a", task.taskId(), 0, 1024).text().contains("eof"));
+            // 输入通道已关闭：再写必须报错而不是静默丢弃
+            assertThrows(IllegalStateException.class,
+                () -> manager.input("session_a", task.taskId(), "again", false, null));
+        }
+    }
+
+    @Test
+    void nonInteractiveTaskHasNoInputChannelAndWaitsForEof() throws Exception {
+        try (CommandTaskManager manager = manager()) {
+            // 未开 interactive：启动时立刻关掉 stdin，读输入的程序拿到 EOF 直接退出，不会挂到超时
+            CommandTaskManager.Task task = manager.start("session_a", "listen", process("listen"), true, 10_000);
+            assertEquals("COMPLETED", awaitDone(manager, "session_a", task.taskId()).status());
+            assertTrue(manager.logs("session_a", task.taskId(), 0, 1024).text().contains("eof"));
+            assertThrows(IllegalStateException.class,
+                () -> manager.input("session_a", task.taskId(), "x", false, null));
+        }
+    }
+
+    @Test
+    void inputIsBoundedAndScopedToOwningSession() throws Exception {
+        try (CommandTaskManager manager = manager()) {
+            CommandTaskManager.Task task =
+                manager.start("session_a", "listen", process("listen"), true, 10_000, null, true);
+            assertNull(manager.input("session_b", task.taskId(), "x", false, null));
+            assertEquals("RUNNING", manager.input("session_b", task.taskId(), "x", false, "session_a").status());
+            String tooLong = "x".repeat(CommandTaskManager.MAX_INPUT_CHARS + 1);
+            assertThrows(IllegalArgumentException.class,
+                () -> manager.input("session_a", task.taskId(), tooLong, false, null));
+            assertEquals("RUNNING", manager.get("session_a", task.taskId()).status());
+            manager.stop("session_a", task.taskId());
+            awaitDone(manager, "session_a", task.taskId());
+            assertThrows(IllegalStateException.class,
+                () -> manager.input("session_a", task.taskId(), "x", false, null), "结束后拒绝写入");
+        }
+    }
+
     private CommandTaskManager manager() {
         return new CommandTaskManager(storage, JsonMapper.builder().build());
     }
@@ -369,6 +418,17 @@ class CommandTaskManagerTest {
                     }
                 }
                 case "hold" -> Thread.sleep(30_000);
+                case "listen" -> {
+                    // 读到一行就回显，读到 EOF 就输出 eof 并退出：非交互启动时应立刻收到 EOF。
+                    var reader = new java.io.BufferedReader(new java.io.InputStreamReader(System.in));
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        System.out.print("got:" + line + "\n");
+                        System.out.flush();
+                    }
+                    System.out.print("eof");
+                    System.out.flush();
+                }
                 case "done" -> System.out.print("done");
                 case "gbk" -> System.out.print("你好GBK输出");
                 default -> throw new IllegalArgumentException(args[0]);

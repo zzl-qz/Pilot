@@ -57,6 +57,24 @@ public class CommandTaskController {
         return requireTask(commands.stop(id, taskId));
     }
 
+    /** 页面上的输入框走这里向 interactive 启动的命令写 stdin；空 text 且不结束输入视为无意义请求。 */
+    @PostMapping("/{taskId}/input")
+    public CommandTaskManager.Task input(@PathVariable String id, @PathVariable String taskId,
+        @RequestParam(defaultValue = "") String text, @RequestParam(defaultValue = "false") boolean endInput) {
+        requireSession(id);
+        if (text.isEmpty() && !endInput) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "text 和 endInput 至少给一个");
+        }
+        try {
+            return requireTask(commands.input(id, taskId, text, endInput, null));
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        } catch (IllegalStateException e) {
+            // 已结束或没有打开的输入通道：请求本身合法，与当前任务状态冲突。
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+        }
+    }
+
     private void requireSession(String id) {
         SessionLookup.require(sessions, id);
     }

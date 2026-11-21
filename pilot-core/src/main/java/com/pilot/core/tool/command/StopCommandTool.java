@@ -7,7 +7,6 @@ import java.util.Objects;
 import com.pilot.core.message.ToolNames;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolSchemas;
-import com.pilot.core.tool.ToolSupport;
 
 /** 停止属于当前会话的命令进程树。 */
 public final class StopCommandTool implements Tool {
@@ -33,14 +32,11 @@ public final class StopCommandTool implements Tool {
     }
 
     public String execute(Map<String, Object> args) {
-        String id = ToolSupport.stringArg(args, "taskId");
-        if (id == null) {
-            return "ERROR: 缺少参数 taskId";
-        }
-        try {
-            return CommandToolSupport.render(tasks.stop(sessionId, id, CommandToolSupport.ownerSession(args)), false);
-        } catch (IllegalArgumentException e) {
-            return "ERROR: " + e.getMessage();
-        }
+        // 参数取好了再进动作，动作里只做一次 stop，不再判空和补 ERROR 文本。
+        return CommandToolSupport.withTaskId(args, id -> stop(id, CommandToolSupport.ownerSession(args)));
+    }
+
+    private String stop(String id, String owner) {
+        return CommandToolSupport.render(tasks.stop(sessionId, id, owner), false);
     }
 }

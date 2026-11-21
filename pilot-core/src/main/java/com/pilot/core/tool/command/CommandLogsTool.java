@@ -7,7 +7,6 @@ import java.util.Objects;
 import com.pilot.core.message.ToolNames;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolSchemas;
-import com.pilot.core.tool.ToolSupport;
 
 /** 日志游标由管理器产生，每次只读取有界文本。 */
 public final class CommandLogsTool implements Tool {
@@ -38,25 +37,21 @@ public final class CommandLogsTool implements Tool {
     }
 
     public String execute(Map<String, Object> args) {
-        String id = ToolSupport.stringArg(args, "taskId");
-        if (id == null) {
-            return "ERROR: 缺少参数 taskId";
+        return CommandToolSupport.withTaskId(args, id -> write(id, args));
+    }
+
+    private String write(String id, Map<String, Object> args) {
+        long offset = CommandToolSupport.integerArg(args, "offset", 0, 0, Long.MAX_VALUE);
+        int limit = (int)CommandToolSupport.integerArg(args, "limit", 12000, 1, 32000);
+        CommandTaskManager.LogChunk chunk =
+            tasks.logs(sessionId, id, offset, limit, CommandToolSupport.ownerSession(args));
+        if (chunk == null) {
+            return "ERROR: 当前会话没有该命令任务";
         }
-        try {
-            long offset = CommandToolSupport.integerArg(args, "offset", 0, 0, Long.MAX_VALUE);
-            int limit = (int)CommandToolSupport.integerArg(args, "limit", 12000, 1, 32000);
-            String owner = CommandToolSupport.ownerSession(args);
-            CommandTaskManager.LogChunk chunk = tasks.logs(sessionId, id, offset, limit, owner);
-            if (chunk == null) {
-                return "ERROR: 当前会话没有该命令任务";
-            }
-            String sandboxHint = CommandToolSupport.nestedSandboxHint(chunk.text(), null);
-            String prefix = sandboxHint.isEmpty() ? "" : sandboxHint + "\n";
-            return prefix + "任务ID: " + chunk.taskId() + "\noffset: " + chunk.offset() + "\nnextOffset: "
-                + chunk.nextOffset() + "\neof: " + chunk.eof() + "\ntruncated: " + chunk.truncated() + "\n输出:\n"
-                + chunk.text();
-        } catch (IllegalArgumentException e) {
-            return "ERROR: " + e.getMessage();
-        }
+        String sandboxHint = CommandToolSupport.nestedSandboxHint(chunk.text(), null);
+        String prefix = sandboxHint.isEmpty() ? "" : sandboxHint + "\n";
+        return prefix + "任务ID: " + chunk.taskId() + "\noffset: " + chunk.offset() + "\nnextOffset: "
+            + chunk.nextOffset() + "\neof: " + chunk.eof() + "\ntruncated: " + chunk.truncated() + "\n输出:\n"
+            + chunk.text();
     }
 }

@@ -112,22 +112,66 @@ class CommandTaskApiTest {
         runs.abandon("test-restore-after-stop");
     }
 
+    @Test
+    void inputEndpointWritesStdinAndRejectsMeaninglessOrForeignRequests() throws Exception {
+        String owner = session();
+        String other = session();
+        CommandTaskManager.Task task = startInteractive(owner);
+        try {
+            mvc.perform(post("/api/sessions/{id}/commands/{task}/input", other, task.taskId()).param("text", "hi\n"))
+                .andExpect(status().isNotFound());
+            mvc.perform(post("/api/sessions/{id}/commands/{task}/input", owner, task.taskId()))
+                .andExpect(status().isBadRequest());
+            mvc.perform(post("/api/sessions/{id}/commands/{task}/input", owner, task.taskId())
+                .param("text", "x".repeat(8193))).andExpect(status().isBadRequest());
+            mvc.perform(post("/api/sessions/{id}/commands/{task}/input", owner, task.taskId()).param("text", "hi\n"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("RUNNING"));
+            await().atMost(Duration.ofSeconds(8))
+                .until(() -> commands.logs(owner, task.taskId(), 0, 1024).text().contains("got:hi"));
+            mvc.perform(post("/api/sessions/{id}/commands/{task}/input", owner, task.taskId()).param("endInput", "true"))
+                .andExpect(status().isOk());
+            await().atMost(Duration.ofSeconds(8))
+                .until(() -> "COMPLETED".equals(commands.get(owner, task.taskId()).status()));
+            // 已结束的任务再写输入：请求合法但状态冲突
+            mvc.perform(post("/api/sessions/{id}/commands/{task}/input", owner, task.taskId()).param("text", "late"))
+                .andExpect(status().isConflict());
+        } finally {
+            commands.stopSession(owner);
+        }
+    }
+
     private String session() {
         return sessions.createSession("后台命令测试", workspace.toString()).id();
     }
 
+    private CommandTaskManager.Task startInteractive(String owner) {
+        return commands.start(owner, "java fixture listen", builder("listen"), true, 0, null, true);
+    }
+
     private CommandTaskManager.Task start(String owner, String mode) {
+        return commands.start(owner, "java fixture " + mode, builder(mode), true, 0);
+    }
+
+    private ProcessBuilder builder(String mode) {
         // Windows 上子进程默认按本地编码输出，显式要求 UTF-8，否则 emoji 会变成问号
-        ProcessBuilder builder = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+        return new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Dfile.encoding=UTF-8", "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8", "-cp",
             System.getProperty("java.class.path"), Fixture.class.getName(), mode).directory(workspace.toFile());
-        return commands.start(owner, "java fixture " + mode, builder, true, 0);
     }
 
     public static class Fixture {
         public static void main(String[] args) throws Exception {
             System.out.print("ready 中文😀");
             System.out.flush();
+            if ("listen".equals(args[0])) {
+                var reader = new java.io.BufferedReader(new java.io.InputStreamReader(System.in));
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    System.out.print("got:" + line + "\n");
+                    System.out.flush();
+                }
+                return;
+            }
             if ("fail".equals(args[0])) {
                 System.exit(7);
             }

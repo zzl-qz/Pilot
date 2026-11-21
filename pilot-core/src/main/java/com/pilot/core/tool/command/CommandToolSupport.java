@@ -10,11 +10,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import com.pilot.core.tool.ToolResults;
+import com.pilot.core.tool.ToolSupport;
 import com.pilot.core.util.WireEnum;
 
 /** 命令工具共用的状态表示；日志内容不参与判断验证是否通过。 */
@@ -45,6 +47,23 @@ final class CommandToolSupport {
 
     static boolean running(CommandTaskManager.Task task) {
         return task != null && CommandTaskStatus.active(task.status());
+    }
+
+    /**
+     * command_logs、stop_command、command_input 共用的入口：取 taskId，交给具体动作，
+     * 把管理器抛出的参数错误与状态错误统一成一行 ERROR 文本。
+     * 动作返回 null 表示当前会话没有该任务，由调用方决定提示什么。
+     */
+    static String withTaskId(Map<String, Object> args, Function<String, String> action) {
+        String id = ToolSupport.stringArg(args, "taskId");
+        if (id == null) {
+            return "ERROR: 缺少参数 taskId";
+        }
+        try {
+            return action.apply(id);
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            return "ERROR: " + e.getMessage();
+        }
     }
 
     /** 读取跨会话归属参数；空串视为未传。 */

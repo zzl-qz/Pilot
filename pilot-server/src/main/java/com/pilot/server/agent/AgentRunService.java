@@ -75,6 +75,7 @@ import com.pilot.core.skill.SkillCatalog;
 import com.pilot.core.tool.EnableToolsTool;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.UseSkillTool;
+import com.pilot.core.tool.command.CommandInputTool;
 import com.pilot.core.tool.command.CommandLogsTool;
 import com.pilot.core.tool.command.CommandStatusTool;
 import com.pilot.core.tool.command.CommandTasksTool;
@@ -2143,6 +2144,7 @@ public class AgentRunService implements RunStarter {
         tools.register(new CommandStatusTool(commandTasks, sessionId, snapshots));
         tools.register(new CommandTasksTool(commandTasks));
         tools.register(new CommandLogsTool(commandTasks, sessionId));
+        tools.register(new CommandInputTool(commandTasks, sessionId));
         tools.register(new StopCommandTool(commandTasks, sessionId));
         tools.register(new ReadTaskHistoryTool(sessions, sessionId));
         if (workProducts != null) {

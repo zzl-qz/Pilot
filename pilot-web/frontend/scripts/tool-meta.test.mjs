@@ -13,6 +13,7 @@ import {
 test('常见工具显示中文名，不直接甩协议名', () => {
   assert.equal(toolLabel('command_status'), '查命令');
   assert.equal(toolLabel('command_logs'), '读日志');
+  assert.equal(toolLabel('command_input'), '写输入');
   assert.equal(toolLabel('browser'), '浏览器');
   assert.equal(toolLabel('run_command'), '命令');
   assert.equal(toolLabel('mcp_tools'), 'MCP 工具');
@@ -25,6 +26,13 @@ test('command_status 参数收成人话，不露 waitSeconds 原文', () => {
   assert.match(text, /最多等 5 秒/);
   assert.doesNotMatch(text, /waitSeconds/);
   assert.doesNotMatch(text, /taskId=/);
+});
+
+test('command_input 只显示任务短 ID，不甩出要写入的正文', () => {
+  const text = toolArgsText('command_input', 'taskId=cmd_16162ef8abcd text=y');
+  assert.match(text, /cmd_1616/);
+  assert.match(text, /写输入/);
+  assert.doesNotMatch(text, /taskId=|text=/);
 });
 
 test('浏览器 summary 里的 action 译成中文', () => {

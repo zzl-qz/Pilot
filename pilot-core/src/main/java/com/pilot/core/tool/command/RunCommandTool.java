@@ -157,6 +157,8 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         if (commandTasks != null) {
             properties.put("background",
                 Map.of("type", "boolean", "default", false, "description", "后台运行并立即返回任务 ID；默认 false，等待命令结束"));
+            properties.put("interactive", Map.of("type", "boolean", "default", false,
+                "description", "保留标准输入，启动后用 command_input 写输入（需要 background=true 且只有单条命令）；默认 false"));
         }
         return ToolSchemas.object(properties, List.of("command"));
     }
@@ -282,7 +284,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             terminal = true;
         } else {
             ManagedRun managed = runManaged(prepared.command(), prepared.displayTokens(), prepared.workdir(),
-                prepared.background(), prepared.timeoutMs(), tracking, prepared.env());
+                prepared.background(), prepared.timeoutMs(), tracking, prepared.env(), prepared.interactive());
             text = managed.text();
             terminal = managed.terminal();
         }
@@ -440,11 +442,28 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             return Preparation.error("ERROR: 当前运行环境不支持后台命令");
         }
         long timeoutMs = timeout(args, background);
+        Object interactiveArg = args == null ? null : args.get("interactive");
+        if (interactiveArg != null && !(interactiveArg instanceof Boolean)) {
+            return Preparation.error("ERROR: interactive 必须是布尔值");
+        }
+        boolean interactive = Boolean.TRUE.equals(interactiveArg);
+        if (interactive) {
+            if (commandTasks == null) {
+                return Preparation.error("ERROR: 当前运行环境不支持交互式命令");
+            }
+            if (!background) {
+                // 前台要等命令结束才返回，模型没有机会在中间写输入，只会等到超时。
+                return Preparation.error("ERROR: interactive 只能配 background=true；前台调用等不到输入");
+            }
+            if (chained || redirected) {
+                return Preparation.error("ERROR: interactive 只支持单条命令，不能串联、管道或重定向");
+            }
+        }
 
         if (!chained && !redirected) {
             SegmentCheck only = checks.getFirst();
             return new Preparation(new Prepared(withWrapper(only.tokens()), only.tokens(), workdir, background,
-                timeoutMs, trackChanges, readOnly, only.env()), null);
+                timeoutMs, trackChanges, readOnly, only.env(), interactive), null);
         }
         // 串联或重定向才进 shell。每段仍用解析出的绝对路径，shell 只负责连接符和已经校验过的重定向。
         List<List<String>> checked = checks.stream().map(SegmentCheck::tokens).toList();
@@ -462,11 +481,11 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             List<String> commandLine =
                 List.of(shell.toString(), "-NoProfile", "-NonInteractive", "-Command", scriptText);
             return new Preparation(new Prepared(commandLine, List.of(display), workdir, background, timeoutMs,
-                trackChanges, readOnly, Map.of()), null);
+                trackChanges, readOnly, Map.of(), false), null);
         }
         String scriptText = script(withWrapperSegments(checked), checks, operators, segments);
         return new Preparation(new Prepared(List.of("/bin/sh", "-c", scriptText), List.of(display), workdir, background,
-            timeoutMs, trackChanges, readOnly, Map.of()), null);
+            timeoutMs, trackChanges, readOnly, Map.of(), false), null);
     }
 
     private List<List<String>> withWrapperSegments(List<List<String>> checked) {
@@ -779,7 +798,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     }
 
     private ManagedRun runManaged(List<String> command, List<String> displayTokens, Path workdir, boolean background,
-        long timeoutMs, CommandChangeTracker.Handle tracking, Map<String, String> env) {
+        long timeoutMs, CommandChangeTracker.Handle tracking, Map<String, String> env, boolean interactive) {
         CommandLaunch launch = launch(command, workdir, env);
         if (launch.builder() == null) {
             return new ManagedRun("ERROR: " + launch.label(), true);
@@ -788,7 +807,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         CommandTaskManager.Task task;
         try {
             task = commandTasks.start(sessionId, String.join(" ", displayTokens), builder, background, timeoutMs,
-                tracking.active() ? tracking : null);
+                tracking.active() ? tracking : null, interactive);
         } catch (RuntimeException e) {
             return new ManagedRun(launchFailure(command, displayTokens, String.valueOf(e.getMessage())), true);
         }
@@ -1184,7 +1203,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     }
 
     private record Prepared(List<String> command, List<String> displayTokens, Path workdir, boolean background,
-        long timeoutMs, boolean trackChanges, boolean readOnly, Map<String, String> env) {
+        long timeoutMs, boolean trackChanges, boolean readOnly, Map<String, String> env, boolean interactive) {
     }
 
     private record Preparation(Prepared prepared, String error) {
