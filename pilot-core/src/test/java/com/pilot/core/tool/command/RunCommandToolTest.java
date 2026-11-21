@@ -65,6 +65,17 @@ class RunCommandToolTest {
     }
 
     @Test
+    void missingWindowsRmSuggestsExplicitPowerShellRemoval() {
+        Assumptions.assumeTrue(System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win"));
+
+        String text = RunCommandTool.launchFailureText(
+            "ERROR: 无法启动命令 rm：Cannot run program \"rm\": CreateProcess error=2", "rm", 1);
+
+        assertTrue(text.contains("PowerShell Remove-Item -LiteralPath"), text);
+        assertTrue(text.contains("不要原样重试 rm"), text);
+    }
+
+    @Test
     void secondMissingUnixFileCommandAsksToStopRetrying() {
         String text = RunCommandTool.launchFailureText(
             "ERROR: 无法启动命令 cat：Cannot run program \"cat\": CreateProcess error=2", "cat", 2);
@@ -95,6 +106,8 @@ class RunCommandToolTest {
             "Cannot run program \"ls\" (in directory \"E:\\work\"): CreateProcess error=2, 系统找不到指定的文件。"));
         assertTrue(RunCommandTool.missingFileCommand("rg",
             "Cannot run program \"rg\": error=2, No such file or directory"));
+        boolean windows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+        assertEquals(windows, RunCommandTool.missingFileCommand("rm", "Cannot run program \"rm\": CreateProcess error=2"));
         assertFalse(RunCommandTool.missingFileCommand("mvn", "Cannot run program \"mvn\": CreateProcess error=2"));
         assertFalse(RunCommandTool.missingFileCommand("cat", "Not a directory"));
     }

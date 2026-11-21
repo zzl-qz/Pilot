@@ -59,7 +59,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
 
     private static final boolean WINDOWS = HostOs.isWindows();
     /** Windows 上常见的 Unix 文件命令：没有对应的可执行文件，原样重试不会变好。 */
-    private static final List<String> UNIX_FILE_COMMANDS = List.of("ls", "cat", "head", "tail", "find", "dir");
+    private static final List<String> UNIX_FILE_COMMANDS = List.of("ls", "cat", "head", "tail", "find", "dir", "rm");
     /** 各平台都可能有、但未必安装的搜索命令：缺失时改用 search_text 更可靠。 */
     private static final List<String> SEARCH_COMMANDS = List.of("rg", "grep");
     /** 启动失败里代表「可执行文件不存在」的两种写法（Windows 与 POSIX）。 */
@@ -935,7 +935,10 @@ public final class RunCommandTool implements Tool, ProducesCheck {
 
     /** Windows 上没有这些 Unix 文件命令，工具描述里直接给出替代工具。 */
     private static String windowsFileCommandNote() {
-        return WINDOWS ? "Windows 上 ls/cat/head/tail/find/dir 没有对应可执行文件，请改用 list_dir / read_file / search_text。" : "";
+        return WINDOWS
+            ? "Windows 上 ls/cat/head/tail/find/dir 没有对应可执行文件，请改用 list_dir / read_file / search_text。"
+                + "删除文件不要直接运行 rm；请显式使用 powershell -NoProfile -Command \"Remove-Item -LiteralPath '工作区内路径'\"。"
+            : "";
     }
 
     /** 取命令的叶子名（去掉目录与 .exe 后缀）。 */
@@ -965,6 +968,10 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         if (SEARCH_COMMANDS.contains(executable)) {
             return "当前环境找不到 " + executable + "，搜内容改用 search_text，找文件用 glob_files，不要再重试这个名字。";
         }
+        if (WINDOWS && "rm".equals(executable)) {
+            return "Windows 上 rm 不是可执行文件；如确需删除工作区内文件，请显式调用 PowerShell Remove-Item -LiteralPath，"
+                + "并只传入已确认的目标路径，不要原样重试 rm。";
+        }
         if (WINDOWS) {
             return "Windows 上 ls/cat/head/tail/find/dir 没有对应可执行文件，请改用 list_dir / read_file / search_text，"
                 + "不要再把它们当成可用命令。";
@@ -974,6 +981,9 @@ public final class RunCommandTool implements Tool, ProducesCheck {
 
     /** 连续失败后的升级建议，同样按系统区分 shell 等价命令。 */
     private static String fileToolEscalation(String executable) {
+        if (WINDOWS && "rm".equals(executable)) {
+            return "不要原样重试；用 PowerShell Remove-Item -LiteralPath，并先确认目标路径在工作区内。";
+        }
         if (SEARCH_COMMANDS.contains(executable) || !WINDOWS) {
             return "不再依赖系统命令，直接用 list_dir / read_file / search_text 完成任务。";
         }
