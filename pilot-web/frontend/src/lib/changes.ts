@@ -9,6 +9,33 @@ import type { ChangeFile, ChangeReport } from '../types/core.js';
 import { normalizePath } from './diff.js';
 
 /**
+ * 合计增删行。
+ *
+ * <p>后端算不出逐行差异时（文件太大、二进制、副本对不上）会给 {@code countsKnown: false}，
+ * 那一条的 0 不代表「没改」；只要有一条算不出来，合计就是未知，界面据此显示「—」而不是 +0 -0。
+ * 旧记录没有这个字段，仍按可信处理。
+ *
+ * @param {Array<{path: string, added?: number, removed?: number, countsKnown?: boolean}>} files
+ */
+export function sumChangeLines(files: readonly (ChangeFile | null | undefined)[] | null | undefined) {
+  let added = 0;
+  let removed = 0;
+  let known = true;
+  let note: string | null = null;
+  for (const file of files || []) {
+    if (!file) continue;
+    if (file.countsKnown === false) {
+      known = false;
+      note ??= file.note || null;
+      continue;
+    }
+    added += Number(file.added || 0);
+    removed += Number(file.removed || 0);
+  }
+  return { added, removed, known, note };
+}
+
+/**
  * 把同一轮里多个 run 的改动报告合并成一份。
  *
  * <p>自动继续会换 runId，用户在界面上看到的应该是「这一轮总共改了什么」，
@@ -28,12 +55,14 @@ export function mergeRunReports(reports: readonly ChangeReport[] | null | undefi
     }
   }
   const list = [...files.values()];
+  const { added, removed, known } = sumChangeLines(list);
   return {
     gitRepository,
     truncated,
     files: list,
-    added: list.reduce((sum, file) => sum + Number(file.added || 0), 0),
-    removed: list.reduce((sum, file) => sum + Number(file.removed || 0), 0)
+    added,
+    removed,
+    known
   };
 }
 
@@ -70,10 +99,12 @@ export function editSummary(files: readonly (ChangeFile | null | undefined)[] | 
   const input = Array.isArray(files) ? files : (files ? [files] : []);
   const list = input.filter((file): file is ChangeFile => Boolean(file)).map((file) => ({ ...file, path: normalizePath(file.path) }));
   const size = Number.isFinite(limit) && limit >= 0 ? Math.floor(limit) : 3;
+  const { added, removed, known } = sumChangeLines(list);
   return {
     total: list.length,
-    added: list.reduce((sum, file) => sum + Number(file.added || 0), 0),
-    removed: list.reduce((sum, file) => sum + Number(file.removed || 0), 0),
+    added,
+    removed,
+    known,
     visible: list.slice(0, size),
     hidden: list.slice(size),
     label: list.length ? `已编辑 ${list.length} 个文件` : '本轮没有改动文件'
@@ -83,6 +114,9 @@ export function editSummary(files: readonly (ChangeFile | null | undefined)[] | 
 /** 单个文件的悬停说明：状态 + 增删行（别把摘要对象塞进 title，那会渲染成 [object Object]）。 */
 export function changeFileTitle(file: ChangeFile | null | undefined) {
   const status = file?.status || 'M';
+  if (file?.countsKnown === false) {
+    return `${status} · ${file.note || '行数未知'}`;
+  }
   return `${status} · +${Number(file?.added || 0)} -${Number(file?.removed || 0)}`;
 }
 

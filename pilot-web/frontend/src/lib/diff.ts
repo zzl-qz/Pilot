@@ -1,4 +1,4 @@
-import type { ChangeFile, DiffFile } from '../types/core.js';
+import type { DiffFile } from '../types/core.js';
 /**
  * unified diff 解析：把 git 补丁拆成「文件 → 行」两级结构。
  *
@@ -91,10 +91,3 @@ export function hasDiffTruncation(diff: string | undefined) {
   return /(?:^|\n)… (?:diff 已截断|该文件 diff 已截断|已省略 \d+ 行) …(?:\r?\n)*$/.test(diff ?? '');
 }
 
-/** 合计增删行，用于摘要行（+12 −3）。 */
-export function totalDiffLines(files: readonly ChangeFile[] | null | undefined) {
-  return (files || []).reduce(
-    (sum, file) => ({ added: sum.added + Number(file.added || 0), removed: sum.removed + Number(file.removed || 0) }),
-    { added: 0, removed: 0 }
-  );
-}

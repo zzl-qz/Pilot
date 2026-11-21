@@ -50,6 +50,8 @@ import lombok.extern.slf4j.Slf4j;
 public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
     private static final String META_FILE = "meta.json";
     private static final String CHANGES_FILE = "changes.json";
+    /** 轮末另存一份完成态内容，之后磁盘再被改动也能算出这一轮到底改了什么。 */
+    private static final String COMPLETED_DIR = "completed";
     /**
      * 超过这个大小的文件不做备份。整文件复制的代价是「每次运行 × 文件大小」，
      * 十几 GB 的日志/产物备份一遍就能把磁盘吃满；跳过时仍记录条目，
@@ -150,8 +152,8 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
                 String completedHash =
                     context.writtenHashes.containsKey(entry.path()) ? context.writtenHashes.get(entry.path())
                         : file.startsWith(context.workspace) ? hashIfRegularFile(file) : null;
-                context.entries.set(i,
-                    new SnapshotEntry(entry.path(), entry.existed(), entry.originalHash(), completedHash));
+                context.entries.set(i, new SnapshotEntry(entry.path(), entry.existed(), entry.originalHash(), completedHash));
+                keepCompletedContent(context, entry.path(), completedHash, false);
             } catch (IOException e) {
                 unavailable.add(entry.path());
                 log.warn("读取 {} 的完成态指纹失败", entry.path(), e);
@@ -161,7 +163,8 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         SnapshotMeta meta = persist(context);
         context.finished = true;
         try {
-            RunChangeReport changes = RunSnapshotDiff.capture(meta, context.directory().resolve("files"), unavailable);
+            RunChangeReport changes = RunSnapshotDiff.capture(meta, context.directory().resolve("files"),
+                context.directory().resolve(COMPLETED_DIR), unavailable);
             writeContent(context.directory().resolve(CHANGES_FILE), mapper.writeValueAsBytes(changes));
         } catch (IOException | RuntimeException e) {
             log.warn("保存本轮差异失败 {}", context.runId, e);
@@ -538,6 +541,7 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
             context.conflicts.add(key);
             throw new UncheckedIOException("记录工具写入指纹失败: " + key, e);
         }
+        keepCompletedContent(context, key, context.writtenHashes.get(key), true);
     }
 
     /** Import a command-discovered change using the pre-command bytes, never the already changed file. */
@@ -562,6 +566,7 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
                     context.conflicts.add(key);
                 }
                 context.writtenHashes.put(key, currentHash);
+                keepCompletedContent(context, key, currentHash, true);
                 persist(context);
                 return;
             }
@@ -582,9 +587,45 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
             }
             context.entries.add(new SnapshotEntry(key, existed, originalHash, currentHash));
             context.writtenHashes.put(key, currentHash);
+            keepCompletedContent(context, key, currentHash, true);
             persist(context);
         } catch (IOException e) {
             throw new UncheckedIOException("记录命令变更失败: " + key, e);
+        }
+    }
+
+    /**
+     * 把本轮完成时的文件内容另存一份，供之后生成改动卡使用。
+     *
+     * <p>改动卡要回答的是「这一轮改了什么」，不是「磁盘现在和记录还能不能对上」。
+     * 写完就把内容留在手里，事后手工改动、{@code git stash}、删掉文件都不会把这一轮的数字变成 0。
+     * 超过备份上限的文件不复制，差异回退到读当前磁盘；副本坏了由读取端按指纹识别。
+     *
+     * @param replace 写完之后立刻存的是最新内容，要覆盖旧副本；轮末补存时不能覆盖写的时候留下的那一份
+     */
+    private void keepCompletedContent(Context context, String key, String completedHash, boolean replace) {
+        Path directory = context.directory().resolve(COMPLETED_DIR).normalize();
+        Path target = directory.resolve(key).normalize();
+        if (target.equals(directory) || !target.startsWith(directory)) {
+            return;
+        }
+        try {
+            if (completedHash == null) {
+                Files.deleteIfExists(target);
+                return;
+            }
+            if (!replace && Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
+                return;
+            }
+            Path source = context.workspace.resolve(key).normalize();
+            if (!source.startsWith(context.workspace) || !Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)
+                || Files.size(source) > MAX_SNAPSHOT_BYTES) {
+                return;
+            }
+            Files.createDirectories(target.getParent());
+            Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException e) {
+            log.debug("保存 {} 的完成态副本失败", key, e);
         }
     }
 

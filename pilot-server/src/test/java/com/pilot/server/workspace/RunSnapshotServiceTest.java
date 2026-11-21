@@ -283,21 +283,48 @@ class RunSnapshotServiceTest {
     }
 
     @Test
-    void preservesManualEditsMadeBeforeRunFinishes() throws IOException {
+    void keepsTheWrittenLinesWhenTheFileIsEditedAgainBeforeTheRunFinishes() throws IOException {
         Path file = workspace.resolve("a.txt");
         Files.writeString(file, "before");
         snapshots.bind("mid_run_manual", workspace);
         snapshots.beforeWrite(file);
         Files.writeString(file, "agent");
         snapshots.afterWrite(file);
+        // 模型写完之后、本轮结束之前又有人动了这个文件：回滚必须拒绝，改动卡仍要说明这一轮写了什么
         Files.writeString(file, "manual while model thinks");
         snapshots.finish();
         snapshots.clear();
         assertEquals(List.of("a.txt"), snapshots.rollback("mid_run_manual").conflicts());
         assertEquals("manual while model thinks", Files.readString(file));
         ChangeService.RunFileChange change = snapshots.changes("mid_run_manual").files().getFirst();
-        assertEquals("", change.diff());
-        assertTrue(change.note().contains("外部修改"));
+        assertEquals(1, change.added());
+        assertEquals(1, change.removed());
+        assertTrue(change.countsKnown());
+        assertTrue(change.diff().contains("-before"), change.diff());
+        assertTrue(change.diff().contains("+agent"), change.diff());
+        assertNull(change.note());
+    }
+
+    @Test
+    void keepsRunLineCountsAfterTheFileChangesOnDiskLater() throws IOException {
+        Path file = workspace.resolve("a.txt");
+        Files.writeString(file, "before\n");
+        snapshots.bind("run_frozen", workspace);
+        snapshots.beforeWrite(file);
+        Files.writeString(file, "agent\n");
+        snapshots.afterWrite(file);
+        snapshots.finish();
+        snapshots.clear();
+
+        // 轮末之后手工改、甚至删掉文件，都不该把这一轮的数字变成 0
+        Files.writeString(file, "manual afterwards\n");
+        ChangeService.RunChangeReport report = snapshots.changes("run_frozen");
+
+        assertEquals(1, report.added());
+        assertEquals(1, report.removed());
+        assertTrue(report.files().getFirst().countsKnown());
+        Files.delete(file);
+        assertEquals(1, snapshots.changes("run_frozen").added());
     }
 
     @Test
@@ -328,6 +355,7 @@ class RunSnapshotServiceTest {
         assertTrue(files.get(0).note().contains("二进制"));
         assertTrue(files.get(1).note().contains("预览上限"));
         assertTrue(files.get(2).note().contains("改前快照"));
+        assertTrue(files.stream().noneMatch(ChangeService.RunFileChange::countsKnown), "算不出行数时必须是未知，不能报成 +0 -0");
     }
 
     @Test

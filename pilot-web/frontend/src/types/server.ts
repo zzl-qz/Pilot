@@ -302,6 +302,7 @@ export interface ChangeServiceRunFileChange {
   removed: number;
   diff: string;
   note?: string | null;
+  countsKnown?: boolean;
 }
 
 /** CheckpointController.java / ForkResponse */

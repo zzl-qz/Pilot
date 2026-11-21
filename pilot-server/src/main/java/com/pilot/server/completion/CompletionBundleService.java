@@ -206,8 +206,9 @@ public class CompletionBundleService {
             text.append("| 文件 | 状态 | + | - |\n| --- | --- | --- | --- |\n");
             bundle.changes()
                 .forEach(change -> text.append("| `").append(change.path()).append("` | ").append(change.status())
-                    .append(" | ").append(change.added()).append(" | ").append(change.removed()).append(" |\n"));
-            text.append("\n合计：+").append(bundle.added()).append(" / -").append(bundle.removed()).append("\n\n");
+                    .append(" | ").append(lines(change, true)).append(" | ").append(lines(change, false)).append(" |\n"));
+            text.append("\n合计：").append(bundle.changes().stream().anyMatch(change -> Boolean.FALSE.equals(change.countsKnown()))
+                ? "部分文件行数未知" : "+" + bundle.added() + " / -" + bundle.removed()).append("\n\n");
             String diff = bundle.changes().stream().map(ChangeService.RunFileChange::diff).filter(Objects::nonNull)
                 .reduce("", (left, right) -> left + right);
             if (!diff.isBlank()) {
@@ -223,6 +224,14 @@ public class CompletionBundleService {
         text.append("---\n\n");
         text.append("这份凭证只汇总服务端记录，不会自动重跑命令。文件变化后请重新验证。\n");
         return text.toString();
+    }
+
+    /** 表格里的行数：算不出来时写「未知」，不能拿 0 冒充。 */
+    private static String lines(ChangeService.RunFileChange change, boolean added) {
+        if (Boolean.FALSE.equals(change.countsKnown())) {
+            return "未知";
+        }
+        return String.valueOf(added ? change.added() : change.removed());
     }
 
     private static List<String> nextSteps(TaskControlService.TaskContract task, ValidationSnapshot verification,

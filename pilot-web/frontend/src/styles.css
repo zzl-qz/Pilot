@@ -3087,6 +3087,7 @@ html[data-theme="light"] .subagent-card.is-failed .subagent-head { color: #b3392
 }
 .changes-totals .add { color: var(--ok); }
 .changes-totals .del { color: var(--err); }
+.changes-line-counts .changes-unknown { color: var(--muted); }
 .changes-actions { display: flex; flex: none; align-items: center; gap: 4px; }
 
 .changes-body { display: flex; flex: 1; flex-direction: column; min-height: 0; }
@@ -3179,6 +3180,8 @@ html[data-theme="light"] .subagent-card.is-failed .subagent-head { color: #b3392
 .change-view-stat { display: inline-flex; flex: none; gap: 5px; font-family: var(--mono); font-size: 11px; }
 .change-view-stat .add { color: var(--ok); }
 .change-view-stat .del { color: var(--err); }
+/* 行数没算出来时用 — 代替假 0，颜色淡于增删数字 */
+.change-row-stat .change-unknown, .change-view-stat .change-unknown { color: var(--muted); }
 
 .change-diff {
   flex: 1;

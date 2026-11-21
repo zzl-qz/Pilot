@@ -29,6 +29,8 @@ export interface ChangeFile {
   removed?: number;
   diff?: string;
   note?: string | null;
+  /** 行数是否可信；为 false 时 added/removed 的 0 不是「没改」，界面按其显示为未知。 */
+  countsKnown?: boolean;
 }
 
 export interface ChangeReport {

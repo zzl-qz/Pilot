@@ -36,6 +36,7 @@ import {
 import { agentMeta, agentTitle, manifestFacts, splitSubagentResult, summarizeAgents, agentStatusLabel, agentStatusDotVariant } from '../lib/agents.js';
 import { splitAttachmentMarkers, attachmentUrl, isImageAttachment, fileBadge, formatBytes } from '../lib/attachments.js';
 import { parseDiff } from '../lib/diff.js';
+import { sumChangeLines } from '../lib/changes.js';
 import { writeClipboard } from '../lib/clipboard.js';
 import { formatClock, formatCount, formatTime } from '../thread-utils.js';
 import { messagePeek } from '../lib/side-chat.js';
@@ -1527,7 +1528,25 @@ function changedCount(value: number) {
   return CHANGED_COUNT.format(value);
 }
 
-function ChangedCounts({ added, removed }: { added: number; removed: number }) {
+/**
+ * 改动卡的增删行。
+ *
+ * <p>后端算不出逐行差异时（文件太大、二进制、完成态副本对不上）给的是「未知」，
+ * 这里显示一个破折号并把原因放进悬停说明——写 +0 -0 会让人误以为这一轮什么都没改。
+ */
+function ChangedCounts({ added, removed, known = true, note }: {
+  added: number;
+  removed: number;
+  known?: boolean;
+  note?: string | null;
+}) {
+  if (!known) {
+    return (
+      <span className="changed-counts" title={note || '行数未知'}>
+        <span className="changed-unknown">—</span>
+      </span>
+    );
+  }
   return (
     <span className="changed-counts">
       <span className="changed-added">+{changedCount(added)}</span>
@@ -1608,8 +1627,7 @@ function ChangedFilesCard({ files, canRollback, onOpen, onRollback }: {
   const [preview, setPreview] = useState<number | null>(null);
   const [closing, setClosing] = useState(false);
   const [place, setPlace] = useState<{ left: number; top: number; width: number; maxHeight: number } | null>(null);
-  const added = files.reduce((sum, file) => sum + Number(file.added || 0), 0);
-  const removed = files.reduce((sum, file) => sum + Number(file.removed || 0), 0);
+  const { added, removed, known, note } = sumChangeLines(files);
   const foldable = files.length > CHANGED_COLLAPSED_ROWS;
   const rows = foldable && !expanded ? files.slice(0, CHANGED_COLLAPSED_ROWS) : files;
   const hiddenCount = files.length - rows.length;
@@ -1715,7 +1733,7 @@ function ChangedFilesCard({ files, canRollback, onOpen, onRollback }: {
         <span className="changed-tile"><EditedGlyph /></span>
         <span className="changed-titles">
           <span className="changed-title">{`已编辑 ${files.length} 个文件`}</span>
-          <ChangedCounts added={added} removed={removed} />
+          <ChangedCounts added={added} removed={removed} known={known} note={note} />
         </span>
         <span className="changed-actions">
           {canRollback && (
@@ -1748,7 +1766,12 @@ function ChangedFilesCard({ files, canRollback, onOpen, onRollback }: {
                 <ProcessKindIcon kind={extractFileMeta(file.path).kind} />
                 <span className="changed-path">{file.path}</span>
               </span>
-              <ChangedCounts added={Number(file.added || 0)} removed={Number(file.removed || 0)} />
+              <ChangedCounts
+                added={Number(file.added || 0)}
+                removed={Number(file.removed || 0)}
+                known={file.countsKnown !== false}
+                note={file.note}
+              />
             </button>
           </li>
         ))}

@@ -1038,6 +1038,7 @@ function ComposerChangesStrip() {
   const inspectorOpen = useStore((state) => state.ui.inspectorOpen);
   const embedded = useStore((state) => state.embeddedSessionId);
   if (embedded || inspectorOpen || !files || !files.length) return null;
+  // 这条汇总读的是工作区 git diff，行数都由补丁算出来，不存在「未知」的情况
   let added = 0;
   let removed = 0;
   for (const file of files) {

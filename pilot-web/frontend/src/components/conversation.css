@@ -2402,6 +2402,7 @@ html[data-theme] .conversation-thread .changed-counts {
 }
 html[data-theme] .conversation-thread .changed-added { color: var(--ok); }
 html[data-theme] .conversation-thread .changed-deleted { color: var(--err); }
+html[data-theme] .conversation-thread .changed-unknown { color: var(--muted); }
 html[data-theme] .conversation-thread .changed-toggle {
   display: inline-flex;
   align-items: center;

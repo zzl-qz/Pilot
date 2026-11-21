@@ -61,8 +61,19 @@ public class ChangeService {
      * @param added  新增行数；不可预览的文件可能为 0
      * @param diff   该文件的 unified diff；无内容可展示时为空字符串
      * @param note   无法显示文本差异时给审阅者的说明
+     * @param countsKnown 行数是否可信；为 {@code false} 时 0 不是「没改」，界面应显示为未知
      */
-    public record RunFileChange(String path, String status, int added, int removed, String diff, String note) {
+    public record RunFileChange(String path, String status, int added, int removed, String diff, String note,
+        Boolean countsKnown) {
+        public RunFileChange {
+            // 旧快照没有这个字段，缺省按「可信」处理
+            countsKnown = !Boolean.FALSE.equals(countsKnown);
+        }
+
+        public RunFileChange(String path, String status, int added, int removed, String diff, String note) {
+            this(path, status, added, removed, diff, note, true);
+        }
+
         public RunFileChange(String path, String status, int added, int removed, String diff) {
             this(path, status, added, removed, diff, null);
         }

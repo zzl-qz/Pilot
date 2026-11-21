@@ -6,7 +6,7 @@ import { useStore } from '../../store.js';
 import { api } from '../../api.js';
 import { ReviewActions } from '../ReviewActions.jsx';
 import { hasDiffTruncation, normalizePath, parseDiff } from '../../lib/diff.js';
-import { sortChangeFiles, splitPath, statusKind } from '../../lib/changes.js';
+import { sortChangeFiles, splitPath, statusKind, sumChangeLines } from '../../lib/changes.js';
 
 /* ---------- 变更面板 ---------- */
 
@@ -51,10 +51,7 @@ export function ChangesPanel() {
   const files = useMemo(() => sortChangeFiles<ChangeFile>(Array.isArray(report?.files) ? report.files : []), [report]);
   const tracked = useMemo(() => files.filter((file) => file.status !== '??'), [files]);
   const untracked = useMemo(() => files.filter((file) => file.status === '??'), [files]);
-  const totals = useMemo(() => tracked.reduce(
-    (sum, file) => ({ added: sum.added + Number(file.added || 0), removed: sum.removed + Number(file.removed || 0) }),
-    { added: 0, removed: 0 }
-  ), [tracked]);
+  const totals = useMemo(() => sumChangeLines(tracked), [tracked]);
   const empty = !files.length;
   const restoring = state === 'restoring';
   const canUndo = !scoped && isGit && !empty && state !== 'error';
@@ -182,7 +179,12 @@ export function ChangesPanel() {
             <>
               <span id="changes-totals" className="changes-totals">
                 <span className="changes-count">{files.length} 个文件</span>
-                {tracked.length > 0 && <span className="changes-line-counts" title="已跟踪文件的增删行数"><span className="add">+{totals.added}</span><span className="del">−{totals.removed}</span></span>}
+                {tracked.length > 0 && (totals.known ? (
+                  <span className="changes-line-counts" title="已跟踪文件的增删行数"><span className="add">+{totals.added}</span><span className="del">−{totals.removed}</span></span>
+                ) : (
+                  // 有一条算不出逐行差异时，合计里的 0 是假的：显示 — 并说明原因
+                  <span className="changes-line-counts" title={totals.note || '部分文件没算出逐行差异'}><span className="changes-unknown">—</span></span>
+                ))}
               </span>
               {untracked.length > 0 && (
                 <button
@@ -317,6 +319,28 @@ export function ChangesPanel() {
 /** 未跟踪文件一次最多列这么多：几百个临时文件全铺出来既卡又没法看。 */
 const UNTRACKED_LIMIT = 80;
 
+/**
+ * 单文件的增删行。
+ *
+ * <p>后端算不出逐行差异时给 {@code countsKnown: false}（文件太大、二进制、副本被清掉），
+ * 那时的 0 不是「没改」，显示 — 并把原因放进悬停提示，避免看起来像真的没动。
+ */
+function lineStat(file: ChangeFile, className: string) {
+  if (file.countsKnown === false) {
+    return (
+      <span className={className} title={file.note || '没算出这个文件的逐行差异'}>
+        <span className="change-unknown">—</span>
+      </span>
+    );
+  }
+  return (
+    <span className={className}>
+      <span className="add">+{Number(file.added || 0)}</span>
+      <span className="del">−{Number(file.removed || 0)}</span>
+    </span>
+  );
+}
+
 /** 变更列表的一行：状态徽标 + 文件名（目录弱化）+ 增删行，悬停露出撤销。 */
 function ChangeRow({ file, active, untracked, confirming, canUndo, busy, onAskUndo, onCancelUndo, onUndo }: { file: ChangeFile; active: boolean; untracked?: boolean; confirming?: boolean; canUndo: boolean; busy: boolean; onAskUndo: () => void; onCancelUndo: () => void; onUndo: () => void }) {
   const { name, dir } = splitPath(file.path);
@@ -350,12 +374,7 @@ function ChangeRow({ file, active, untracked, confirming, canUndo, busy, onAskUn
           <span className="change-row-name">{name}</span>
           {dir && <span className="change-row-dir">{dir}</span>}
         </span>
-        {!untracked && (
-          <span className="change-row-stat">
-            <span className="add">+{Number(file.added || 0)}</span>
-            <span className="del">−{Number(file.removed || 0)}</span>
-          </span>
-        )}
+        {!untracked && lineStat(file, 'change-row-stat')}
       </button>
       {canUndo && <button
         type="button"
@@ -453,16 +472,14 @@ function DiffView({ report, scoped, path, change, prevPath, nextPath, index, tot
     setConfirming(false);
     useStore.getState().setUi({ changeView: target });
   };
+  // 能解析出这个文件的补丁时，行数来自补丁本身，一定可信；否则用报告里的结论
+  const viewFile = file && { ...file, added: change?.added ?? file.added, removed: change?.removed ?? file.removed, countsKnown: change ? true : file.countsKnown };
+  const viewStat = viewFile ? lineStat(viewFile, 'change-view-stat') : null;
   return (
     <div className="change-view">
       <div className="change-view-bar">
         <span className="change-view-path" title={path}>{path}</span>
-        {file ? (
-          <span className="change-view-stat">
-            <span className="add">+{change?.added ?? file.added}</span>
-            <span className="del">−{change?.removed ?? file.removed}</span>
-          </span>
-        ) : (untracked ? <span className="change-view-tag">未跟踪</span> : null)}
+        {viewStat ?? (untracked ? <span className="change-view-tag">未跟踪</span> : null)}
         {total > 0 && index > 0 && <span className="change-view-index">{index} / {total}</span>}
         <button
           type="button"

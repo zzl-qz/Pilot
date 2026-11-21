@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { hasDiffTruncation, normalizePath, parseDiff, totalDiffLines } from '../../../frontend/src/lib/diff.js';
+import { hasDiffTruncation, normalizePath, parseDiff } from '../../../frontend/src/lib/diff.js';
+import { sumChangeLines } from '../../../frontend/src/lib/changes.js';
 
 test('把补丁拆成文件与行，并统计增删', () => {
   const diff = [
@@ -120,7 +121,8 @@ test('多个文件各自计数，末尾换行不会多出一行上下文', () =>
   const files = parseDiff(diff);
 
   assert.deepEqual(files.map((file) => file.path), ['a.txt', 'b.txt']);
-  assert.deepEqual(totalDiffLines(files), { added: 2, removed: 2 });
+  const { added, removed } = sumChangeLines(files);
+  assert.deepEqual({ added, removed }, { added: 2, removed: 2 });
 });
 
 test('重命名与二进制的文件头都能取到新路径', () => {
