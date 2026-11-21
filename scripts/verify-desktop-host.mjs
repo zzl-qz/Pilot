@@ -42,9 +42,9 @@ try{
     report.electronVersion=JSON.parse(await readFile(join(root,'pilot-desktop/node_modules/electron/package.json'),'utf8')).version;
   });
   await run('desktop-units',['--test','pilot-desktop/test/*.test.mjs']);
-  await run('source-launcher',['pilot-desktop/launcher-smoke.mjs']);
-  await run('desktop-security',['pilot-desktop/security-smoke.mjs']);
-  await run('desktop-reconnect',['pilot-desktop/ui-smoke.mjs']);
+  await run('source-launcher',['pilot-desktop/test/smoke/launcher-smoke.mjs']);
+  await run('desktop-security',['pilot-desktop/test/smoke/security-smoke.mjs']);
+  await run('desktop-reconnect',['pilot-desktop/test/smoke/ui-smoke.mjs']);
   await run('native-bridge',['pilot-mobile/scripts/direct-qr-smoke.mjs','--direct']);
   await run('component-repair',['pilot-mobile/scripts/environment-smoke.mjs']);
   await run('bridge-recovery',['pilot-mobile/scripts/backend-smoke.mjs','--direct','--recovery']);

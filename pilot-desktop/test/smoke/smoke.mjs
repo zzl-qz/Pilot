@@ -1,16 +1,15 @@
 import { spawn, execFileSync } from 'node:child_process';
-import { prepareDevelopmentHost } from './brand-host.mjs';
+import { desktopRoot as root, prepareDevelopmentHost } from '../../brand-host.mjs';
 import { createServer } from 'node:http';
+import { once } from 'node:events';
 import net from 'node:net';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join as joinPath } from 'node:path';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { setTimeout as delay } from 'node:timers/promises';
 
-const root = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(join(root, '../pilot-web/frontend/package.json'));
 const { chromium } = require('playwright-core');
 const home = mkdtempSync(join(tmpdir(), 'pilot-desktop-'));
@@ -26,10 +25,11 @@ const cdpPort = await new Promise((resolve, reject) => {
 
 const env = { ...process.env, PILOT_DESKTOP_SMOKE: '1', PILOT_BROWSER_HOME: home, PILOT_DESKTOP_CDP_PORT: String(cdpPort) };
 delete env.ELECTRON_RUN_AS_NODE;
-const child = spawn(electron, [root], {
+const child = spawn(electron, [root, `--user-data-dir=${join(home, 'profile')}`], {
   env,
   stdio: ['ignore', 'pipe', 'pipe']
 });
+const closed = once(child, 'close');
 let logs = '';
 child.stdout.on('data', (chunk) => { logs += chunk; });
 child.stderr.on('data', (chunk) => { logs += chunk; });
@@ -99,5 +99,6 @@ try {
   console.log('SMOKE_OK');
 } finally {
   child.kill('SIGTERM');
-  rmSync(home, { recursive: true, force: true });
+  await closed;
+  rmSync(home, { recursive: true, force: true, maxRetries: 5 });
 }

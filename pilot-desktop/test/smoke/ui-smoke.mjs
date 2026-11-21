@@ -3,12 +3,10 @@ import { createServer } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { prepareDevelopmentHost } from './brand-host.mjs';
+import { desktopRoot as root, prepareDevelopmentHost } from '../../brand-host.mjs';
 
-const root = fileURLToPath(new URL('.', import.meta.url));
-const { _electron } = createRequire(new URL('../pilot-web/frontend/package.json', import.meta.url))('playwright-core');
+const { _electron } = createRequire(new URL('../../../pilot-web/frontend/package.json', import.meta.url))('playwright-core');
 const temp = await mkdtemp(join(tmpdir(), 'pilot-shell-ui-'));
 let loadCount = 0;
 const server = createServer((_, res) => { res.writeHead(200, { 'content-type': 'text/html;charset=utf-8' }); res.end(`<!doctype html><h1 data-load="${++loadCount}">Pilot 服务已连接</h1>`); });

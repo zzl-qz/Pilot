@@ -12,9 +12,9 @@
 
 ```text
 npm --prefix pilot-desktop test
-node pilot-desktop/security-smoke.mjs
-node pilot-desktop/ui-smoke.mjs
-node pilot-desktop/launcher-smoke.mjs
+npm --prefix pilot-desktop run test:security
+npm --prefix pilot-desktop run test:ui
+node pilot-desktop/test/smoke/launcher-smoke.mjs
 ```
 
 真实 Electron 测试需要已安装桌面依赖及 `pilot-web/frontend` 的测试依赖，使用临时数据目录和独立 profile。安全测试为主动发送子框架 IPC，在独立测试窗口中额外开启子框架 preload 并注入探针；生产窗口维持原有沙箱与子框架隔离。测试使用实际主进程策略，探针不会加入生产 preload。

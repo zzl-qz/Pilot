@@ -4,12 +4,10 @@ import {createServer} from 'node:http';
 import {mkdtemp,mkdir,rm,writeFile,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {fileURLToPath} from 'node:url';
 import {createRequire} from 'node:module';
-import {prepareDevelopmentHost} from './brand-host.mjs';
-import {partitionName} from './protocol.mjs';
-const root=fileURLToPath(new URL('.',import.meta.url));
-const {_electron}=createRequire(new URL('../pilot-web/frontend/package.json',import.meta.url))('playwright-core');
+import {desktopRoot as root,prepareDevelopmentHost} from '../../brand-host.mjs';
+import {partitionName} from '../../protocol.mjs';
+const {_electron}=createRequire(new URL('../../../pilot-web/frontend/package.json',import.meta.url))('playwright-core');
 const temp=await mkdtemp(join(tmpdir(),'pilot-ipc-中文 with spaces-'));
 const report=process.env.PILOT_DESKTOP_REPORT_DIR||join(root,'out','security-report');
 await mkdir(report,{recursive:true});
@@ -99,7 +97,7 @@ try{
     const {workbenchIpc}=new Function(policy+';return {workbenchIpc};')();
     workbenchIpc(ipcMain,()=>win,origin).handle('pilot-test-frame-guard',()=>({ok:true}));
     await win.loadURL(url);
-  },{url:home+'/rogue',preload:join(root,'preload.cjs'),origin:home,policy:(await readFile(new URL('./workbench-security.mjs',import.meta.url),'utf8')).replace(/^export /gm,'')});
+  },{url:home+'/rogue',preload:join(root,'preload.cjs'),origin:home,policy:(await readFile(new URL('../../workbench-security.mjs',import.meta.url),'utf8')).replace(/^export /gm,'')});
   let rogue;const deadline=Date.now()+10000;
   while(!rogue&&Date.now()<deadline){rogue=desktop.windows().find(p=>p.url()===home+'/rogue');if(!rogue)await new Promise(resolve=>setTimeout(resolve,50));}
   assert.ok(rogue,'测试窗口必须就绪');await rogue.waitForFunction(()=>Boolean(window.ipcProbe&&window.pilotDesktop));

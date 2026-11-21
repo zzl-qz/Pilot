@@ -8,10 +8,10 @@
     "start": "node start.mjs",
     "postinstall": "node prepare-runtime.mjs",
     "test": "node --test \"test/*.test.mjs\"",
-    "smoke": "node smoke.mjs",
-    "test:ui": "node ui-smoke.mjs",
+    "smoke": "node test/smoke/smoke.mjs",
+    "test:ui": "node test/smoke/ui-smoke.mjs",
     "test:browser": "node browser-viewport-smoke.mjs",
-    "test:security": "node security-smoke.mjs",
+    "test:security": "node test/smoke/security-smoke.mjs",
     "test:host": "node ../scripts/verify-desktop-host.mjs"
   },
   "devDependencies": {
