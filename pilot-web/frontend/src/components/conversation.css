@@ -1093,6 +1093,18 @@ html .conversation-thread .turn-process .tool-image-preview {
   border-radius: 6px;
 }
 
+html .conversation-thread .turn-process .tool-output-diff .is-added { color: var(--ok); }
+html .conversation-thread .turn-process .tool-output-diff .is-removed { color: var(--err); }
+html .conversation-thread .turn-process .tool-output-note { margin: 8px 11px; color: var(--warn); }
+html .conversation-thread .turn-process .tool-web-result {
+  max-height: 360px;
+  padding: 8px 11px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+html .conversation-thread .turn-process .tool-web-result .bubble-md > :first-child { margin-top: 0; }
+html .conversation-thread .turn-process .tool-web-result .bubble-md > :last-child { margin-bottom: 0; }
+
 /* 子智能体卡片在过程流中的柔和适配 */
 html .conversation-thread .turn-process .agent-card {
   margin: 2px 0;

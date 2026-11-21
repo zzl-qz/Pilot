@@ -931,6 +931,7 @@ function isSummaryClick(event: React.MouseEvent<HTMLDetailsElement>) {
   event.preventDefault();
   return true;
 }
+
 /** 只有失败和等待批准会在展开组内自动露出详情；「已中断」只是收尾常态，不替用户撑开行。 */
 const AUTO_REVEAL_STATUS = new Set(['error', 'wait']);
 
@@ -1081,6 +1082,7 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
   const rawBody = String(tool.body || '').trim();
   const [open, setOpen] = useState(AUTO_REVEAL_STATUS.has(tool.status));
   const [copied, setCopied] = useState(false);
+  const [imagePreviewFailed, setImagePreviewFailed] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
   const userToggled = useRef(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -1103,6 +1105,8 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
     && /\.(png|jpe?g|gif|webp)$/i.test(display.filePath) && sessionId
     ? `/api/sessions/${encodeURIComponent(sessionId)}/file/image?path=${encodeURIComponent(display.filePath)}`
     : '';
+  const isWebResult = tool.name === 'web_search' || tool.name === 'web_fetch';
+  const hasUnifiedDiff = /^(?:diff --git |@@ |\+\+\+ |--- )/m.test(body);
   const status = TOOL_STATUS_TITLES[shownStatus] || '状态未知';
   const hasDetail = Boolean(body);
   const Header = hasDetail ? 'button' : 'div';
@@ -1197,9 +1201,18 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
               </button>
             </div>
           </div>
-          {imagePreview && <img className="tool-image-preview" src={imagePreview}
-            alt={`图片预览：${display.primary}`} loading="lazy" />}
-          <pre tabIndex={0}>{body}</pre>
+          {imagePreview && !imagePreviewFailed && <img className="tool-image-preview" src={imagePreview}
+            alt={`图片预览：${display.primary}`} loading="lazy" onError={() => setImagePreviewFailed(true)} />}
+          {imagePreviewFailed && <p className="tool-output-note" role="status">图片预览加载失败，文件可能已移动或无法读取。</p>}
+          {isWebResult
+            ? <div className="tool-web-result"><MarkdownBody text={body} /></div>
+            : hasUnifiedDiff
+              ? <pre className="tool-output-diff" tabIndex={0}>{body.split('\n').map((line, index) => {
+                const kind = line.startsWith('+') && !line.startsWith('+++') ? 'added'
+                  : line.startsWith('-') && !line.startsWith('---') ? 'removed' : '';
+                return <span key={index} className={kind ? `is-${kind}` : undefined}>{line || '\u200b'}{'\n'}</span>;
+              })}</pre>
+              : <pre tabIndex={0}>{body}</pre>}
         </div>
       )}
       {running && <AskChoices tool={tool} />}
