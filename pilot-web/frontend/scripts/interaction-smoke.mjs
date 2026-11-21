@@ -189,7 +189,8 @@ async function run(page,name,url) {
   await page.locator('#settings-model-save').click();
   assert.equal(await page.getByLabel('模型名称',{exact:true}).inputValue(),'test-model');
   const settingsClose = page.getByRole('button', { name: '关闭弹窗', exact: true });
-  const closeBounds = await settingsClose.boundingBox();
+  // 隐藏窗口里的 Electron 不推帧，弹层入场缩放缓存在 0.95，量渲染尺寸会得到 34.2。这里量布局尺寸。
+  const closeBounds = await settingsClose.evaluate(el => { const style = getComputedStyle(el); return { width: parseFloat(style.width), height: parseFloat(style.height) }; });
   assert.ok(closeBounds.width >= 36 && closeBounds.height >= 36);
   assert.match(await settingsClose.getAttribute('title'), /Esc/);
   await page.screenshot({path:join(temp,`${name}-settings-close.png`)});

@@ -109,6 +109,11 @@ export async function checkWorkbench(page, name, output) {
       ] },
       storage: { healthy: false, issues: [{ area: '数据目录', reason: '权限不足，无法写入', at: '2026-11-06T00:00:00Z' }] }
     });
+    // 权限页会读规则文件：给一份字段完整的响应，别让渲染落到空对象上。
+    api.permissionRules = async workspace => ({
+      workspace, file: workspace + '/.pilot/settings.json', allow: ['run_command (git status)'], deny: [], ask: [],
+      loadIssues: [], inherited: { allow: [], deny: [], ask: [] }
+    });
   });
   await page.getByRole('button', { name: '更多功能', exact: true }).click();
   await page.locator('#settings-open').click();

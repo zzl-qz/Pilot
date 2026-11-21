@@ -92,7 +92,8 @@ async function checkSnapshotReview(page) {
   const diff = page.locator('#change-diff');
   await scope.locator('option[value="workspace"][disabled]').waitFor({ state: 'attached' });
   assert.equal(await scope.inputValue(), 'run');
-  await page.getByText('本轮结束后显示逐行差异', { exact: true }).waitFor();
+  // 同一句文案在空态标题和顶部计数里各出现一次，按空态容器定位，避免 strict 冲突。
+  await page.locator('.changes-empty-state .changes-empty-title').filter({ hasText: '本轮结束后显示逐行差异' }).waitFor();
 
   await page.evaluate(() => store.setState({ running: false }));
   await page.locator('#change-files').getByText('本轮.txt', { exact: true }).click();
