@@ -53,73 +53,8 @@ public final class IsolatedWorkspace implements AutoCloseable {
         IsolatedWorkspace copy = new IsolatedWorkspace(Files.createTempDirectory("pilot-isolated-").toRealPath());
         long[] total = {0};
         try {
-            Files.walkFileTree(source.root(), new SimpleFileVisitor<>() {
-                @Override
-                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
-                    if (dir.equals(source.root())) {
-                        return FileVisitResult.CONTINUE;
-                    }
-                    if (build && generated(dir)) {
-                        copy.excluded.add(source.display(dir));
-                        return FileVisitResult.SKIP_SUBTREE;
-                    }
-                    if (reserved(source.display(dir)) || !source.allowsDirectory(dir)) {
-                        return FileVisitResult.SKIP_SUBTREE;
-                    }
-                    Files.createDirectories(copy.root.resolve(source.display(dir)));
-                    return FileVisitResult.CONTINUE;
-                }
-
-                @Override
-                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                    String name = source.display(file);
-                    if (build && generated(file)) {
-                        copy.excluded.add(name);
-                        return FileVisitResult.CONTINUE;
-                    }
-                    if (reserved(name) || !source.allows(file)) {
-                        return FileVisitResult.CONTINUE;
-                    }
-                    if (!attrs.isRegularFile() || attrs.isSymbolicLink()) {
-                        throw new IOException("隔离副本不支持链接或特殊文件：" + name);
-                    }
-                    if (attrs.size() > MAX_FILE || (total[0] += attrs.size()) > MAX_TOTAL
-                        || copy.baseline.size() >= 50000) {
-                        throw new IOException("隔离副本超过文件或总大小上限，命令未执行：" + name);
-                    }
-                    source.resolve(name); // 复制前再检查祖先路径，不能沿已换成外部链接的目录读取。
-                    Path target = copy.root.resolve(name);
-                    Files.createDirectories(target.getParent());
-                    Files.copy(file, target, StandardCopyOption.COPY_ATTRIBUTES, LinkOption.NOFOLLOW_LINKS);
-                    if (!Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS) || Files.size(target) > MAX_FILE) {
-                        throw new IOException("快照期间文件发生变化：" + name);
-                    }
-                    copy.baseline.put(name, hash(target));
-                    return FileVisitResult.CONTINUE;
-                }
-            });
-            PathValidator targetPaths = new PathValidator(copy.root, source.scope());
-            for (var entry : proposals.entrySet()) {
-                if (reserved(entry.getKey())) {
-                    throw new IOException("提案包含受保护路径：" + entry.getKey());
-                }
-                Path target = targetPaths.resolve(entry.getKey());
-                String normalized = targetPaths.display(target);
-                if (copy.excluded.stream()
-                    .anyMatch(dir -> normalized.equals(dir) || normalized.startsWith(dir + "/"))) {
-                    throw new IOException("提案修改了被排除的构建产物，不能校验：" + normalized);
-                }
-                byte[] content = entry.getValue().getBytes(java.nio.charset.StandardCharsets.UTF_8);
-                if (content.length > MAX_FILE || (total[0] += content.length) > MAX_TOTAL) {
-                    throw new IOException("提案超过隔离副本大小上限");
-                }
-                if (!copy.baseline.containsKey(targetPaths.display(target)) && copy.baseline.size() >= 50000) {
-                    throw new IOException("提案超过隔离副本文件数量上限");
-                }
-                Files.createDirectories(target.getParent());
-                Files.write(target, content);
-                copy.baseline.put(targetPaths.display(target), hash(target));
-            }
+            copy.copySource(source, build, total);
+            copy.applyProposals(source, proposals, total);
             return copy;
         } catch (IOException | RuntimeException e) {
             try {
@@ -128,6 +63,79 @@ public final class IsolatedWorkspace implements AutoCloseable {
                 e.addSuppressed(cleanup);
             }
             throw e;
+        }
+    }
+
+    /** 按 scope 复制可见文件，跳过受保护路径；构建模式下把产物目录记入 excluded。 */
+    private void copySource(PathValidator source, boolean build, long[] total) throws IOException {
+        Files.walkFileTree(source.root(), new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                if (dir.equals(source.root())) {
+                    return FileVisitResult.CONTINUE;
+                }
+                if (build && generated(dir)) {
+                    excluded.add(source.display(dir));
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
+                if (reserved(source.display(dir)) || !source.allowsDirectory(dir)) {
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
+                Files.createDirectories(root.resolve(source.display(dir)));
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                String name = source.display(file);
+                if (build && generated(file)) {
+                    excluded.add(name);
+                    return FileVisitResult.CONTINUE;
+                }
+                if (reserved(name) || !source.allows(file)) {
+                    return FileVisitResult.CONTINUE;
+                }
+                if (!attrs.isRegularFile() || attrs.isSymbolicLink()) {
+                    throw new IOException("隔离副本不支持链接或特殊文件：" + name);
+                }
+                if (attrs.size() > MAX_FILE || (total[0] += attrs.size()) > MAX_TOTAL || baseline.size() >= 50000) {
+                    throw new IOException("隔离副本超过文件或总大小上限，命令未执行：" + name);
+                }
+                source.resolve(name); // 复制前再检查祖先路径，不能沿已换成外部链接的目录读取。
+                Path target = root.resolve(name);
+                Files.createDirectories(target.getParent());
+                Files.copy(file, target, StandardCopyOption.COPY_ATTRIBUTES, LinkOption.NOFOLLOW_LINKS);
+                if (!Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS) || Files.size(target) > MAX_FILE) {
+                    throw new IOException("快照期间文件发生变化：" + name);
+                }
+                baseline.put(name, hash(target));
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
+
+    /** 把提案覆盖到副本上并登记基线；受保护路径与被排除的产物目录一律拒绝。 */
+    private void applyProposals(PathValidator source, Map<String, String> proposals, long[] total) throws IOException {
+        PathValidator targetPaths = new PathValidator(root, source.scope());
+        for (var entry : proposals.entrySet()) {
+            if (reserved(entry.getKey())) {
+                throw new IOException("提案包含受保护路径：" + entry.getKey());
+            }
+            Path target = targetPaths.resolve(entry.getKey());
+            String normalized = targetPaths.display(target);
+            if (excluded.stream().anyMatch(dir -> normalized.equals(dir) || normalized.startsWith(dir + "/"))) {
+                throw new IOException("提案修改了被排除的构建产物，不能校验：" + normalized);
+            }
+            byte[] content = entry.getValue().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            if (content.length > MAX_FILE || (total[0] += content.length) > MAX_TOTAL) {
+                throw new IOException("提案超过隔离副本大小上限");
+            }
+            if (!baseline.containsKey(normalized) && baseline.size() >= 50000) {
+                throw new IOException("提案超过隔离副本文件数量上限");
+            }
+            Files.createDirectories(target.getParent());
+            Files.write(target, content);
+            baseline.put(normalized, hash(target));
         }
     }
 
