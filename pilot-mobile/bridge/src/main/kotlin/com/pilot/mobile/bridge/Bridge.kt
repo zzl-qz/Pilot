@@ -1,5 +1,6 @@
 package com.pilot.mobile.bridge
 
+import com.pilot.mobile.bridge.pairing.PairingStore
 import com.pilot.mobile.transport.*
 import computer.iroh.*
 import kotlinx.coroutines.*

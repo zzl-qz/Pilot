@@ -1,5 +1,6 @@
-package com.pilot.mobile.bridge
+package com.pilot.mobile.bridge.pairing
 
+import com.pilot.mobile.bridge.NetworkEnvironment
 import kotlinx.coroutines.*
 import kotlinx.serialization.json.*
 

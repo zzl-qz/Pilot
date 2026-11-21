@@ -1,4 +1,4 @@
-package com.pilot.mobile.bridge
+package com.pilot.mobile.bridge.pairing
 
 import com.pilot.mobile.transport.*
 import computer.iroh.SecretKey

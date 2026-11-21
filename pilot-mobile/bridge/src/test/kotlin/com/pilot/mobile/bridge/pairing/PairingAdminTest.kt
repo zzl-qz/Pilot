@@ -1,5 +1,6 @@
-package com.pilot.mobile.bridge
+package com.pilot.mobile.bridge.pairing
 
+import com.pilot.mobile.bridge.Bridge
 import com.google.zxing.*
 import com.google.zxing.client.j2se.BufferedImageLuminanceSource
 import com.google.zxing.common.HybridBinarizer

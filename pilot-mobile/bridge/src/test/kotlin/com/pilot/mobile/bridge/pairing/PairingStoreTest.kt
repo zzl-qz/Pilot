@@ -1,4 +1,4 @@
-package com.pilot.mobile.bridge
+package com.pilot.mobile.bridge.pairing
 
 import java.nio.file.Files
 import kotlin.test.*

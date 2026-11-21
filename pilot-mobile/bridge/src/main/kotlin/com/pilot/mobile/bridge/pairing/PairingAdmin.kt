@@ -1,5 +1,6 @@
-package com.pilot.mobile.bridge
+package com.pilot.mobile.bridge.pairing
 
+import com.pilot.mobile.bridge.Bridge
 import com.pilot.mobile.transport.*
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer

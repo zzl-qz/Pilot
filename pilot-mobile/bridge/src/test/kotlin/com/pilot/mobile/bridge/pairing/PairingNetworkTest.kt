@@ -1,5 +1,10 @@
-package com.pilot.mobile.bridge
+package com.pilot.mobile.bridge.pairing
 
+import com.pilot.mobile.bridge.Bridge
+import com.pilot.mobile.bridge.InterfaceObservation
+import com.pilot.mobile.bridge.dnsHint
+import com.pilot.mobile.bridge.environmentSnapshot
+import com.pilot.mobile.bridge.observeProxies
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.MultiFormatReader
 import com.google.zxing.client.j2se.BufferedImageLuminanceSource

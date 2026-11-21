@@ -1,4 +1,4 @@
-package com.pilot.mobile.bridge
+package com.pilot.mobile.bridge.pairing
 
 import com.google.zxing.*
 import com.google.zxing.client.j2se.BufferedImageLuminanceSource
