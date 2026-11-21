@@ -10,6 +10,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -201,7 +202,7 @@ final class InvestigationTracker {
     private static boolean isTemporaryPath(String raw) {
         String path = normalizePath(raw);
         for (String part : path.split("/")) {
-            String name = part.toLowerCase(java.util.Locale.ROOT);
+            String name = part.toLowerCase(Locale.ROOT);
             if (name.equals(".analysis") || name.equals(".pilot") || name.startsWith("tmp-") || name.endsWith(".tmp")) {
                 return true;
             }
