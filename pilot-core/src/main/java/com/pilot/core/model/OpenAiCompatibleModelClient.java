@@ -49,6 +49,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     private ModelProfile profile;
     private volatile boolean cacheParametersDisabled;
     private volatile boolean streamUsageDisabled;
+    private volatile boolean replayAllReasoning;
 
     public OpenAiCompatibleModelClient(HttpClient httpClient, ObjectMapper objectMapper, URI endpoint, String apiKey,
         String model) {
@@ -126,13 +127,17 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     }
 
     Map<String, Object> requestBody(List<Message> messages, List<ToolDefinition> definitions, boolean streaming) {
+        return requestBody(messages, definitions, streaming, replayAllReasoning);
+    }
+
+    private Map<String, Object> requestBody(List<Message> messages, List<ToolDefinition> definitions, boolean streaming,
+        boolean includeEarlierReasoning) {
         ModelCapacity capacity = ModelCapacity.active();
         RequestBudget.enforce(messages, definitions, capacity);
         int lastUser = Message.lastRealUserTurnIndex(messages);
         List<Map<String, Object>> items = new ArrayList<>();
         for (int i = 0; i < messages.size(); i++) {
-            // 只有当前用户轮次里的思考要回传。更早的思考留着会占窗口，而且供应商也不再要求。
-            items.add(messagePayload(messages.get(i), i > lastUser));
+            items.add(messagePayload(messages.get(i), includeEarlierReasoning || i > lastUser));
         }
         List<Map<String, Object>> tools = definitions == null ? new ArrayList<>()
             : new ArrayList<>(definitions.stream().map(this::toolPayload).map(LinkedHashMap::new).toList());
@@ -189,6 +194,25 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         return body;
     }
 
+    private static boolean requiresEarlierReasoningReplay(int statusCode, String errorBody) {
+        String error = errorBody.toLowerCase(java.util.Locale.ROOT);
+        return statusCode == 400 && error.contains("reasoning_content") && error.contains("thinking mode")
+            && error.contains("passed back");
+    }
+
+    private boolean enableEarlierReasoning(List<Message> messages, boolean requestIncludedEarlierReasoning) {
+        if (requestIncludedEarlierReasoning) {
+            return false;
+        }
+        int lastUser = Message.lastRealUserTurnIndex(messages);
+        if (lastUser < 0 || messages.stream().limit(lastUser + 1L)
+            .noneMatch(message -> "assistant".equals(message.role()) && !message.reasoningContent().isBlank())) {
+            return false;
+        }
+        replayAllReasoning = true;
+        return true;
+    }
+
     private static boolean markMessage(Map<String, Object> payload, Map<String, Object> marker, boolean stableSystem) {
         Object content = payload.get("content");
         if (content instanceof String text && !text.isBlank()) {
@@ -242,9 +266,11 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
 
     @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
-        HttpRequest request =
-            ModelHttp.jsonPost(endpoint, requestTimeout, objectMapper, requestBody(messages, tools, false))
-                .header("Authorization", "Bearer " + apiKey).build();
+        boolean includeEarlierReasoning = replayAllReasoning;
+        HttpRequest request = ModelHttp
+            .jsonPost(endpoint, requestTimeout, objectMapper,
+                requestBody(messages, tools, false, includeEarlierReasoning))
+            .header("Authorization", "Bearer " + apiKey).build();
 
         long startedAt = System.nanoTime();
         BoundedHttp.TextResponse response;
@@ -260,6 +286,10 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
 
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             String errorBody = ModelHttp.snippet(response.body());
+            if (requiresEarlierReasoningReplay(response.statusCode(), errorBody)
+                && enableEarlierReasoning(messages, includeEarlierReasoning)) {
+                return chat(messages, tools);
+            }
             if ((response.statusCode() == 404 || response.statusCode() == 405)
                 && NativeToolRejectedException.rejected(response.statusCode(), errorBody)) {
                 throw new NativeToolRejectedException("端点未提供当前聊天协议路由", true);
@@ -295,9 +325,11 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> textDelta,
         Consumer<String> reasoningDelta) {
-        HttpRequest request =
-            ModelHttp.jsonPost(endpoint, requestTimeout, objectMapper, requestBody(messages, tools, true))
-                .header("Authorization", "Bearer " + apiKey).header("Accept", "text/event-stream").build();
+        boolean includeEarlierReasoning = replayAllReasoning;
+        HttpRequest request = ModelHttp
+            .jsonPost(endpoint, requestTimeout, objectMapper,
+                requestBody(messages, tools, true, includeEarlierReasoning))
+            .header("Authorization", "Bearer " + apiKey).header("Accept", "text/event-stream").build();
 
         long startedAt = System.nanoTime();
         try (var response = BoundedHttp.open(httpClient, request, idleTimeout, BoundedHttp.STREAM_BYTES)) {
@@ -305,6 +337,10 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                 try (InputStream stream = response.body()) {
                     String errorBody = ModelHttp
                         .snippet(new String(stream.readNBytes(BoundedHttp.ERROR_BYTES), StandardCharsets.UTF_8));
+                    if (requiresEarlierReasoningReplay(response.statusCode(), errorBody)
+                        && enableEarlierReasoning(messages, includeEarlierReasoning)) {
+                        return chat(messages, tools, textDelta, reasoningDelta);
+                    }
                     if ((response.statusCode() == 404 || response.statusCode() == 405)
                         && NativeToolRejectedException.rejected(response.statusCode(), errorBody)) {
                         throw new NativeToolRejectedException("端点未提供当前聊天协议路由", true);

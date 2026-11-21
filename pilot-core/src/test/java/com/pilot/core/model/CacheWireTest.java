@@ -180,6 +180,50 @@ class CacheWireTest {
         }
     }
 
+    @Test
+    void retriesWithEarlierThinkingOnlyWhenEndpointRequiresIt() throws Exception {
+        List<String> bodies = new ArrayList<>();
+        HttpServer server = reasoningReplayServer(bodies, false);
+        server.start();
+        try {
+            URI endpoint = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
+            var raw = client(endpoint);
+            List<Message> history = thinkingHistory();
+
+            assertEquals("ok", raw.chat(history, List.of()).content());
+            assertEquals(2, bodies.size());
+            assertFalse(messages(bodies.getFirst()).get(2).has("reasoning_content"));
+            assertEquals("旧思考", messages(bodies.get(1)).get(2).path("reasoning_content").asString());
+
+            raw.chat(history, List.of());
+            assertEquals("旧思考", messages(bodies.get(2)).get(2).path("reasoning_content").asString(),
+                "确认端点要求后，后续请求应沿用完整思考历史");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void streamingRetriesBeforeEmittingAnyOutputWhenEndpointRequiresEarlierThinking() throws Exception {
+        List<String> bodies = new ArrayList<>();
+        HttpServer server = reasoningReplayServer(bodies, true);
+        server.start();
+        try {
+            URI endpoint = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
+            var raw = client(endpoint);
+            StringBuilder answer = new StringBuilder();
+
+            raw.chat(thinkingHistory(), List.of(), answer::append, null);
+
+            assertEquals("ok", answer.toString());
+            assertEquals(2, bodies.size());
+            assertFalse(messages(bodies.getFirst()).get(2).has("reasoning_content"));
+            assertEquals("旧思考", messages(bodies.get(1)).get(2).path("reasoning_content").asString());
+        } finally {
+            server.stop(0);
+        }
+    }
+
     /** Anthropic 同样以真实用户轮次为界：内部提醒不剥离当前轮 thinking，下一条真实提问才停回传。 */
     @Test
     void anthropicKeepsCurrentTurnThinkingUntilTheNextRealUserMessage() throws Exception {
@@ -320,6 +364,35 @@ class CacheWireTest {
         List<Message> messages = new ArrayList<>(base);
         messages.addAll(List.of(extra));
         return messages;
+    }
+
+    private static List<Message> thinkingHistory() {
+        return List.of(Message.system("rules"), Message.user("第一问"),
+            Message.assistant("", List.of(new ToolCall("c1", "read_file", Map.of())), "旧思考"),
+            Message.tool("c1", "A"), Message.user("第二问"),
+            Message.assistant("", List.of(new ToolCall("c2", "read_file", Map.of())), "新思考"),
+            Message.tool("c2", "B"));
+    }
+
+    private HttpServer reasoningReplayServer(List<String> bodies, boolean streaming) throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            bodies.add(body);
+            boolean hasEarlierThinking = messages(body).get(2).has("reasoning_content");
+            String payload = !hasEarlierThinking
+                ? "{\"error\":{\"message\":\"The `reasoning_content` in the thinking mode must be passed back to the API.\"}}"
+                : streaming
+                    ? "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+                    : "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":\"ok\"}}]}";
+            byte[] bytes = payload.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", streaming ? "text/event-stream" : "application/json");
+            exchange.sendResponseHeaders(hasEarlierThinking ? 200 : 400, bytes.length);
+            try (var output = exchange.getResponseBody()) {
+                output.write(bytes);
+            }
+        });
+        return server;
     }
 
     private JsonNode messages(String body) {
