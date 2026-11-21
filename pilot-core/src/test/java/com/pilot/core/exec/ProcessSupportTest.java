@@ -5,8 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 import java.io.IOException;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.concurrent.TimeoutException;
 
 import org.junit.jupiter.api.Test;
@@ -41,6 +44,31 @@ class ProcessSupportTest {
         assertThrows(IOException.class,
             () -> ProcessSupport.captureUtf8(new ProcessBuilder(directory.resolve("missing-command").toString()),
                 Duration.ofSeconds(1), 64));
+    }
+
+    @Test
+    void decodesUtf8OutputAsIs() {
+        assertEquals("不是内部或外部命令", ProcessSupport.decode("不是内部或外部命令".getBytes(StandardCharsets.UTF_8)));
+    }
+
+    @Test
+    void fallsBackToGbkWhenOutputIsNotUtf8() {
+        byte[] gbk = "不是内部或外部命令".getBytes(Charset.forName("GBK"));
+        assertEquals("不是内部或外部命令", ProcessSupport.decode(gbk));
+    }
+
+    @Test
+    void keepsUtf8TextWhoseLastCharacterWasCutOffByTheByteLimit() {
+        byte[] full = "构建通过".getBytes(StandardCharsets.UTF_8);
+        assertEquals("构建通", ProcessSupport.decode(Arrays.copyOf(full, full.length - 1)));
+        assertEquals("构建通", ProcessSupport.decode(Arrays.copyOf(full, full.length - 2)));
+        assertEquals("构建通", ProcessSupport.decode(Arrays.copyOf(full, full.length - 3)));
+    }
+
+    @Test
+    void decodesEmptyAndMissingOutputToEmptyText() {
+        assertEquals("", ProcessSupport.decode(null));
+        assertEquals("", ProcessSupport.decode(new byte[0]));
     }
 
     private ProcessBuilder child(String mode) {

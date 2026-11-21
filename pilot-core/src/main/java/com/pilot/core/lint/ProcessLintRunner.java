@@ -1,11 +1,13 @@
 package com.pilot.core.lint;
 
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
+import java.io.ByteArrayOutputStream;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
+
+import com.pilot.core.exec.ProcessSupport;
 
 /**
  * 用系统 shell 跑 lint。命令来自仓库自己的清单，工作目录锁在该仓库根。
@@ -14,6 +16,8 @@ import java.util.concurrent.TimeUnit;
 public final class ProcessLintRunner implements LintRunner {
     public static final ProcessLintRunner INSTANCE = new ProcessLintRunner();
     private static final int MAX_OUTPUT_CHARS = 16_000;
+    /** 按字节截断后再解码：中文在 UTF-8 下占 3 字节，按字符数截断会把多字节序列切断。 */
+    private static final int MAX_OUTPUT_BYTES = 64 * 1024;
 
     private ProcessLintRunner() {
     }
@@ -30,7 +34,7 @@ public final class ProcessLintRunner implements LintRunner {
         } catch (Exception e) {
             return LintResult.failedToStart(e.getMessage() == null ? "无法启动 lint" : e.getMessage());
         }
-        StringBuilder output = new StringBuilder();
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
         Thread reader = new Thread(() -> drain(process.getInputStream(), output), "lint-output");
         reader.setDaemon(true);
         reader.start();
@@ -39,10 +43,10 @@ public final class ProcessLintRunner implements LintRunner {
             if (!finished) {
                 process.destroyForcibly();
                 reader.join(1_000);
-                return new LintResult(-1, clip(output.toString()), true, true);
+                return new LintResult(-1, clip(decode(output)), true, true);
             }
             reader.join(1_000);
-            return new LintResult(process.exitValue(), clip(output.toString()), false, true);
+            return new LintResult(process.exitValue(), clip(decode(output)), false, true);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             process.destroyForcibly();
@@ -58,16 +62,24 @@ public final class ProcessLintRunner implements LintRunner {
         return List.of("sh", "-c", command);
     }
 
-    private static void drain(InputStream input, StringBuilder output) {
+    /**
+     * 只累积原始字节，读完再整体解码。Windows 中文系统的子进程按 GBK 输出，
+     * 边读边按 UTF-8 解码会把「不是内部或外部命令」变成乱码，缺命令就被误判成通过。
+     */
+    private static void drain(InputStream input, ByteArrayOutputStream output) {
         try {
             byte[] buf = new byte[4096];
             int n;
-            while ((n = input.read(buf)) >= 0 && output.length() < MAX_OUTPUT_CHARS) {
-                output.append(new String(buf, 0, n, StandardCharsets.UTF_8));
+            while ((n = input.read(buf)) >= 0 && output.size() < MAX_OUTPUT_BYTES) {
+                output.write(buf, 0, Math.min(n, MAX_OUTPUT_BYTES - output.size()));
             }
         } catch (Exception ignored) {
             // 进程被超时杀掉时读端会断，输出保留已经拿到的部分
         }
+    }
+
+    private static String decode(ByteArrayOutputStream output) {
+        return ProcessSupport.decode(output.toByteArray());
     }
 
     private static String clip(String text) {

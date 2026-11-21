@@ -3,7 +3,6 @@ package com.pilot.core.exec;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -136,7 +135,7 @@ public final class LocalExecutionBackend implements ExecutionBackend {
                     break;
                 }
             }
-            return new Captured(buffer.toString(StandardCharsets.UTF_8), truncated);
+            return new Captured(ProcessSupport.decode(buffer.toByteArray()), truncated);
         } catch (IOException e) {
             return new Captured("", false);
         }

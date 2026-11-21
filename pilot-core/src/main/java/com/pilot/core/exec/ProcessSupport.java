@@ -28,6 +28,8 @@ import com.pilot.core.util.HostOs;
 public final class ProcessSupport {
     /** Windows 中文环境的默认编码，作为非 UTF-8 输出的回退。 */
     private static final Charset GBK = Charset.forName("GBK");
+    /** UTF-8 单个字符最多 4 字节；输出被截断时最多缺 3 个字节。 */
+    private static final int MAX_TRUNCATED_BYTES = 3;
     private static final boolean WINDOWS = HostOs.isWindows();
 
     private ProcessSupport() {
@@ -125,15 +127,28 @@ public final class ProcessSupport {
         }
     }
 
-    /** 优先按 UTF-8 严格解码；出现非法字节时回退 GBK。 */
+    /**
+     * 优先按 UTF-8 严格解码；出现非法字节时回退 GBK。
+     *
+     * <p>输出被字节上限截断时可能正好切在多字节序列中间，那种场景仍应按 UTF-8 解码，
+     * 所以先退回最多 3 个字节再试，试不出来才认定是本地编码。否则一段被截断的中文会整段变成乱码。
+     */
     public static String decode(byte[] bytes) {
         if (bytes == null || bytes.length == 0) {
             return "";
         }
+        String text = utf8OrNull(bytes, bytes.length);
+        for (int trim = 1; text == null && trim <= MAX_TRUNCATED_BYTES && trim < bytes.length; trim++) {
+            text = utf8OrNull(bytes, bytes.length - trim);
+        }
+        return text == null ? new String(bytes, GBK) : text;
+    }
+
+    private static String utf8OrNull(byte[] bytes, int length) {
         try {
-            return StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(bytes)).toString();
+            return StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(bytes, 0, length)).toString();
         } catch (CharacterCodingException e) {
-            return new String(bytes, GBK);
+            return null;
         }
     }
 
