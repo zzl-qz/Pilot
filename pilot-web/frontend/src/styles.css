@@ -3653,6 +3653,140 @@ html[data-theme="light"] .accent-dot.is-on { box-shadow: 0 0 0 2px #fff, 0 0 0 4
 .arb-card.is-resolved { border-color: var(--line-soft); background: rgba(255, 255, 255, 0.02); }
 .arb-card.is-resolved .arb-head { color: var(--muted); }
 
+/* 提问卡片：标题说「在等你」，问题独占一行，选项竖排整行可点。 */
+.ask-card {
+  align-self: stretch;
+  margin: 10px 0 4px;
+  padding: 14px 16px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel-2);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+}
+
+.ask-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.ask-card-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.ask-card-sent {
+  color: var(--ok);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ask-card-question {
+  margin: 0 0 12px;
+  color: var(--ink);
+  font-size: 13.5px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.ask-card-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+}
+
+.ask-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.55;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.ask-option:hover:not(:disabled) { border-color: var(--accent-line); background: var(--accent-soft); color: var(--ink); }
+.ask-option:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 1px; }
+.ask-option:disabled { opacity: 0.5; cursor: default; }
+.ask-option.is-picked { border-color: var(--accent-line); background: var(--accent-soft); color: var(--ink); opacity: 1; }
+
+.ask-option-index {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: var(--panel-3);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+
+.ask-option.is-picked .ask-option-index { background: var(--accent-line); color: var(--ink); }
+.ask-option-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+.ask-form { display: flex; gap: 8px; }
+
+.ask-custom {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg-soft);
+  color: var(--ink);
+  font-size: 12.5px;
+}
+
+.ask-custom:focus { outline: none; border-color: var(--accent-line); }
+.ask-custom:disabled { opacity: 0.5; }
+
+.ask-submit {
+  flex: none;
+  padding: 8px 14px;
+  border: 1px solid var(--accent-line);
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ask-submit:hover:not(:disabled) { background: var(--accent-line); color: var(--ink); }
+.ask-submit:disabled { opacity: 0.4; cursor: default; }
+
+.ask-card-answer {
+  margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
 .sandbox-actions {
   display: flex;
   flex-wrap: wrap;

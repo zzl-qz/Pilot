@@ -129,6 +129,19 @@ test('parseToolDisplay 解析文件行号、编辑增减行数与命令非零退
   assert.equal(okCmd.exitCode, null);
 });
 
+test('ask_user 行头只说等待几项，不重复卡片里的问题正文', () => {
+  const ask = parseToolDisplay({
+    name: 'ask_user',
+    args: 'ASK\n「仓库现状」快照要怎么落地？\n只加开关\u001f精简内容\u001f按 dsh 做法'
+  });
+  assert.equal(ask.primary, '等待你选择 3 项');
+  assert.doesNotMatch(ask.primary, /仓库现状/);
+  assert.equal(ask.filePath, '');
+
+  const broken = parseToolDisplay({ name: 'ask_user', args: 'ASK\n只有一个选项\n甲' });
+  assert.equal(broken.primary, '等待回答');
+});
+
 test('summarizeActiveTool 提取当前运行中工具的简短摘要', () => {
   assert.equal(
     summarizeActiveTool([

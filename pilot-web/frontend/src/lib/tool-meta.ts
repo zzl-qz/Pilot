@@ -344,6 +344,20 @@ export function parseToolDisplay(tool: { name: string; args: string; body?: stri
   const body = String(tool.body || '').trim();
   const fullTarget = toolArgsText(tool.name, rawArgs);
 
+  // 提问的问题正文交给卡片展示，行头只留一句状态，否则同一句话会出现两遍还被截断。
+  if (tool.name === 'ask_user') {
+    const ask = parseAsk(rawArgs);
+    return {
+      kind: 'tool',
+      primary: ask ? `等待你选择 ${ask.options.length} 项` : '等待回答',
+      fullTarget: '',
+      lineRange: '',
+      diff: null,
+      exitCode: null,
+      filePath: ''
+    };
+  }
+
   if (FILE_TOOLS.has(tool.name)) {
     const simplePath = extractSimpleArg(rawArgs, 'path');
     const pathFromBody = !simplePath && !fullTarget

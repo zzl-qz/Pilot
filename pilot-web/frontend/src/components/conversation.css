@@ -660,6 +660,12 @@ html .conversation-thread .turn-process .conversation-tools .tool-group-list::be
   display: none;
 }
 
+/* 正在等你选择的卡片比工具行高得多，按工具行限高会把输入框裁在滚动区外，等回答时放宽一档。 */
+html .conversation-thread .turn-process .conversation-tools.is-asking .tool-group-list {
+  max-height: min(560px, 72vh);
+  max-height: min(560px, 72dvh);
+}
+
 html .conversation-thread .turn-process .conversation-tools .tool-group-list > .process-scroll-content {
   margin-inline-start: 4px;
   padding-inline-start: 10px;

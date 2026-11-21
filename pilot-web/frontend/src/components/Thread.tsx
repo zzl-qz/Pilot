@@ -979,10 +979,14 @@ const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] }) {
   };
   const hiddenSegments = !filterAttention && segments.length > visibleLimit ? segments.length - visibleLimit : 0;
   const renderedSegments = hiddenSegments > 0 ? segments.slice(-visibleLimit) : segments;
+  // 有提问时优先把回答卡片滚进视野，其次才是需留意项。
+  let focusSelector: string | undefined;
+  if (hasActiveAsk) focusSelector = '.ask-card';
+  else if (needsAttention) focusSelector = '.tool-row.is-attention';
   return (
     <details
       ref={detailsRef}
-      className={`tool-group conversation-tools${running > 0 ? ' is-live' : ''}`}
+      className={`tool-group conversation-tools${running > 0 ? ' is-live' : ''}${hasActiveAsk ? ' is-asking' : ''}`}
       open={open}
       onToggle={event => setOpen(event.currentTarget.open)}
     >
@@ -1021,7 +1025,7 @@ const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] }) {
         className="tool-group-list"
         autoFollow={running > 0 && !needsAttention && !hasActiveAsk}
         followKey={`${visibleTools.length}:${lastTool?.callId ?? ''}:${lastTool?.status ?? ''}:${filterAttention ? 'attn' : 'all'}`}
-        focusSelector={hasActiveAsk ? '.arb-options' : needsAttention ? '.tool-row.is-attention' : undefined}
+        focusSelector={focusSelector}
       >
         {hiddenSegments > 0 && (
           <button
@@ -1196,17 +1200,42 @@ function AskChoices({ tool }: { tool: ToolView }) {
     setSent(choice);
     void api.answerQuestion(sessionId, tool.callId, choice);
   };
+  // 选项竖排整行可点：ask_user 的选项常是整句，横排胶囊会把文字挤成省略号，看不出选的是什么。
   return (
-    <div className="arb-options">
-      <p className="arb-summary">{ask.question}</p>
-      {ask.options.map(option => (
-        <Button key={option} size="sm" label={option} isDisabled={Boolean(sent)} onClick={() => send(option)} />
-      ))}
-      <input className="arb-custom" value={custom} placeholder="自己填写" aria-label="自己填写"
-        onChange={event => setCustom(event.target.value)} />
-      <Button size="sm" variant="ghost" label="提交填写" isDisabled={!custom.trim() || Boolean(sent)} onClick={() => send('')} />
-      {sent && <span className="sandbox-decision">已提交：{sent}</span>}
-    </div>
+    <section className="ask-card" aria-label="需要你的选择">
+      <header className="ask-card-head">
+        <span className="ask-card-badge"><Icon name="info" /> 需要你的选择</span>
+        {sent && <span className="ask-card-sent">已回答</span>}
+      </header>
+      <p className="ask-card-question">{ask.question}</p>
+      <ul className="ask-card-options">
+        {ask.options.map((option, index) => (
+          <li key={option}>
+            <button
+              type="button"
+              className={`ask-option${sent === option ? ' is-picked' : ''}`}
+              disabled={Boolean(sent)}
+              onClick={() => send(option)}
+            >
+              <span className="ask-option-index" aria-hidden="true">{index + 1}</span>
+              <span className="ask-option-text">{option}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      <form className="ask-form" onSubmit={event => { event.preventDefault(); send(''); }}>
+        <input
+          className="ask-custom"
+          value={custom}
+          placeholder="都不是，自己填写"
+          aria-label="自己填写"
+          disabled={Boolean(sent)}
+          onChange={event => setCustom(event.target.value)}
+        />
+        <button type="submit" className="ask-submit" disabled={!custom.trim() || Boolean(sent)}>提交</button>
+      </form>
+      {sent && <p className="ask-card-answer">已提交：{sent}</p>}
+    </section>
   );
 }
 
