@@ -77,11 +77,12 @@ export function Thread() {
     resize: 'instant'
   });
 
-  /*
-   * 上滑不自动加载更早的历史：用户只是往回翻看时，不该被一页页前插的内容反复顶走位置，
-   * 更早一页只在点「加载更早消息」时请求。滚动方向仍然记着，向下接近底部才补更新的消息。
-   */
+  /* 更早历史在两屏范围内预取，靠近顶部且滚动停稳后再插入。 */
   const lastScrollTop = useRef(0);
+  const earlierArmed = useRef(false);
+  const earlierTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const earlierPending = useRef(false);
+  const pointerHeld = useRef(false);
   const navigationUntil = useRef(0);
   /*
    * 点击加载更早消息后前插内容时，部分内核会暂时抑制原生 overflow-anchor。
@@ -91,6 +92,15 @@ export function Thread() {
   const prependAnchorRef = useRef<{ scrollHeight: number; scrollTop: number; firstKey: string | null; count: number }>({
     scrollHeight: 0, scrollTop: 0, firstKey: null, count: 0
   });
+
+  const capturePrependAnchor = useCallback((el: HTMLElement) => {
+    prependAnchorRef.current = {
+      scrollHeight: el.scrollHeight,
+      scrollTop: el.scrollTop,
+      firstKey: rows[0]?.key ?? null,
+      count: rows.length
+    };
+  }, [rows]);
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
@@ -103,6 +113,7 @@ export function Thread() {
         el.scrollTop = prev.scrollTop + deltaHeight;
         lastScrollTop.current = el.scrollTop;
       }
+      earlierPending.current = false;
     }
     if (el) {
       prependAnchorRef.current = {
@@ -115,22 +126,88 @@ export function Thread() {
   }, [rows, isAtBottom, scrollRef]);
 
   const beforeNavigation = useCallback(() => {
+    clearTimeout(earlierTimer.current);
     navigationUntil.current = performance.now() + 250;
   }, []);
 
+  const scheduleEarlier = useCallback(() => {
+    clearTimeout(earlierTimer.current);
+    earlierTimer.current = setTimeout(() => {
+      const el = scrollRef.current;
+      if (!el || pointerHeld.current || performance.now() < navigationUntil.current) return;
+      if (el.scrollHeight - el.clientHeight - el.scrollTop < 8) return;
+      if (el.scrollTop > Math.max(64, historyPrefetchDistance(el.clientHeight) * 0.35)) return;
+      if (earlierPending.current || !useStore.getState().thread.history.hasMore) return;
+      earlierPending.current = true;
+      capturePrependAnchor(el);
+      void requestEarlierHistory().finally(() => {
+        if (earlierPending.current) setTimeout(() => { earlierPending.current = false; }, 0);
+      });
+    }, 100);
+  }, [capturePrependAnchor, requestEarlierHistory, scrollRef]);
+
+  useEffect(() => () => clearTimeout(earlierTimer.current), []);
+
   const handleScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const el = event.currentTarget;
+    if (event.target !== el) return;
     const threshold = historyPrefetchDistance(el.clientHeight);
     const toTop = el.scrollTop;
     const toBottom = Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight);
     const goingDown = toTop > lastScrollTop.current;
     lastScrollTop.current = toTop;
+    if (earlierPending.current) capturePrependAnchor(el);
     if (performance.now() < navigationUntil.current) return;
-    // 上滑什么都不做：更早的一页只由「加载更早消息」按钮显式请求，不再随滚动自动前插。
+    if (toTop > threshold) earlierArmed.current = false;
+    if (toTop <= threshold && toBottom >= 8 && history.hasMore && !history.loading && !history.error) {
+      if (!earlierArmed.current) {
+        earlierArmed.current = true;
+        void useStore.getState().prefetchEarlier().then(ready => {
+          const current = scrollRef.current;
+          if (!current || current.scrollTop > threshold || pointerHeld.current) return;
+          // 预取失败时走可见的加载/错误状态，避免静默停在顶部。
+          if (ready || useStore.getState().thread.history.hasMore) scheduleEarlier();
+        });
+      }
+      if (toTop <= Math.max(64, threshold * 0.35)) scheduleEarlier();
+    }
     if (goingDown && toBottom <= threshold) {
       void requestLaterHistory();
     }
-  }, [requestLaterHistory]);
+  }, [capturePrependAnchor, history.error, history.hasMore, history.loading, requestLaterHistory, scheduleEarlier, scrollRef]);
+
+  const handlePointerDown = useCallback(() => {
+    pointerHeld.current = true;
+    clearTimeout(earlierTimer.current);
+  }, []);
+  const handlePointerRelease = useCallback(() => {
+    pointerHeld.current = false;
+    const el = scrollRef.current;
+    if (el && el.scrollTop <= historyPrefetchDistance(el.clientHeight)) scheduleEarlier();
+  }, [scheduleEarlier, scrollRef]);
+
+  const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    if (event.deltaY < 0 && event.currentTarget.scrollTop <= 2) scheduleEarlier();
+  }, [scheduleEarlier]);
+
+  const loadEarlierManually = useCallback(() => {
+    stopScroll();
+    const el = scrollRef.current;
+    if (el) capturePrependAnchor(el);
+    earlierPending.current = true;
+    void requestEarlierHistory({ force: true }).finally(() => {
+      if (earlierPending.current) setTimeout(() => { earlierPending.current = false; }, 0);
+    });
+  }, [capturePrependAnchor, requestEarlierHistory, scrollRef, stopScroll]);
+
+  useEffect(() => {
+    window.addEventListener('pointerup', handlePointerRelease);
+    window.addEventListener('pointercancel', handlePointerRelease);
+    return () => {
+      window.removeEventListener('pointerup', handlePointerRelease);
+      window.removeEventListener('pointercancel', handlePointerRelease);
+    };
+  }, [handlePointerRelease]);
 
   /* 内容不足一屏时不会产生滚动事件，主动补更早的一页，否则历史永远加载不出来。 */
   useEffect(() => {
@@ -164,13 +241,14 @@ export function Thread() {
 
   return (
     <div className="thread-scroll-region conversation-thread">
-      <div className="thread" ref={scrollRef} role="region" aria-label="消息记录" tabIndex={0} onScroll={handleScroll}>
+      <div className="thread" ref={scrollRef} role="region" aria-label="消息记录" tabIndex={0}
+        onPointerDownCapture={handlePointerDown} onScroll={handleScroll} onWheel={handleWheel}>
         <div className="thread-column" ref={contentRef}>
           {history.hasMore && (
             <RetryRow
               label={history.error ? '加载更早失败，点击重试' : history.loading ? '正在加载更早消息…' : '加载更早消息'}
               disabled={history.loading}
-              onClick={() => { stopScroll(); requestEarlierHistory({ force: true }); }}
+              onClick={loadEarlierManually}
             />
           )}
           {display.rows.map((row, index) => (
