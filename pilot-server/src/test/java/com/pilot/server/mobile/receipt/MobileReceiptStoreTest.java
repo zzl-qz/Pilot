@@ -1,4 +1,4 @@
-package com.pilot.server.mobile;
+package com.pilot.server.mobile.receipt;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;

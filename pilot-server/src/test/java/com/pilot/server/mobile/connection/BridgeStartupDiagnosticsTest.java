@@ -1,4 +1,4 @@
-package com.pilot.server.mobile;
+package com.pilot.server.mobile.connection;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;

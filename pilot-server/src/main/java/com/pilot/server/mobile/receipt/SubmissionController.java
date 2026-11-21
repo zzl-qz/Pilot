@@ -1,4 +1,4 @@
-package com.pilot.server.mobile;
+package com.pilot.server.mobile.receipt;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
