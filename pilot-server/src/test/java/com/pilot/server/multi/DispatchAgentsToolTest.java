@@ -14,8 +14,8 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import com.pilot.core.multi.AgentProfileCatalog;
 import com.pilot.core.multi.TaskSpec;
+import com.pilot.core.multi.profile.AgentProfileCatalog;
 import com.pilot.core.workspace.AgentScope;
 
 class DispatchAgentsToolTest {

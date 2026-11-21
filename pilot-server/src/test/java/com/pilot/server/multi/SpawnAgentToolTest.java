@@ -33,7 +33,7 @@ import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ModelUsage;
 import com.pilot.core.model.ToolDefinition;
-import com.pilot.core.multi.AgentProfileCatalog;
+import com.pilot.core.multi.profile.AgentProfileCatalog;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PolicyPermissionGate;
 import com.pilot.core.tool.Tool;

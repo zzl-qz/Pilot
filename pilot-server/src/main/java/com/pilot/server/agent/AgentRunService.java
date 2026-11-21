@@ -54,7 +54,7 @@ import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelUsage;
 import com.pilot.core.model.RequestReport;
 import com.pilot.core.model.RequestTotals;
-import com.pilot.core.multi.AgentProfileCatalog;
+import com.pilot.core.multi.profile.AgentProfileCatalog;
 import com.pilot.core.permission.PermissionGate;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.plan.PlanSink;

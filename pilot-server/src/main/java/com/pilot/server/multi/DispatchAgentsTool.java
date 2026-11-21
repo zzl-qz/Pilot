@@ -10,10 +10,10 @@ import java.util.function.Consumer;
 
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.message.ToolNames;
-import com.pilot.core.multi.AgentProfile;
-import com.pilot.core.multi.AgentProfileCatalog;
 import com.pilot.core.multi.RiskLevel;
 import com.pilot.core.multi.TaskSpec;
+import com.pilot.core.multi.profile.AgentProfile;
+import com.pilot.core.multi.profile.AgentProfileCatalog;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolSchemas;
 import com.pilot.core.workspace.AgentScope;

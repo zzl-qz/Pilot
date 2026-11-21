@@ -1,4 +1,4 @@
-package com.pilot.core.multi;
+package com.pilot.core.multi.profile;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;

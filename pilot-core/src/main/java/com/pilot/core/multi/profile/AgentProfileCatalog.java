@@ -1,4 +1,4 @@
-package com.pilot.core.multi;
+package com.pilot.core.multi.profile;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

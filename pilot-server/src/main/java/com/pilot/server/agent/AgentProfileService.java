@@ -6,7 +6,7 @@ import java.util.List;
 
 import org.springframework.stereotype.Component;
 
-import com.pilot.core.multi.AgentProfileCatalog;
+import com.pilot.core.multi.profile.AgentProfileCatalog;
 import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.skill.SkillService;
