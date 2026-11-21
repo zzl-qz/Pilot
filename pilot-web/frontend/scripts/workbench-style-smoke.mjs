@@ -12,7 +12,7 @@ const output=await mkdtemp(join(tmpdir(),'pilot-workbench-style-'));
 const entry=`.workbench-style-${process.pid}.html`,file=join(root,entry);
 const fixture=`<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Pilot 工作台</title><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
 import React from 'react';import {createRoot} from 'react-dom/client';import App from '/src/components/App.jsx';import {useStore} from '/src/store.js';import {api} from '/src/api.js';
-import {setMarkdownContext} from '/src/lib/markdown-render.js';
+import {setMarkdownContext} from '/src/lib/content/markdown-render.js';
 import '/src/styles.css';import '/src/shell-vanilla.css';import '/src/styles-addendum.css';import '/src/workbench.css';
 window.store=useStore;window.api=api;document.documentElement.dataset.theme='dark';document.documentElement.dataset.accent='sky';
 for(const k of Object.keys(api))if(typeof api[k]==='function')api[k]=async()=>({});

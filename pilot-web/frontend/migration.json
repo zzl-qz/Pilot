@@ -135,9 +135,9 @@
       "batch": 5,
       "name": "内容与历史",
       "files": [
-        "lib/content-format.js",
-        "lib/markdown-render.js",
-        "lib/markdown-stream.js",
+        "lib/content/content-format.js",
+        "lib/content/markdown-render.js",
+        "lib/content/markdown-stream.js",
         "lib/history.js",
         "lib/transcript.js",
         "lib/side-chat.js"
@@ -392,8 +392,8 @@
         "components/ResultInbox.jsx",
         "components/ResearchPanel.jsx",
         "components/WorkProductsPanel.jsx",
-        "components/Schedules.jsx",
-        "components/RecurringPlans.jsx"
+        "components/automation/Schedules.jsx",
+        "components/automation/RecurringPlans.jsx"
       ],
       "features": [
         "定时/时区/重复/模板",

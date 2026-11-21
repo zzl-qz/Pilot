@@ -1,4 +1,4 @@
-import type { MarkdownBlock, HistoryRange } from '../types/content.js';
+import type { MarkdownBlock, HistoryRange } from '../../types/content.js';
 /**
  * 流式 Markdown 的块级增量渲染。
  *

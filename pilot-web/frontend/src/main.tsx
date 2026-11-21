@@ -1,6 +1,6 @@
 import { createRoot } from 'react-dom/client';
 import App from './components/App.jsx';
-import { setMarkdownNotifier, setMarkdownContext } from './lib/markdown-render.js';
+import { setMarkdownNotifier, setMarkdownContext } from './lib/content/markdown-render.js';
 import './styles.css';
 import './shell-vanilla.css';
 import './styles-addendum.css';

@@ -6,7 +6,7 @@ import {
   resumeLineIndex,
   sameBlock,
   sharedBlockPrefix
-} from '../../../frontend/src/lib/markdown-stream.js';
+} from '../../../frontend/src/lib/content/markdown-stream.js';
 
 /** 一个行为像 DOM 的最小容器。 */
 function fakeContainer() {

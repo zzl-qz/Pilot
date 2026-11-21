@@ -30,7 +30,7 @@ test('列表连续编号、重复1、起始编号、空行与段落边界', asyn
   const previous = globalThis.document;
   globalThis.document = { createElement:tag=>new Node(tag), createDocumentFragment:()=>new Node('#fragment'), createTextNode:text=>new Node('#text',text) };
   try {
-    const {markdownBlockRecords} = await import('../src/lib/markdown-render.js');
+    const {markdownBlockRecords} = await import('../src/lib/content/markdown-render.js');
     for (const [input, counts] of [ ['1. A\n\n2. B\n\n3. C',[3]], ['1. A\n\n1. B\n\n1. C',[3]], ['1. A\n\n段落\n\n1. B',[1,1]], ['1. A\n\n- B',[1,1]] ]) {
       assert.deepEqual(markdownBlockRecords(input.split('\n')).filter(r=>['ol','ul'].includes(r.node.tag)).map(r=>r.node.children.length), counts);
     }

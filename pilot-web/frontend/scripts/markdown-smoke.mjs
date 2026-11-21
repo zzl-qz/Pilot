@@ -12,8 +12,8 @@ import { fileURLToPath } from 'node:url';
 const root = process.env.PILOT_MIGRATION_BASELINE_ROOT || fileURLToPath(new URL('..', import.meta.url));
 const output = await mkdtemp(join(tmpdir(), 'pilot-markdown-'));
 const fixture = `<html lang="zh-CN"><meta charset="utf-8"><div id="target"></div><div id="stream"></div><script type="module">
-import {renderMarkdown,markdownBlockRecords,setMarkdownContext,setMarkdownNotifier} from '/src/lib/markdown-render.js';
-import {createBlockStreamRenderer} from '/src/lib/markdown-stream.js';
+import {renderMarkdown,markdownBlockRecords,setMarkdownContext,setMarkdownNotifier} from '/src/lib/content/markdown-render.js';
+import {createBlockStreamRenderer} from '/src/lib/content/markdown-stream.js';
 window.opens=[];window.notices=[];window.copies=[];window.copyFails=false;
 Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{if(window.copyFails)throw Error('denied');window.copies.push(text);}},configurable:true});document.execCommand=()=>false;
 setMarkdownNotifier(text=>notices.push(text));setMarkdownContext({getWorkspace:()=>'/workspace/pilot',openFile:(path,line)=>opens.push({path,line})});

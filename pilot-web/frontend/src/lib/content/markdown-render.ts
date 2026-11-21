@@ -1,11 +1,11 @@
-import type { MarkdownBlock } from '../types/content.js';
+import type { MarkdownBlock } from '../../types/content.js';
 import DOMPurify from 'dompurify';
 /**
  * Markdown 渲染引擎：从旧版原生实现原样搬运（块级流式解析 + 代码块复制按钮 + katex + mermaid）。
  * katex / mermaid 依旧从 /vendor 下的静态脚本加载，行为与旧版一致。
  */
 
-import { writeClipboard as tryWriteClipboard } from './clipboard.js';
+import { writeClipboard as tryWriteClipboard } from '../clipboard.js';
 import { parseCallout, resolveFileReference, languageLabel, outputKind, safeImageSource } from './content-format.js';
 
 let notify: (text: string) => void = () => {};
