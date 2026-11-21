@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readAttachmentFile } from '../../../frontend/src/lib/attachment-input.js';
+import { readAttachmentFile } from '../../../frontend/src/lib/attachments/input.js';
 
 test('读取附件保留原名、类型、大小和完整 data URL', async t => {
   const original = globalThis.FileReader;

@@ -1,5 +1,5 @@
-import type { DraftAttachment } from '../types/input.js';
-import type { AttachmentLimitsBudget } from '../types/server.js';
+import type { DraftAttachment } from '../../types/input.js';
+import type { AttachmentLimitsBudget } from '../../types/server.js';
 let localId = 0;
 
 /** 仅用于草稿内去重，不是鉴权令牌；普通 HTTP 下 randomUUID 可能不可用。 */

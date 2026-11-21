@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { hasFileTransferHint, readTransferFilePaths } from '../src/lib/clipboard.js';
-import { readDesktopClipboardFiles } from '../src/lib/attachment-input.js';
+import { readDesktopClipboardFiles } from '../src/lib/attachments/input.js';
 
 test('文件拖拽即使只暴露 items 也能识别', () => {
   assert.equal(hasFileTransferHint({ items: [{ kind: 'file' }] }), true);

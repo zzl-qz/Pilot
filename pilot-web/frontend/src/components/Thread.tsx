@@ -34,7 +34,7 @@ import {
   type ToolIconKind
 } from '../lib/tool-meta.js';
 import { agentMeta, agentTitle, manifestFacts, splitSubagentResult, summarizeAgents, agentStatusLabel, agentStatusDotVariant } from '../lib/agents.js';
-import { splitAttachmentMarkers, attachmentUrl, isImageAttachment, fileBadge, formatBytes } from '../lib/attachments.js';
+import { splitAttachmentMarkers, attachmentUrl, isImageAttachment, fileBadge, formatBytes } from '../lib/attachments/attachments.js';
 import { parseDiff } from '../lib/diff.js';
 import { sumChangeLines } from '../lib/changes.js';
 import { writeClipboard } from '../lib/clipboard.js';

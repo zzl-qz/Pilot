@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { fetchQueuedDraft } from '../src/lib/queue.js';
-import { attachmentUrl } from '../src/lib/attachments.js';
+import { attachmentUrl } from '../src/lib/attachments/attachments.js';
 
 const bytes = (text) => new TextEncoder().encode(text);
 function fetcher(files, calls = []) {

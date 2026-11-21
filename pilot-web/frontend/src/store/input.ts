@@ -1,5 +1,5 @@
 import type { StoreContext, StoreSlice } from './context.js';
-import { attachmentBatchError, requireAttachmentLimits } from '../lib/attachments.js';
+import { attachmentBatchError, requireAttachmentLimits } from '../lib/attachments/attachments.js';
 import type { InputMessage } from '../types/api.js';
 import { errorInfo } from '../lib/errors.js';
 import { submissions } from '../lib/submissions.js';

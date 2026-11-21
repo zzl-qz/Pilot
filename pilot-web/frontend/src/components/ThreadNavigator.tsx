@@ -8,7 +8,7 @@ import { Button } from '@astryxdesign/core/Button';
 import { IconButton } from '@astryxdesign/core/IconButton';
 import { Icon } from './Icon.jsx';
 import { useStore } from '../store.js';
-import { splitAttachmentMarkers } from '../lib/attachments.js';
+import { splitAttachmentMarkers } from '../lib/attachments/attachments.js';
 import './thread-navigator.css';
 import { api } from '../api.js';
 import { bookmarksChanged, localBookmarks, normalizeBookmarks, syncBookmarks } from '../lib/bookmark-sync.js';

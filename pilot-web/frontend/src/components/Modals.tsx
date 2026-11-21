@@ -22,7 +22,7 @@ const ProjectEditor = lazy(() => import('./ProjectEditor.jsx').then(m => ({ defa
 const SettingsModal = lazy(() => import('./Settings.jsx').then(m => ({ default: m.SettingsModal })));
 const MobileConnectionContent = lazy(() => import('./MobileConnection.jsx').then(m => ({ default: m.MobileConnectionContent })));
 import { reverifyPrompt } from '../lib/verification-status.js';
-import { splitAttachmentMarkers } from '../lib/attachments.js';
+import { splitAttachmentMarkers } from '../lib/attachments/attachments.js';
 import { toolArgsText, toolLabel } from '../lib/tool-meta.js';
 
 export { Modal };

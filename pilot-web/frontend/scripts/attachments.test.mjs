@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { attachmentBatchError, checkIncomingFile } from '../src/lib/attachments.js';
+import { attachmentBatchError, checkIncomingFile } from '../src/lib/attachments/attachments.js';
 import { transferDirectoryNames, transferHasDirectory } from '../src/lib/clipboard.js';
 
 const limits = { maxFiles: 2, maxFileBytes: 1000, maxTotalBytes: 1500, maxRequestBytes: 4000 };
@@ -69,7 +69,7 @@ test('批量文案覆盖空文件与总量', () => {
   assert.match(attachmentBatchError([{ name: 'x', size: 3 }], { ...limits, maxTotalBytes: 2 }), /总量/);
 });
 test('SVG 等非栅格格式按普通文件处理，避免图片位置数对不上', async () => {
-  const { isImageAttachment, fileBadge } = await import('../src/lib/attachments.js');
+  const { isImageAttachment, fileBadge } = await import('../src/lib/attachments/attachments.js');
   assert.equal(isImageAttachment({ name: 'shot.png', mimeType: 'image/png' }), true);
   assert.equal(isImageAttachment({ name: 'shot.jpg', mimeType: 'image/jpg' }), true);
   assert.equal(isImageAttachment({ name: 'shot.jpg', mimeType: 'application/octet-stream' }), true);

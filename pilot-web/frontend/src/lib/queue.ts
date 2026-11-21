@@ -1,6 +1,6 @@
 import type { QueueEntry, QueueResponse } from '../types/runtime.js';
 import type { DraftAttachment } from '../types/input.js';
-import { attachmentUrl, splitAttachmentMarkers } from './attachments.js';
+import { attachmentUrl, splitAttachmentMarkers } from './attachments/attachments.js';
 import type { QueueEditTarget } from '../types/store.js';
 
 /**

@@ -22,7 +22,7 @@ import { classifyRunFailure, isEphemeral, isRunEnd, planProgressLabel, type RUN_
 import { eventTimestamp, parseTimestamp, toolArgsText, toolLabel } from './lib/tool-meta.js';
 import { shortAgentId } from './lib/agents.js';
 import { preview, estimateTokens, sameUserInput } from './thread-utils.js';
-import { splitAttachmentMarkers } from './lib/attachments.js';
+import { splitAttachmentMarkers } from './lib/attachments/attachments.js';
 
 /** 活动流保留上限，与旧版 MAX_TIMELINE_EVENTS 一致。 */
 const MAX_TIMELINE_EVENTS = 300;

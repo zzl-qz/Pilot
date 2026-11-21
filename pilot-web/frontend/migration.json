@@ -108,8 +108,8 @@
       "files": [
         "lib/interaction.js",
         "lib/commands.js",
-        "lib/attachments.js",
-        "lib/attachment-input.js",
+        "lib/attachments/attachments.js",
+        "lib/attachments/input.js",
         "lib/clipboard.js",
         "lib/composer-state.js",
         "lib/composer-input.js",

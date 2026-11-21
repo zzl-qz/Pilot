@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { platformModifier, isShortcutModifier } from '../../../frontend/src/lib/interaction.js';
-import { attachmentId } from '../../../frontend/src/lib/attachment-input.js';
+import { attachmentId } from '../../../frontend/src/lib/attachments/input.js';
 
 test('快捷键标识覆盖三平台及优先使用的 Client Hints', () => {
   for (const platform of ['MacIntel', 'Macintosh']) assert.equal(platformModifier({ platform }), '⌘');

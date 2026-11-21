@@ -1,6 +1,6 @@
 import type { VoiceEnvironment, VoiceOptions, VoicePhase, VoiceState } from '../types/input.js';
 import type { VoiceLimitsBudget } from '../types/server.js';
-import { formatBytes } from './attachments.js';
+import { formatBytes } from './attachments/attachments.js';
 import { errorInfo } from './errors.js';
 const FORMATS = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
 export function voiceFormat(Recorder: Pick<typeof MediaRecorder, 'isTypeSupported'> | null | undefined) {

@@ -2,7 +2,7 @@ import type { QueueEntry } from '../types/runtime.js';
 import { Button } from '@astryxdesign/core/Button';
 import { useRef, useState } from 'react';
 import { useStore } from '../store.js';
-import { splitAttachmentMarkers, joinAttachmentMarkers } from '../lib/attachments.js';
+import { splitAttachmentMarkers, joinAttachmentMarkers } from '../lib/attachments/attachments.js';
 import { locateQueueTarget, queueBlockReason, queueEntryKey, queueHeader, queueLane, textWithoutParkedMark } from '../lib/queue.js';
 import type { QueueEditTarget } from '../types/store.js';
 import { Icon } from './Icon.jsx';

@@ -1,7 +1,7 @@
 import type { DraftAttachment } from '../types/input.js';
 interface SerializedDraft { text: string; positions: number[]; query: boolean }
 import { readTransferFiles, hasFileTransferHint } from './clipboard.js';
-import { fileBadge, formatBytes, isImageAttachment } from './attachments.js';
+import { fileBadge, formatBytes, isImageAttachment } from './attachments/attachments.js';
 
 /**
  * 输入框的编辑器：一个 contenteditable 放正文和 @ 引用，附件单独排在输入框下方的 rail 里。

@@ -1,6 +1,6 @@
-import type { AttachmentLimitsBudget } from '../types/server.js';
-import type { MessageAttachment } from '../types/runtime.js';
-import type { AttachmentMarker, MessagePart } from '../types/input.js';
+import type { AttachmentLimitsBudget } from '../../types/server.js';
+import type { MessageAttachment } from '../../types/runtime.js';
+import type { AttachmentMarker, MessagePart } from '../../types/input.js';
 /**
  * 输入框附件相关的纯函数：限制校验、文件类型徽标、大小格式化，
  * 以及把服务端内联进正文的文件块还原成「正文 + 文件卡片」。
