@@ -31,7 +31,7 @@ import com.pilot.core.permission.PermissionMode;
  * @param lintGateEnabled      收尾时是否运行当前仓库的 lint。默认开启，设为 false 可做对照
  * @param lintOnFailure        规范没过时的处理：retry 先改，次数用尽且测试通过才放行（默认）；pass 直接记录并放行；stop 直接终止
  * @param preflightLocalizationEnabled 是否在每次新用户消息进入循环前执行确定性候选目标预定位；默认开启，设为 false 可做对照
- * @param repositoryBrief      会话首条 run 注入的仓库快照档位：full 带目录树（默认）；brief 只留分支、脏文件数、构建与 lint；off 不注入
+ * @param repositoryBrief      仓库快照档位：brief（默认）只留分支、脏文件数、构建与 lint；full 另带目录树；off 不注入
  */
 @ConfigurationProperties(prefix = "pilot.agent")
 public record AgentProperties(String workspace, PermissionMode permissionMode, int maxSteps, Integer repeatRemindAt,
@@ -146,8 +146,9 @@ public record AgentProperties(String workspace, PermissionMode permissionMode, i
             String flag = System.getProperty("pilot.agent.preflight-localization-enabled");
             preflightLocalizationEnabled = flag == null || flag.isBlank() || !"false".equalsIgnoreCase(flag.strip());
         }
-        // 仓库快照档位：写错就启动失败，不静默当成 full 把目录树塞给模型。
-        repositoryBrief = repositoryBrief == null || repositoryBrief.isBlank() ? "full"
+        // 仓库快照档位：写错就启动失败，不静默当成 brief 或 full。
+        // 默认 brief：目录树模型一条 list_dir 就能拿到更新的，没必要每会话先塞一份。
+        repositoryBrief = repositoryBrief == null || repositoryBrief.isBlank() ? "brief"
             : repositoryBrief.strip().toLowerCase(Locale.ROOT);
         if (!REPOSITORY_BRIEF_MODES.contains(repositoryBrief)) {
             throw new IllegalArgumentException(
@@ -160,7 +161,7 @@ public record AgentProperties(String workspace, PermissionMode permissionMode, i
         return !"off".equals(repositoryBrief);
     }
 
-    /** full 带目录树；brief 只留分支、脏文件数、构建与 lint。 */
+    /** full 带目录树；brief（默认）只留分支、脏文件数、构建与 lint。 */
     public boolean repositoryBriefDetailed() {
         return "full".equals(repositoryBrief);
     }

@@ -33,9 +33,9 @@ class AgentPropertiesTest {
 
         assertEquals(PermissionMode.AUTO, properties.permissionMode(), "默认完全放行");
         assertEquals(1_000, properties.maxSteps());
-        assertEquals("full", properties.repositoryBrief(), "仓库快照默认带目录树");
+        assertEquals("brief", properties.repositoryBrief(), "仓库快照默认只留会变的值，不带目录树");
         assertTrue(properties.repositoryBriefEnabled());
-        assertTrue(properties.repositoryBriefDetailed());
+        assertFalse(properties.repositoryBriefDetailed());
         assertEquals(500, properties.directMaxRequests());
         assertEquals(400_000, properties.contextMaxChars());
         assertEquals(0, properties.maxPlanContinues(), "计划不再自动催继续");

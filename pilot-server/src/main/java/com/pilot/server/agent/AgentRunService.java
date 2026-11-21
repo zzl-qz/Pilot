@@ -155,6 +155,8 @@ public class AgentRunService implements RunStarter {
     private final PreFlightLocator preFlightLocator = new PreFlightLocator();
     /** 仓库快照按工作区指纹复用：状态没变就不重复跑 git / 目录遍历 / lint 发现。 */
     private final RepositoryBriefCache repositoryBriefs;
+    /** 每个会话上次注入快照时的工作区指纹：值不变不再注入，变了才在本步输入前追加一份。 */
+    private final ConcurrentMap<String, String> sessionBriefs = new ConcurrentHashMap<>();
 
     private final SessionService sessions;
     private final ModelClient modelClient;
@@ -1285,19 +1287,36 @@ public class AgentRunService implements RunStarter {
     }
 
     /**
-     * 会话首条 run 时把仓库快照作为第一条 user 消息注入一次，此后不再注入。
+     * 工作区指纹变了就在本步输入之前注入一份仓库快照；指纹没变不重复注入。
      *
      * <p>快照不进 system：git 状态每轮都会变，进 system 会让跨轮前缀缓存全部失效；
      * 作为首条 user 消息随历史正常落盘与压缩，模板已声明「以工具实查为准」。
+     * 会话首条注入后记下指纹，此后工作区变了（切分支、提交、改动增减）才追加一条新快照，
+     * 避免模型拿着过期的分支名继续干活。
      */
-    private List<Message> withRepositoryBrief(List<Message> history, String workspace) {
-        if (!history.isEmpty()) {
+    private List<Message> withRepositoryBrief(List<Message> history, String workspace, String sessionId) {
+        if (!properties.repositoryBriefEnabled()) {
             return history;
         }
-        String brief = repositoryBrief(workspace);
+        Path root;
+        try {
+            root = toolFactory.resolve(workspace);
+        } catch (RuntimeException e) {
+            return history;
+        }
+        if (!Files.isDirectory(root)) {
+            return history;
+        }
+        RepoState state = repoState(root);
+        String fingerprint = sessionFingerprint(root, state);
+        if (fingerprint.equals(sessionBriefs.get(sessionId))) {
+            return history;
+        }
+        String brief = repositoryBrief(root, state);
         if (brief.isEmpty()) {
             return history;
         }
+        sessionBriefs.put(sessionId, fingerprint);
         List<Message> seeded = new ArrayList<>(history);
         seeded.add(Message.user(brief));
         return List.copyOf(seeded);
@@ -1323,42 +1342,27 @@ public class AgentRunService implements RunStarter {
     }
 
     /**
-     * 仓库现状快照：顶层结构、git 分支与未提交改动、构建方式。
+     * 仓库现状快照：git 分支与未提交改动、构建方式、规范检查；full 档另带顶层结构。
      *
      * <p>模型不用从零摸索，也不会覆盖用户手上的未提交改动。
-     * 仅在会话首条 run 时生成一次，此后模型按提示词要求用工具实查。
-     * 同一工作区在状态没变时复用上次生成的正文（{@link RepositoryBriefCache}），
-     * 档位由 {@code pilot.agent.repository-brief} 决定：full 带目录树，brief 只留分支与脏文件数，off 不注入。
+     * 同一工作区在状态没变时复用上次生成的正文（{@link RepositoryBriefCache}）。档位由
+     * {@code pilot.agent.repository-brief} 决定：brief（默认）只留会变的值，full 带目录树，off 不注入。
      */
-    private String repositoryBrief(String workspace) {
-        if (!properties.repositoryBriefEnabled()) {
-            return "";
-        }
-        Path root;
-        try {
-            root = toolFactory.resolve(workspace);
-        } catch (RuntimeException e) {
-            return "";
-        }
-        if (!Files.isDirectory(root)) {
-            return "";
-        }
+    private String repositoryBrief(Path root, RepoState state) {
         boolean detailed = properties.repositoryBriefDetailed();
-        boolean git = Files.isDirectory(root.resolve(".git"));
-        String branch = git ? branchName(root) : NON_GIT;
-        String status = git ? runGit(root, "status", "--porcelain=v1", "-uall") : null;
         String tree = detailed ? workspaceTree(root) : "";
         String build = buildHint(root);
         String key = RepositoryBriefCache.key(root);
         // 指纹只覆盖最终会进快照的输入：分支、改动清单、顶层条目、构建方式。都不变就不必重新生成。
-        String fingerprint = Sha256.hex(branch + "\u0000" + status + "\u0000" + tree + "\u0000" + build);
+        String fingerprint =
+            Sha256.hex(state.branch() + "\u0000" + state.status() + "\u0000" + tree + "\u0000" + build);
         String cached = repositoryBriefs.cached(key, fingerprint);
         if (cached != null) {
             return cached;
         }
         try {
             String text = PROMPTS.render(detailed ? "context/repository" : "context/repository-brief",
-                Map.of("tree", tree, "git", gitState(branch, status, detailed), "build", build,
+                Map.of("tree", tree, "git", gitState(state, detailed), "build", build,
                     "lint", lintNote(root))).strip();
             repositoryBriefs.store(key, fingerprint, text);
             return text;
@@ -1366,6 +1370,38 @@ public class AgentRunService implements RunStarter {
             log.debug("生成仓库摘要失败", e);
             return "";
         }
+    }
+
+    /** 生成快照要的 git 现状。一次采集，会话指纹与正文都从这里取。 */
+    private record RepoState(boolean git, String branch, String status, String head) {
+    }
+
+    private static RepoState repoState(Path root) {
+        if (!Files.isDirectory(root.resolve(".git"))) {
+            return new RepoState(false, NON_GIT, null, "");
+        }
+        String status = runGit(root, "status", "--porcelain=v1", "-uall");
+        String head = runGit(root, "rev-parse", "HEAD");
+        return new RepoState(true, branchName(root), status, head == null ? "" : head.strip());
+    }
+
+    /**
+     * 会话级指纹：分支 + 未提交文件数 + HEAD 提交。
+     *
+     * <p>对齐 dsh 的做法：值不变不追加内容，值变化时在本步输入之前追加一份快照。
+     * 只取改动数量不取文件名，改的是哪个文件不算变化，要清单让模型自己 {@code git status}。
+     * 非 git 工作区没有分支和提交可比，退回顶层条目：新建或删掉条目才算变了。
+     */
+    private static String sessionFingerprint(Path root, RepoState state) {
+        if (!state.git()) {
+            try {
+                return NON_GIT + "\u0000" + String.join("\u0000", topEntries(root));
+            } catch (IOException e) {
+                return NON_GIT;
+            }
+        }
+        long dirty = state.status() == null ? -1 : state.status().lines().filter(line -> !line.isBlank()).count();
+        return state.branch() + "\u0000" + dirty + "\u0000" + state.head();
     }
 
     private String lintNote(Path root) {
@@ -1384,45 +1420,53 @@ public class AgentRunService implements RunStarter {
     }
 
     private static String workspaceTree(Path root) {
+        List<String> names;
+        try {
+            names = topEntries(root);
+        } catch (IOException e) {
+            return "（读取目录失败）";
+        }
+        if (names.isEmpty()) {
+            return "（空目录）";
+        }
+        boolean truncated = names.size() > MAX_TREE_ENTRIES;
+        String listed =
+            names.stream().limit(MAX_TREE_ENTRIES).map(name -> "- " + name).collect(Collectors.joining("\n"));
+        return truncated ? listed + "\n- …（其余条目省略）" : listed;
+    }
+
+    /** 顶层条目（目录带结尾斜杠），已去掉依赖与产物目录；full 档的目录树和会话指纹都用它。 */
+    private static List<String> topEntries(Path root) throws IOException {
         try (Stream<Path> entries = Files.list(root)) {
-            List<String> names = entries.map(path -> {
+            return entries.map(path -> {
                 String name = path.getFileName().toString();
                 return Files.isDirectory(path) ? name + "/" : name;
             }).filter(
                 name -> !IGNORED_ENTRIES.contains(name.endsWith("/") ? name.substring(0, name.length() - 1) : name))
-                .sorted().limit(MAX_TREE_ENTRIES + 1L).toList();
-            if (names.isEmpty()) {
-                return "（空目录）";
-            }
-            boolean truncated = names.size() > MAX_TREE_ENTRIES;
-            String listed = String.join("\n", names.stream().limit(MAX_TREE_ENTRIES).map(name -> "- " + name).toList());
-            return truncated ? listed + "\n- …（其余条目省略）" : listed;
-        } catch (IOException e) {
-            return "（读取目录失败）";
+                .sorted().toList();
         }
     }
 
     /**
      * Git 现状正文。
      *
-     * @param status {@code git status --porcelain} 的原始输出；{@code null} 表示不是 git 仓库或读取失败
      * @param detailed 为 false 时只报脏文件数量，不列文件名（brief 档给长会话省 token）
      */
-    private static String gitState(String branch, String status, boolean detailed) {
-        if (status == null) {
-            return NON_GIT.equals(branch) ? "不是 git 仓库" : "分支 `" + branch + "`（无法读取未提交改动）";
+    private static String gitState(RepoState state, boolean detailed) {
+        if (state.status() == null) {
+            return state.git() ? "分支 `" + state.branch() + "`（无法读取未提交改动）" : "不是 git 仓库";
         }
-        List<String> lines = status.lines().filter(line -> !line.isBlank()).toList();
+        List<String> lines = state.status().lines().filter(line -> !line.isBlank()).toList();
         if (lines.isEmpty()) {
-            return "分支 `" + branch + "`，工作区干净";
+            return "分支 `" + state.branch() + "`，工作区干净";
         }
         if (!detailed) {
-            return "分支 `" + branch + "`，有 " + lines.size() + " 个文件未提交（用 `git status` 看清单）";
+            return "分支 `" + state.branch() + "`，" + lines.size() + " 个文件未提交";
         }
         String listed =
             lines.stream().limit(MAX_GIT_CHANGES).map(line -> "- " + line.strip()).collect(Collectors.joining("\n"));
         String more = lines.size() > MAX_GIT_CHANGES ? "\n- …（还有 " + (lines.size() - MAX_GIT_CHANGES) + " 个）" : "";
-        return "分支 `" + branch + "`，有 " + lines.size() + " 个文件未提交：\n" + listed + more;
+        return "分支 `" + state.branch() + "`，有 " + lines.size() + " 个文件未提交：\n" + listed + more;
     }
 
     private static String branchName(Path root) {
@@ -1709,13 +1753,14 @@ public class AgentRunService implements RunStarter {
         }
         snapshots.bind(runId, toolFactory.resolve(workspace));
         try {
-            // 普通运行时，会话首条消息前注入一次仓库快照（见 withRepositoryBrief）；续跑不注入；
+            // 工作区变了就在本步输入前补一份仓库快照（见 withRepositoryBrief），没变不重复注入；
             // 用户点名了技能时，指引作为独立 user 消息在用户输入之前注入（见 withSkillActivation）
             TaskControlService.TaskContract activeTask = taskControls.load(sessionId);
             String completionGoal = activeTask == null ? null : activeTask.originalGoal();
             AgentLoop.Result result = continuation ? loop.resume(history, sink, checkpoint, completionGoal)
                 : loop.run(input, attachments, imagePositions,
-                    withSkillActivation(withRepositoryBrief(history, workspace), workspace, handle), sink, checkpoint);
+                    withSkillActivation(withRepositoryBrief(history, workspace, sessionId), workspace, handle), sink,
+                    checkpoint);
             conversations.save(sessionId, result.conversation());
             logPreflightTelemetry(runId, preflight, loop.observedPathsSnapshot(), result.changedFiles());
             log.info("Agent run {} completed: failureCode={}, messages={}, workspace={}", runId, result.failureCode(),

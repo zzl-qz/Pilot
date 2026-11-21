@@ -568,7 +568,7 @@ class AgentRunServiceTest {
             fixture.start();
             fixture.awaitFinished("COMPLETED");
 
-            // 第二次 run：历史非空，不应重复注入
+            // 第二次 run：工作区指纹没变，不应重复注入
             String secondRun = fixture.service.claimRun(fixture.sessionId).orElseThrow();
             fixture.service.start(fixture.sessionId, secondRun, "第二个任务");
             fixture.awaitFinished("COMPLETED");
@@ -593,7 +593,7 @@ class AgentRunServiceTest {
             assertTrue(snapshotAt >= 0 && snapshotAt < inputAt, "快照应位于首条用户输入之前");
 
             List<Message> second = requests.get(1);
-            assertEquals(1, snapshotCount(second), "第二轮 run 不应重复注入快照");
+            assertEquals(1, snapshotCount(second), "指纹没变时第二轮 run 不应重复注入快照");
             assertTrue(second.stream()
                 .anyMatch(message -> "user".equals(message.role()) && "第二个任务".equals(message.content())));
         }
@@ -648,6 +648,35 @@ class AgentRunServiceTest {
         }
     }
 
+    /** 同会话里工作区变了要再补一份快照，否则模型拿着过期的分支名继续干活。 */
+    @Test
+    void appendsAnotherSnapshotWhenTheWorkspaceChangesMidSession() throws Exception {
+        CopyOnWriteArrayList<List<Message>> requests = new CopyOnWriteArrayList<List<Message>>();
+        ModelClient model = (messages, tools) -> {
+            requests.add(messages);
+            return done();
+        };
+        Files.writeString(workspace.resolve("before.txt"), "evidence");
+        try (Fixture fixture = new Fixture(model, 8)) {
+            fixture.start();
+            fixture.awaitFinished("COMPLETED");
+
+            Files.writeString(workspace.resolve("added-later.txt"), "evidence");
+            String secondRun = fixture.service.claimRun(fixture.sessionId).orElseThrow();
+            fixture.service.start(fixture.sessionId, secondRun, "第二个任务");
+            fixture.awaitFinished("COMPLETED");
+
+            assertEquals(1, snapshotCount(requests.get(0)), "首条请求注入一份快照");
+            List<Message> second = requests.get(1);
+            assertEquals(2, snapshotCount(second), "工作区变了要补一份新快照");
+            List<String> snapshots = second.stream().filter(message -> "user".equals(message.role()))
+                .map(Message::content).filter(content -> content.startsWith("## 仓库现状")).toList();
+            assertTrue(snapshots.getLast().contains("构建："), "新快照仍要带构建方式：" + snapshots.getLast());
+            assertTrue(second.stream().anyMatch(
+                message -> "user".equals(message.role()) && "第二个任务".equals(message.content())), "本步输入仍在快照之后");
+        }
+    }
+
     @Test
     void reusesSnapshotWhileWorkspaceIsUnchangedAndRegeneratesAfterEdits() throws Exception {
         Files.writeString(workspace.resolve("preexisting.txt"), "evidence");
@@ -656,7 +685,8 @@ class AgentRunServiceTest {
             snapshots.add(snapshotOf(messages));
             return done();
         };
-        try (Fixture fixture = new Fixture(model, 8)) {
+        // 目录树只在 full 档出现：非 git 工作区里 brief 档正文不含随工作区变化的内容，看不出重新生成。
+        try (Fixture fixture = new Fixture(model, 8, false, 1, PermissionMode.READ_ONLY, null, "full")) {
             fixture.start();
             fixture.awaitFinished("COMPLETED");
             // 同一工作区第二个会话：状态没变，正文直接复用缓存
