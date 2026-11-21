@@ -1,4 +1,4 @@
-package com.pilot.server.session;
+package com.pilot.server.usage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 

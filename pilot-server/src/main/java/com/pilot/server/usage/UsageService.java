@@ -1,4 +1,4 @@
-package com.pilot.server.session;
+package com.pilot.server.usage;
 
 import java.math.BigDecimal;
 import java.time.Instant;

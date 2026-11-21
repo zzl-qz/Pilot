@@ -19,8 +19,8 @@ import com.pilot.core.session.SessionRepository;
 import com.pilot.core.util.Sha256;
 import com.pilot.server.attachment.AttachmentLimits;
 import com.pilot.server.results.ResultInboxService;
-import com.pilot.server.session.ProjectController;
 import com.pilot.server.session.SessionController;
+import com.pilot.server.project.ProjectController;
 
 import tools.jackson.databind.ObjectMapper;
 

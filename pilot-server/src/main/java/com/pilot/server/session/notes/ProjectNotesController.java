@@ -1,4 +1,4 @@
-package com.pilot.server.session;
+package com.pilot.server.session.notes;
 
 import java.util.List;
 import java.util.Objects;

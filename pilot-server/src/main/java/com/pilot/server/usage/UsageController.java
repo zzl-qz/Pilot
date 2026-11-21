@@ -1,4 +1,4 @@
-package com.pilot.server.session;
+package com.pilot.server.usage;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;

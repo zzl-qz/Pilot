@@ -24,8 +24,8 @@ import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.session.SessionRepository;
 import com.pilot.server.attachment.AttachmentLimits;
 import com.pilot.server.results.ResultInboxService;
-import com.pilot.server.session.ProjectController;
 import com.pilot.server.session.SessionController;
+import com.pilot.server.project.ProjectController;
 
 import tools.jackson.databind.ObjectMapper;
 
