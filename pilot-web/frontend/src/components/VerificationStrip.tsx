@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store.js';
-import { REVERIFY_TEXT, stripView } from '../lib/validation-strip.js';
+import { REVERIFY_TEXT, stripView } from '../lib/verification/strip.js';
 import { latestRunResult } from '../lib/events.js';
 import './verification-strip.css';
 

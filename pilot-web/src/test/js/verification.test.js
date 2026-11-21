@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { verificationLabel, verificationHint } from '../../../frontend/src/lib/verification.js';
+import { verificationLabel, verificationHint } from '../../../frontend/src/lib/verification/run.js';
 
 test('执行结束、记录检查通过与目标核验通过保持不同含义', () => {
   assert.equal(verificationLabel('COMPLETED'), '执行已结束');

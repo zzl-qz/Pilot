@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { stripView } from '../src/lib/validation-strip.js';
+import { stripView } from '../src/lib/verification/strip.js';
 
 const evidence = (over = {}) => ({
   id: 'val_1', sessionId: 's1', runId: 'r1', candidateHash: 'abc123def456',

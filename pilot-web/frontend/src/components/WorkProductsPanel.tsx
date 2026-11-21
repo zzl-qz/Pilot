@@ -1,6 +1,6 @@
 import type * as S from '../types/server.js';
 import { errorInfo } from '../lib/errors.js';
-import { verificationNeedsAttention, verificationStatusDetail, verificationStatusLabel, verificationStatusTone, reverifyPrompt, shortFingerprint } from '../lib/verification-status.js';
+import { verificationNeedsAttention, verificationStatusDetail, verificationStatusLabel, verificationStatusTone, reverifyPrompt, shortFingerprint } from '../lib/verification/products.js';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useStore } from '../store.js';

@@ -1,4 +1,4 @@
-import type * as S from '../types/server.js';
+import type * as S from '../../types/server.js';
 
 /**
  * 成果的验证结论：不是「有没有跑过测试」，而是「那条证据现在还作不作数」。

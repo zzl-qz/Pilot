@@ -1,4 +1,4 @@
-import type * as S from '../types/server.js';
+import type * as S from '../../types/server.js';
 
 /**
  * 输入框上方那条验证结论的展示数据。

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { verificationNeedsAttention, verificationStatusDetail, verificationStatusLabel, verificationStatusTone, shortFingerprint, statusFromCode, reverifyPrompt, REVERIFY_PROMPT } from '../src/lib/verification-status.js';
-import { verificationTone, verificationNeedsRerun } from '../src/lib/verification.js';
+import { verificationNeedsAttention, verificationStatusDetail, verificationStatusLabel, verificationStatusTone, shortFingerprint, statusFromCode, reverifyPrompt, REVERIFY_PROMPT } from '../src/lib/verification/products.js';
+import { verificationTone, verificationNeedsRerun } from '../src/lib/verification/run.js';
 
 test('成果验证结论的三种状态各有独立文案与视觉，未知状态不冒充通过', () => {
   assert.equal(verificationStatusLabel('verified'), '已验证');

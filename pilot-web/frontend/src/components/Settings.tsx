@@ -13,9 +13,9 @@ import { emptySkillsHint, parseInstallSource, summarizeInstallResults, gitUrlPro
 import { useStore } from '../store.js';
 import { MCP_TRUST_LABELS, mcpSourceLabel } from '../lib/mcp.js';
 import { writeClipboard } from '../lib/clipboard.js';
-import { statusFromCode, verificationStatusLabel } from '../lib/verification-status.js';
+import { statusFromCode, verificationStatusLabel } from '../lib/verification/products.js';
 import { commandStatusLabel } from '../lib/command-tasks.js';
-import { verificationLabel } from '../lib/verification.js';
+import { verificationLabel } from '../lib/verification/run.js';
 import { api } from '../api.js';
 import { Icon } from './Icon.jsx';
 import { Modal } from './Modal.jsx';

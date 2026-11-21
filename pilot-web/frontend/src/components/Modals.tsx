@@ -16,12 +16,12 @@ import { downloadSessionExport, exportFailureMessage, saveSessionMarkdown } from
 import { buildTranscript } from '../lib/transcript.js';
 import { SessionActionDialog } from './SessionMenu.jsx';
 import { filterPaletteActions } from '../lib/commands.js';
-import { verificationLabel, verificationHint, verificationTone, verificationNeedsRerun } from '../lib/verification.js';
+import { verificationLabel, verificationHint, verificationTone, verificationNeedsRerun } from '../lib/verification/run.js';
 
 const ProjectEditor = lazy(() => import('./ProjectEditor.jsx').then(m => ({ default: m.ProjectEditor })));
 const SettingsModal = lazy(() => import('./Settings.jsx').then(m => ({ default: m.SettingsModal })));
 const MobileConnectionContent = lazy(() => import('./MobileConnection.jsx').then(m => ({ default: m.MobileConnectionContent })));
-import { reverifyPrompt } from '../lib/verification-status.js';
+import { reverifyPrompt } from '../lib/verification/products.js';
 import { splitAttachmentMarkers } from '../lib/attachments/attachments.js';
 import { toolArgsText, toolLabel } from '../lib/tool-meta.js';
 
