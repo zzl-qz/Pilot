@@ -1,14 +1,16 @@
 import { existsSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, posix, resolve, win32 } from 'node:path';
 
 /**
  * 各平台常见的 Google Chrome 安装位置。
  *
  * 用绝对路径而不是 channel，是因为命令子进程的环境经过白名单裁剪：缺了 PROGRAMFILES 一类变量时，
  * Playwright 会把路径拼成 `undefined\Program Files\...` 并误报「浏览器未安装」。
- * Windows 除了系统级安装，还要看用户级安装（LOCALAPPDATA）；macOS 兼顾 arm64 与 x86 的 Chrome 变体；
- * Linux 覆盖发行版包、deb 包、snap 和 chromium。
+ * Windows 除了系统级安装，还要看用户级安装（LOCALAPPDATA）；系统盘不一定在 C:，按 SYSTEMDRIVE 拼。
+ * macOS 兼顾 arm64 与 x86 的 Chrome 变体；Linux 覆盖发行版包、deb 包、snap 和 chromium。
+ *
+ * Windows 分支统一用 win32 拼接，这样同一份断言在 macOS/Linux 上跑也能得到一致的反斜杠路径。
  *
  * platform/env 可注入，好让三个系统的候选清单都能在任何一个系统上被测试。
  */
@@ -16,18 +18,19 @@ export function chromeCandidates({ platform = process.platform, env = process.en
   if (platform === 'darwin') {
     const app = (name) => `/Applications/${name}.app/Contents/MacOS/${name}`;
     return [app('Google Chrome'), app('Google Chrome Canary'),
-      join(homedir(), 'Applications', 'Google Chrome.app', 'Contents', 'MacOS', 'Google Chrome')];
+      posix.join(homedir(), 'Applications', 'Google Chrome.app', 'Contents', 'MacOS', 'Google Chrome')];
   }
   if (platform === 'linux') {
     return ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/opt/google/chrome/chrome',
       '/snap/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'];
   }
-  const programDirs = [env.PROGRAMFILES, env['PROGRAMFILES(X86)'], 'C:\\Program Files',
-    'C:\\Program Files (x86)'].filter(Boolean);
-  const localAppData = env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local');
+  const drive = env.SYSTEMDRIVE || env.SystemDrive || 'C:';
+  const programDirs = [env.PROGRAMFILES, env['PROGRAMFILES(X86)'], win32.join(drive, 'Program Files'),
+    win32.join(drive, 'Program Files (x86)')].filter(Boolean);
+  const localAppData = env.LOCALAPPDATA || win32.join(homedir(), 'AppData', 'Local');
   return [
-    ...programDirs.map((dir) => join(dir, 'Google', 'Chrome', 'Application', 'chrome.exe')),
-    join(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    ...programDirs.map((dir) => win32.join(dir, 'Google', 'Chrome', 'Application', 'chrome.exe')),
+    win32.join(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'),
   ];
 }
 
