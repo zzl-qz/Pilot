@@ -18,6 +18,7 @@ import java.util.Set;
 import java.util.stream.Stream;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -155,6 +156,31 @@ public class SessionFilesController {
     @GetMapping("/{id}/file")
     public FileResponse file(@PathVariable String id, @RequestParam("path") String path) {
         return fileWorkspace(paths(id).root(), path);
+    }
+
+    /** 工作区内图片的只读预览，供会话工具结果内嵌展示。 */
+    @GetMapping("/{id}/file/image")
+    public ResponseEntity<byte[]> image(@PathVariable String id, @RequestParam("path") String path) throws IOException {
+        Path file = paths(id).resolve(path);
+        if (!Files.isRegularFile(file)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "不是文件: " + path);
+        if (Files.size(file) > 5L * 1024 * 1024) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "图片超过 5 MB，无法预览");
+        }
+        MediaType type = switch (extension(file)) {
+            case "png" -> MediaType.IMAGE_PNG;
+            case "jpg", "jpeg" -> MediaType.IMAGE_JPEG;
+            case "gif" -> MediaType.IMAGE_GIF;
+            case "webp" -> MediaType.parseMediaType("image/webp");
+            default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "仅支持 PNG、JPEG、GIF、WebP 图片");
+        };
+        return ResponseEntity.ok().contentType(type).header("X-Content-Type-Options", "nosniff")
+            .body(Files.readAllBytes(file));
+    }
+
+    private static String extension(Path file) {
+        String name = file.getFileName().toString();
+        int dot = name.lastIndexOf('.');
+        return dot < 0 ? "" : name.substring(dot + 1).toLowerCase(Locale.ROOT);
     }
 
     static FileResponse fileWorkspace(Path workspace, String path) {

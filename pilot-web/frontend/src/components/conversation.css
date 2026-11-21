@@ -1082,6 +1082,17 @@ html .conversation-thread .turn-process .tool-body pre {
   overflow-wrap: anywhere;
 }
 
+html .conversation-thread .turn-process .tool-image-preview {
+  display: block;
+  max-width: min(100%, 560px);
+  max-height: 360px;
+  margin: 10px 11px;
+  object-fit: contain;
+  object-position: left center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
 /* 子智能体卡片在过程流中的柔和适配 */
 html .conversation-thread .turn-process .agent-card {
   margin: 2px 0;
@@ -2073,12 +2084,8 @@ html[data-theme] .message-queue .queue-lane-hint {
   color: var(--dim);
 }
 
-html[data-theme] .message-queue .queue-list {
-  max-height: min(260px, 34vh);
-  max-height: min(260px, 34dvh);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
+/* 队列列表不再自己限高滚动：它套在外层 .composer-docks 里，两层滚动会挤成两条滚动条，
+   而内层限高 260px 又比外层 240px 更高，滚动条就贴在底部工具栏边上。统一交给 .composer-docks。 */
 
 html[data-theme] .message-queue .queue-item {
   position: relative;

@@ -381,6 +381,16 @@ html[data-theme] .usage-card { flex: 1; padding: 0 16px; border: 0; border-radiu
 /* 排队正文以这里为准：前面的样式文件还会写省略号和最大高度，后加载的这一份把它们盖掉。 */
 html[data-theme] .message-queue { overflow: visible; border-radius: 12px; max-height: none; }
 html[data-theme] .queue-list { margin: 0; padding: 0; list-style: none; max-height: none; overflow: visible; }
+/* 队列只在外层 .composer-docks 里滚，内层不再自己限高。滚到中间时头部留在视野里，
+   否则「收起 / 暂停队列」跟着滚走，要往回找。底色用不透明色，避免遮住的队列行透上来。 */
+html[data-theme] .message-queue .queue-head-row {
+  position: sticky; top: 0; z-index: 1;
+  border-start-start-radius: 11px; border-start-end-radius: 11px;
+  background: var(--bg-soft);
+}
+html[data-theme] .message-queue.is-held .queue-head-row {
+  background: color-mix(in srgb, var(--warn) 9%, var(--bg-soft));
+}
 html[data-theme] .queue-item { align-items: flex-start; min-height: 42px; gap: 8px; flex-wrap: wrap; }
 html[data-theme] .queue-main { flex: 1 1 180px; min-width: 0; }
 html[data-theme] .queue-main .queue-text,

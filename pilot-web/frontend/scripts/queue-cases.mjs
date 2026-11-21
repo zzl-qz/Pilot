@@ -45,6 +45,39 @@ export async function checkQueue(page, name, temp) {
     assert.ok(box.x >= 0 && box.x + box.width <= width + 1 && box.y >= 0);
     await page.screenshot({ path: join(temp, `${name}-queue-${width}.png`) });
   }
+  // 队列面板只保留一层滚动：外层 .composer-docks 负责滚，队列列表自己不再限高产生滚动条。
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.evaluate(() => {
+    store.setState({
+      running: true, runId: 'queue-run',
+      queueEntries: Array.from({ length: 8 }, (_, index) => ({ content: `第 ${index + 1} 条排队消息，用来撑高队列面板以检查滚动容器` })),
+    });
+  });
+  const scrollFacts = await page.evaluate(() => {
+    const list = document.querySelector('.queue-list');
+    const scrolls = (el) => Boolean(el) && /auto|scroll/.test(getComputedStyle(el).overflowY) && el.scrollHeight > el.clientHeight + 1;
+    const chain = [];
+    for (let el = list?.parentElement; el; el = el.parentElement) if (scrolls(el)) chain.push(el.className);
+    const docks = document.querySelector('.composer-docks');
+    const items = docks ? docks.querySelectorAll('.queue-item') : [];
+    if (docks) docks.scrollTop = docks.scrollHeight;
+    const last = items.length ? items[items.length - 1].getBoundingClientRect() : null;
+    const box = docks ? docks.getBoundingClientRect() : null;
+    const head = document.querySelector('.queue-head-row');
+    const headBox = head ? head.getBoundingClientRect() : null;
+    return {
+      listScrolls: scrolls(list),
+      listOverflowY: list ? getComputedStyle(list).overflowY : null,
+      chain,
+      lastReachable: Boolean(last && box) && last.bottom <= box.bottom + 1 && last.top >= box.top - 1,
+      headStaysVisible: Boolean(headBox && box) && headBox.top >= box.top - 1 && headBox.top <= box.top + 1,
+    };
+  });
+  assert.equal(scrollFacts.listScrolls, false, '队列列表不再自己产生滚动条');
+  assert.equal(scrollFacts.listOverflowY, 'visible', '队列列表不声明 overflow-y');
+  assert.deepEqual(scrollFacts.chain, ['composer-docks'], '队列面板只有 composer-docks 一层滚动容器');
+  assert.equal(scrollFacts.lastReachable, true, '滚到底能看到最后一条排队消息');
+  assert.equal(scrollFacts.headStaysVisible, true, '滚到中间时队列头部停在可见顶部，收起和暂停仍可点');
   // 编辑文件消息只改正文；Esc 先关闭编辑器，不停止正在运行的任务。
   await page.evaluate(() => {
     window.queuedFileBlock = '[附件 notes.txt (text/plain)]\n保留原始文件内容\n[附件结束 notes.txt]';

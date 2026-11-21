@@ -1085,6 +1085,11 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
   const seconds = running ? elapsedSeconds(tool.startedAt, tool.finishedAt) : 0;
   const meta = formatLatency(tool.meta === '未返回结果' ? '' : (tool.meta || ''));
   const display = parseToolDisplay(tool);
+  const sessionId = useStore(state => state.sessionId);
+  const imagePreview = tool.name === 'read_file' && /^图片\s/.test(body)
+    && /\.(png|jpe?g|gif|webp)$/i.test(display.filePath) && sessionId
+    ? `/api/sessions/${encodeURIComponent(sessionId)}/file/image?path=${encodeURIComponent(display.filePath)}`
+    : '';
   const status = TOOL_STATUS_TITLES[shownStatus] || '状态未知';
   const hasDetail = Boolean(body);
   const Header = hasDetail ? 'button' : 'div';
@@ -1179,6 +1184,8 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
               </button>
             </div>
           </div>
+          {imagePreview && <img className="tool-image-preview" src={imagePreview}
+            alt={`图片预览：${display.primary}`} loading="lazy" />}
           <pre tabIndex={0}>{body}</pre>
         </div>
       )}
