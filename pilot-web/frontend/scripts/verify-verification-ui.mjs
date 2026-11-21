@@ -117,7 +117,11 @@ const fixtures = {
     import '/src/styles.css'; import '/src/styles-addendum.css';
     const report = ${JSON.stringify(STRIP_REPORT)};
     useStore.setState({ init: async () => {}, sessionId: 's1', hasRun: true, notes: [],
-      submitInput: async () => true, validation: { report, recent: report.latest ? [report.latest] : [] } });
+      submitInput: async () => true, validation: { report, recent: report.latest ? [report.latest] : [] },
+      // 运行中的 fixture 要带上能凑出「正在执行 · …」的条件，否则下面的断言分不清是删掉了还是本来就不画。
+      runStartedAt: Date.now() - 60000,
+      thread: { rows: [{ type: 'turn', tools: [{ status: 'run', name: 'run_command', args: { command: 'node scripts/check.mjs' } }] }] } });
+    window.setRunning = (running) => useStore.setState({ running });
     createRoot(document.getElementById('root')).render(React.createElement(VerificationStrip));`),
   '/__task': page('task', `
     import { TaskContract } from '/src/components/Modals.jsx';
@@ -312,6 +316,10 @@ await check('主界面结论条显示过期状态并可展开依据', async () =
   await strip.getByRole('button', { name: '看依据' }).click();
   await strip.getByText(/node --test/).waitFor();
   await view.screenshot({ path: join(output, 'strip.png'), fullPage: true });
+  // 这一轮跑起来时整条收起：当前动作与耗时由顶栏的运行状态负责，不再重复占一行。
+  await view.evaluate(() => window.setRunning(true));
+  await strip.waitFor({ state: 'detached' });
+  await view.screenshot({ path: join(output, 'strip-running.png'), fullPage: true });
   assert.deepEqual(pageErrors, []);
   await context.close();
 });

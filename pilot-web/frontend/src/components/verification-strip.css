@@ -22,21 +22,8 @@
   border-inline-start-color: color-mix(in srgb, var(--muted, #8a8a8a) 55%, var(--line));
   background: transparent;
 }
-.verification-strip[data-tone='running'] { border-inline-start-color: var(--accent, #7b8cff); }
 
 .verification-strip-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.verification-strip-pulse {
-  flex: none;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--accent, #7b8cff);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #7b8cff) 22%, transparent);
-  animation: pulse 1.5s ease-in-out infinite;
-}
-@media (prefers-reduced-motion: reduce) {
-  .verification-strip-pulse { animation: none; }
-}
 .verification-strip-badge {
   flex: none;
   padding: 0 6px;
@@ -56,7 +43,6 @@
   background: color-mix(in srgb, var(--muted, #8a8a8a) 10%, transparent);
   font-weight: 500;
 }
-.verification-strip[data-tone='running'] .verification-strip-badge { color: var(--accent, #7b8cff); }
 
 .verification-strip-detail { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .verification-strip-actions { flex: none; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }

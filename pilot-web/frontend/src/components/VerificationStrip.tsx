@@ -1,9 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store.js';
-import { runPhase } from '../lib/interaction.js';
-import { formatClock } from '../thread-utils.js';
 import { REVERIFY_TEXT, stripView } from '../lib/validation-strip.js';
-import { toolArgsText, toolLabel } from '../lib/tool-meta.js';
 import './verification-strip.css';
 
 /**
@@ -13,7 +10,8 @@ import './verification-strip.css';
  * 用户永远看不到；放在这里，每轮结束都能一眼看到当前结论、依据和下一步动作。
  *
  * <p>没有会话、或还没跑过任何一轮时不显示——空会话上摆一条「未验证」只会变成噪音。
- * 这一轮还在跑时也不显示结论，只说当前在做什么。结论要等这一轮停下来才有。
+ * 这一轮还在跑时整条都不显示：顶栏的运行状态已经报了当前动作和耗时，这里再摆一条只重复一遍。
+ * 结论要等这一轮停下来才有。
  */
 export function VerificationStrip() {
   const sessionId = useStore(state => state.sessionId);
@@ -27,7 +25,8 @@ export function VerificationStrip() {
   useEffect(() => { setOpen(false); }, [sessionId]);
 
   if (!sessionId) return null;
-  if (running) return <RunningStatus />;
+  // 跑的过程中不给验证结论，也不另起一条运行提示条：顶栏已经在报状态。
+  if (running) return null;
   // 任务中断待续跑时，输入框上方已有「继续执行」主动作条，不再叠放一条「未验证」干扰主操作。
   if (resumable) return null;
 
@@ -57,42 +56,4 @@ export function VerificationStrip() {
       )}
     </section>
   );
-}
-
-/** 任务还在跑：只报当前动作，不给验证结论，也不提供「重新验证」。 */
-function RunningStatus() {
-  const hasApprovals = useStore(state => Object.keys(state.pendingApprovals || {}).length > 0);
-  const phase = useStore(runPhase);
-  const startedAt = useStore(state => state.runStartedAt);
-  const detail = useStore(state => currentAction(state.thread));
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => setTick(value => value + 1), 1000);
-    return () => clearInterval(timer);
-  }, []);
-  if (hasApprovals) return null;
-  const elapsed = startedAt ? Math.max(0, Math.round((Date.now() - startedAt) / 1000)) : 0;
-  const clock = startedAt ? formatClock(elapsed) : '';
-  // 短暂思考且无正在执行的工具时，顶栏已显示「正在思考」，不重复绘制占位条；
-  // 超过 8 秒的长思考或正在执行命令时再明确提示实时进度与耗时，避免用户误以为卡死。
-  if (!detail && elapsed < 8) return null;
-  const stage = detail ? `正在执行 · ${detail}` : `${phase}（模型深度思考中）`;
-  return (
-    <section id="verification-strip" className="verification-strip" data-tone="running" aria-label="任务状态">
-      <div className="verification-strip-row">
-        <span className="verification-strip-pulse" aria-hidden="true" />
-        {clock && <span className="verification-strip-badge">{clock}</span>}
-        <span className="verification-strip-detail" title={stage}>{stage}</span>
-      </div>
-    </section>
-  );
-}
-
-function currentAction(thread: { rows?: { type?: string; tools?: { status?: string; name?: string; args?: unknown }[] }[] } | null | undefined) {
-  const turn = [...(thread?.rows || [])].reverse().find(row => row.type === 'turn');
-  const tool = [...(turn?.tools || [])].reverse().find(item => item.status === 'run' || item.status === 'running');
-  if (!tool) return '';
-  const args = toolArgsText(tool.name || '', tool.args).replace(/\s+/g, ' ').trim();
-  if (!args) return toolLabel(tool.name || '');
-  return args.length > 72 ? `${args.slice(0, 72)}…` : args;
 }
