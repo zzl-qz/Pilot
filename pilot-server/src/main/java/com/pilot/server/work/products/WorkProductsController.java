@@ -1,4 +1,4 @@
-package com.pilot.server.work;
+package com.pilot.server.work.products;
 
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;

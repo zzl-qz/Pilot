@@ -1,4 +1,4 @@
-package com.pilot.server.work;
+package com.pilot.server.work.files;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -23,6 +23,7 @@ import com.pilot.core.util.Sha256;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.store.AutomationStore;
+import com.pilot.server.work.products.WorkProductService;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;

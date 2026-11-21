@@ -39,10 +39,10 @@ import com.pilot.server.store.AutomationStore;
 import com.pilot.server.store.SqliteStore;
 import com.pilot.server.store.ToolCallJournalFactory;
 import com.pilot.server.validation.ValidationLedger;
-import com.pilot.server.work.DocumentService;
-import com.pilot.server.work.FileWorkbenchService;
-import com.pilot.server.work.SkillDraftService;
-import com.pilot.server.work.WorkProductService;
+import com.pilot.server.work.files.DocumentService;
+import com.pilot.server.work.files.FileWorkbenchService;
+import com.pilot.server.work.products.SkillDraftService;
+import com.pilot.server.work.products.WorkProductService;
 
 /** 会话删除必须级联文档工作台，且失败时保留会话以便原样重试。 */
 class SessionCleanupServiceTest {

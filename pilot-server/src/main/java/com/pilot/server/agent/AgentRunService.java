@@ -206,8 +206,8 @@ public class AgentRunService implements RunStarter {
     @org.springframework.beans.factory.annotation.Autowired
     private org.springframework.beans.factory.ObjectProvider<com.pilot.server.schedule.ScheduleService> scheduleService;
     private volatile com.pilot.server.desktop.DesktopViewportReset viewportReset;
-    private com.pilot.server.work.WorkProductService workProducts;
-    private com.pilot.server.work.SkillDraftService skillDrafts;
+    private com.pilot.server.work.products.WorkProductService workProducts;
+    private com.pilot.server.work.products.SkillDraftService skillDrafts;
     private SkillInstallService skillInstaller;
     private ProjectRepository projects;
 
@@ -222,8 +222,8 @@ public class AgentRunService implements RunStarter {
     }
 
     @org.springframework.beans.factory.annotation.Autowired
-    public void setWorkProducts(com.pilot.server.work.WorkProductService workProducts,
-        com.pilot.server.work.SkillDraftService skillDrafts) {
+    public void setWorkProducts(com.pilot.server.work.products.WorkProductService workProducts,
+        com.pilot.server.work.products.SkillDraftService skillDrafts) {
         this.workProducts = workProducts;
         this.skillDrafts = skillDrafts;
     }
@@ -2193,10 +2193,10 @@ public class AgentRunService implements RunStarter {
         tools.register(new StopCommandTool(commandTasks, sessionId));
         tools.register(new ReadTaskHistoryTool(sessions, sessionId));
         if (workProducts != null) {
-            tools.register(new com.pilot.server.work.PublishArtifactTool(workProducts, objectMapper, sessionId, runId));
+            tools.register(new com.pilot.server.work.products.PublishArtifactTool(workProducts, objectMapper, sessionId, runId));
         }
         if (skillDrafts != null && skills != null && skills.enabled()) {
-            tools.register(new com.pilot.server.work.ProposeSkillTool(skillDrafts, objectMapper, sessionId, runId));
+            tools.register(new com.pilot.server.work.products.ProposeSkillTool(skillDrafts, objectMapper, sessionId, runId));
         }
         if (skillInstaller != null && skills != null && skills.enabled()) {
             tools.register(new InstallSkillTool(skillInstaller, skills, objectMapper, workspace));

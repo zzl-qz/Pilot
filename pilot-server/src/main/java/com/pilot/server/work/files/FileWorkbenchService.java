@@ -1,4 +1,4 @@
-package com.pilot.server.work;
+package com.pilot.server.work.files;
 
 import java.awt.Desktop;
 import java.io.IOException;
@@ -37,6 +37,7 @@ import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.common.web.SessionLookup;
 import com.pilot.server.store.AutomationStore;
 import com.pilot.server.tool.WorkspaceToolFactory;
+import com.pilot.server.work.products.WorkProductService;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;

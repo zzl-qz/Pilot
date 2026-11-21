@@ -1,4 +1,4 @@
-package com.pilot.server.work;
+package com.pilot.server.work.files;
 
 import java.nio.file.Files;
 import java.util.function.Supplier;

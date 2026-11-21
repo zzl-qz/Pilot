@@ -1,4 +1,4 @@
-package com.pilot.server.work;
+package com.pilot.server.work.files;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -38,6 +38,7 @@ import org.mockito.Mockito;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.store.AutomationStore;
+import com.pilot.server.work.products.WorkProductService;
 import com.pilot.server.store.SqliteStore;
 import com.pilot.server.tool.WorkspaceToolFactory;
 

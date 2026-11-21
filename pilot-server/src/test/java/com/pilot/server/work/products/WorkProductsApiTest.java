@@ -1,4 +1,4 @@
-package com.pilot.server.work;
+package com.pilot.server.work.products;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;

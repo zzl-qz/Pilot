@@ -22,10 +22,10 @@ import com.pilot.server.run.TaskControlService;
 import com.pilot.server.session.notes.SessionNotes;
 import com.pilot.server.store.ToolCallJournalFactory;
 import com.pilot.server.validation.ValidationLedger;
-import com.pilot.server.work.DocumentService;
-import com.pilot.server.work.FileWorkbenchService;
-import com.pilot.server.work.SkillDraftService;
-import com.pilot.server.work.WorkProductService;
+import com.pilot.server.work.files.DocumentService;
+import com.pilot.server.work.files.FileWorkbenchService;
+import com.pilot.server.work.products.SkillDraftService;
+import com.pilot.server.work.products.WorkProductService;
 
 /**
  * 会话的级联删除：删一个会话要同时清掉它的事件、对话记忆、计划、运行记录、沙箱、文档工作台和内存队列。
