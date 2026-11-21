@@ -14,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.pilot.core.event.RunOutcome;
 import com.pilot.server.common.data.PilotDataDir;
 
 import tools.jackson.databind.json.JsonMapper;
@@ -227,7 +228,7 @@ class TaskControlServiceTest {
             "EXECUTING", "", 0, "progress");
         assertTrue(tasks.execution("session", task, execution));
 
-        tasks.settleDirectRun("session", com.pilot.core.event.RunOutcome.PARTIAL, "还有一步未完成");
+        tasks.settleDirectRun("session", RunOutcome.PARTIAL, "还有一步未完成");
 
         assertEquals("UNVERIFIED", tasks.load("session").execution().phase());
         assertEquals("还有一步未完成", tasks.load("session").execution().gap());

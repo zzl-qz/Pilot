@@ -39,10 +39,8 @@ class VerificationCheckTest {
             VerificationCheck.passingKind("node scripts/build-assets.mjs → exit 0"));
         assertEquals(VerificationCheck.Kind.OTHER,
             VerificationCheck.passingKind("node scripts/results-smoke.mjs → exit 1"));
-        assertEquals(VerificationCheck.Kind.OTHER,
-            VerificationCheck.passingKind("node scripts/check.mjs → exit 1"));
-        assertEquals(VerificationCheck.Kind.OTHER,
-            VerificationCheck.passingKind("node scripts/notcheck.mjs → exit 0"));
+        assertEquals(VerificationCheck.Kind.OTHER, VerificationCheck.passingKind("node scripts/check.mjs → exit 1"));
+        assertEquals(VerificationCheck.Kind.OTHER, VerificationCheck.passingKind("node scripts/notcheck.mjs → exit 0"));
         assertEquals(VerificationCheck.Kind.OTHER,
             VerificationCheck.passingKind("node scripts/my-results-smoke-helper.mjs → exit 0"));
         assertEquals(VerificationCheck.Kind.TEST, VerificationCheck.classifyCommand("pnpm -C packages/ui test"));

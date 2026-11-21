@@ -274,8 +274,8 @@ public class TaskControlService {
     public synchronized void settleDirectRun(String sessionId, RunOutcome outcome, String detail) {
         TaskContract task = load(sessionId);
         if (task == null || task.execution() == null || !ExecutionMode.DIRECT.is(task.execution().mode())
-            || !WireEnum.in(task.execution().phase(), ExecutionPhase.EXECUTING, ExecutionPhase.VERIFYING) || outcome == null
-            || outcome == RunOutcome.COMPLETED) {
+            || !WireEnum.in(task.execution().phase(), ExecutionPhase.EXECUTING, ExecutionPhase.VERIFYING)
+            || outcome == null || outcome == RunOutcome.COMPLETED) {
             return;
         }
         Execution current = task.execution();
@@ -288,11 +288,12 @@ public class TaskControlService {
             default -> ExecutionPhase.UNVERIFIED;
         };
         String gap = detail == null || detail.isBlank() ? outcome.name() : detail.strip();
-        execution(sessionId, task, new Execution(current.mode(), current.reason(), current.criteria(), current.unknowns(),
-            current.requests(), current.activeMillis(), current.evidence(), phase.name(), gap, current.idleReviews(),
-            current.progress(), current.requestAllowance(), current.timeAllowanceMillis(), current.assessmentVersion(),
-            current.usage(), current.changedPaths(), current.nextAction(), current.expectedObservation(),
-            current.budgetSegments()));
+        execution(sessionId, task,
+            new Execution(current.mode(), current.reason(), current.criteria(), current.unknowns(), current.requests(),
+                current.activeMillis(), current.evidence(), phase.name(), gap, current.idleReviews(),
+                current.progress(), current.requestAllowance(), current.timeAllowanceMillis(),
+                current.assessmentVersion(), current.usage(), current.changedPaths(), current.nextAction(),
+                current.expectedObservation(), current.budgetSegments()));
     }
 
     /** 模型运行完成和用户验收完成分别记录；未勾选的明确验收条件不会自动通过。 */

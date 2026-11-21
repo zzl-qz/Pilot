@@ -8,11 +8,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -489,6 +491,44 @@ class RunSnapshotServiceTest {
         assertTrue(result.warning().contains("3 个文件仅按大小和修改时间"), result.warning());
         assertEquals("before", Files.readString(unchanged));
         assertTrue(snapshots.rollback("run_degraded").failed().contains("modified.txt"), "降级基线没有原始字节，不能用于恢复已修改文件");
+    }
+
+    @Test
+    void commandChangeTrackingFiltersGitIgnoredGeneratedOutputsWhileKeepingTrackedAndUnignoredFiles() throws Exception {
+        git(workspace, "init");
+        git(workspace, "config", "user.email", "test@example.com");
+        git(workspace, "config", "user.name", "test");
+        Files.writeString(workspace.resolve(".gitignore"), "generated/static/\n");
+        Path trackedIgnored = Files.createDirectories(workspace.resolve("generated/static")).resolve("tracked.txt");
+        Files.writeString(trackedIgnored, "v1");
+        git(workspace, "add", ".gitignore");
+        git(workspace, "add", "-f", "generated/static/tracked.txt");
+        git(workspace, "commit", "-m", "init");
+
+        snapshots.bind("run_gitignore", workspace);
+        CommandChangeTracker.Handle handle = snapshots.begin(workspace);
+
+        Files.writeString(workspace.resolve("generated/static/bundle.js"), "compiled asset");
+        Files.writeString(trackedIgnored, "v2");
+        Files.createDirectories(workspace.resolve("src"));
+        Files.writeString(workspace.resolve("src/App.java"), "class App {}\n");
+
+        CommandChangeTracker.Result result = snapshots.finish(handle);
+        snapshots.finish();
+        snapshots.clear();
+
+        assertTrue(result.complete(), result.warning());
+        assertEquals(List.of("generated/static/tracked.txt", "src/App.java"), result.changedPaths(),
+            "Git 忽略的未跟踪构建产物应被过滤，已跟踪文件与普通新源码必须保留");
+    }
+
+    private static void git(Path dir, String... args) throws Exception {
+        List<String> cmd = new ArrayList<>();
+        cmd.add("git");
+        cmd.addAll(List.of(args));
+        Process p = new ProcessBuilder(cmd).directory(dir.toFile()).redirectErrorStream(true).start();
+        String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertEquals(0, p.waitFor(), out);
     }
 
     private void change(String runId, Path file, String content) throws IOException {

@@ -1,6 +1,7 @@
 package com.pilot.server.workspace;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -13,6 +14,7 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -21,6 +23,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 import org.springframework.stereotype.Component;
@@ -65,7 +68,8 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
      * 命令前基线是 best-effort：超过这个时间就降级为“大小+修改时间”指纹，
      * 不能再把整个基线（连带本轮所有改动）弄没。
      */
-    private static final long COMMAND_BASELINE_BUDGET_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
+    private static final long COMMAND_BASELINE_BUDGET_NANOS = TimeUnit.SECONDS.toNanos(3);
+    private static final long GIT_IGNORE_TIMEOUT_MILLIS = 2_000L;
     private static final Set<String> COMMAND_IGNORED_DIRECTORIES =
         Set.of(".git", ".pilot", ".gradle", ".idea", ".vscode", ".next", ".nuxt", ".turbo", ".cache", "coverage",
             "node_modules", "target", "build", "dist", "out", "__pycache__", ".pytest_cache", ".mypy_cache",
@@ -291,6 +295,10 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
                     baseline.files().get(name) == null ? null : baseline.files().get(name).hash(),
                     after.files().get(name) == null ? null : after.files().get(name).hash()))
                 .sorted().toList();
+            Set<String> ignoredOutputs = gitIgnoredUntracked(workspace, changed);
+            if (!ignoredOutputs.isEmpty()) {
+                changed = changed.stream().filter(name -> !ignoredOutputs.contains(name)).toList();
+            }
             for (String name : changed) {
                 CommandFile before = baseline.files().get(name);
                 byte[] content = null;
@@ -324,6 +332,80 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
             }
             return result;
         }
+    }
+
+    /**
+     * 过滤构建/编译命令生成的 Git 忽略产物（如 Maven/Vite 写出的静态资源），避免它们污染 changedFiles 并把先前通过的检查标成 CHECKS_STALE。
+     * {@code git check-ignore} 默认不命中已跟踪文件；非 Git 目录、git 不可用或超时一律回退保留原清单。
+     */
+    static Set<String> gitIgnoredUntracked(Path workspace, List<String> relativePaths) {
+        if (workspace == null || relativePaths == null || relativePaths.isEmpty() || !insideGitRepo(workspace)) {
+            return Set.of();
+        }
+        Process process = null;
+        try {
+            process = new ProcessBuilder("git", "check-ignore", "--stdin", "-z").directory(workspace.toFile()).start();
+            Process started = process;
+            byte[][] stdout = new byte[1][];
+            Thread reader = Thread.ofVirtual().start(() -> {
+                try {
+                    stdout[0] = started.getInputStream().readAllBytes();
+                } catch (IOException ignored) {
+                    stdout[0] = new byte[0];
+                }
+            });
+            try (OutputStream out = started.getOutputStream()) {
+                for (String path : relativePaths) {
+                    out.write(path.getBytes(StandardCharsets.UTF_8));
+                    out.write(0);
+                }
+            }
+            if (!started.waitFor(GIT_IGNORE_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+                started.destroyForcibly();
+                return Set.of();
+            }
+            reader.join(GIT_IGNORE_TIMEOUT_MILLIS);
+            if (started.exitValue() != 0 || stdout[0] == null || stdout[0].length == 0) {
+                return Set.of();
+            }
+            return parseNullSeparatedPaths(stdout[0]);
+        } catch (IOException | InterruptedException | RuntimeException ignored) {
+            if (ignored instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            return Set.of();
+        } finally {
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly();
+            }
+        }
+    }
+
+    private static boolean insideGitRepo(Path workspace) {
+        Path current = workspace.toAbsolutePath().normalize();
+        for (int depth = 0; current != null && depth < 16; depth++, current = current.getParent()) {
+            if (Files.exists(current.resolve(".git"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static Set<String> parseNullSeparatedPaths(byte[] raw) {
+        Set<String> ignored = new HashSet<>();
+        int start = 0;
+        for (int i = 0; i < raw.length; i++) {
+            if (raw[i] == 0) {
+                if (i > start) {
+                    ignored.add(new String(raw, start, i - start, StandardCharsets.UTF_8).replace('\\', '/'));
+                }
+                start = i + 1;
+            }
+        }
+        if (start < raw.length) {
+            ignored.add(new String(raw, start, raw.length - start, StandardCharsets.UTF_8).replace('\\', '/'));
+        }
+        return ignored;
     }
 
     private CommandBaseline commandInventory(Path workspace, Path backupRoot, long deadlineNanos,

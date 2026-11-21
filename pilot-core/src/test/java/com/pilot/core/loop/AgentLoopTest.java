@@ -1831,11 +1831,14 @@ class AgentLoopTest {
 
         AgentLoop.Result result = loop.run("修改 A", List.of(), events::add);
 
-        assertNull(result.failureCode());
-        assertEquals(5, client.requests.size(), "两次验证提醒和一次自审都应先于 policy reviewer");
+        assertEquals("TASK_INCOMPLETE", result.failureCode());
+        assertEquals(4, client.requests.size(), "两次验证提醒后仍未验证应在通用门禁阻断，不能放行到 policy reviewer");
         assertTrue(lastContent(client.requests.get(2)).contains("收尾前验证"));
-        assertTrue(lastContent(client.requests.get(4)).contains("收尾前自查"));
-        assertEquals(1, reviews.get());
+        assertTrue(lastContent(client.requests.get(3)).contains("收尾前验证"));
+        assertEquals(0, reviews.get());
+        assertFalse(events.stream().anyMatch(RunCompleted.class::isInstance));
+        assertTrue(events.stream().anyMatch(event -> event instanceof RunEnded ended
+            && ended.outcome() == RunOutcome.BLOCKED && "TASK_INCOMPLETE".equals(ended.code())));
     }
 
     /** 计划没做完也直接收尾，未完成项如实交回界面。 */
@@ -1972,15 +1975,18 @@ class AgentLoopTest {
         AgentLoop loop = new AgentLoop(client, registry(write, failing), new PolicyPermissionGate(PermissionMode.AUTO),
             config(12, 3));
 
-        loop.run("修一下 A", List.of(), events::add);
+        AgentLoop.Result result = loop.run("修一下 A", List.of(), events::add);
 
-        RunCompleted completed =
-            (RunCompleted)events.stream().filter(event -> event instanceof RunCompleted).findFirst().orElseThrow();
-        assertEquals(List.of("mvn -q test → exit 1"), completed.checks());
-        assertEquals(6, client.requests.size(), "两次催验证 + 一次自审");
+        assertEquals("TASK_INCOMPLETE", result.failureCode());
+        assertFalse(events.stream().anyMatch(RunCompleted.class::isInstance));
+        RunEnded ended =
+            events.stream().filter(RunEnded.class::isInstance).map(RunEnded.class::cast).findFirst().orElseThrow();
+        assertEquals(RunOutcome.BLOCKED, ended.outcome());
+        assertEquals(List.of("mvn -q test → exit 1"), ended.checks());
+        assertEquals(5, client.requests.size(), "编辑 + 失败测试 + 两次催验证后应阻断完成");
         assertTrue(lastContent(client.requests.get(3)).contains("收尾前验证"));
-        assertTrue(lastContent(client.requests.get(5)).contains("收尾前自查"));
-        assertEquals(3, events.stream().filter(RunContinued.class::isInstance).count());
+        assertTrue(lastContent(client.requests.get(4)).contains("收尾前验证"));
+        assertEquals(2, events.stream().filter(RunContinued.class::isInstance).count());
     }
 
     /** 权限拒绝属于「没执行」，不能当成验证结果写进 checks。 */
