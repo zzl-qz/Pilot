@@ -811,6 +811,33 @@ class GoalExecutionPolicyTest {
     }
 
     @Test
+    void currentVersionCheckSupersedesPriorVersionCheckOfSameScopeAndKindOnly() throws Exception {
+        Files.writeString(root.resolve("A.java"), "v1");
+        var policy = policy((messages, tools) -> fail("no extra model call"), 20);
+        policy.beforeRequest(history);
+        observe(policy, "edit_file", "A.java", "v1", null);
+        // v1 上先跑了较窄的单测与失败的 spotless
+        check(policy, "mvnw -pl pilot-core -Dtest=IsolatedWorkspaceTest test", ".", 0);
+        check(policy, "mvnw -pl pilot-core spotless:check", ".", 1);
+
+        // 改完格式进入 v2，如果只补跑了 spotless（静态检查）而没重跑任何测试，仍应标为 CHECKS_STALE
+        Files.writeString(root.resolve("A.java"), "v2");
+        check(policy, "mvnw -pl pilot-core spotless:check checkstyle:check", ".", 0);
+        policy.review(history, Set.of(), List.of());
+        assertEquals("CHECKS_STALE", tasks.load("s").execution().phase(), "同目录旧版本的 TEST 未在当前版本重跑，不能只凭静态检查放行");
+
+        // 在不同工作目录跑测试也不能覆盖根目录旧测试
+        check(policy, "mvnw -pl pilot-core -Dtest=IsolatedWorkspaceTest,SandboxCommandToolTest test", "other", 0);
+        policy.review(history, Set.of(), List.of());
+        assertEquals("CHECKS_STALE", tasks.load("s").execution().phase(), "其他目录的测试不能覆盖根目录旧检查");
+
+        // 在同一工作目录补跑包含原测试的新测试命令并通过后，当前版本已覆盖全部检查类别 → CHECKS_PASSED
+        check(policy, "mvnw -pl pilot-core -Dtest=IsolatedWorkspaceTest,SandboxCommandToolTest test", ".", 0);
+        policy.review(history, Set.of(), List.of());
+        assertEquals("CHECKS_PASSED", tasks.load("s").execution().phase());
+    }
+
+    @Test
     void pendingCheckDoesNotCountAsPassedAndBackgroundResultKeepsWorkdir() {
         var policy = policy((messages, tools) -> fail("no extra model call"), 20);
         policy.beforeRequest(history);

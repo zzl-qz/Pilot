@@ -3,6 +3,7 @@ package com.pilot.server.agent;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -124,6 +125,20 @@ final class GoalEvidence {
         String check = Objects.toString(evidence.check(), "");
         int arrow = check.lastIndexOf(" → exit ");
         return (arrow < 0 ? check : check.substring(0, arrow)).strip();
+    }
+
+    /** 按（规范化工作目录 + 检查类别）生成验证覆盖域，用于判断当前版本新检查是否已覆盖历史旧检查。 */
+    static String verificationScope(TaskControlService.Evidence evidence) {
+        String target = Objects.toString(evidence == null ? "" : evidence.target(), "").replace('\\', '/').strip();
+        while (target.startsWith("./")) {
+            target = target.substring(2);
+        }
+        if (target.isEmpty()) {
+            target = ".";
+        }
+        VerificationCheck.Kind kind =
+            VerificationCheck.classifyCommand(commandFromCheck(evidence).toLowerCase(Locale.ROOT));
+        return target + "|" + kind.name();
     }
 
     static boolean isQualifyingVerification(TaskControlService.Evidence evidence) {

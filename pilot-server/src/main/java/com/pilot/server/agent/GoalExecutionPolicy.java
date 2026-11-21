@@ -846,12 +846,15 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
             .toList();
         List<String> realFailed = extractCheckNames(currentFailures, false);
         List<String> sandboxBlocked = extractCheckNames(currentFailures, true);
-        boolean hasPassed = checks.values().stream()
-            .anyMatch(e -> version.equals(e.endVersion()) && GoalEvidence.isQualifyingVerification(e));
+        Set<String> passedCurrentScopes = checks.values().stream()
+            .filter(e -> version.equals(e.endVersion()) && GoalEvidence.isQualifyingVerification(e))
+            .map(GoalEvidence::verificationScope).collect(Collectors.toSet());
+        boolean hasPassed = !passedCurrentScopes.isEmpty();
         boolean failed = !realFailed.isEmpty() || (!sandboxBlocked.isEmpty() && !hasPassed);
         boolean running = checks.values().stream().anyMatch(e -> EvidenceStatus.RUNNING.is(e.status()));
-        boolean stale = checks.values().stream()
-            .anyMatch(e -> EvidenceStatus.STALE.is(e.status()) || !version.equals(e.endVersion()));
+        boolean stale =
+            checks.values().stream().filter(e -> EvidenceStatus.STALE.is(e.status()) || !version.equals(e.endVersion()))
+                .anyMatch(e -> !passedCurrentScopes.contains(GoalEvidence.verificationScope(e)));
         ExecutionPhase phase = failed ? ExecutionPhase.CHECKS_FAILED : running ? ExecutionPhase.UNVERIFIED : stale
             ? ExecutionPhase.CHECKS_STALE : checks.isEmpty() ? ExecutionPhase.UNVERIFIED : ExecutionPhase.CHECKS_PASSED;
         String detail = directVerificationDetail(phase, realFailed.isEmpty() ? sandboxBlocked : realFailed,
