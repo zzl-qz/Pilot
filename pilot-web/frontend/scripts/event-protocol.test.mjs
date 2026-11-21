@@ -48,6 +48,15 @@ const cases = [
 test('协议回归覆盖每个已注册的 SSE 类型且没有重复', () => {
   assert.deepEqual(cases.map(item => item[0]).toSorted(), [...EVENT_TYPES].sort());
 });
+test('工具行保留来源 runId，方便直接打开本轮文件差异', () => {
+  let state = { thread: initialThread(), ui: { notice: null }, timeline: [], pendingInputs: [], queue: [],
+    pendingApprovals: {}, pendingArbitrations: {}, agents: {}, running: false, runUsage: null, contextStatus: null };
+  state = produce(state, draft => applyEvent(draft,
+    { type: 'run.started', payload: { input: '任务' }, sequence: 1, runId: 'run-1' }, { live: true }));
+  state = produce(state, draft => applyEvent(draft,
+    { type: 'tool.started', payload: { callId: 'c', name: 'edit_file', summary: 'src/a.ts' }, sequence: 2, runId: 'run-1' }, { live: true }));
+  assert.equal(turn(state).tools[0].runId, 'run-1');
+});
 for (const [type, payload, before, verify] of cases) {
   for (const live of [true, false]) test(`${type} 在${live ? '实时' : '回放'}中保持业务结果`, () => {
     let state = { thread: initialThread(), ui: { notice: null }, timeline: [], pendingInputs: [], queue: [], pendingApprovals: {}, pendingArbitrations: {}, agents: {}, running: false, runUsage: null, contextStatus: null };

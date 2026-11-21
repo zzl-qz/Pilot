@@ -1107,6 +1107,7 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
     : '';
   const isWebResult = tool.name === 'web_search' || tool.name === 'web_fetch';
   const hasUnifiedDiff = /^(?:diff --git |@@ |\+\+\+ |--- )/m.test(body);
+  const canOpenDiff = ['edit_file', 'create_file', 'apply_patch'].includes(tool.name) && Boolean(display.filePath);
   const status = TOOL_STATUS_TITLES[shownStatus] || '状态未知';
   const hasDetail = Boolean(body);
   const Header = hasDetail ? 'button' : 'div';
@@ -1190,6 +1191,20 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
                   onClick={() => useStore.getState().openPreview(display.filePath, display.startLine)}
                 >
                   预览文件
+                </button>
+              )}
+              {canOpenDiff && (
+                <button type="button" className="tool-body-action" onClick={() => {
+                  const state = useStore.getState();
+                  if (tool.runId) state.setUi({ inspectorOpen: true, inspectorTab: 'changes', reviewRunId: tool.runId, changeView: display.filePath });
+                  else state.openPreview(display.filePath);
+                }}>
+                  查看差异
+                </button>
+              )}
+              {tool.name === 'run_command' && tool.status === 'error' && (
+                <button type="button" className="tool-body-action" onClick={() => useStore.getState().setUi({ inspectorOpen: true, inspectorTab: 'commands' })}>
+                  查看命令
                 </button>
               )}
               <button

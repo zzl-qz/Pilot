@@ -662,7 +662,8 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
         // 记录开始时间：慢工具（大目录 grep、npm test）要能显示「已跑 N 秒」，
         // 否则一个不动的转圈看起来就是卡死
         startedAt: eventTimestamp(event),
-        agentId: event.payload.agentId || null
+        agentId: event.payload.agentId || null,
+        runId: event.runId || null
       };
       turn.tools.push(row);
       turn.toolIndex[row.callId] = row;
