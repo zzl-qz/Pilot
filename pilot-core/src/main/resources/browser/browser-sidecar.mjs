@@ -16,7 +16,7 @@
 
 import { createRequire } from 'node:module';
 import { publicHttps, externalRequestAllowed, externalMutations, requireExternalApproval, hostDecision,
-  hostRulesFromEnv, parseHosts } from './browser-policy.mjs';
+  hostRulesFromEnv, cdpEndpoint, externalAgentHostAllowed } from './browser-policy.mjs';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -39,9 +39,12 @@ const DEFAULT_MIRROR_WIDTH = 960;
 const DEFAULT_MIRROR_QUALITY = 55;
 // 外网主机清单由 Java 侧配置写入环境变量；进程启动时读一次，改配置后重启 sidecar 即生效。
 const HOST_RULES = hostRulesFromEnv();
+// 外部 CDP 端点：用户自己开着的 Chrome。只接受回环地址，写错就当没配。
+const EXTERNAL_CDP = cdpEndpoint(process.env.PILOT_BROWSER_CDP);
 
 let playwright;
 let browserPromise = null;
+let externalPromise = null;
 const sessions = new Map();
 const queues = new Map();
 // 前端订阅过镜像的会话：浏览器尚未启动时先登记，会话建立时自动开始推帧。
@@ -380,6 +383,18 @@ async function connectDesktop(desktop) {
   return browserPromise;
 }
 
+/** 外部 CDP 端点：用户自己已经开了调试端口的 Chrome，不归本进程启停。 */
+async function connectExternal() {
+  if (!externalPromise) {
+    const playwright = loadPlaywright();
+    externalPromise = playwright.chromium.connectOverCDP(EXTERNAL_CDP).catch((error) => {
+      externalPromise = null;
+      throw error;
+    });
+  }
+  return externalPromise;
+}
+
 async function waitForDesktopPage(browser, tabId, targetId) {
   const marker = `/marker/${tabId}`;
   const deadline = Date.now() + 8000;
@@ -430,9 +445,53 @@ async function createDesktopSession(id, desktop) {
   return session;
 }
 
-/** 桌面里人已经打开的 http(s) 页面，智能体可以操作。无头浏览器仍只许本机源。 */
-function agentMayTouchPage(url, desktop) {
-  if (!url || String(url).includes('/marker/')) return true;
+/**
+ * 外部 CDP 会话：连用户真实浏览器。沿用已有 Context（登录态就在里面），只开一个新标签。
+ *
+ * <p>不能给这个 Context 装 route：它属于用户全部标签，拦一个请求会连带影响人自己打开的页面。
+ * 所以这一类的边界放在动作层：只允许操作放行清单里的主机。
+ */
+async function createExternalSession(id) {
+  const browser = await connectExternal();
+  if (!browser.isConnected()) {
+    externalPromise = null;
+    throw new Error(`外部浏览器已断开（${EXTERNAL_CDP}）。重新启动 Chrome 的调试端口后再试。`);
+  }
+  const context = browser.contexts()[0] || await browser.newContext();
+  const page = await context.newPage();
+  const session = {
+    id, context, page, console: [], network: [], dead: false, external: true, desktop: false,
+    mirror: false, capture: false, embed: true, frameOptions: '',
+    mirrorWidth: DEFAULT_MIRROR_WIDTH, mirrorQuality: DEFAULT_MIRROR_QUALITY,
+    cdp: null, cdpPage: null, lastFrameAt: 0, historyCdp: null, historyCdpPage: null
+  };
+  context.setDefaultTimeout(ACTION_TIMEOUT_MS);
+  context.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
+  attachPage(session, page);
+  sessions.set(id, session);
+  return session;
+}
+
+/** 外部 CDP 会话只能操作放行清单里的主机：里面是用户真实的登录态。 */
+function refuseExternalTarget(value) {
+  if (externalAgentHostAllowed(value, HOST_RULES)) return;
+  let host = String(value || '');
+  try { host = new URL(host).hostname; } catch { /* 不是网址就按原文提示 */ }
+  const hint = HOST_RULES.allow.length
+    ? '不在放行清单（PILOT_BROWSER_ALLOW_HOSTS）里'
+    : '没配放行清单（PILOT_BROWSER_ALLOW_HOSTS），外部浏览器一律不碰';
+  throw new Error(`外部浏览器里的 ${host} ${hint}。人可以自己继续操作这个页面。`);
+}
+
+/**
+ * 智能体能不能碰这个页面。
+ *
+ * <p>桌面里人已经打开的 http(s) 页面可以操作；无头浏览器只许本机源；
+ * 外部 CDP 连的是用户自己的浏览器，必须显式配放行清单，清单外一律不碰。
+ */
+function agentMayTouchPage(url, current) {
+  const external = Boolean(current && current.external);
+  if (!url || (!external && String(url).includes('/marker/'))) return true;
   let parsed;
   try {
     parsed = new URL(String(url));
@@ -440,14 +499,19 @@ function agentMayTouchPage(url, desktop) {
     return false;
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
-  return Boolean(desktop) || loopbackUrl(url);
+  if (external) return externalAgentHostAllowed(url, HOST_RULES);
+  return Boolean(current && current.desktop) || loopbackUrl(url);
 }
 
 function refuseOffAllowlist(current) {
-  if (current.externalOrigin && new URL(current.page.url()).origin === current.externalOrigin) return;
   const page = current.page;
   if (!page || page.isClosed()) return;
-  if (agentMayTouchPage(page.url(), current.desktop)) return;
+  if (current.external) {
+    refuseExternalTarget(page.url());
+    return;
+  }
+  if (current.externalOrigin && new URL(page.url()).origin === current.externalOrigin) return;
+  if (agentMayTouchPage(page.url(), current)) return;
   throw new Error(`当前页面不在智能体允许的源站上（${page.url()}）。人可以继续浏览；智能体的点击、输入和跳转已停用。`);
 }
 
@@ -488,6 +552,8 @@ async function createSession(id) {
     const browser = await getHeadedBrowser();
     return createLocalSession(id, browser);
   }
+  // 配了外部 CDP 端点就优先连用户自己的浏览器（登录态在里面）。
+  if (EXTERNAL_CDP) return createExternalSession(id);
   const desktop = readDesktop();
   if (desktop) return createDesktopSession(id, desktop);
   const browser = await getBrowser();
@@ -985,6 +1051,18 @@ const handlers = {
   },
 
   async probe() {
+    if (EXTERNAL_CDP) {
+      const browser = await connectExternal();
+      const version = browser.version();
+      // 外部浏览器是用户自己的进程，探测完不能关。
+      return {
+        text: `已接入外部 Chrome（CDP ${EXTERNAL_CDP}）${version ? `，Chromium ${version}` : ''}`,
+        version,
+        headless: false,
+        capabilities: ['mirror'],
+        external: true
+      };
+    }
     const desktop = readDesktop();
     if (desktop) {
       const browser = await connectDesktop(desktop);
@@ -1008,6 +1086,19 @@ const handlers = {
   },
 
   async navigate(args, current) {
+    if (current.external) {
+      // 外部浏览器是用户的真实浏览器：只去放行清单里的主机，且不装 route。
+      if (!args.url) throw new Error('navigate 需要 url。');
+      refuseExternalTarget(args.url);
+      let externalResponse;
+      try {
+        externalResponse = await pageOf(current).goto(String(args.url), { waitUntil: 'load', timeout: NAVIGATION_TIMEOUT_MS });
+      } catch (error) {
+        throw new Error(`外部浏览器打开 ${args.url} 失败：${String(error.message || error).split('\n')[0]}`);
+      }
+      const externalStatus = externalResponse ? externalResponse.status() : 0;
+      return { text: `已打开，HTTP ${externalStatus || '未知'}\n${await describePage(current)}`, url: current.page.url() };
+    }
     if (args.approvedExternal) {
       if (!await publicHttps(args.url, undefined, HOST_RULES)) throw new Error(externalBlockedReason(args.url));
       current.externalOrigin = new URL(args.url).origin;
@@ -1113,6 +1204,8 @@ const handlers = {
    */
   async resize(args, current) {
     const page = pageOf(current);
+    // 外部浏览器是用户自己的窗口：面板不能改它的视口，否则会把人正在看的页面挤变形。
+    if (current.external) return { text: '外部浏览器按人自己的窗口尺寸显示，未调整视口', url: page.url() };
     const width = Math.min(1920, Math.max(280, Math.round(Number(args.width) || 0)));
     const height = Math.min(1600, Math.max(220, Math.round(Number(args.height) || 0)));
     const existing = page.viewportSize();
@@ -1506,7 +1599,9 @@ async function dispatch(request) {
     if (existing) {
       sessions.delete(request.session);
       try {
-        await existing.context.close();
+        // 外部 CDP 的 Context 属于用户自己：只关我们开的那一个标签。
+        if (existing.external) await existing.page.close();
+        else await existing.context.close();
       } catch {
         // 浏览器已退出
       }
@@ -1540,7 +1635,8 @@ async function dispatch(request) {
   }
   let current;
   const existing = sessions.get(request.session);
-  if (op === 'navigate' && request.approvedExternal && !existing?.externalOrigin) {
+  // 外部 CDP 会话本身就是用户的真实浏览器，不再另开隔离上下文。
+  if (op === 'navigate' && request.approvedExternal && !existing?.externalOrigin && !existing?.external) {
     // 外网任务使用独立上下文；关闭本地旧上下文，但不关闭用户桌面浏览器。
     if (existing && !existing.desktop) await existing.context.close();
     current = await createLocalSession(request.session, await getBrowser());

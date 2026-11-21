@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { hostDecision, hostRulesFromEnv, parseHosts, publicHttps } from '../../main/resources/browser/browser-policy.mjs';
+import { cdpEndpoint, externalAgentHostAllowed, hostDecision, hostRulesFromEnv, parseHosts,
+  publicHttps } from '../../main/resources/browser/browser-policy.mjs';
 
 test('parseHosts 接受逗号与空白两种分隔，并统一小写去空白', () => {
   assert.deepEqual(parseHosts('a.com, b.com  c.com'), ['a.com', 'b.com', 'c.com']);
@@ -59,4 +60,32 @@ test('publicHttps 先过地址校验再过主机清单', async () => {
   assert.equal(await publicHttps('https://example.com/a', resolve), true);
   assert.equal(await publicHttps('http://example.com/a', resolve, { allow: ['*'] }), false);
   assert.equal(await publicHttps('https://127.0.0.1/a', resolve, { allow: ['*'] }), false);
+});
+
+test('cdpEndpoint 只接受回环地址的 http/https 端点', () => {
+  assert.equal(cdpEndpoint('http://127.0.0.1:9222'), 'http://127.0.0.1:9222');
+  assert.equal(cdpEndpoint('http://localhost:9222/'), 'http://localhost:9222');
+  assert.equal(cdpEndpoint(' https://127.0.0.1:9223/devtools '), 'https://127.0.0.1:9223');
+  assert.equal(cdpEndpoint('http://[::1]:9222'), 'http://[::1]:9222');
+  // 跨网络的端点等于把真实浏览器控制权交出去，一律不认
+  assert.equal(cdpEndpoint('http://10.0.0.5:9222'), null);
+  assert.equal(cdpEndpoint('ws://127.0.0.1:9222'), null);
+  assert.equal(cdpEndpoint('file:///tmp/x'), null);
+  assert.equal(cdpEndpoint(''), null);
+  assert.equal(cdpEndpoint(undefined), null);
+  assert.equal(cdpEndpoint('不是地址'), null);
+});
+
+test('externalAgentHostAllowed 空清单等于谁都不碰，且 deny 优先', () => {
+  const hosts = { allow: ['example.com', '*.ok.test'], deny: ['bad.example.com'] };
+  assert.equal(externalAgentHostAllowed('https://example.com/a', hosts), true);
+  assert.equal(externalAgentHostAllowed('https://a.ok.test/a', hosts), true);
+  assert.equal(externalAgentHostAllowed('https://bad.example.com/a', hosts), false);
+  assert.equal(externalAgentHostAllowed('https://other.com/a', hosts), false);
+  // 与 publicHttps 相反：空清单不意味着放行
+  assert.equal(externalAgentHostAllowed('http://127.0.0.1:5173/', { allow: [], deny: [] }), false);
+  assert.equal(externalAgentHostAllowed('http://127.0.0.1:5173/', undefined), false);
+  // 外部浏览器只接管网页，about:blank / 非 http(s) 一律不放
+  assert.equal(externalAgentHostAllowed('about:blank', hosts), false);
+  assert.equal(externalAgentHostAllowed('file:///etc/passwd', { allow: ['*'], deny: [] }), false);
 });

@@ -84,6 +84,8 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     /** 外网主机清单：逗号或空白分隔，{@code *.example.com} 覆盖子域；空表示不额外收紧。 */
     private final String allowHosts;
     private final String denyHosts;
+    /** 外部 CDP 端点（用户自己开着的 Chrome）；留空表示只用内置浏览器。 */
+    private final String cdpEndpoint;
 
     private volatile PlaywrightBackend backend;
     private volatile String pendingReason = "浏览器运行时尚未启动";
@@ -105,7 +107,8 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         @Value("${pilot.browser.browsers-dir:}") String browsersDir,
         @Value("${pilot.browser.idle-shutdown-seconds:-1}") long idleShutdownSeconds,
         @Value("${pilot.browser.allow-hosts:}") String allowHosts,
-        @Value("${pilot.browser.deny-hosts:}") String denyHosts) {
+        @Value("${pilot.browser.deny-hosts:}") String denyHosts,
+        @Value("${pilot.browser.cdp-endpoint:}") String cdpEndpoint) {
         this.browserHome = browserHome;
         this.mapper = mapper;
         this.mirrors = mirrors;
@@ -118,6 +121,7 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         this.idleShutdownSeconds = idleShutdownSeconds;
         this.allowHosts = allowHosts == null ? "" : allowHosts.strip();
         this.denyHosts = denyHosts == null ? "" : denyHosts.strip();
+        this.cdpEndpoint = cdpEndpoint == null ? "" : cdpEndpoint.strip();
     }
 
     @Override
@@ -387,20 +391,23 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     }
 
     /** sidecar 进程的注入环境：浏览器选型与有头/无头全部由 Java 配置驱动。 */
-    private Map<String, String> sidecarEnvironment(Path home, boolean headless) {
+    Map<String, String> sidecarEnvironment(Path home, boolean headless) {
         Map<String, String> env = new LinkedHashMap<>();
         env.put("PLAYWRIGHT_BROWSERS_PATH", browsersPath(home).toString());
         env.put("PILOT_BROWSER_HEADLESS", headless ? "true" : "false");
         if (!preferBundled) {
             env.put("PILOT_BROWSER_PREFER_BUNDLED", "false");
         }
-        // 主机清单交给 sidecar 判：navigate 与页面内每个请求都过同一套规则，deny 优先。
-        if (!allowHosts.isEmpty()) {
-            env.put("PILOT_BROWSER_ALLOW_HOSTS", allowHosts);
-        }
-        if (!denyHosts.isEmpty()) {
-            env.put("PILOT_BROWSER_DENY_HOSTS", denyHosts);
-        }
+        // 主机清单与外部端点都交给 sidecar 判：留空即保持原有保守行为，写错由 sidecar 忽略。
+        Map<String, String> passthrough = new LinkedHashMap<>();
+        passthrough.put("PILOT_BROWSER_ALLOW_HOSTS", allowHosts);
+        passthrough.put("PILOT_BROWSER_DENY_HOSTS", denyHosts);
+        passthrough.put("PILOT_BROWSER_CDP", cdpEndpoint);
+        passthrough.forEach((key, value) -> {
+            if (!value.isEmpty()) {
+                env.put(key, value);
+            }
+        });
         return env;
     }
 

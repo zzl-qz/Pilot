@@ -76,7 +76,7 @@ class BrowserRuntimeTest {
         var mirrors = new RuntimeMirrors("https://mirror.test/npm", "https://mirror.test/chromium/",
             "https://mirror.test/electron");
         BrowserRuntime runtime = new BrowserRuntime(browserHome(home.toString()), new ObjectMapper(), mirrors, true,
-            true, true, true, true, "", -1, "", "") {
+            true, true, true, true, "", -1, "", "", "") {
             @Override
             int run(Path directory, Path executable, Duration timeout, List<String> command,
                 Map<String, String> environment) {
@@ -103,10 +103,31 @@ class BrowserRuntimeTest {
         assertEquals("https://mirror.test/chromium", environments.get(3).get("PLAYWRIGHT_DOWNLOAD_HOST"));
     }
 
+    /**
+     * 主机清单和外部 CDP 端点靠环境变量传给 sidecar：留空不注入（保持保守默认），
+     * 写了才注入，写错地址由 sidecar 自己当作没配。
+     */
+    @Test
+    void sidecarEnvironmentPassesOnlyTheBrowserPolicyValuesThatWereSet() {
+        BrowserRuntime plain = new BrowserRuntime(browserHome(""), new ObjectMapper(), RuntimeMirrors.defaults(),
+            true, false, true, true, true, "", -1, "", "", "");
+        Map<String, String> defaults = plain.sidecarEnvironment(data, true);
+        assertEquals(Set.of("PLAYWRIGHT_BROWSERS_PATH", "PILOT_BROWSER_HEADLESS"), defaults.keySet());
+        assertEquals("true", defaults.get("PILOT_BROWSER_HEADLESS"));
+
+        BrowserRuntime configured = new BrowserRuntime(browserHome(""), new ObjectMapper(), RuntimeMirrors.defaults(),
+            true, false, true, true, true, "", -1, "a.com, *.b.com", "bad.com", "http://127.0.0.1:9223");
+        Map<String, String> env = configured.sidecarEnvironment(data, false);
+        assertEquals("a.com, *.b.com", env.get("PILOT_BROWSER_ALLOW_HOSTS"));
+        assertEquals("bad.com", env.get("PILOT_BROWSER_DENY_HOSTS"));
+        assertEquals("http://127.0.0.1:9223", env.get("PILOT_BROWSER_CDP"));
+        assertEquals("false", env.get("PILOT_BROWSER_HEADLESS"));
+    }
+
     @Test
     void disabledRuntimeDeclaresNoCapabilityAndExplainsWhy() {
         BrowserRuntime runtime = new BrowserRuntime(browserHome(""), new ObjectMapper(), RuntimeMirrors.defaults(),
-            false, false, false, true, true, "", -1, "", "");
+            false, false, false, true, true, "", -1, "", "", "");
         runtime.start();
 
         Availability availability = runtime.availability();
@@ -122,7 +143,7 @@ class BrowserRuntimeTest {
     @Test
     void toolFactoryRegistersSessionExtrasButTheyStayHiddenUntilTheirCapabilityIsReady(@TempDir Path workspace) {
         BrowserRuntime runtime = new BrowserRuntime(browserHome(""), new ObjectMapper(), RuntimeMirrors.defaults(),
-            false, false, false, true, true, "", -1, "", "");
+            false, false, false, true, true, "", -1, "", "", "");
         WorkspaceToolFactory factory = new WorkspaceToolFactory(
             new AgentProperties(workspace.toString(), PermissionMode.AUTO, 8, 3, 5, 300, 2, 1, 60_000, true),
             new WebSearchProperties(false, "http://127.0.0.1:9", "", ""), SnapshotSink.none(), new ObjectMapper());
@@ -168,7 +189,7 @@ class BrowserRuntimeTest {
         Assumptions.assumeTrue(Files.isDirectory(home.directory().resolve("node_modules").resolve("playwright-core")),
             "没有安装 playwright-core");
         BrowserRuntime runtime = new BrowserRuntime(home, new ObjectMapper(), RuntimeMirrors.defaults(), true, false,
-            false, true, true, "", -1, "", "");
+            false, true, true, "", -1, "", "", "");
         try {
             assertFalse(runtime.availability().available(), "启动之前不能声明能力");
             runtime.start();

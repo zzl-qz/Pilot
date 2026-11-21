@@ -70,6 +70,40 @@ export async function externalRequestAllowed({ url, method, navigation, origin, 
   return true;
 }
 
+/**
+ * 外部 CDP 端点只接受本机回环地址：连到网络对端等于把真实浏览器的控制权交出去。
+ *
+ * <p>返回规范化后的 origin，写错协议或主机一律 null。
+ */
+export function cdpEndpoint(value) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  try {
+    const url = new URL(text);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    const loopback = host === 'localhost' || host.endsWith('.localhost') || host === '::1'
+      || host === '127.0.0.1' || /^127\.\d+\.\d+\.\d+$/.test(host);
+    return loopback ? url.origin : null;
+  } catch { return null; }
+}
+
+/**
+ * 外部 CDP 会话碰的是用户真实浏览器和登录态，所以必须显式写放行清单，且只认清单内主机。
+ *
+ * <p>与 {@link publicHttps} 的空清单语义相反：这里空清单表示「谁都不碰」。
+ */
+export function externalAgentHostAllowed(value, hosts) {
+  let parsed;
+  try {
+    parsed = new URL(String(value));
+  } catch { return false; }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+  const allow = Array.isArray(hosts?.allow) ? hosts.allow : [];
+  return allow.length > 0 && hostDecision(parsed.hostname.toLowerCase(), hosts) === 'allow';
+}
+
 export const externalMutations = new Set(['click', 'dblclick', 'right_click', 'hover', 'fill', 'type', 'press',
   'select', 'upload', 'download', 'evaluate', 'reload', 'back', 'forward']);
 
