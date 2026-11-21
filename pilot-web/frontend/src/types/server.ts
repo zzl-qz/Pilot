@@ -1155,6 +1155,25 @@ export interface SettingsControllerSettingsResponse {
   childModel?: string;
 }
 
+/**
+ * 一组 allow/deny/ask 规则。工作区规则与用户级规则（{@code inherited}）同构，
+ * 所以只声明一次，避免两份字段各自漂移。
+ */
+export interface PermissionRuleSet {
+  allow: (string)[];
+  deny: (string)[];
+  ask: (string)[];
+}
+
+/** PermissionRulesController.java / RulesResponse */
+export interface PermissionRulesControllerRulesResponse extends PermissionRuleSet {
+  workspace: string;
+  file: string;
+  loadIssues: (string)[];
+  /** 用户级 ~/.pilot/settings.json 已生效的规则，只读展示 */
+  inherited: PermissionRuleSet;
+}
+
 /** SkillDraftService.java / Draft */
 export interface SkillDraftServiceDraft {
   id: string;

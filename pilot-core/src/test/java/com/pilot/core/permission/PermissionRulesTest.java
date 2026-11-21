@@ -1,6 +1,7 @@
 package com.pilot.core.permission;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -8,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -97,5 +99,55 @@ class PermissionRulesTest {
 
         assertTrue(rules.isEmpty());
         assertTrue(rules.loadIssues().stream().anyMatch(issue -> issue.contains("permissions")));
+    }
+
+    @Test
+    void saveRoundTripsAndKeepsOtherTopLevelKeys() throws IOException {
+        Path file = PermissionRules.workspaceFile(workspace);
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, """
+            {"hooks":{"pre":"x"},"permissions":{"allow":["run_command(old:*)"]}}
+            """);
+
+        PermissionRules.save(workspace, List.of("run_command(mvn test:*)"), List.of("run_command(rm -rf:*)"),
+            List.of("edit_file(docs/*.md)"));
+
+        PermissionRules saved = PermissionRules.loadWorkspace(workspace);
+        assertEquals(List.of("run_command(mvn test:*)"), saved.allowRules());
+        assertEquals(List.of("run_command(rm -rf:*)"), saved.denyRules());
+        assertEquals(List.of("edit_file(docs/*.md)"), saved.askRules());
+        assertTrue(saved.loadIssues().isEmpty());
+
+        String text = Files.readString(file);
+        assertTrue(text.contains("\"hooks\""), "其他顶层字段必须保留");
+        assertFalse(text.contains("run_command(old:*)"), "旧规则应被整体替换，不是追加");
+
+        assertEquals(PermissionDecision.DENY, saved.evaluate(command("rm -rf /tmp/x")).decision());
+        assertEquals(PermissionDecision.ALLOW, saved.evaluate(command("mvn test -q")).decision());
+        assertEquals(PermissionDecision.ASK, saved.evaluate(edit("docs/guide.md")).decision());
+    }
+
+    @Test
+    void savingNoRulesRemovesPermissionsKey() throws IOException {
+        Path file = PermissionRules.workspaceFile(workspace);
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, """
+            {"mcp":{"servers":[]},"permissions":{"deny":["read_file(.env)"]}}
+            """);
+
+        PermissionRules.save(workspace, List.of(), List.of(), List.of());
+
+        assertTrue(PermissionRules.loadWorkspace(workspace).isEmpty());
+        String text = Files.readString(file);
+        assertFalse(text.contains("\"permissions\""), "空规则不应留下空数组");
+        assertTrue(text.contains("\"mcp\""));
+    }
+
+    @Test
+    void savingSkipsBlankRulesAndCreatesMissingDirectory() throws IOException {
+        PermissionRules.save(workspace, List.of("  ", "read_file(src/**)"), null, List.of());
+
+        assertEquals(List.of("read_file(src/**)"), PermissionRules.loadWorkspace(workspace).allowRules());
+        assertTrue(Files.isRegularFile(PermissionRules.workspaceFile(workspace)));
     }
 }

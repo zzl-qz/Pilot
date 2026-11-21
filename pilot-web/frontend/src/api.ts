@@ -247,6 +247,11 @@ export const api = {
   settings: (signal?: AbortSignal) => apiJson<ApiResults['settings']>('/api/settings', { signal }),
   // 后端是 PUT：之前发 POST 会 405，权限与模型保存点了没反应
   savePermissionMode: (mode: string) => apiJson<ApiResults['savePermissionMode']>('/api/settings/permission-mode', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) }),
+  /** 工作区 .pilot/settings.json 的 allow/deny/ask 规则；每次请求都重新读盘，改完立即生效。 */
+  permissionRules: (workspace: string, signal?: AbortSignal) =>
+    apiJson<ApiResults['permissionRules']>(`/api/permission-rules?workspace=${encodeURIComponent(workspace)}`, { signal }),
+  savePermissionRules: (body: { workspace: string; allow: string[]; deny: string[]; ask: string[] }) =>
+    apiJson<ApiResults['savePermissionRules']>('/api/permission-rules', jsonBody('PUT', body)),
   saveModel: (body: Update<S.SettingsControllerModelRequest>) => apiJson<ApiResults['saveModel']>('/api/settings/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   clearModelKey: () => apiJson<ApiResults['clearModelKey']>('/api/settings/model/api-key', { method: 'DELETE' }),
   modelRuntime: () => apiJson<ApiResults['modelRuntime']>('/api/settings/model/runtime'),

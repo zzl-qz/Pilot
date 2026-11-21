@@ -1,9 +1,11 @@
 package com.pilot.core.permission;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -56,6 +58,73 @@ public final class PermissionRules {
         return new PermissionRules(List.of(), List.of(), List.of(), List.of());
     }
 
+    /** 工作区级规则文件；写入入口与 {@link #load} 读的是同一个文件。 */
+    public static Path workspaceFile(Path workspace) {
+        return workspace == null ? null : workspace.resolve(".pilot").resolve("settings.json");
+    }
+
+    /** 当前生效的规则原文，按 deny、ask、allow 分开，供设置界面展示与编辑。 */
+    public List<String> allowRules() {
+        return render(allow);
+    }
+
+    public List<String> denyRules() {
+        return render(deny);
+    }
+
+    public List<String> askRules() {
+        return render(ask);
+    }
+
+    private static List<String> render(List<Rule> rules) {
+        return rules.stream().map(rule -> rule.specifier().isEmpty() ? rule.tool()
+            : rule.tool() + "(" + rule.specifier() + ")").toList();
+    }
+
+    /**
+     * 把三组规则写回工作区 {@code .pilot/settings.json} 的 {@code permissions} 段。
+     *
+     * <p>文件里其他顶层字段（hooks、mcp 等）原样保留：只替换 {@code permissions} 三个数组，
+     * 空数组直接移除对应键。写不了就抛异常，由接口层报告给用户，不静默吞掉。
+     */
+    public static void save(Path workspace, List<String> allow, List<String> deny, List<String> ask)
+        throws IOException {
+        Path file = workspaceFile(workspace);
+        if (file == null) {
+            throw new IOException("没有工作区，无法保存权限规则");
+        }
+        Map<String, Object> root = new LinkedHashMap<>();
+        if (Files.isRegularFile(file)) {
+            Map<?, ?> existing = MAPPER.readValue(Files.readAllBytes(file), Map.class);
+            if (existing != null) {
+                existing.forEach((key, value) -> root.put(String.valueOf(key), value));
+            }
+        }
+        Map<String, Object> permissions = new LinkedHashMap<>();
+        putRules(permissions, "deny", deny);
+        putRules(permissions, "ask", ask);
+        putRules(permissions, "allow", allow);
+        if (permissions.isEmpty()) {
+            root.remove("permissions");
+        } else {
+            root.put("permissions", permissions);
+        }
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(root),
+            StandardCharsets.UTF_8);
+    }
+
+    private static void putRules(Map<String, Object> permissions, String key, List<String> rules) {
+        if (rules == null) {
+            return;
+        }
+        List<String> cleaned = rules.stream().filter(rule -> rule != null && !rule.isBlank()).map(String::strip)
+            .toList();
+        if (!cleaned.isEmpty()) {
+            permissions.put(key, cleaned);
+        }
+    }
+
     public boolean isEmpty() {
         return allow.isEmpty() && deny.isEmpty() && ask.isEmpty();
     }
@@ -66,12 +135,41 @@ public final class PermissionRules {
         List<Rule> deny = new ArrayList<>();
         List<Rule> ask = new ArrayList<>();
         List<String> loadIssues = new ArrayList<>();
-        Path userHome = Path.of(System.getProperty("user.home", "."));
-        merge(userHome.resolve(".pilot").resolve("settings.json"), allow, deny, ask, loadIssues);
+        merge(userFile(), allow, deny, ask, loadIssues);
         if (workspace != null) {
-            merge(workspace.resolve(".pilot").resolve("settings.json"), allow, deny, ask, loadIssues);
+            merge(workspaceFile(workspace), allow, deny, ask, loadIssues);
         }
         return new PermissionRules(allow, deny, ask, loadIssues);
+    }
+
+    /**
+     * 只读工作区级文件，不含用户级。
+     *
+     * <p>设置界面改的就是这一个文件，所以展示与回写必须用同一范围；
+     * 否则把 {@link #load} 的合并结果写回去，会把用户级规则复制进工作区文件。
+     */
+    public static PermissionRules loadWorkspace(Path workspace) {
+        return loadSingle(workspaceFile(workspace));
+    }
+
+    /** 只读用户级文件（{@code ~/.pilot/settings.json}），供界面以只读方式展示。 */
+    public static PermissionRules loadUser() {
+        return loadSingle(userFile());
+    }
+
+    private static PermissionRules loadSingle(Path file) {
+        List<Rule> allow = new ArrayList<>();
+        List<Rule> deny = new ArrayList<>();
+        List<Rule> ask = new ArrayList<>();
+        List<String> loadIssues = new ArrayList<>();
+        if (file != null) {
+            merge(file, allow, deny, ask, loadIssues);
+        }
+        return new PermissionRules(allow, deny, ask, loadIssues);
+    }
+
+    private static Path userFile() {
+        return Path.of(System.getProperty("user.home", ".")).resolve(".pilot").resolve("settings.json");
     }
 
     public List<String> loadIssues() {

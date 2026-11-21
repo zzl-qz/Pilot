@@ -135,6 +135,8 @@ export interface ApiResults {
   workspaceBrowse: S.WorkspaceServiceBrowseResult & { entries?: S.WorkspaceServiceDirectoryEntry[] };
   settings: S.SettingsControllerSettingsResponse;
   savePermissionMode: S.SettingsControllerSettingsResponse;
+  permissionRules: S.PermissionRulesControllerRulesResponse;
+  savePermissionRules: S.PermissionRulesControllerRulesResponse;
   saveModel: S.SettingsControllerSettingsResponse;
   clearModelKey: S.SettingsControllerSettingsResponse;
   modelRuntime: S.ModelRuntimeSettingsView;
