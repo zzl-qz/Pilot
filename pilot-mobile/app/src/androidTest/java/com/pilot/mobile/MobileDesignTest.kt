@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import com.pilot.mobile.transport.TranscriptRow
+import com.pilot.mobile.ui.*
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Rule

@@ -1,4 +1,4 @@
-package com.pilot.mobile
+package com.pilot.mobile.ui
 
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -22,6 +22,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pilot.mobile.transport.text
+import com.pilot.mobile.bool
+import com.pilot.mobile.objects
+import com.pilot.mobile.statusLabel
+import com.pilot.mobile.MobileState
+import com.pilot.mobile.PilotViewModel
+import com.pilot.mobile.PairedComputer
 import kotlinx.serialization.json.*
 
 @Composable

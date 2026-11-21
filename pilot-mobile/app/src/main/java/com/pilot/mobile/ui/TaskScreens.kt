@@ -1,4 +1,4 @@
-package com.pilot.mobile
+package com.pilot.mobile.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -26,6 +26,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pilot.mobile.transport.text
+import com.pilot.mobile.bool
+import com.pilot.mobile.objects
+import com.pilot.mobile.MobileState
+import com.pilot.mobile.PilotViewModel
 import kotlinx.serialization.json.*
 
 @Composable

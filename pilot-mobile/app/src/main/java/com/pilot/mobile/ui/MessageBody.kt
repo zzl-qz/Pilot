@@ -1,4 +1,4 @@
-package com.pilot.mobile
+package com.pilot.mobile.ui
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*

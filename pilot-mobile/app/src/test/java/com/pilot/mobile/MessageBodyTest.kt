@@ -1,5 +1,7 @@
 package com.pilot.mobile
 
+import com.pilot.mobile.ui.messageBlocks
+import com.pilot.mobile.ui.messageInline
 import org.junit.Assert.*
 import org.junit.Test
 

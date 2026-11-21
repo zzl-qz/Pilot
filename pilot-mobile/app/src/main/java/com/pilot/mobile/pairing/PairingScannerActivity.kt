@@ -1,4 +1,4 @@
-package com.pilot.mobile
+package com.pilot.mobile.pairing
 
 import android.Manifest
 import android.app.Activity
@@ -42,6 +42,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.zxing.BarcodeFormat
+import com.pilot.mobile.ui.PilotTheme
 import com.journeyapps.barcodescanner.BarcodeCallback
 import com.journeyapps.barcodescanner.BarcodeResult
 import com.journeyapps.barcodescanner.CameraPreview

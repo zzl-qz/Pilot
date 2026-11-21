@@ -1,6 +1,8 @@
 package com.pilot.mobile
 
 import com.pilot.mobile.transport.PairingInvite
+import com.pilot.mobile.pairing.PairingScanGate
+import com.pilot.mobile.pairing.PairingScanDecision
 import org.junit.Assert.*
 import org.junit.Test
 

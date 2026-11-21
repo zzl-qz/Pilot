@@ -34,6 +34,9 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.pilot.mobile.transport.text
+import com.pilot.mobile.pairing.PairingScanContract
+import com.pilot.mobile.pairing.PairingScanResult
+import com.pilot.mobile.ui.*
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

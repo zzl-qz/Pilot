@@ -1,4 +1,4 @@
-package com.pilot.mobile
+package com.pilot.mobile.pairing
 
 import com.pilot.mobile.transport.PairingInvite
 
