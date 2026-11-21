@@ -1,8 +1,5 @@
 package com.pilot.server.agent;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -16,13 +13,11 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -47,7 +42,6 @@ import com.pilot.core.event.RunOutcome;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.event.RunUsageUpdated;
 import com.pilot.core.event.SessionEvent;
-import com.pilot.core.lint.ProjectLint;
 import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.loop.ContextCompactor;
 import com.pilot.core.message.Attachment;
@@ -83,7 +77,6 @@ import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.core.tool.command.RunCommandTool;
 import com.pilot.core.tool.command.StopCommandTool;
 import com.pilot.core.trace.JsonlTraceRecorder;
-import com.pilot.core.util.Sha256;
 import com.pilot.core.util.WireEnum;
 import com.pilot.core.workspace.AgentScope;
 import com.pilot.core.workspace.PathValidator;
@@ -144,19 +137,8 @@ public class AgentRunService implements RunStarter {
             TaskControlStatus.REVIEW_UNAVAILABLE, TaskControlStatus.VERIFICATION_FAILED);
     /** 提示词正文在 {@code prompts/} 资源里，这里只做变量注入与拼接。 */
     private static final PromptLibrary PROMPTS = PromptLibrary.standard();
-    /** 仓库快照：顶层条目与未提交改动都限行，避免 system 被大仓库撑爆。 */
-    private static final int MAX_TREE_ENTRIES = 30;
-    private static final int MAX_GIT_CHANGES = 12;
-    private static final long GIT_TIMEOUT_MS = 2_000L;
-    /** 非 git 工作区在快照里的分支占位，用来区分「没有仓库」和「读不出改动」。 */
-    private static final String NON_GIT = "<no-git>";
-    private static final Set<String> IGNORED_ENTRIES = Set.of(".git", ".pilot", ".idea", ".vscode", ".gradle", ".venv",
-        "__pycache__", "node_modules", "target", "build", "dist", "out");
     private final PreFlightLocator preFlightLocator = new PreFlightLocator();
-    /** 仓库快照按工作区指纹复用：状态没变就不重复跑 git / 目录遍历 / lint 发现。 */
-    private final RepositoryBriefCache repositoryBriefs;
-    /** 每个会话上次注入快照时的工作区指纹：值不变不再注入，变了才在本步输入前追加一份。 */
-    private final ConcurrentMap<String, String> sessionBriefs = new ConcurrentHashMap<>();
+    private final RepositoryContext repositoryContext;
 
     private final SessionService sessions;
     private final ModelClient modelClient;
@@ -304,7 +286,8 @@ public class AgentRunService implements RunStarter {
         this.runRepository = runRepository;
         this.objectMapper = objectMapper;
         this.dataDir = dataDir;
-        this.repositoryBriefs = new RepositoryBriefCache(dataDir == null ? null : dataDir.file("repository-briefs"));
+        this.repositoryContext = new RepositoryContext(properties, toolFactory,
+            new RepositoryBriefCache(dataDir == null ? null : dataDir.file("repository-briefs")));
         this.queuedMessages = queuedMessages;
         this.multiAgent = multiAgent;
         this.multiProperties = multiProperties;
@@ -1287,42 +1270,6 @@ public class AgentRunService implements RunStarter {
     }
 
     /**
-     * 工作区指纹变了就在本步输入之前注入一份仓库快照；指纹没变不重复注入。
-     *
-     * <p>快照不进 system：git 状态每轮都会变，进 system 会让跨轮前缀缓存全部失效；
-     * 作为首条 user 消息随历史正常落盘与压缩，模板已声明「以工具实查为准」。
-     * 会话首条注入后记下指纹，此后工作区变了（切分支、提交、改动增减）才追加一条新快照，
-     * 避免模型拿着过期的分支名继续干活。
-     */
-    private List<Message> withRepositoryBrief(List<Message> history, String workspace, String sessionId) {
-        if (!properties.repositoryBriefEnabled()) {
-            return history;
-        }
-        Path root;
-        try {
-            root = toolFactory.resolve(workspace);
-        } catch (RuntimeException e) {
-            return history;
-        }
-        if (!Files.isDirectory(root)) {
-            return history;
-        }
-        RepoState state = repoState(root);
-        String fingerprint = sessionFingerprint(root, state);
-        if (fingerprint.equals(sessionBriefs.get(sessionId))) {
-            return history;
-        }
-        String brief = repositoryBrief(root, state);
-        if (brief.isEmpty()) {
-            return history;
-        }
-        sessionBriefs.put(sessionId, fingerprint);
-        List<Message> seeded = new ArrayList<>(history);
-        seeded.add(Message.user(brief));
-        return List.copyOf(seeded);
-    }
-
-    /**
      * 用户显式点名技能时，把技能指引作为独立 user 消息注入在用户输入之前（与仓库快照同模式）。
      *
      * <p>不进 system：500 行正文会破坏跨轮前缀缓存，而 user 消息随历史可压缩、续跑不丢；
@@ -1339,205 +1286,6 @@ public class AgentRunService implements RunStarter {
         List<Message> seeded = new ArrayList<>(history);
         seeded.add(Message.user(activate));
         return List.copyOf(seeded);
-    }
-
-    /**
-     * 仓库现状快照：git 分支与未提交改动、构建方式、规范检查；full 档另带顶层结构。
-     *
-     * <p>模型不用从零摸索，也不会覆盖用户手上的未提交改动。
-     * 同一工作区在状态没变时复用上次生成的正文（{@link RepositoryBriefCache}）。档位由
-     * {@code pilot.agent.repository-brief} 决定：brief（默认）只留会变的值，full 带目录树，off 不注入。
-     */
-    private String repositoryBrief(Path root, RepoState state) {
-        boolean detailed = properties.repositoryBriefDetailed();
-        String tree = detailed ? workspaceTree(root) : "";
-        String build = buildHint(root);
-        String key = RepositoryBriefCache.key(root);
-        // 指纹只覆盖最终会进快照的输入：分支、改动清单、顶层条目、构建方式。都不变就不必重新生成。
-        String fingerprint =
-            Sha256.hex(state.branch() + "\u0000" + state.status() + "\u0000" + tree + "\u0000" + build);
-        String cached = repositoryBriefs.cached(key, fingerprint);
-        if (cached != null) {
-            return cached;
-        }
-        try {
-            String text = PROMPTS.render(detailed ? "context/repository" : "context/repository-brief",
-                Map.of("tree", tree, "git", gitState(state, detailed), "build", build,
-                    "lint", lintNote(root))).strip();
-            repositoryBriefs.store(key, fingerprint, text);
-            return text;
-        } catch (RuntimeException e) {
-            log.debug("生成仓库摘要失败", e);
-            return "";
-        }
-    }
-
-    /** 生成快照要的 git 现状。一次采集，会话指纹与正文都从这里取。 */
-    private record RepoState(boolean git, String branch, String status, String head) {
-    }
-
-    private static RepoState repoState(Path root) {
-        if (!Files.isDirectory(root.resolve(".git"))) {
-            return new RepoState(false, NON_GIT, null, "");
-        }
-        String status = runGit(root, "status", "--porcelain=v1", "-uall");
-        String head = runGit(root, "rev-parse", "HEAD");
-        return new RepoState(true, branchName(root), status, head == null ? "" : head.strip());
-    }
-
-    /**
-     * 会话级指纹：分支 + 未提交文件数 + HEAD 提交。
-     *
-     * <p>对齐 dsh 的做法：值不变不追加内容，值变化时在本步输入之前追加一份快照。
-     * 只取改动数量不取文件名，改的是哪个文件不算变化，要清单让模型自己 {@code git status}。
-     * 非 git 工作区没有分支和提交可比，退回顶层条目：新建或删掉条目才算变了。
-     */
-    private static String sessionFingerprint(Path root, RepoState state) {
-        if (!state.git()) {
-            try {
-                return NON_GIT + "\u0000" + String.join("\u0000", topEntries(root));
-            } catch (IOException e) {
-                return NON_GIT;
-            }
-        }
-        long dirty = state.status() == null ? -1 : state.status().lines().filter(line -> !line.isBlank()).count();
-        return state.branch() + "\u0000" + dirty + "\u0000" + state.head();
-    }
-
-    private String lintNote(Path root) {
-        if (!properties.lintGateEnabledValue()) {
-            return "已关闭（pilot.agent.lint-gate-enabled=false），本次不跑规范检查";
-        }
-        try {
-            ProjectLint lint = ProjectLint.discover(root);
-            if (!lint.ready()) {
-                return "未发现仓库自己的 lint。将使用内置通用检查，只看裸数字和重复字符串";
-            }
-            return lint.source() + "：`" + lint.command() + "`。运行开始后命令和规则文件会被锁定，模型不能关闭或改掉。";
-        } catch (RuntimeException e) {
-            return "lint 发现失败，收尾时会再试一次";
-        }
-    }
-
-    private static String workspaceTree(Path root) {
-        List<String> names;
-        try {
-            names = topEntries(root);
-        } catch (IOException e) {
-            return "（读取目录失败）";
-        }
-        if (names.isEmpty()) {
-            return "（空目录）";
-        }
-        boolean truncated = names.size() > MAX_TREE_ENTRIES;
-        String listed =
-            names.stream().limit(MAX_TREE_ENTRIES).map(name -> "- " + name).collect(Collectors.joining("\n"));
-        return truncated ? listed + "\n- …（其余条目省略）" : listed;
-    }
-
-    /** 顶层条目（目录带结尾斜杠），已去掉依赖与产物目录；full 档的目录树和会话指纹都用它。 */
-    private static List<String> topEntries(Path root) throws IOException {
-        try (Stream<Path> entries = Files.list(root)) {
-            return entries.map(path -> {
-                String name = path.getFileName().toString();
-                return Files.isDirectory(path) ? name + "/" : name;
-            }).filter(
-                name -> !IGNORED_ENTRIES.contains(name.endsWith("/") ? name.substring(0, name.length() - 1) : name))
-                .sorted().toList();
-        }
-    }
-
-    /**
-     * Git 现状正文。
-     *
-     * @param detailed 为 false 时只报脏文件数量，不列文件名（brief 档给长会话省 token）
-     */
-    private static String gitState(RepoState state, boolean detailed) {
-        if (state.status() == null) {
-            return state.git() ? "分支 `" + state.branch() + "`（无法读取未提交改动）" : "不是 git 仓库";
-        }
-        List<String> lines = state.status().lines().filter(line -> !line.isBlank()).toList();
-        if (lines.isEmpty()) {
-            return "分支 `" + state.branch() + "`，工作区干净";
-        }
-        if (!detailed) {
-            return "分支 `" + state.branch() + "`，" + lines.size() + " 个文件未提交";
-        }
-        String listed =
-            lines.stream().limit(MAX_GIT_CHANGES).map(line -> "- " + line.strip()).collect(Collectors.joining("\n"));
-        String more = lines.size() > MAX_GIT_CHANGES ? "\n- …（还有 " + (lines.size() - MAX_GIT_CHANGES) + " 个）" : "";
-        return "分支 `" + state.branch() + "`，有 " + lines.size() + " 个文件未提交：\n" + listed + more;
-    }
-
-    private static String branchName(Path root) {
-        try {
-            String head = Files.readString(root.resolve(".git").resolve("HEAD"), StandardCharsets.UTF_8).strip();
-            String prefix = "ref: refs/heads/";
-            if (head.startsWith(prefix)) {
-                return head.substring(prefix.length());
-            }
-            return head.isEmpty() ? "unknown" : "detached@" + head.substring(0, Math.min(7, head.length()));
-        } catch (IOException e) {
-            return "unknown";
-        }
-    }
-
-    private static String runGit(Path root, String... args) {
-        List<String> command = new ArrayList<>();
-        command.add("git");
-        command.add("--no-pager");
-        command.addAll(List.of(args));
-        ProcessBuilder builder = new ProcessBuilder(command);
-        builder.directory(root.toFile());
-        builder.redirectErrorStream(true);
-        builder.environment().put("GIT_OPTIONAL_LOCKS", "0");
-        try {
-            Process process = builder.start();
-            if (!process.waitFor(GIT_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
-                process.destroyForcibly();
-                return null;
-            }
-            return new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            return null;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return null;
-        }
-    }
-
-    private static String buildHint(Path root) {
-        String childNodeProjects;
-        try (Stream<Path> children = Files.list(root)) {
-            childNodeProjects =
-                children.filter(Files::isDirectory).filter(path -> Files.isRegularFile(path.resolve("package.json")))
-                    .map(path -> path.getFileName().toString()).sorted().limit(8).collect(Collectors.joining("、"));
-        } catch (IOException e) {
-            childNodeProjects = "";
-        }
-        String nodeHint = childNodeProjects.isEmpty() ? ""
-            : "；Node 子项目：" + childNodeProjects + "（先读各自 package.json，运行 npm 命令时设置对应 workdir）";
-        if (Files.isRegularFile(root.resolve("pom.xml"))) {
-            return "Maven 项目：优先用工作区的 `mvnw`，不要依赖系统 maven" + nodeHint;
-        }
-        if (Files.isRegularFile(root.resolve("build.gradle"))
-            || Files.isRegularFile(root.resolve("build.gradle.kts"))) {
-            return "Gradle 项目：用工作区的 `gradlew`";
-        }
-        if (Files.isRegularFile(root.resolve("package.json"))) {
-            return "Node 项目：先看 package.json 的 scripts，再跑 `npm test` / `npm run build` 这类脚本" + nodeHint;
-        }
-        if (Files.isRegularFile(root.resolve("pyproject.toml"))
-            || Files.isRegularFile(root.resolve("requirements.txt"))) {
-            return "Python 项目：用 `pytest` 或项目里声明的命令";
-        }
-        if (Files.isRegularFile(root.resolve("Cargo.toml"))) {
-            return "Rust 项目：`cargo test` / `cargo build`";
-        }
-        if (Files.isRegularFile(root.resolve("go.mod"))) {
-            return "Go 项目：`go build ./...` / `go test ./...`";
-        }
-        return "未识别到根目录构建文件，改动后按项目实际情况验证" + nodeHint;
     }
 
     /** 把工作区和祖先目录的项目约定注入 system，并保留每份文件的来源。 */
@@ -1759,7 +1507,8 @@ public class AgentRunService implements RunStarter {
             String completionGoal = activeTask == null ? null : activeTask.originalGoal();
             AgentLoop.Result result = continuation ? loop.resume(history, sink, checkpoint, completionGoal)
                 : loop.run(input, attachments, imagePositions,
-                    withSkillActivation(withRepositoryBrief(history, workspace, sessionId), workspace, handle), sink,
+                    withSkillActivation(repositoryContext.withRepositoryBrief(history, workspace, sessionId), workspace,
+                        handle), sink,
                     checkpoint);
             conversations.save(sessionId, result.conversation());
             logPreflightTelemetry(runId, preflight, loop.observedPathsSnapshot(), result.changedFiles());
