@@ -1,8 +1,8 @@
 import { useLayoutEffect, type ReactNode, type Ref } from 'react';
 import { Button } from '@astryxdesign/core/Button';
 import { Dialog } from '@astryxdesign/core/Dialog';
-import { restoreFocus } from '../lib/interaction.js';
-import { Icon } from './Icon.jsx';
+import { restoreFocus } from '../../lib/interaction.js';
+import { Icon } from '../Icon.jsx';
 import './automation.css';
 
 export function AutomationDialog({ titleId, title, description, onClose, bodyRef, footer, children, width = 960 }: {

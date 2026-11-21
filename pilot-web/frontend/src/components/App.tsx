@@ -27,8 +27,8 @@ import { useResultUnread } from '../lib/result-unread.js';
 import './workbench-shell.css';
 import '../harness.css';
 
-const Schedules = lazy(() => import('./Schedules.jsx'));
-const RecurringPlans = lazy(() => import('./RecurringPlans.jsx'));
+const Schedules = lazy(() => import('./automation/Schedules.jsx'));
+const RecurringPlans = lazy(() => import('./automation/RecurringPlans.jsx'));
 const MessageSearch = lazy(() => import('./MessageSearch.jsx'));
 const ResultInbox = lazy(() => import('./ResultInbox.jsx'));
 const IdeaLibrary = lazy(() => import('./IdeaLibrary.jsx'));

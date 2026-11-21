@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { errorInfo } from '../lib/errors.js';
+import { errorInfo } from '../../lib/errors.js';
 
 /** 轮询保留已读取的数据。主动刷新可以取代旧请求，慢请求不会被下一轮轮询丢弃。 */
 export function useAutomationList<T>(load: () => Promise<T[] | null>, interval?: number) {

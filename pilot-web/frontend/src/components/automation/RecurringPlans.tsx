@@ -4,11 +4,11 @@ import { Badge } from '@astryxdesign/core/Badge';
 import { Banner } from '@astryxdesign/core/Banner';
 import { Button } from '@astryxdesign/core/Button';
 import { EmptyState } from '@astryxdesign/core/EmptyState';
-import { api } from '../api.js';
-import { errorInfo } from '../lib/errors.js';
-import { formatDateTime } from '../lib/date-format.js';
-import { useStore } from '../store.js';
-import type { RecurringScheduleServiceSeries } from '../types/server.js';
+import { api } from '../../api.js';
+import { errorInfo } from '../../lib/errors.js';
+import { formatDateTime } from '../../lib/date-format.js';
+import { useStore } from '../../store.js';
+import type { RecurringScheduleServiceSeries } from '../../types/server.js';
 import { AutomationDialog } from './AutomationDialog.jsx';
 import { useAutomationList } from './useAutomationList.js';
 

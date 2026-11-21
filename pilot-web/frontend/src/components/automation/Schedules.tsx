@@ -9,11 +9,11 @@ import { Field } from '@astryxdesign/core/Field';
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl';
 import { TextArea } from '@astryxdesign/core/TextArea';
 import { TextInput } from '@astryxdesign/core/TextInput';
-import { api } from '../api.js';
-import { errorInfo } from '../lib/errors.js';
-import { useStore } from '../store.js';
-import type { ScheduleDraft } from '../types/api.js';
-import type { ScheduledTask, RecurringScheduleServiceTemplate } from '../types/server.js';
+import { api } from '../../api.js';
+import { errorInfo } from '../../lib/errors.js';
+import { useStore } from '../../store.js';
+import type { ScheduleDraft } from '../../types/api.js';
+import type { ScheduledTask, RecurringScheduleServiceTemplate } from '../../types/server.js';
 import { AutomationDialog } from './AutomationDialog.jsx';
 import { useAutomationList } from './useAutomationList.js';
 

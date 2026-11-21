@@ -10,8 +10,8 @@ import { errorInfo } from '../lib/errors.js';
 import { formatDateTime, safeIsoDate } from '../lib/date-format.js';
 import { useStore } from '../store.js';
 import type { DeliveryServiceDelivery, DeliveryServiceSettings } from '../types/server.js';
-import { AutomationDialog } from './AutomationDialog.jsx';
-import { useAutomationList } from './useAutomationList.js';
+import { AutomationDialog } from './automation/AutomationDialog.jsx';
+import { useAutomationList } from './automation/useAutomationList.js';
 
 const statuses: Record<string, string> = {
   PENDING: '待投递', SENDING: '投递中', RETRY: '等待重试', FAILED: '投递失败', DELIVERED: '已投递', CANCELLED: '已取消'
