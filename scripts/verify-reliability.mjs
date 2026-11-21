@@ -33,7 +33,7 @@ async function tests(folder) {
 }
 await tests('pilot-web/src/test/js');
 await tests('pilot-web/frontend/scripts');
-await tests('pilot-desktop');
+await tests('pilot-desktop/test');
 await tests('evaluation/harness');
 await run(process.execPath, ['--test', 'evaluation/harness/baselines/2026-11-03-gpt-screening/support/proxy-usage-final.test.mjs']);
 await run(process.execPath, ['pilot-web/frontend/scripts/check.mjs']);

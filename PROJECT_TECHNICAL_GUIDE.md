@@ -376,7 +376,7 @@ RunSnapshotService 在文件写工具第一次修改某个路径前保存原内�
 
 只撤代码、只撤对话和一起撤有不同后果。检查点解决本地操作恢复，Git 负责长期版本历史。未来独立子任务工作区和产物应用还需要另外的提交、验证与恢复协议。
 
-源码：[RunSnapshotService](pilot-server/src/main/java/com/pilot/server/workspace/RunSnapshotService.java)、[ChangeService](pilot-server/src/main/java/com/pilot/server/workspace/ChangeService.java)、[CheckpointController](pilot-server/src/main/java/com/pilot/server/session/CheckpointController.java)、[BranchController](pilot-server/src/main/java/com/pilot/server/git/BranchController.java)。
+源码：[RunSnapshotService](pilot-server/src/main/java/com/pilot/server/workspace/RunSnapshotService.java)、[ChangeService](pilot-server/src/main/java/com/pilot/server/workspace/ChangeService.java)、[CheckpointController](pilot-server/src/main/java/com/pilot/server/session/history/CheckpointController.java)、[BranchController](pilot-server/src/main/java/com/pilot/server/git/BranchController.java)。
 
 ## 11 多子智能体在分担什么工作
 

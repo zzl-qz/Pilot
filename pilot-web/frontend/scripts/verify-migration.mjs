@@ -44,8 +44,7 @@ try {
   await run('frontend-units', ['--import', loader, '--test', ...webTests, ...componentTests]);
   if (!unitOnly) {
     await run('typecheck-and-build', ['scripts/check.mjs']);
-    const desktopTests = (await readdir(resolve(repo, 'pilot-desktop'))).filter(name => name.endsWith('.test.mjs')).sort().map(name => resolve(repo, 'pilot-desktop', name));
-    await run('desktop-units', ['--test', ...desktopTests]);
+    await run('desktop-units', ['--test', 'pilot-desktop/test/*.test.mjs'], repo);
     const smoke = stateSync ? ['navigation', 'composer', 'event-stream', 'workbench-refresh', 'session-management', 'thread-scroll'].map(name => name + '-smoke.mjs')
       : all ? (await readdir(join(root, 'scripts'))).filter(name => name.endsWith('-smoke.mjs') && !name.includes('-package-')).sort()
       : [...new Set(['navigation-smoke.mjs', 'composer-smoke.mjs', ...selected.map(name => name.endsWith('.mjs') ? name : name + '-smoke.mjs')])];
