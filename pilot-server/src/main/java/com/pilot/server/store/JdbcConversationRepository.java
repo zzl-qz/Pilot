@@ -32,11 +32,11 @@ public final class JdbcConversationRepository implements ConversationRepository 
     @Override
     public List<Message> load(String sessionId) {
         return JdbcSupport.query(store,
-            "SELECT role, content, tool_calls, tool_call_id, attachments, image_positions FROM conversation_messages "
+            "SELECT role, content, tool_calls, tool_call_id, attachments, image_positions, reasoning_content FROM conversation_messages "
                 + "WHERE session_id = ? ORDER BY seq",
             statement -> statement.setString(1, sessionId),
             rows -> new Message(rows.getString(1), rows.getString(2), toolCalls(rows.getString(3)), rows.getString(4),
-                attachments(rows.getString(5)), imagePositions(rows.getString(6))),
+                attachments(rows.getString(5)), imagePositions(rows.getString(6)), rows.getString(7)),
             "读取对话记忆失败: " + sessionId);
     }
 
@@ -61,15 +61,16 @@ public final class JdbcConversationRepository implements ConversationRepository 
                 statement.setString(6, message.toolCallId());
                 statement.setString(7, attachments);
                 statement.setString(8, imagePositions);
-                statement.setString(9, now);
+                statement.setString(9, message.reasoningContent().isBlank() ? null : message.reasoningContent());
+                statement.setString(10, now);
             });
         }
         JdbcSupport.inTransaction(store, connection -> {
             JdbcSupport.exec(connection, "DELETE FROM conversation_messages WHERE session_id = ?",
                 statement -> statement.setString(1, sessionId));
             JdbcSupport.batch(connection, "INSERT INTO conversation_messages "
-                + "(session_id, seq, role, content, tool_calls, tool_call_id, attachments, image_positions, created_at) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows);
+                + "(session_id, seq, role, content, tool_calls, tool_call_id, attachments, image_positions, reasoning_content, created_at) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows);
         }, "保存对话记忆失败: " + sessionId);
     }
 

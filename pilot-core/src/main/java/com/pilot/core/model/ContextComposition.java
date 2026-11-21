@@ -64,6 +64,9 @@ public record ContextComposition(long totalTokens, boolean estimated, int attach
                             : "conversation";
                 add(totals, category, remaining);
             }
+            if (!message.reasoningContent().isBlank()) {
+                add(totals, "conversation", message.reasoningContent());
+            }
             for (var call : message.toolCalls()) {
                 calledTools.put(call.callId(), call.name());
                 add(totals, "conversation", call.name() + JSON.writeValueAsString(CanonicalJson.ordered(call.args())));

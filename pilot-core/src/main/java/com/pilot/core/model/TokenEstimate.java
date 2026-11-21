@@ -16,7 +16,7 @@ public final class TokenEstimate {
     public static int of(List<Message> messages) {
         int total = 0;
         for (Message message : messages) {
-            total += of(message.content());
+            total += of(message.content()) + of(message.reasoningContent());
         }
         return total;
     }

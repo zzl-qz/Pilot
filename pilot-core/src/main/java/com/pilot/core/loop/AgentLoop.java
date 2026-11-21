@@ -1253,7 +1253,7 @@ public final class AgentLoop {
                     String trimmed =
                         content.substring(0, head) + "\n[中间已截断以留出上下文]\n" + content.substring(content.length() - tail);
                     messages.set(index, new Message(message.role(), trimmed, message.toolCalls(), message.toolCallId(),
-                        message.attachments(), message.imagePositions()));
+                        message.attachments(), message.imagePositions(), message.reasoningContent()));
                     continue;
                 }
             }
@@ -1287,7 +1287,7 @@ public final class AgentLoop {
                 continue;
             }
             messages.set(i, new Message(message.role(), message.content() + "\n[图片已从本次请求移除以留出上下文]", message.toolCalls(),
-                message.toolCallId(), List.of(), List.of()));
+                message.toolCallId(), List.of(), List.of(), message.reasoningContent()));
             return true;
         }
         return false;

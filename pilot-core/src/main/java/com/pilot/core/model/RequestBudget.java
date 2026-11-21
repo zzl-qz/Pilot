@@ -109,7 +109,7 @@ public final class RequestBudget {
             return message;
         }
         return new Message(message.role(), message.content(), kept, message.toolCallId(), message.attachments(),
-            message.imagePositions());
+            message.imagePositions(), message.reasoningContent());
     }
 
     /** 由所有端点适配器在序列化并发送之前调用，包括摘要、审查、收尾和子代理。 */

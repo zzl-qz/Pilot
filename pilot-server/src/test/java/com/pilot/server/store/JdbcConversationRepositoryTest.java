@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.DriverManager;
 import java.util.List;
 import java.util.Map;
 
@@ -43,7 +44,8 @@ class JdbcConversationRepositoryTest {
         Files.write(image, new byte[] {1, 2, 3});
         List<Message> messages =
             List.of(Message.user("把 P0-1 实现掉", List.of(new Attachment("shot.png", "image/png", image.toString()))),
-                Message.assistant("先读代码", List.of(new ToolCall("c1", "read_file", Map.of("path", "AgentLoop.java")))),
+                Message.assistant("先读代码", List.of(new ToolCall("c1", "read_file", Map.of("path", "AgentLoop.java"))),
+                    "先检查持久化与恢复路径。"),
                 Message.tool("c1", "class AgentLoop { ... }"));
 
         conversations.save("ses_1", messages);
@@ -60,6 +62,7 @@ class JdbcConversationRepositoryTest {
         assertTrue(Files.isRegularFile(Path.of(loaded.get(0).attachments().getFirst().path())),
             "附件引用应继续指向 AttachmentService 的稳定落盘文件");
         assertTrue(loaded.get(1).hasToolCalls());
+        assertEquals("先检查持久化与恢复路径。", loaded.get(1).reasoningContent());
         assertEquals("read_file", loaded.get(1).toolCalls().get(0).name());
         assertEquals("AgentLoop.java", loaded.get(1).toolCalls().get(0).args().get("path"));
         assertEquals("c1", loaded.get(2).toolCallId());
@@ -77,6 +80,25 @@ class JdbcConversationRepositoryTest {
 
         assertEquals(1, loaded.size());
         assertTrue(loaded.getFirst().attachments().isEmpty());
+        assertEquals("", loaded.getFirst().reasoningContent());
+    }
+
+    @Test
+    void migratesLegacyConversationSchemaForReasoningContent() throws Exception {
+        Path legacyDatabase = tempDir.resolve("legacy.db");
+        try (var connection = DriverManager.getConnection("jdbc:sqlite:" + legacyDatabase);
+            var statement = connection.createStatement()) {
+            statement.executeUpdate("CREATE TABLE conversation_messages (session_id TEXT NOT NULL, seq INTEGER NOT NULL, "
+                + "role TEXT NOT NULL, content TEXT NOT NULL, tool_calls TEXT, tool_call_id TEXT, created_at TEXT NOT NULL, "
+                + "PRIMARY KEY (session_id, seq))");
+            statement.executeUpdate("INSERT INTO conversation_messages VALUES "
+                + "('legacy', 1, 'assistant', '旧答复', NULL, NULL, '2026-01-01T00:00:00Z')");
+        }
+
+        var migrated = new JdbcConversationRepository(new SqliteStore(legacyDatabase), JsonMapper.builder().build());
+        assertEquals("", migrated.load("legacy").getFirst().reasoningContent());
+        migrated.save("legacy", List.of(Message.assistant("答复", List.of(), "reasoning")));
+        assertEquals("reasoning", migrated.load("legacy").getFirst().reasoningContent());
     }
 
     @Test

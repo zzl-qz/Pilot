@@ -28,6 +28,18 @@ class RequestBudgetTest {
     }
 
     @Test
+    void includesReasoningMetadataInContextEstimates() {
+        String reasoning = "内部思考".repeat(100);
+        Message withoutReasoning = Message.assistant("", List.of());
+        Message withReasoning = Message.assistant("", List.of(), reasoning);
+
+        assertEquals(TokenEstimate.of(reasoning),
+            ContextComposition.estimate(List.of(withReasoning), List.of(), List.of()).totalTokens()
+                - ContextComposition.estimate(List.of(withoutReasoning), List.of(), List.of()).totalTokens());
+        assertEquals(TokenEstimate.of(reasoning), TokenEstimate.of(List.of(withReasoning)));
+    }
+
+    @Test
     void safetyMarginIsAppliedOnceAgainstTheActiveModel() {
         ModelCapacity.activate(ModelCapacity.of(32_000L, 4_000));
         try {

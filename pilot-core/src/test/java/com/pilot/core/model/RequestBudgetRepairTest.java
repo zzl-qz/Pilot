@@ -61,11 +61,12 @@ class RequestBudgetRepairTest {
         var blank = new ToolCall("  ", "read_file", Map.of());
         var messages = new ArrayList<Message>();
         messages.add(Message.tool("stray", "不该留下"));
-        messages.add(Message.assistant("", List.of(first, duplicate, blank)));
+        messages.add(Message.assistant("", List.of(first, duplicate, blank), "保留的思考"));
         messages.add(Message.tool("call_a", "正文"));
         RequestBudget.closeDanglingToolCalls(messages);
         RequestBudget.validateProtocol(messages);
         assertEquals(1, messages.get(0).toolCalls().size());
+        assertEquals("保留的思考", messages.get(0).reasoningContent());
         assertEquals("正文", messages.get(1).content());
         assertTrue(messages.stream().noneMatch(message -> "stray".equals(message.toolCallId())));
     }

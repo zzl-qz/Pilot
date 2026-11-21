@@ -437,6 +437,7 @@ public final class SqliteStore {
         // 让 checkpoint / resume / 进程重启后仍能重建同一条多模态消息。
         addColumnIfMissing(statement, "conversation_messages", "attachments", "TEXT");
         addColumnIfMissing(statement, "conversation_messages", "image_positions", "TEXT");
+        addColumnIfMissing(statement, "conversation_messages", "reasoning_content", "TEXT");
         // 想法从「只记下来」扩成「可转待办」：状态与关联目标单独成列，正文不动。
         // 老记录没有这一列时按 inbox 处理，语义正好是「只记下来、还没安排」。
         addColumnIfMissing(statement, "session_notes", "status", "TEXT NOT NULL DEFAULT 'inbox'");
@@ -456,7 +457,7 @@ public final class SqliteStore {
             + activityOrder + ")");
         initializeSearch(statement);
         // 记录结构版本，供数据迁移与备份恢复核对；写不进去不影响运行
-        statement.execute("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '5')");
+        statement.execute("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '6')");
     }
 
     private static void initializeSearch(Statement s) throws SQLException {
