@@ -2,7 +2,6 @@ package com.pilot.server.frontend;
 
 import java.io.File;
 import java.io.IOException;
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.CodeSource;
@@ -60,23 +59,15 @@ public final class FrontendStartup {
     }
 
     public static boolean runningFromClasses() {
-        return runningFromClasses(FrontendStartup.class.getProtectionDomain().getCodeSource());
+        return SourceLayout.runningFromClasses(FrontendStartup.class);
     }
 
     static boolean runningFromClasses(CodeSource source) {
-        return source != null && source.getLocation() != null
-            && isDevelopmentLocation(String.valueOf(source.getLocation()));
+        return SourceLayout.runningFromClasses(source);
     }
 
     /** Spring Boot 4 的 jar:nested: 地址也能被解析成目录，只有 file: 目录才是开发态。 */
     static boolean isDevelopmentLocation(String location) {
-        if (location == null || !location.regionMatches(true, 0, "file:", 0, 5)) {
-            return false;
-        }
-        try {
-            return Files.isDirectory(Path.of(URI.create(location)));
-        } catch (RuntimeException e) {
-            return false;
-        }
+        return SourceLayout.isDevelopmentLocation(location);
     }
 }

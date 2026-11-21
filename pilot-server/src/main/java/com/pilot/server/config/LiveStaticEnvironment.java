@@ -9,7 +9,6 @@ import org.springframework.core.Ordered;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.MapPropertySource;
 
-import com.pilot.server.frontend.FrontendStartup;
 import com.pilot.server.runtime.SourceLayout;
 
 /**
@@ -21,7 +20,7 @@ public class LiveStaticEnvironment implements EnvironmentPostProcessor, Ordered 
 
     @Override
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
-        if (!FrontendStartup.runningFromClasses() || environment.containsProperty(LOCATIONS_KEY)
+        if (!SourceLayout.runningFromClasses(LiveStaticEnvironment.class) || environment.containsProperty(LOCATIONS_KEY)
             || environment.containsProperty(LOCATIONS_KEY + "[0]")) {
             return;
         }

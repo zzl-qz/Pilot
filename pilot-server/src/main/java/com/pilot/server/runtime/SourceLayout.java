@@ -1,7 +1,9 @@
 package com.pilot.server.runtime;
 
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.CodeSource;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
@@ -64,6 +66,28 @@ public final class SourceLayout {
 
     public static Path bundledRuntime(Path root) {
         return localData(root).resolve("runtime");
+    }
+
+    /** 判断指定类是否从源码编译输出目录（classes）加载，而非打包后的 fat jar。 */
+    public static boolean runningFromClasses(Class<?> anchor) {
+        return anchor != null && runningFromClasses(anchor.getProtectionDomain().getCodeSource());
+    }
+
+    public static boolean runningFromClasses(CodeSource source) {
+        return source != null && source.getLocation() != null
+            && isDevelopmentLocation(String.valueOf(source.getLocation()));
+    }
+
+    /** Spring Boot 4 的 jar:nested: 地址也能被解析成目录，只有 file: 目录才是开发态。 */
+    public static boolean isDevelopmentLocation(String location) {
+        if (location == null || !location.regionMatches(true, 0, "file:", 0, 5)) {
+            return false;
+        }
+        try {
+            return Files.isDirectory(Path.of(URI.create(location)));
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     private static boolean hasServer(Path root) {
