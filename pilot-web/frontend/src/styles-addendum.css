@@ -1893,10 +1893,6 @@ html[data-theme='light'] .cap-tag[data-tone='error'] { background: rgba(183, 53,
 
 /* ---------- 确认弹窗与消息操作 ---------- */
 .confirm-message { margin: 0; color: var(--ink-2); font-size: 12.5px; line-height: 1.7; }
-.reply-actions { margin-top: 4px; opacity: 0; transition: opacity 0.12s ease; }
-.msg-assistant:hover .reply-actions,
-.msg-assistant:focus-within .reply-actions { opacity: 1; }
-@media (hover: none) { .reply-actions { opacity: 0.7; } }
 .session-action.is-danger:hover { background: rgba(255, 111, 111, 0.14); color: var(--err); }
 
 /* ---------- 检查点弹窗 ---------- */

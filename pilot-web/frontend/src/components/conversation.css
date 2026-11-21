@@ -189,20 +189,26 @@ html[data-theme] .conversation-thread .conversation-reply-head .who {
   font-weight: 600;
   opacity: 1;
 }
-html[data-theme] .conversation-thread .conversation-reply-head .reply-actions {
+html[data-theme] .conversation-thread .conversation-reply-foot {
   display: flex;
-  position: static;
+  align-items: center;
   gap: 2px;
-  height: auto;
+  margin: 2px 0 0 -4px;
   opacity: 1;
   transition: opacity 0.14s ease;
+}
+html[data-theme] .conversation-thread .conversation-reply-time {
+  margin-left: 6px;
+  color: var(--dim);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 @media (hover: hover) and (pointer: fine) {
   html[data-theme] .conversation-thread .msg-user:not(:hover):not(:focus-within) .msg-actions {
     opacity: 0.35;
   }
-  html[data-theme] .conversation-thread .msg-assistant:not(:hover):not(:focus-within) .reply-actions {
-    opacity: 0.48;
+  html[data-theme] .conversation-thread .msg-assistant:not(:hover):not(:focus-within) .conversation-reply-foot {
+    opacity: 0.55;
   }
 }
 html[data-theme] .conversation-thread .message-action { width: 28px; height: 28px; border-radius: 6px; }

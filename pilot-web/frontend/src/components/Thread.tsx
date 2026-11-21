@@ -845,6 +845,9 @@ const Turn = memo(function Turn({ row, isLast }: { row: TurnRow; isLast: boolean
    * 只在最后一轮、且没有任务在跑时给入口，避免对中间轮次重放出错乱的历史。
    */
   const canRegenerate = isLast && !running && !row.reply.live && Boolean(replyText);
+  // Codex 式元信息行：作者留在头部，复制/重新生成与时间一起放到正文下面。
+  const replyAt = row.stats?.finishedAt || row.stats?.startedAt;
+  const replyTime = formatTime(replyAt);
   return (
     <div className="turn-shell" data-run={row.runIds?.join(',') || undefined}>
       {hasProcess && (
@@ -858,18 +861,19 @@ const Turn = memo(function Turn({ row, isLast }: { row: TurnRow; isLast: boolean
         <article className={`msg msg-assistant${row.reply.live ? ' is-streaming' : ''}`}>
           <header className="conversation-reply-head">
             <span className="who">Pilot</span>
-            {replyText && !row.reply.live && (
-              <div className="reply-actions">
-                <CopyControl text={replyText} label="复制这条回复" />
-                {canRegenerate && <IconButton className="message-action" size="sm" variant="ghost"
-                  label="重新生成" icon={<Icon name="refresh" />} onClick={() => useStore.getState().regenerate()} />}
-              </div>
-            )}
             {row.reply.live && <span className="conversation-streaming" role="status">
               <Spinner size="sm" shade="subtle" aria-hidden="true" />正在回复
             </span>}
           </header>
           {replyText && <div className="bubble"><MarkdownBody text={replyText} /></div>}
+          {replyText && !row.reply.live && (
+            <footer className="conversation-reply-foot">
+              <CopyControl text={replyText} label="复制这条回复" />
+              {canRegenerate && <IconButton className="message-action" size="sm" variant="ghost"
+                label="重新生成" icon={<Icon name="refresh" />} onClick={() => useStore.getState().regenerate()} />}
+              {replyTime && <span className="conversation-reply-time">{replyTime}</span>}
+            </footer>
+          )}
         </article>
       )}
       <TurnStats stats={row.stats} reports={row.requests} agentCount={agentCount} />
