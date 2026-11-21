@@ -139,7 +139,7 @@ flowchart TD
 | 工具定义和 JSON Schema | 告诉模型工具名字、参数与用途 | `Tool.parameters`、`ToolDefinition` | 不能代替工具内部的参数和权限验证 |
 | SQLite 与 JDBC | 单机保存项目、会话、事件、消息、计划和配置 | `store` 包 | 本地数据库不能自动恢复已经失去所有权的系统进程 |
 | WAL 与事务 | 缓解读写竞争，并一起保存有关联的数据库变更 | `SqliteStore`、JDBC 仓储 | 不能把数据库与磁盘上多个文件变成同一个原子事务 |
-| SSE 与 EventSource | 后端向浏览器持续推送状态、文字、工具和审批事件 | SessionController、前端 `store/run-state.ts` | 浏览器断线恢复仍需事件存储、游标和去重 |
+| SSE 与 EventSource | 后端向浏览器持续推送状态、文字、工具和审批事件 | SessionHistoryController、前端 `store/run-state.ts` | 浏览器断线恢复仍需事件存储、游标和去重 |
 | 线程池与 CompletableFuture | HTTP 接口及时返回，后台执行任务，等待异步审批或子任务 | AgentRunService、ApprovalBroker、MultiAgentService | 并发不等于工作区隔离 |
 | 虚拟线程 | 以较低线程管理开销处理命令输出和监控等待 | CommandTaskManager | 不限制子进程的文件、网络或 CPU 权限 |
 | ProcessBuilder 与 ProcessHandle | 启动工具命令、读取输出、追踪和停止相关进程 | RunCommandTool、CommandTaskManager | 指定工作目录不能阻止进程访问其他目录 |
@@ -359,7 +359,7 @@ SSE 是服务端向浏览器推送的通道；提交消息、批准工具和停�
 
 界面是 React + TypeScript 单页应用，入口 `pilot-web/frontend/src/main.tsx`；状态集中在 `src/store/` 的 Zustand store，纯逻辑放在 `src/lib/`（如事件合并、附件、草稿、队列），组件在 `src/components/`。构建用 Vite（`pilot-web/frontend/package.json` 的 `build` 脚本），产物由 Maven 打进服务端静态资源，运行时只启动一个后端进程。开发期可用 `pnpm --dir pilot-web/frontend dev` 起前端开发服务器并代理到后端。
 
-源码：[EventEnvelope](pilot-core/src/main/java/com/pilot/core/event/EventEnvelope.java)、[SessionService](pilot-core/src/main/java/com/pilot/core/session/SessionService.java)、[事件类型](pilot-core/src/main/java/com/pilot/core/event/EventType.java)、[SessionController](pilot-server/src/main/java/com/pilot/server/session/SessionController.java)、[前端入口](pilot-web/frontend/src/main.tsx)、[状态与事件流](pilot-web/frontend/src/store/run-state.ts)、[前端事件处理](pilot-web/frontend/src/lib/workbench-sync.ts)。
+源码：[EventEnvelope](pilot-core/src/main/java/com/pilot/core/event/EventEnvelope.java)、[SessionService](pilot-core/src/main/java/com/pilot/core/session/SessionService.java)、[事件类型](pilot-core/src/main/java/com/pilot/core/event/EventType.java)、[SessionHistoryController](pilot-server/src/main/java/com/pilot/server/session/history/SessionHistoryController.java)、[前端入口](pilot-web/frontend/src/main.tsx)、[状态与事件流](pilot-web/frontend/src/store/run-state.ts)、[前端事件处理](pilot-web/frontend/src/lib/workbench-sync.ts)。
 
 ## 10 变更 检查点和 Git 分支分别解决什么
 
@@ -465,7 +465,7 @@ Windows 原生方案可评估受限令牌、文件 ACL、Job Objects 和 AppCont
 
 ### 第一遍阅读五个位置
 
-1. [SessionController](pilot-server/src/main/java/com/pilot/server/session/SessionController.java)：先找 messages 和 events，理解页面输入如何进入、过程如何出来。
+1. [SessionController](pilot-server/src/main/java/com/pilot/server/session/SessionController.java)：先找 messages，了解页面输入怎样进入后端。实时事件从 [SessionHistoryController](pilot-server/src/main/java/com/pilot/server/session/history/SessionHistoryController.java) 查起。
 2. [AgentRunService](pilot-server/src/main/java/com/pilot/server/agent/AgentRunService.java)：看 execute，理解本轮的历史、模型、工具、权限和事件出口如何装配。
 3. [AgentLoop](pilot-core/src/main/java/com/pilot/core/loop/AgentLoop.java)：看循环中模型回答、工具执行、结果回填和结束判断。
 4. [ToolExecutor](pilot-core/src/main/java/com/pilot/core/loop/ToolExecutor.java)：看允许、拒绝、审批和真正开始执行前的检查。
