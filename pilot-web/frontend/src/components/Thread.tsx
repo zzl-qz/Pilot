@@ -935,6 +935,13 @@ function isSummaryClick(event: React.MouseEvent<HTMLDetailsElement>) {
 /** 只有失败和等待批准会在展开组内自动露出详情；「已中断」只是收尾常态，不替用户撑开行。 */
 const AUTO_REVEAL_STATUS = new Set(['error', 'wait']);
 
+/** 只给真正的增删行着色，文件头的 +++ / --- 保持原样。 */
+function diffLineKind(line: string) {
+  if (line.startsWith('+') && !line.startsWith('+++')) return 'added';
+  if (line.startsWith('-') && !line.startsWith('---')) return 'removed';
+  return '';
+}
+
 /**
  * 操作组单独 memo：流式输出时只有 reply 在变，tools 数组引用不变，这一整块（可能几十行）
  * 直接跳过比对。默认收起为单行摘要，展开后在固定最大高度内滚动，不把对话拉成无限高度。
@@ -1115,6 +1122,16 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
     ? `${display.fullTarget}${display.lineRange ? ` ${display.lineRange}` : ''}`
     : `${toolLabel(tool.name)} · ${status.split('：')[0]}`;
 
+  /* 正文按内容换渲染：网页结果走 markdown，带 unified diff 头的逐行着色，其余保持原样纯文本。 */
+  const renderBody = () => {
+    if (isWebResult) return <div className="tool-web-result"><MarkdownBody text={body} /></div>;
+    if (!hasUnifiedDiff) return <pre tabIndex={0}>{body}</pre>;
+    return <pre className="tool-output-diff" tabIndex={0}>{body.split('\n').map((line, index) => {
+      const kind = diffLineKind(line);
+      return <span key={index} className={kind ? `is-${kind}` : undefined}>{line || '\u200b'}{'\n'}</span>;
+    })}</pre>;
+  };
+
   /* 点击展开靠近限高视口底部的行时，只微调内部滚动列表，确保详情立即可见而不牵动外层消息流。 */
   useLayoutEffect(() => {
     if (!open || !hasDetail || !userToggled.current) return;
@@ -1219,15 +1236,7 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
           {imagePreview && !imagePreviewFailed && <img className="tool-image-preview" src={imagePreview}
             alt={`图片预览：${display.primary}`} loading="lazy" onError={() => setImagePreviewFailed(true)} />}
           {imagePreviewFailed && <p className="tool-output-note" role="status">图片预览加载失败，文件可能已移动或无法读取。</p>}
-          {isWebResult
-            ? <div className="tool-web-result"><MarkdownBody text={body} /></div>
-            : hasUnifiedDiff
-              ? <pre className="tool-output-diff" tabIndex={0}>{body.split('\n').map((line, index) => {
-                const kind = line.startsWith('+') && !line.startsWith('+++') ? 'added'
-                  : line.startsWith('-') && !line.startsWith('---') ? 'removed' : '';
-                return <span key={index} className={kind ? `is-${kind}` : undefined}>{line || '\u200b'}{'\n'}</span>;
-              })}</pre>
-              : <pre tabIndex={0}>{body}</pre>}
+          {renderBody()}
         </div>
       )}
       {running && <AskChoices tool={tool} />}

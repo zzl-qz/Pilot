@@ -134,11 +134,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         boolean includeEarlierReasoning) {
         ModelCapacity capacity = ModelCapacity.active();
         RequestBudget.enforce(messages, definitions, capacity);
-        int lastUser = Message.lastRealUserTurnIndex(messages);
-        List<Map<String, Object>> items = new ArrayList<>();
-        for (int i = 0; i < messages.size(); i++) {
-            items.add(messagePayload(messages.get(i), includeEarlierReasoning || i > lastUser));
-        }
+        List<Map<String, Object>> items = messageItems(messages, includeEarlierReasoning);
         List<Map<String, Object>> tools = definitions == null ? new ArrayList<>()
             : new ArrayList<>(definitions.stream().map(this::toolPayload).map(LinkedHashMap::new).toList());
         Map<String, Object> body = new LinkedHashMap<>();
@@ -171,27 +167,42 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             body.put("prompt_cache_key",
                 "pilot-" + MeteredModelClient.hash(ModelRequestScope.current().cacheGroup()).substring(0, 32));
         }
-        if (!cacheParametersDisabled && ((promptCaching && !profile.cacheMode().equals(ModelProfile.CACHE_NONE))
+        applyCacheMarkers(tools, items, messages);
+        return body;
+    }
+
+    private List<Map<String, Object>> messageItems(List<Message> messages, boolean includeEarlierReasoning) {
+        int lastUser = Message.lastRealUserTurnIndex(messages);
+        List<Map<String, Object>> items = new ArrayList<>(messages.size());
+        for (int i = 0; i < messages.size(); i++) {
+            items.add(messagePayload(messages.get(i), includeEarlierReasoning || i > lastUser));
+        }
+        return items;
+    }
+
+    /** 三个边界：工具、固定 system、最近可缓存消息。不会随着对话积累无限标记。 */
+    private void applyCacheMarkers(List<Map<String, Object>> tools, List<Map<String, Object>> items,
+        List<Message> messages) {
+        if (cacheParametersDisabled || !((promptCaching && !profile.cacheMode().equals(ModelProfile.CACHE_NONE))
             || profile.cacheMode().equals(ModelProfile.CACHE_EXPLICIT))) {
-            Map<String, Object> marker = new LinkedHashMap<>();
-            marker.put("type", "ephemeral");
-            if (!profile.cacheTtl().isBlank()) {
-                marker.put("ttl", profile.cacheTtl());
-            }
-            // 三个边界：工具、固定 system、最近可缓存消息。不会随着对话积累无限标记。
-            if (!tools.isEmpty()) {
-                tools.getLast().put("cache_control", marker);
-            }
-            if (!items.isEmpty() && messages.getFirst().role().equals("system")) {
-                markMessage(items.getFirst(), marker, true);
-            }
-            for (int index = items.size() - 1; index > 0; index--) {
-                if (markMessage(items.get(index), marker, false)) {
-                    break;
-                }
+            return;
+        }
+        Map<String, Object> marker = new LinkedHashMap<>();
+        marker.put("type", "ephemeral");
+        if (!profile.cacheTtl().isBlank()) {
+            marker.put("ttl", profile.cacheTtl());
+        }
+        if (!tools.isEmpty()) {
+            tools.getLast().put("cache_control", marker);
+        }
+        if (!items.isEmpty() && messages.getFirst().role().equals("system")) {
+            markMessage(items.getFirst(), marker, true);
+        }
+        for (int index = items.size() - 1; index > 0; index--) {
+            if (markMessage(items.get(index), marker, false)) {
+                break;
             }
         }
-        return body;
     }
 
     private static boolean requiresEarlierReasoningReplay(int statusCode, String errorBody) {
