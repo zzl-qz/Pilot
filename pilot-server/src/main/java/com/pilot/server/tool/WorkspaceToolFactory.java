@@ -52,6 +52,7 @@ import com.pilot.core.tool.file.SandboxCreateFileTool;
 import com.pilot.core.tool.file.SandboxEditFileTool;
 import com.pilot.core.tool.file.SearchTool;
 import com.pilot.core.tool.office.OfficeTool;
+import com.pilot.core.tool.process.ProcessListTool;
 import com.pilot.core.workspace.AgentScope;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.attachment.AttachmentReferences;
@@ -266,6 +267,7 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
         registry.register(new LocalResourcesTool());
         registry.register(new ApplyPatchTool(validator, snapshots, reads));
         registry.register(new RunCommandTool(validator, commandChanges()));
+        registry.register(new ProcessListTool());
         if (planSink != null) {
             registry.register(new UpdatePlanTool(planSink, plans.get()));
         }
