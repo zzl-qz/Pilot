@@ -39,6 +39,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunStarted;
+import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.project.Project;
 import com.pilot.core.project.ProjectRepository;
@@ -720,7 +721,8 @@ public class SessionController {
     public HistoryResponse history(@PathVariable String id,
         @RequestParam(name = "limit", defaultValue = "60") int limit,
         @RequestParam(name = "before", required = false) Long before,
-        @RequestParam(name = "after", required = false) Long after) {
+        @RequestParam(name = "after", required = false) Long after,
+        @RequestParam(name = "compactTools", defaultValue = "false") boolean compactTools) {
         requireSession(id);
         if (before != null && after != null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "before 和 after 不能同时使用");
@@ -733,17 +735,28 @@ public class SessionController {
             after != null ? !page.isEmpty() && page.get(page.size() - 1).sequence() < sessions.latestSequence(id)
                 : !page.isEmpty() && page.get(0).sequence() > 1;
         int total = countOf(id);
+        List<?> responseEvents = compactTools ? page.stream().map(event -> {
+            if (!(event.payload() instanceof ToolCompleted completed)) return event;
+            String summary = completed.resultSummary();
+            if (summary == null || summary.isEmpty()) return event;
+            int end = summary.offsetByCodePoints(0, Math.min(80, summary.codePointCount(0, summary.length())));
+            String preview = summary.substring(0, end).lines().findFirst().orElse("");
+            var compact = new EventEnvelope(event.sequence(), event.timestamp(), event.type(), event.sessionId(),
+                event.runId(), new ToolCompleted(completed.callId(), preview, completed.latencyMs()),
+                event.version(), event.previewId(), event.previewOffset());
+            return objectMapper.valueToTree(compact).asObject().put("detailAvailable", true);
+        }).toList() : page;
         if (revision != sessions.historyRevision(id)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "会话历史已变化，请重新加载");
         }
-        return new HistoryResponse(page, hasMore, total, revision);
+        return new HistoryResponse(responseEvents, hasMore, total, revision);
     }
 
     /**
      * @param hasMore 是否还有更早的事件
      * @param total   该会话的事件总数
      */
-    public record HistoryResponse(List<EventEnvelope> events, boolean hasMore, int total, long historyRevision) {
+    public record HistoryResponse(List<?> events, boolean hasMore, int total, long historyRevision) {
     }
 
     @org.springframework.beans.factory.annotation.Value("${pilot.events.queue-bytes:8388608}")

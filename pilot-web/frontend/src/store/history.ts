@@ -85,7 +85,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
       earlierInflight = null;
       earlierRequest = null;
       try {
-        const data = requireData(await api.history(sessionId, { limit: thread.history.pageSize }));
+        const data = requireData(await api.history(sessionId, { limit: thread.history.pageSize, compactTools: true }));
         if (get().sessionId !== sessionId || historyGeneration !== generation) {
           return false;
         }
@@ -143,7 +143,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
       if (earlierInflight && earlierInflight.sessionId === sessionId && earlierInflight.before === before) {
         return earlierInflight.promise;
       }
-      const promise = api.history(sessionId, { limit: thread.history.pageSize, before })
+      const promise = api.history(sessionId, { limit: thread.history.pageSize, before, compactTools: true })
         .then((result) => {
           const data = requireData(result);
           if (!currentHistoryPage(sessionId, generation, data.historyRevision)) {
@@ -210,7 +210,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
         draft.thread.history.error = false;
       });
       try {
-        const data = requireData(await api.history(sessionId, { limit: thread.history.pageSize, before }));
+        const data = requireData(await api.history(sessionId, { limit: thread.history.pageSize, before, compactTools: true }));
         if (!currentHistoryPage(sessionId, generation, data.historyRevision)) {
           return false;
         }
@@ -295,7 +295,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
         return false;
       }
       try {
-        const data = requireData(await api.history(sessionId, { limit: thread.history.pageSize, after }));
+        const data = requireData(await api.history(sessionId, { limit: thread.history.pageSize, after, compactTools: true }));
         if (!currentHistoryPage(sessionId, generation, data.historyRevision)) {
           return false;
         }

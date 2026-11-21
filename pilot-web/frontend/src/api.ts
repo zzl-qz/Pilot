@@ -181,13 +181,16 @@ export const api = {
   activeRun: (id: string) => apiJson<ApiResults['activeRun']>(`/api/sessions/${encodeURIComponent(id)}/runs/active`),
   approval: (callId: string, approved: boolean) => apiJson<ApiResults['approval']>(`/api/approvals/${encodeURIComponent(callId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ approved }) }),
   answerQuestion: (id: string, callId: string, choice: string) => apiJson<ApiResults['answerQuestion']>(`/api/sessions/${encodeURIComponent(id)}/questions/${encodeURIComponent(callId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ choice }) }),
-  history: (id: string, { limit, before, after }: { limit?: number; before?: number; after?: number } = {}) => {
+  history: (id: string, { limit, before, after, compactTools }: { limit?: number; before?: number; after?: number; compactTools?: boolean } = {}) => {
     const params = new URLSearchParams();
     if (limit) params.set('limit', String(limit));
     if (before != null) params.set('before', String(before));
     if (after != null) params.set('after', String(after));
+    if (compactTools) params.set('compactTools', 'true');
     return apiJson<ApiResults['history']>(`/api/sessions/${encodeURIComponent(id)}/history?${params}`);
   },
+  event: (id: string, sequence: number, revision: number) => apiJson<{ event: import('./types/events.js').EventEnvelope; historyRevision: number }>(
+    `/api/sessions/${encodeURIComponent(id)}/events/${sequence}?revision=${revision}`),
   checkpoints: (id: string, sequence: number) => apiJson<ApiResults['checkpoints']>(`/api/sessions/${encodeURIComponent(id)}/checkpoints?sequence=${sequence}`),
   // 回退必须带 mode（code / conversation / both），分支带上 revision 做乐观锁
   restoreCheckpoint: (id: string, body: { sequence: number; mode: string; revision?: number; operationId?: string }) => apiJson<ApiResults['restoreCheckpoint']>(`/api/sessions/${encodeURIComponent(id)}/checkpoints/restore`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }),

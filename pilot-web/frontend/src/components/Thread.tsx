@@ -1025,28 +1025,52 @@ function toolCounts(tools: ToolView[]) {
  * 单条操作。默认收起为单行摘要，点击后再展开详情；状态放组件内，流式刷新不会顶掉用户折叠状态。
  */
 const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
-  const rawBody = String(tool.body || '').trim();
-  const [open, setOpen] = useState(AUTO_REVEAL_STATUS.has(tool.status));
+  const sequence = tool.detailSequence;
+  const autoReveal = sequence == null && AUTO_REVEAL_STATUS.has(tool.status);
+  const [open, setOpen] = useState(autoReveal);
+  const [detail, setDetail] = useState<{ key: string; state: 'loading' | 'error' | 'ready'; body?: string }>();
   const [copied, setCopied] = useState(false);
   const [imagePreviewFailed, setImagePreviewFailed] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
   const userToggled = useRef(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => { if (AUTO_REVEAL_STATUS.has(tool.status)) setOpen(true); }, [tool.status]);
+  useEffect(() => { if (autoReveal) setOpen(true); }, [autoReveal]);
   useEffect(() => () => clearTimeout(copyTimer.current), []);
   const sessionLive = useStore(state => state.running);
+  const sessionId = useStore(state => state.sessionId);
+  const sessionEpoch = useStore(state => state.sessionEpoch);
+  const historyRevision = useStore(state => state.historyRevision);
+  const detailKey = JSON.stringify([sessionId, sessionEpoch, historyRevision, sequence, tool.callId]);
+  const currentDetail = detail?.key === detailKey ? detail : undefined;
+  const detailBody = (sequence == null ? tool.body : currentDetail?.body || '').trim();
+  const loadDetail = async () => {
+    if (sequence == null || currentDetail?.state === 'ready' || currentDetail?.state === 'loading') return;
+    setDetail({ key: detailKey, state: 'loading' });
+    try {
+      if (!sessionId || historyRevision == null) throw new Error('缺少历史版本');
+      const result = await api.event(sessionId, sequence, historyRevision);
+      const current = useStore.getState();
+      if (current.sessionId !== sessionId || current.sessionEpoch !== sessionEpoch || current.historyRevision !== historyRevision) return;
+      const event = result?.event;
+      if (result?.historyRevision !== historyRevision || event?.sequence !== sequence || event.type !== 'tool.completed'
+        || event.sessionId !== sessionId || event.payload.callId !== tool.callId) throw new Error('历史版本已变化');
+      setDetail(previous => previous?.key === detailKey
+        ? { key: detailKey, state: 'ready', body: event.payload.resultSummary || '' } : previous);
+    } catch {
+      setDetail(previous => previous?.key === detailKey ? { key: detailKey, state: 'error' } : previous);
+    }
+  };
   const running = tool.status === 'run' && sessionLive;
   const shownStatus = tool.status === 'run' && !sessionLive ? 'interrupted' : tool.status;
   const attention = ['error', 'wait', 'interrupted'].includes(shownStatus);
   // 协议里失败正文常带 ERROR: 前缀，界面改成「失败：」。
-  const body = tool.status === 'error' && /^ERROR:\s*/i.test(rawBody)
-    ? rawBody.replace(/^ERROR:\s*/i, '失败：')
-    : rawBody;
+  const body = tool.status === 'error' && /^ERROR:\s*/i.test(detailBody)
+    ? detailBody.replace(/^ERROR:\s*/i, '失败：')
+    : detailBody;
   useSecondTick(running);
   const seconds = running ? elapsedSeconds(tool.startedAt, tool.finishedAt) : 0;
   const meta = formatLatency(tool.meta === '未返回结果' ? '' : (tool.meta || ''));
-  const display = parseToolDisplay(tool);
-  const sessionId = useStore(state => state.sessionId);
+  const display = parseToolDisplay(currentDetail?.body == null ? tool : { ...tool, body: currentDetail.body });
   const imagePreview = tool.name === 'read_file' && /^图片\s/.test(body)
     && /\.(png|jpe?g|gif|webp)$/i.test(display.filePath) && sessionId
     ? `/api/sessions/${encodeURIComponent(sessionId)}/file/image?path=${encodeURIComponent(display.filePath)}`
@@ -1055,7 +1079,7 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
   const hasUnifiedDiff = /^(?:diff --git |@@ |\+\+\+ |--- )/m.test(body);
   const canOpenDiff = ['edit_file', 'create_file', 'apply_patch'].includes(tool.name) && Boolean(display.filePath);
   const status = TOOL_STATUS_TITLES[shownStatus] || '状态未知';
-  const hasDetail = Boolean(body);
+  const hasDetail = Boolean(body) || sequence != null;
   const Header = hasDetail ? 'button' : 'div';
   const detailLabel = display.fullTarget
     ? `${display.fullTarget}${display.lineRange ? ` ${display.lineRange}` : ''}`
@@ -1109,7 +1133,11 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
         className="conversation-tool-line"
         type={hasDetail ? 'button' : undefined}
         aria-expanded={hasDetail ? open : undefined}
-        onClick={hasDetail ? () => { userToggled.current = true; setOpen(value => !value); } : undefined}
+        onClick={hasDetail ? () => {
+          userToggled.current = true;
+          setOpen(!open);
+          if (!open) void loadDetail();
+        } : undefined}
       >
         <span className="conversation-tool-name">{toolLabel(tool.name)}</span>
         <ProcessKindIcon kind={display.kind} />
@@ -1137,6 +1165,12 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
       </Header>
       {open && hasDetail && (
         <div className="tool-body">
+          {currentDetail?.state === 'loading' && <p role="status">正在加载操作详情…</p>}
+          {sequence != null && (!currentDetail || currentDetail.state === 'error') && (
+            <p role="alert">{currentDetail ? '详情加载失败。' : '详情尚未加载。'}<button type="button" className="tool-body-action" onClick={() => void loadDetail()}>{currentDetail ? '重试' : '加载'}</button></p>
+          )}
+          {currentDetail?.state === 'ready' && !body && <p>没有操作详情。</p>}
+          {body && <>
           <div className="tool-body-bar">
             <span className="tool-body-target" title={detailLabel}>{detailLabel}</span>
             <div className="tool-body-actions">
@@ -1176,6 +1210,7 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
             alt={`图片预览：${display.primary}`} loading="lazy" onError={() => setImagePreviewFailed(true)} />}
           {imagePreviewFailed && <p className="tool-output-note" role="status">图片预览加载失败，文件可能已移动或无法读取。</p>}
           {renderBody()}
+          </>}
         </div>
       )}
       {running && <AskChoices tool={tool} />}

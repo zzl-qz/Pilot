@@ -690,6 +690,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
         row.status = failed ? 'error' : 'ok';
         row.meta = `${event.payload.latencyMs} ms`;
         row.body = event.payload.resultSummary || '';
+        row.detailSequence = event.detailAvailable ? event.sequence : undefined;
         syncToolRow(turn!, row);
       }
       record(draft, event, {
