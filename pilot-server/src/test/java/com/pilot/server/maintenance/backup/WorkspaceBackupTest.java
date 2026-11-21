@@ -1,4 +1,4 @@
-package com.pilot.server.maintenance;
+package com.pilot.server.maintenance.backup;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -93,7 +93,7 @@ class WorkspaceBackupTest {
         assertTrue(restored.findByPath(newTree.toRealPath()).isPresent());
         assertTrue(restored.preview(newTree.toRealPath()).conflict().isEmpty());
         restored.handoff(newTree.toRealPath());
-        assertEquals("staged\nunstaged\n", Files.readString(newBase.resolve("tracked.txt")));
+        assertEquals(List.of("staged", "unstaged"), Files.readAllLines(newBase.resolve("tracked.txt")));
     }
 
     @Test

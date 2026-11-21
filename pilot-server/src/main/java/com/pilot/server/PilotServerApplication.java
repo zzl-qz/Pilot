@@ -8,7 +8,7 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 import com.pilot.server.frontend.FrontendStartup;
-import com.pilot.server.maintenance.MaintenanceCli;
+import com.pilot.server.maintenance.backup.MaintenanceCli;
 
 @SpringBootApplication
 @ConfigurationPropertiesScan

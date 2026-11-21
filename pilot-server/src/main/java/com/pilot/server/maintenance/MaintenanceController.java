@@ -17,6 +17,7 @@ import com.pilot.core.exec.ExecutionBackends;
 import com.pilot.server.common.data.DataMaintenance;
 import com.pilot.server.common.data.StorageHealth;
 import com.pilot.server.compat.PluginCompatService;
+import com.pilot.server.maintenance.backup.BackupService;
 
 import lombok.RequiredArgsConstructor;
 

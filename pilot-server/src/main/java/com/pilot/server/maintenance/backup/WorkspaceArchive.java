@@ -1,4 +1,4 @@
-package com.pilot.server.maintenance;
+package com.pilot.server.maintenance.backup;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -8,6 +8,7 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.DosFileAttributeView;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.ArrayList;
@@ -163,6 +164,17 @@ final class WorkspaceArchive {
             gitText(scratch, "fetch", "--no-tags", "--", base.toString(), workspace.baseline() + ":" + BASELINE);
             gitText(scratch, "bundle", "create", archive.resolve("history.bundle").toString(), HEAD, BASELINE);
         } finally {
+            // Git for Windows 给临时仓库中的对象设置只读属性，删除前需要解除。
+            Path objects = scratch.resolve("objects");
+            if (Files.isDirectory(objects, LinkOption.NOFOLLOW_LINKS)
+                && Files.getFileStore(scratch).supportsFileAttributeView(DosFileAttributeView.class)) {
+                try (var files = Files.find(objects, Integer.MAX_VALUE, (path, attrs) -> attrs.isRegularFile())) {
+                    for (var paths = files.iterator(); paths.hasNext();) {
+                        var dos = Files.getFileAttributeView(paths.next(), DosFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+                        if (dos.readAttributes().isReadOnly()) dos.setReadOnly(false);
+                    }
+                }
+            }
             BackupManifest.deleteTree(scratch);
         }
     }
@@ -336,7 +348,7 @@ final class WorkspaceArchive {
 
     private static void git(Path root, Path output, String... args) throws IOException {
         List<String> command = new ArrayList<>(List.of("git", "--no-optional-locks", "-C", root.toString(), "-c",
-            "core.autocrlf=false", "-c", "core.quotepath=false", "-c", "gc.auto=0"));
+            "core.autocrlf=false", "-c", "core.quotepath=false", "-c", "core.longpaths=true", "-c", "gc.auto=0"));
         command.addAll(List.of(args));
         Path errors = Files.createTempFile("pilot-git-", ".err");
         try {
