@@ -3,7 +3,7 @@ import test from 'node:test';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { saveSessionMarkdown } from './session-export.mjs';
+import { saveSessionMarkdown } from '../session-export.mjs';
 
 test('使用用户所选位置保存完整 UTF-8 文件，并返回实际路径', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'pilot-export-'));

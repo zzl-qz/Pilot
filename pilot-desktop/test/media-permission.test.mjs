@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { installMicrophonePermissions } from './media-permission.mjs';
+import { installMicrophonePermissions } from '../media-permission.mjs';
 for (const platform of ['darwin', 'win32', 'linux']) {
   test(`${platform} 只对 Pilot 主页面授权音频，macOS 请求系统权限`, async () => {
     let request, check, asked = 0;

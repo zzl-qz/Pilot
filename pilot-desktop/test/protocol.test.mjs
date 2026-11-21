@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { agentMayOperate, agentMayTouchPage, formatPageLogs, markerPath, partitionName, snapBounds, userPageUrl } from './protocol.mjs';
+import { agentMayOperate, agentMayTouchPage, formatPageLogs, markerPath, partitionName, snapBounds, userPageUrl } from '../protocol.mjs';
 
 test('人的地址栏：本机补 http，外网补 https，拒绝别的协议', () => {
   assert.equal(userPageUrl('localhost:5173'), 'http://localhost:5173/');

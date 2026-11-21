@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { localDirectoryPickerAvailable, selectProjectDirectories } from './directory-picker.mjs';
+import { localDirectoryPickerAvailable, selectProjectDirectories } from '../directory-picker.mjs';
 
 test('本机工作台支持 IPv4、IPv6 和 localhost，远程与相似主机不打开本机目录', async () => {
   for (const url of ['http://127.0.0.1:9999', 'https://localhost:443', 'http://[::1]:9999']) assert.equal(localDirectoryPickerAvailable(url), true);

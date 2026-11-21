@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { desktopRoot, electronBinary, prepareDevelopmentHost } from './brand-host.mjs';
+import { desktopRoot, electronBinary, prepareDevelopmentHost } from '../brand-host.mjs';
 
 test('保留各平台原始 Electron 入口，供开发壳准备及非 macOS 启动使用', () => {
   const root = resolve('test-root');

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { offlinePage } from './offline-page.mjs';
+import { offlinePage } from '../offline-page.mjs';
 
 test('离线页显示实际服务并保留重试地址', () => {
   const page = offlinePage('http://localhost:12345/app?q=a&b=2');

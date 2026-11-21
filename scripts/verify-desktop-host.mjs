@@ -2,7 +2,7 @@
 // 在实际宿主上执行，Gitee/GitHub runner 和本地使用同一入口。只使用隔离数据，不调用模型。
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {mkdir,readFile,writeFile,readdir} from 'node:fs/promises';
+import {mkdir,readFile,writeFile} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {release} from 'node:os';
@@ -41,8 +41,7 @@ try{
     assert.ok(first.ready&&second.ready,first.message||second.message);assert.equal(first.binary,second.binary);
     report.electronVersion=JSON.parse(await readFile(join(root,'pilot-desktop/node_modules/electron/package.json'),'utf8')).version;
   });
-  const tests=(await readdir(join(root,'pilot-desktop'))).filter(name=>name.endsWith('.test.mjs')).sort().map(name=>join('pilot-desktop',name));
-  await run('desktop-units',['--test',...tests]);
+  await run('desktop-units',['--test','pilot-desktop/test/*.test.mjs']);
   await run('source-launcher',['pilot-desktop/launcher-smoke.mjs']);
   await run('desktop-security',['pilot-desktop/security-smoke.mjs']);
   await run('desktop-reconnect',['pilot-desktop/ui-smoke.mjs']);

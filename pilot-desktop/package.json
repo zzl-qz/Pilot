@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node start.mjs",
     "postinstall": "node prepare-runtime.mjs",
-    "test": "node --test *.test.mjs",
+    "test": "node --test \"test/*.test.mjs\"",
     "smoke": "node smoke.mjs",
     "test:ui": "node ui-smoke.mjs",
     "test:browser": "node browser-viewport-smoke.mjs",

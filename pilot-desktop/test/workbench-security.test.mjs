@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { configuredWorkbenchUrl, workbenchOrigin, isWorkbenchUrl, trustedWorkbench, workbenchIpc, installWorkbenchNavigation } from './workbench-security.mjs';
+import { configuredWorkbenchUrl, workbenchOrigin, isWorkbenchUrl, trustedWorkbench, workbenchIpc, installWorkbenchNavigation } from '../workbench-security.mjs';
 
 const home = 'http://127.0.0.1:9999';
 

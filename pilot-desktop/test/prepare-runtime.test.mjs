@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,rm,chmod,readdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {dirname,join,relative} from 'node:path';
-import {electronBinary} from './brand-host.mjs';
-import {prepareDesktopRuntime,runtimeReady,binaryArchitectures} from './prepare-runtime.mjs';
+import {electronBinary} from '../brand-host.mjs';
+import {prepareDesktopRuntime,runtimeReady,binaryArchitectures} from '../prepare-runtime.mjs';
 async function fixture(){
  const root=await mkdtemp(join(tmpdir(),'pilot-desktop-runtime-中文 '));const folder=join(root,'node_modules/electron');await mkdir(folder,{recursive:true});
  await writeFile(join(folder,'package.json'),'{"version":"45.2.1"}');await writeFile(join(folder,'install.js'),'fixture');

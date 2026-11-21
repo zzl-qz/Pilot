@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { windowSizeMenuItem, workbenchMenuItems, workbenchShortcut } from './platform-menu.mjs';
+import { windowSizeMenuItem, workbenchMenuItems, workbenchShortcut } from '../platform-menu.mjs';
 
 test('macOS 使用系统窗口 Zoom 动作', () => {
   assert.equal(windowSizeMenuItem('darwin').role, 'zoom');

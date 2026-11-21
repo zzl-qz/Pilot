@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { mobileBridgeOptions, parseMobileAdmin, resolveMobileJava } from './mobile-bridge.mjs';
+import { mobileBridgeOptions, parseMobileAdmin, resolveMobileJava } from '../mobile-bridge.mjs';
 
 test('移动连接仅接入本机，拒绝外部服务与不支持的平台', () => {
   const options = { pilotUrl: 'http://127.0.0.1:9999', libraries: '/tmp/path with spaces/lib', dataDir: '/tmp/data with spaces', env: {}, platform: 'linux', arch: 'x64' };
