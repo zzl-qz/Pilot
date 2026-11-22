@@ -11,8 +11,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-import com.pilot.core.util.RealPaths;
 import com.pilot.core.util.HostOs;
+import com.pilot.core.workspace.RealPaths;
 
 /**
  * 把一条命令放进当前操作系统能提供的文件系统沙箱。
