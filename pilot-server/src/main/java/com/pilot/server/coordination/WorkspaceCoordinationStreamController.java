@@ -50,6 +50,7 @@ public class WorkspaceCoordinationStreamController {
     private final CoordinationScopeResolver scopes;
     private final WorkspaceCoordinationEventBus events;
     private final SessionEventTransport streams;
+    private final SessionPresenceRegistry presence;
     private final ObjectMapper objectMapper;
 
     @Value("${pilot.workspace-events.buffer-bytes:1048576}")
@@ -69,10 +70,13 @@ public class WorkspaceCoordinationStreamController {
 
     @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public void events(@RequestParam String workspace, @RequestParam(name = "after", required = false) Long after,
+        @RequestParam(name = "session", required = false) String session,
         @RequestHeader(name = "Last-Event-ID", required = false) Long lastEventId, HttpServletRequest request,
         HttpServletResponse response) throws IOException {
         String key = new PathValidator(Path.of(workspace)).root().toString();
         ProjectCoordinationScope scope = scopes.scopeForWorkspace(key, sessions.list());
+        String watcher = watcherOf(session, scope);
+        presence.markOnline(watcher);
         long cursor = Math.max(0, after != null ? after : lastEventId != null ? lastEventId : 0L);
         AtomicReference<WorkspaceEventSubscription> subscription = new AtomicReference<>();
         var stream = new AsyncEventStream(streams, request, response, streamBytes,
@@ -81,6 +85,7 @@ public class WorkspaceCoordinationStreamController {
                 if (current != null) {
                     current.close();
                 }
+                presence.markOffline(watcher);
             }, () -> {
             });
         long earliest = events.earliestRetainedSequence();
@@ -104,10 +109,27 @@ public class WorkspaceCoordinationStreamController {
                 handle.close();
             }
         } catch (IllegalStateException failure) {
+            presence.markOffline(watcher);
             sendControl(stream, "workspace.error",
                 Map.of("message", failure.getMessage() == null ? "无法建立工作区事件订阅" : failure.getMessage()));
             stream.finish();
         }
+    }
+
+    /**
+     * 事件流挂在哪个会话名下：只有登记过、且与本流解析出的协调范围一致时才计入在线，
+     * 避免拿任意会话标识刷在线状态。
+     */
+    private String watcherOf(String session, ProjectCoordinationScope scope) {
+        if (session == null || session.isBlank()) {
+            return null;
+        }
+        return sessions.find(session)
+            .map(found -> scopes.scopeForWorkspace(found.workspace(), sessions.list()))
+            .filter(candidate -> scope.projectId() == null || candidate.projectId() == null
+                || scope.projectId().equals(candidate.projectId()))
+            .map(candidate -> session)
+            .orElse(null);
     }
 
     /** 订阅与传输的实时指标，供看板排查连接与丢弃情况。 */

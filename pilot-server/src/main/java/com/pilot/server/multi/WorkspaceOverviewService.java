@@ -134,18 +134,6 @@ public class WorkspaceOverviewService {
             .map(entry -> new FileOwner(entry.getKey(), List.copyOf(entry.getValue()))).toList();
     }
 
-    private boolean sameWorkspace(Session session, String key) {
-        if (session.workspace() == null || session.workspace().isBlank()) {
-            return false;
-        }
-        try {
-            return new PathValidator(Path.of(session.workspace())).root().toString().equals(key);
-        } catch (RuntimeException e) {
-            log.debug("跳过工作区已不可用的会话 {}：{}", session.id(), e.getMessage());
-            return false;
-        }
-    }
-
     /**
      * 某个工作区的当前全貌；{@code fileOwners} 只列被多个会话同时改着的文件。
      *
