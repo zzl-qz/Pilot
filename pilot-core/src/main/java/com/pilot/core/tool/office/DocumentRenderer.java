@@ -44,11 +44,11 @@ public final class DocumentRenderer {
                 return "pdf " + OfficePdf.create(target, spec, paths);
             }
             case "xlsx" -> {
-                OfficeTool.workbook(spec, target);
+                OfficeWorkbookRenderer.create(spec, target);
                 return "xlsx 已生成并计算公式";
             }
             case "pptx" -> {
-                OfficeTool.presentation(spec, target);
+                OfficePresentationRenderer.create(spec, target);
                 return "pptx 已生成并读回";
             }
             default -> throw new IllegalArgumentException("不支持的导出格式：" + format);
