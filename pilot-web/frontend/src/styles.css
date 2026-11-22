@@ -3620,6 +3620,19 @@ html[data-theme="light"] .accent-dot.is-on { box-shadow: 0 0 0 2px #fff, 0 0 0 4
 .overview-conflicts h4 { margin: 0 0 6px; color: var(--warn); font-size: 11.5px; }
 .overview-conflicts ul, .overview-sessions { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
 .overview-conflicts li { display: flex; gap: 8px; justify-content: space-between; color: var(--ink-2); font-size: 11.5px; }
+/* 看板内的实时状态与动作行：状态用等宽字便于对齐游标，动作按钮排在同一行不换行。 */
+.overview-feed { font-family: var(--mono); font-size: 11px; }
+.overview-actions { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.overview-input {
+  flex: 1;
+  min-width: 120px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--ink);
+  font-size: 11.5px;
+}
 .overview-conflicts code, .overview-line code { font-family: var(--mono); font-size: 11px; }
 .overview-sessions li { padding: 10px 12px; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--panel-2); }
 .overview-sessions li.is-current { border-color: var(--line); }

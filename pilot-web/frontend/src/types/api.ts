@@ -1,4 +1,5 @@
 import type * as S from './server.js';
+import type * as C from './coordination.js';
 import type { ContextStatus, QueueResponse } from './runtime.js';
 import type { DraftAttachment } from './input.js';
 
@@ -100,6 +101,11 @@ export interface ApiResults {
   sandboxManifest: S.MultiAgentControllerSandboxManifestReport;
   /** 工作区看板：该目录下所有会话的当前状态（只读）。 */
   workspaceOverview: S.WorkspaceOverviewServiceOverview;
+  /** 会话间协调：看板一次拉齐协调快照与工作区概览。 */
+  coordinationBoard: C.CoordinationBoard;
+  coordinationRequest: C.CoordinationRequest;
+  coordinationClaim: C.CoordinationClaim;
+  coordinationHandoff: C.CoordinationHandoff;
   resolveArbitration: ActionResponse;
   diff: S.ChangeServiceChangeReport;
   fileDiff: S.ChangeServiceFilePatch;

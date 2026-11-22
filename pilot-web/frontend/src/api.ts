@@ -249,6 +249,20 @@ export const api = {
   /** 工作区看板：一次拿到该目录下所有会话在做什么；只读，改动仍走各会话自己的接受入口。 */
   workspaceOverview: (path: string) => apiJson<ApiResults['workspaceOverview']>(`/api/workspaces/overview?path=${encodeURIComponent(path)}`),
   workspaceBrowse: (path?: string) => apiJson<ApiResults['workspaceBrowse']>(`/api/workspaces/browse?path=${encodeURIComponent(path || '')}`),
+  // 会话间协调：所有动作都以 sessionId 作为发起方，越权与占用冲突由服务端拒绝并带原因
+  coordinationBoard: (sessionId: string) => apiJson<ApiResults['coordinationBoard']>(`/api/sessions/${encodeURIComponent(sessionId)}/coordination`),
+  coordinationRequest: (sessionId: string, body: { toSessionId: string; reason: string; taskId?: string }) =>
+    apiJson<ApiResults['coordinationRequest']>(`/api/sessions/${encodeURIComponent(sessionId)}/coordination/requests`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  coordinationResolveRequest: (sessionId: string, requestId: string, action: 'accept' | 'decline' | 'withdraw') =>
+    apiJson<ApiResults['coordinationRequest']>(`/api/sessions/${encodeURIComponent(sessionId)}/coordination/requests/${encodeURIComponent(requestId)}/${action}`, { method: 'POST' }),
+  coordinationClaim: (sessionId: string, body: { path: string; kind?: 'FILE' | 'DIRECTORY'; ttlSeconds?: number }) =>
+    apiJson<ApiResults['coordinationClaim']>(`/api/sessions/${encodeURIComponent(sessionId)}/coordination/claims`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  coordinationReleaseClaim: (sessionId: string, claimId: string) =>
+    apiJson<ApiResults['coordinationClaim']>(`/api/sessions/${encodeURIComponent(sessionId)}/coordination/claims/${encodeURIComponent(claimId)}`, { method: 'DELETE' }),
+  coordinationHandoff: (sessionId: string, body: { toSessionId: string; taskId: string; summary: string }) =>
+    apiJson<ApiResults['coordinationHandoff']>(`/api/sessions/${encodeURIComponent(sessionId)}/coordination/handoffs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  coordinationResolveHandoff: (sessionId: string, handoffId: string, action: 'accept' | 'decline') =>
+    apiJson<ApiResults['coordinationHandoff']>(`/api/sessions/${encodeURIComponent(sessionId)}/coordination/handoffs/${encodeURIComponent(handoffId)}/${action}`, { method: 'POST' }),
   settings: (signal?: AbortSignal) => apiJson<ApiResults['settings']>('/api/settings', { signal }),
   // 后端是 PUT：之前发 POST 会 405，权限与模型保存点了没反应
   savePermissionMode: (mode: string) => apiJson<ApiResults['savePermissionMode']>('/api/settings/permission-mode', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) }),
