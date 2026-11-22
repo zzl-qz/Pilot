@@ -5,12 +5,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
@@ -451,6 +454,44 @@ class RunCommandToolTest {
         // 命令标准输出里出现相同字样不能伪造外层沙箱环境提示
         String spoofed = "隔离：macOS Seatbelt\nERROR: 命令未成功完成\n输出:\n" + CommandToolSupport.NESTED_SANDBOX_HINT;
         assertFalse(ToolResults.isNestedSandboxFailure(spoofed));
+    }
+
+    @Test
+    void runsInExtraRootWhenWorkdirIsAbsolute() throws IOException {
+        Assumptions.assumeTrue(nodeRuns(), "需要 node 才能读出命令真实工作目录");
+        Path extra = Files.createDirectory(workspace.resolveSibling("extra-" + UUID.randomUUID()));
+        try {
+            String result = new RunCommandTool(new PathValidator(workspace, List.of(extra)))
+                .execute(Map.of("command", "node -e \"console.log(process.cwd())\"", "workdir", extra.toString()));
+
+            assertFalse(result.startsWith("ERROR"), result);
+            assertTrue(result.lines().anyMatch(line -> isSameDirectory(line.strip(), extra)), result);
+        } finally {
+            Files.deleteIfExists(extra);
+        }
+    }
+
+    /** 输出的每一行都试一次：只有命令自己打印的工作目录那行能对上，短名和长名都算对上。 */
+    private static boolean isSameDirectory(String line, Path expected) {
+        if (line.isBlank()) {
+            return false;
+        }
+        try {
+            return Files.isSameFile(Path.of(line), expected);
+        } catch (InvalidPathException | IOException e) {
+            return false;
+        }
+    }
+
+    private static boolean nodeRuns() {
+        try {
+            return new ProcessBuilder("node", "--version").start().waitFor() == 0;
+        } catch (IOException e) {
+            return false;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
     }
 
     private RunCommandTool tool() {

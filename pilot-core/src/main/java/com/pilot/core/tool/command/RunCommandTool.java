@@ -149,7 +149,8 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     public Map<String, Object> parameters() {
         Map<String, Object> properties = new java.util.LinkedHashMap<>();
         properties.put("command", ToolSchemas.string("完整命令，例如 \"mvn -q test\" 或 \"git status --porcelain\""));
-        properties.put("workdir", ToolSchemas.string("可选，工作区内的工作目录，例如 pilot-web；默认工作区根目录"));
+        properties.put("workdir", ToolSchemas.string(
+            "可选，工作目录：工作区内的相对路径（例如 pilot-web），或项目其他文件夹的绝对路径；默认工作区根目录"));
         properties.put("timeoutSeconds",
             Map.of("type", "integer", "minimum", 0, "maximum", 600, "description", "前台默认 120 秒，后台默认 0（不设超时），最大 600 秒"));
         if (commandTasks != null) {
@@ -1054,7 +1055,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
      * 子进程不再继承服务进程的整份环境。
      */
     private CommandLaunch launch(List<String> command, Path workdir, Map<String, String> extra) {
-        OsSandbox.Launch sandbox = OsSandbox.wrap(command, paths.root());
+        OsSandbox.Launch sandbox = OsSandbox.wrap(command, paths.root(), paths.roots());
         if (sandbox.command().isEmpty()) {
             return new CommandLaunch(null, sandbox.label());
         }

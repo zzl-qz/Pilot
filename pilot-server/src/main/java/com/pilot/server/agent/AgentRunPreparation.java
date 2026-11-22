@@ -30,6 +30,8 @@ import com.pilot.core.permission.PermissionGate;
 import com.pilot.core.permission.PermissionRules;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.plan.PlanSink;
+import com.pilot.core.project.Project;
+import com.pilot.core.project.ProjectRepository;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.session.PlanRepository;
 import com.pilot.core.session.Session;
@@ -93,6 +95,7 @@ public final class AgentRunPreparation {
     private WorkProductService workProducts;
     private SkillDraftService skillDrafts;
     private AgentProfileService agentProfiles;
+    private ProjectRepository projects;
 
     public AgentRunPreparation(SessionService sessions, WorkspaceToolFactory toolFactory, AgentProperties properties,
         MultiAgentProperties multiProperties, TaskControlService taskControls,
@@ -126,6 +129,12 @@ public final class AgentRunPreparation {
         this.agentProfiles = agentProfiles;
     }
 
+    /** 项目绑定的其他文件夹会作为会话的额外可读写根；没注入时只看默认工作区。 */
+    @Autowired(required = false)
+    public void setProjects(ProjectRepository projects) {
+        this.projects = projects;
+    }
+
     public AgentLoop.Config loopConfig(PreparedRun prepared, String sessionId) {
         return new AgentLoop.Config(properties.maxSteps(), properties.repeatRemindAt(), properties.repeatAbortAt(),
             prepared.systemPrompt(), () -> plans.load(sessionId), properties.maxPlanContinues(),
@@ -147,10 +156,11 @@ public final class AgentRunPreparation {
         Consumer<ToolRegistry> toolConfigurer) {
         String workspace = sessions.find(input.sessionId()).map(Session::workspace).orElse(null);
         Path resolvedWorkspace = toolFactory.resolve(workspace);
-        PathValidator workspaceValidator = new PathValidator(resolvedWorkspace);
+        List<Path> extraRoots = projectFolders(input.sessionId());
+        PathValidator workspaceValidator = new PathValidator(resolvedWorkspace, extraRoots);
         ReviewMode review = ReviewMode.parse(input.unattended() ? input.automationGoal() : input.input());
-        ToolRegistry tools = review.active() ? reviewTools(workspace)
-            : sessionTools(input.sessionId(), input.runId(), workspace, planSink);
+        ToolRegistry tools = review.active() ? reviewTools(workspace, extraRoots)
+            : sessionTools(input.sessionId(), input.runId(), workspace, planSink, extraRoots);
         List<String> inheritedDeferred = review.active() ? List.of()
             : inheritedDeferredTools(input.deferredToolSnapshot(), input.history());
         tools.enable(inheritedDeferred);
@@ -376,11 +386,20 @@ public final class AgentRunPreparation {
         }
     }
 
-    private ToolRegistry reviewTools(String workspace) {
+    /** 会话所属项目绑定的其他文件夹；会话只存一个默认工作目录，其余目录按项目取。 */
+    private List<Path> projectFolders(String sessionId) {
+        if (projects == null) {
+            return List.of();
+        }
+        return sessions.find(sessionId).map(Session::projectId).flatMap(projects::find).map(Project::folders)
+            .orElse(List.of()).stream().map(Path::of).toList();
+    }
+
+    private ToolRegistry reviewTools(String workspace, List<Path> extraRoots) {
         AgentScope scope = AgentScope.readOnly(List.of(), List.of())
             .withTools(List.of("read_*", "list_*", "glob_*", "search_*", CodeSymbolTool.NAME, ToolNames.RUN_COMMAND,
                 ToolNames.WEB_SEARCH, ToolNames.WEB_FETCH), List.of());
-        return toolFactory.registryForScope(workspace, scope, SandboxSink.rejectAll());
+        return toolFactory.registryForScope(workspace, scope, SandboxSink.rejectAll(), extraRoots);
     }
 
     private Set<String> sessionTools(ToolRegistry base) {
@@ -416,11 +435,12 @@ public final class AgentRunPreparation {
         return PROMPTS.render("system/plan-context", Map.of("planItems", list)).strip();
     }
 
-    private ToolRegistry sessionTools(String sessionId, String runId, String workspace, PlanSink planSink) {
+    private ToolRegistry sessionTools(String sessionId, String runId, String workspace, PlanSink planSink,
+        List<Path> extraRoots) {
         ToolRegistry tools = new ToolRegistry();
         toolFactory.usePlan(() -> plans.load(sessionId));
         try {
-            toolFactory.registryFor(workspace, planSink).tools().stream()
+            toolFactory.registryFor(workspace, extraRoots, planSink).tools().stream()
                 .filter(tool -> !ToolNames.RUN_COMMAND.equals(tool.name())
                     && !EnableToolsTool.NAME.equals(tool.name()))
                 .forEach(tools::register);
@@ -428,8 +448,8 @@ public final class AgentRunPreparation {
             toolFactory.usePlan(null);
         }
         tools.register(new EnableToolsTool(tools));
-        RunCommandTool commands = new RunCommandTool(new PathValidator(toolFactory.resolve(workspace)), commandTasks,
-            sessionId, snapshots);
+        RunCommandTool commands = new RunCommandTool(new PathValidator(toolFactory.resolve(workspace), extraRoots),
+            commandTasks, sessionId, snapshots);
         for (com.pilot.core.tool.Tool tool : tools.tools()) {
             if (tool instanceof ReadFileTool read) {
                 commands.withReads(read.guard());

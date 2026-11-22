@@ -4,10 +4,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Assumptions;
@@ -20,6 +22,24 @@ class OsSandboxTest {
 
     @TempDir
     Path workspace;
+
+    @Test
+    void extraProjectFoldersBecomeWritableAndKeepGitMetadataLocked() throws IOException {
+        Path shared = Files.createDirectory(workspace.resolveSibling("shared-" + UUID.randomUUID()));
+        try {
+            Path root = workspace.toRealPath();
+            Path extra = shared.toRealPath();
+
+            List<Path> writable = OsSandbox.writableRoots(root, OsSandbox.Family.LINUX, List.of(extra));
+            List<Path> locked = OsSandbox.protectedWrites(root, List.of(extra));
+
+            assertTrue(writable.contains(extra), writable.toString());
+            assertTrue(locked.contains(extra.resolve(".git/hooks")), locked.toString());
+            assertTrue(locked.contains(root.resolve(".git/config")), locked.toString());
+        } finally {
+            Files.deleteIfExists(shared);
+        }
+    }
 
     @Test
     void seatbeltAllowsWorkspaceThenLocksGitMetadata() throws Exception {

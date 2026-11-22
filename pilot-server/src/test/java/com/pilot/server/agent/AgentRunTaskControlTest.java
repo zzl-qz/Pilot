@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.MockMakers.SUBCLASS;
 import static org.mockito.Mockito.any;
@@ -710,7 +711,7 @@ class AgentRunTaskControlTest {
             tasks = new TaskControlService(mapper, data);
             WorkspaceToolFactory factory = mock(WorkspaceToolFactory.class, withSettings().mockMaker(SUBCLASS));
             when(factory.resolve(anyString())).thenReturn(workspace);
-            when(factory.registryFor(anyString(), any(PlanSink.class))).thenAnswer(invocation -> {
+            when(factory.registryFor(anyString(), anyList(), any(PlanSink.class))).thenAnswer(invocation -> {
                 ToolRegistry tools = new ToolRegistry();
                 tools.register(new ReadFileTool(new PathValidator(workspace)));
                 if (additional != null) {
@@ -718,7 +719,7 @@ class AgentRunTaskControlTest {
                 }
                 return tools;
             });
-            when(factory.registryForScope(anyString(), any(), any())).thenAnswer(invocation -> {
+            when(factory.registryForScope(anyString(), any(), any(), anyList())).thenAnswer(invocation -> {
                 ToolRegistry tools = new ToolRegistry();
                 tools.register(new ReadFileTool(new PathValidator(workspace)));
                 return tools;

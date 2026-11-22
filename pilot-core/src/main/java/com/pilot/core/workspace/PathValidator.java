@@ -6,6 +6,8 @@ import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -21,14 +23,24 @@ import java.util.Objects;
  */
 public final class PathValidator {
     private final Path root;
+    private final List<Path> roots;
     private final AgentScope scope;
 
     public PathValidator(Path root) {
-        this(root, null);
+        this(root, List.of(), null);
+    }
+
+    /** @param extraRoots 同一项目关联的其他目录：绝对路径可读写，相对路径仍以默认根为起点 */
+    public PathValidator(Path root, List<Path> extraRoots) {
+        this(root, extraRoots, null);
     }
 
     /** @param scope 子 Agent 的文件白名单；{@code null} 表示不额外限制（仍受工作区根目录约束） */
     public PathValidator(Path root, AgentScope scope) {
+        this(root, List.of(), scope);
+    }
+
+    public PathValidator(Path root, List<Path> extraRoots, AgentScope scope) {
         Objects.requireNonNull(root, "root must not be null");
         Path absolute = root.toAbsolutePath().normalize();
         if (!Files.isDirectory(absolute)) {
@@ -40,10 +52,16 @@ public final class PathValidator {
             throw new UncheckedIOException("cannot resolve workspace root: " + absolute, e);
         }
         this.scope = scope;
+        this.roots = bind(extraRoots);
     }
 
     public Path root() {
         return root;
+    }
+
+    /** 本次运行可见可写的全部根：默认工作区在前，其余项目文件夹在后。 */
+    public List<Path> roots() {
+        return roots;
     }
 
     public AgentScope scope() {
@@ -82,9 +100,43 @@ public final class PathValidator {
         } catch (InvalidPathException e) {
             throw new WorkspaceViolationException("非法路径: " + value);
         }
-        // 先解析真实祖先，再比较边界：绝对路径可能经过工作区别名（如 macOS 的 /var）。
-        // 校验从候选路径向上最近的现存祖先的真实路径，避免通过“工作区内符号链接/新建子路径”越界。
-        // 例如 workspace/link 指向外部目录时，workspace/link/new.txt 本身尚不存在，仍须拒绝。
+        Path resolved = canonical(candidate, value);
+        if (!resolved.startsWith(boundFor(resolved))) {
+            throw new WorkspaceViolationException("路径超出工作区: " + value);
+        }
+        // 工作区根目录本身始终可解析（列目录时再按白名单过滤子项），其余路径按子 Agent 视图校验。
+        // 额外目录的展示形式是绝对路径，子 Agent 白名单里没有它，等于继续对子 Agent 关闭。
+        String relative = display(resolved);
+        if (scope != null && !".".equals(relative) && !scope.allowsPath(relative)) {
+            throw new WorkspaceViolationException(scope.denialHint(relative));
+        }
+        return resolved;
+    }
+
+    /** 候选路径落在哪个可见根上：命中多个时取更具体的那个，都不命中时交给默认根统一报越界。 */
+    private Path boundFor(Path candidate) {
+        Path match = root;
+        int best = -1;
+        for (Path bound : roots) {
+            if (candidate.startsWith(bound) && bound.getNameCount() > best) {
+                match = bound;
+                best = bound.getNameCount();
+            }
+        }
+        return match;
+    }
+
+    /**
+     * 把候选路径换成真实路径：取最近现存祖先的 real path，再拼回尚未创建的后缀。
+     *
+     * <p>这一步必须发生在比较边界之前：Windows 临时目录等路径可能以 8.3 短名出现，
+     * 而可见根都是 real path，直接比较前缀会把合法路径误判成越界。
+     * 从现存祖先开始解析还避免通过“工作区内符号链接/新建子路径”越界：
+     * workspace/link 指向外部目录时，workspace/link/new.txt 本身尚不存在，仍须拒绝。
+     *
+     * @throws WorkspaceViolationException 无法解析路径（含悬空链接）
+     */
+    private Path canonical(Path candidate, String value) {
         Path existing = candidate;
         while (existing != null && !Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) {
             existing = existing.getParent();
@@ -93,24 +145,37 @@ public final class PathValidator {
             throw new WorkspaceViolationException("无法验证工作区路径: " + value);
         }
         try {
-            Path realExisting = existing.toRealPath();
-            if (!realExisting.startsWith(root)) {
-                throw new WorkspaceViolationException("路径超出工作区（符号链接）: " + value);
-            }
-            Path suffix = existing.relativize(candidate);
-            Path resolved = realExisting.resolve(suffix).normalize();
-            if (!resolved.startsWith(root)) {
-                throw new WorkspaceViolationException("路径超出工作区: " + value);
-            }
-            // 工作区根目录本身始终可解析（列目录时再按白名单过滤子项），其余路径按子 Agent 视图校验
-            String relative = display(resolved);
-            if (scope != null && !".".equals(relative) && !scope.allowsPath(relative)) {
-                throw new WorkspaceViolationException(scope.denialHint(relative));
-            }
-            return resolved;
+            return existing.toRealPath().resolve(existing.relativize(candidate)).normalize();
         } catch (IOException e) {
             // 悬空链接也属于现存节点；无法解析时必须拒绝，不能退回父目录后继续写入。
             throw new WorkspaceViolationException("无法验证工作区路径: " + value + "（" + e.getMessage() + "）");
+        }
+    }
+
+    /** 额外目录取 real path，跳过不存在、不是目录或与已有根重叠的条目，重复项只留一份。 */
+    private List<Path> bind(List<Path> extraRoots) {
+        List<Path> visible = new ArrayList<>();
+        visible.add(root);
+        if (extraRoots == null) {
+            return List.copyOf(visible);
+        }
+        for (Path extra : extraRoots) {
+            Path real = extra == null ? null : realDirectory(extra);
+            if (real == null || visible.stream().anyMatch(real::startsWith)) {
+                continue;
+            }
+            visible.add(real);
+        }
+        return List.copyOf(visible);
+    }
+
+    /** 不存在或不是目录时返回 {@code null}，由调用方跳过：项目里的目录可能暂时没挂载。 */
+    private static Path realDirectory(Path path) {
+        try {
+            Path absolute = path.toAbsolutePath().normalize();
+            return Files.isDirectory(absolute) ? absolute.toRealPath() : null;
+        } catch (IOException e) {
+            return null;
         }
     }
 

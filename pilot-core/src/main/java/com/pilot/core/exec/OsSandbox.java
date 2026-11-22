@@ -48,16 +48,26 @@ public final class OsSandbox {
     }
 
     public static Launch wrap(List<String> command, Path workspace) {
-        return wrap(command, workspace, Family.current(), networkAllowed());
+        return wrap(command, workspace, List.of());
+    }
+
+    /** @param extraWritable 同一项目关联的其他目录：与工作区一样可写，{@code .git} 元数据仍只读 */
+    public static Launch wrap(List<String> command, Path workspace, List<Path> extraWritable) {
+        return wrap(command, workspace, Family.current(), networkAllowed(), extraWritable);
     }
 
     static Launch wrap(List<String> command, Path workspace, Family family, boolean network) {
+        return wrap(command, workspace, family, network, List.of());
+    }
+
+    static Launch wrap(List<String> command, Path workspace, Family family, boolean network,
+        List<Path> extraWritable) {
         if (!enabled()) {
             return new Launch(List.copyOf(command), "隔离：未启用（pilot.os.sandbox=false，命令在本机执行）", false);
         }
         Path root = real(workspace);
-        List<Path> writable = writableRoots(root, family);
-        List<Path> locked = protectedWrites(root);
+        List<Path> writable = writableRoots(root, family, extraWritable);
+        List<Path> locked = protectedWrites(root, extraWritable);
         return switch (family) {
             case MAC -> mac(command, root, writable, locked, network);
             case LINUX -> linux(command, root, writable, locked, network);
@@ -280,8 +290,14 @@ public final class OsSandbox {
     }
 
     static List<Path> writableRoots(Path workspace, Family family) {
+        return writableRoots(workspace, family, List.of());
+    }
+
+    static List<Path> writableRoots(Path workspace, Family family, List<Path> extraWritable) {
+        Path realWorkspace = real(workspace);
         Set<Path> roots = new LinkedHashSet<>();
-        roots.add(real(workspace));
+        roots.add(realWorkspace);
+        roots.addAll(extraDirectories(extraWritable, realWorkspace));
         roots.add(real(Path.of(System.getProperty("java.io.tmpdir", "/tmp"))));
         roots.add(real(Path.of("/tmp")));
         if (family == Family.MAC) {
@@ -302,8 +318,41 @@ public final class OsSandbox {
     }
 
     static List<Path> protectedWrites(Path workspace) {
+        return protectedWrites(workspace, List.of());
+    }
+
+    /** 每个可见根的 git 元数据都只读：多挂一个目录不能连带放开它的 hooks 和配置。 */
+    static List<Path> protectedWrites(Path workspace, List<Path> extraWritable) {
         Path root = real(workspace);
-        return List.of(root.resolve(".git/config"), root.resolve(".git/hooks"), root.resolve(".git/info"));
+        List<Path> visible = new ArrayList<>();
+        visible.add(root);
+        visible.addAll(extraDirectories(extraWritable, root));
+        List<Path> locked = new ArrayList<>();
+        for (Path path : visible) {
+            locked.add(path.resolve(".git/config"));
+            locked.add(path.resolve(".git/hooks"));
+            locked.add(path.resolve(".git/info"));
+        }
+        return List.copyOf(locked);
+    }
+
+    /** 额外目录只保留真实的、与工作区不重叠的条目，重复项只留一份。 */
+    private static List<Path> extraDirectories(List<Path> extraWritable, Path workspace) {
+        if (extraWritable == null || extraWritable.isEmpty()) {
+            return List.of();
+        }
+        Set<Path> extras = new LinkedHashSet<>();
+        for (Path extra : extraWritable) {
+            if (extra == null) {
+                continue;
+            }
+            Path real = real(extra);
+            if (!Files.isDirectory(real) || real.startsWith(workspace)) {
+                continue;
+            }
+            extras.add(real);
+        }
+        return List.copyOf(extras);
     }
 
     private static String label(String backend, boolean network) {

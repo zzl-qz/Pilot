@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -14,6 +15,9 @@ import org.junit.jupiter.api.io.TempDir;
 class PathValidatorTest {
     @TempDir
     Path workspace;
+
+    @TempDir
+    Path other;
 
     @Test
     void resolvesRelativePathInsideWorkspace() throws IOException {
@@ -110,5 +114,55 @@ class PathValidatorTest {
 
         assertThrows(IllegalArgumentException.class, () -> validator.resolve("  "));
         assertThrows(IllegalArgumentException.class, () -> validator.resolve(null));
+    }
+
+    @Test
+    void resolvesAbsolutePathInExtraRoot() throws IOException {
+        Files.writeString(other.resolve("shared.txt"), "content");
+        PathValidator validator = new PathValidator(workspace, List.of(other));
+
+        Path resolved = validator.resolve(other.resolve("shared.txt").toString());
+
+        assertEquals(other.resolve("shared.txt").toRealPath(), resolved);
+        assertEquals(List.of(workspace.toRealPath(), other.toRealPath()), validator.roots());
+        assertEquals(resolved.toString(), validator.display(resolved));
+    }
+
+    @Test
+    void resolvesMissingChildInExtraRoot() throws IOException {
+        PathValidator validator = new PathValidator(workspace, List.of(other));
+
+        assertEquals(other.toRealPath().resolve("new/child.txt"),
+            validator.resolve(other.resolve("new/child.txt").toString()));
+    }
+
+    @Test
+    void relativePathsStillStartFromWorkspaceRoot() throws IOException {
+        Files.createDirectories(other.resolve("nested"));
+        PathValidator validator = new PathValidator(workspace, List.of(other));
+
+        assertEquals(workspace.toRealPath().resolve("nested"), validator.resolve("nested"));
+        assertEquals(workspace.toRealPath(), validator.roots().getFirst());
+    }
+
+    @Test
+    void skipsMissingAndDuplicatedExtraRoots() throws IOException {
+        PathValidator validator =
+            new PathValidator(workspace, List.of(workspace, workspace, workspace.resolve("not-created")));
+
+        assertEquals(List.of(workspace.toRealPath()), validator.roots());
+        assertThrows(WorkspaceViolationException.class, () -> validator.resolve("../outside.txt"));
+    }
+
+    @Test
+    void extraRootsStayInvisibleToAgentScope() throws IOException {
+        Files.writeString(workspace.resolve("shared.txt"), "content");
+        Files.writeString(other.resolve("shared.txt"), "content");
+        AgentScope scope = AgentScope.readOnly(List.of("shared.txt"), List.of());
+        PathValidator validator = new PathValidator(workspace, List.of(other), scope);
+
+        assertEquals(workspace.resolve("shared.txt").toRealPath(), validator.resolve("shared.txt"));
+        assertThrows(WorkspaceViolationException.class,
+            () -> validator.resolve(other.resolve("shared.txt").toString()));
     }
 }

@@ -158,7 +158,12 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
      * 每次运行新建若干无状态对象，开销可以忽略。
      */
     public ToolRegistry registryFor(String workspace, PlanSink planSink) {
-        return create(resolve(workspace), planSink);
+        return create(resolve(workspace), planSink, List.of());
+    }
+
+    /** @param extraRoots 项目关联的其他文件夹：绝对路径可读写，相对路径仍按默认工作区 */
+    public ToolRegistry registryFor(String workspace, List<Path> extraRoots, PlanSink planSink) {
+        return create(resolve(workspace), planSink, extraRoots);
     }
 
     /** 只在构建这一次工具表时有效，用完要清掉。 */
@@ -202,8 +207,14 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
      * @param sandbox 改动出口；只读任务传 {@link SandboxSink#rejectAll()} 也不会被触发
      */
     public ToolRegistry registryForScope(String workspace, AgentScope scope, SandboxSink sandbox) {
+        return registryForScope(workspace, scope, sandbox, List.of());
+    }
+
+    /** @param extraRoots 项目关联的其他文件夹；子 Agent 白名单里没有它们，仍只看默认工作区 */
+    public ToolRegistry registryForScope(String workspace, AgentScope scope, SandboxSink sandbox,
+        List<Path> extraRoots) {
         AgentScope view = scope == null ? AgentScope.readOnly(List.of(), List.of()) : scope;
-        PathValidator validator = new PathValidator(resolve(workspace), view);
+        PathValidator validator = new PathValidator(resolve(workspace), extraRoots, view);
         ToolRegistry registry = new ToolRegistry();
         // 每个子 Agent 一份「先读后改」记录，与父级互不共享
         ReadTracker reads = new ReadTracker();
@@ -248,7 +259,11 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
     }
 
     private ToolRegistry create(Path root, PlanSink planSink) {
-        PathValidator validator = new PathValidator(root);
+        return create(root, planSink, List.of());
+    }
+
+    private ToolRegistry create(Path root, PlanSink planSink, List<Path> extraRoots) {
+        PathValidator validator = new PathValidator(root, extraRoots);
         ToolRegistry registry = new ToolRegistry();
         // 每次 run 一份「先读后改」记录：read_file 登记过的文件才允许 edit_file
         // （刚创建或刚编辑过的文件同样登记，连续编辑不受影响）

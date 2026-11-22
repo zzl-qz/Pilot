@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.MockMakers.SUBCLASS;
 import static org.mockito.Mockito.mock;
@@ -1267,13 +1268,13 @@ class AgentRunServiceTest {
             WorkspaceToolFactory factory = mock(WorkspaceToolFactory.class, withSettings().mockMaker(SUBCLASS));
             when(factory.resolve(anyString())).thenReturn(workspace);
             when(factory.registryForScope(anyString(), any(com.pilot.core.workspace.AgentScope.class),
-                any(com.pilot.core.tool.SandboxSink.class))).thenAnswer(invocation -> {
+                any(com.pilot.core.tool.SandboxSink.class), anyList())).thenAnswer(invocation -> {
                     // /review 独立模式的只读工具表（真实实现里由 AgentScope 裁剪）：测试里至少提供读工具
                     ToolRegistry tools = new ToolRegistry();
                     tools.register(new ReadFileTool(new PathValidator(workspace)));
                     return tools;
                 });
-            when(factory.registryFor(anyString(), any(PlanSink.class))).thenAnswer(invocation -> {
+            when(factory.registryFor(anyString(), anyList(), any(PlanSink.class))).thenAnswer(invocation -> {
                 ToolRegistry tools = new ToolRegistry();
                 tools.register(new ReadFileTool(new PathValidator(workspace)));
                 if (goals) {
@@ -1465,8 +1466,8 @@ class AgentRunServiceTest {
         PathValidator validator = new PathValidator(workspace);
         WorkspaceToolFactory realPlanFactory = mock(WorkspaceToolFactory.class, withSettings().mockMaker(SUBCLASS));
         when(realPlanFactory.resolve(anyString())).thenReturn(workspace);
-        when(realPlanFactory.registryFor(anyString(), any(PlanSink.class))).thenAnswer(inv -> {
-            PlanSink sink = inv.getArgument(1);
+        when(realPlanFactory.registryFor(anyString(), anyList(), any(PlanSink.class))).thenAnswer(inv -> {
+            PlanSink sink = inv.getArgument(2);
             ToolRegistry reg = new ToolRegistry();
             reg.register(new ReadFileTool(validator, new ReadTracker()));
             reg.register(new CodeSymbolTool(validator));
