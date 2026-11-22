@@ -202,6 +202,8 @@ public final class AgentRunPreparation {
         Set<String> availableTools = prepared.availableTools();
         boolean reviewActive = prepared.review().active();
         List<String> inheritedDeferred = prepared.inheritedDeferredTools();
+        // 子 Agent 与父会话共用同一组项目目录，否则多目录项目里的子任务看不见兄弟目录
+        List<Path> extraRoots = projectFolders(sessionId);
         if (goalPolicy != null) {
             boolean readOnlySession = reviewActive
                 || properties.permissionMode() == com.pilot.core.permission.PermissionMode.READ_ONLY
@@ -243,6 +245,7 @@ public final class AgentRunPreparation {
             if (multiProperties.enabled()) {
                 tools.register(new DispatchAgentsTool(multiAgent, sessionId, runId, workspace,
                     sink, cancelled, executionClient, profiles, childUsage)
+                .withExtraRoots(extraRoots)
                     .withParentPermission(unattended && executionTask.automation().fullAccess()
                         ? com.pilot.core.permission.PermissionMode.AUTO : null));
             }

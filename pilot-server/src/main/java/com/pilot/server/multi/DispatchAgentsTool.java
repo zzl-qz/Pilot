@@ -1,5 +1,6 @@
 package com.pilot.server.multi;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -45,6 +46,13 @@ public final class DispatchAgentsTool implements Tool {
     private final AgentProfileCatalog profiles;
     /** 子 Agent 用量归集：计入父任务事故熔断与 run.usage 聚合。 */
     private final SpawnAgentTool.UsageSink usageSink;
+    /** 父会话所属项目绑定的其他文件夹；子 Agent 的读写范围跟着一起走。 */
+    private List<Path> extraRoots = List.of();
+
+    public DispatchAgentsTool withExtraRoots(List<Path> roots) {
+        this.extraRoots = roots == null ? List.of() : List.copyOf(roots);
+        return this;
+    }
 
     public DispatchAgentsTool(MultiAgentService service, String sessionId, String runId, String workspace,
         Consumer<SessionEvent> events, BooleanSupplier cancelled) {
@@ -143,7 +151,7 @@ public final class DispatchAgentsTool implements Tool {
         try {
             MultiAgentService.Result result =
                 service.dispatch(new MultiAgentService.Dispatch(sessionId, runId, workspace, specs, events, cancelled,
-                    executionClient, usageSink).withParentPermission(parentPermission));
+                    executionClient, usageSink).withParentPermission(parentPermission).withExtraRoots(extraRoots));
             return result.report();
         } catch (IllegalArgumentException e) {
             return "ERROR: 任务计划不合法：" + e.getMessage();

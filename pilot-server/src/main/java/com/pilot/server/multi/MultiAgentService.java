@@ -78,12 +78,12 @@ import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.trace.JsonlTraceRecorder;
 import com.pilot.core.util.Texts;
 import com.pilot.core.workspace.AgentScope;
-import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.MultiAgentBudget;
 import com.pilot.server.config.MultiAgentProperties;
 import com.pilot.server.multi.SpawnAgentTool.UsageSink;
 import com.pilot.server.permission.PermissionSettings;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.tool.WorkspaceToolFactory;
 
 import tools.jackson.databind.ObjectMapper;
@@ -171,20 +171,32 @@ public class MultiAgentService {
      * @param events    会话事件出口（父 run 的 sink）
      * @param cancelled 父 run 的取消信号，子 Agent 逐个检查
      * @param usageSink 子 Agent 模型用量归集：计入父任务事故熔断与 run.usage 聚合；空时用 no-op
+     * @param extraRoots 父会话所属项目绑定的其他文件夹；子 Agent 的读写范围与父会话一致
      */
     public record Dispatch(String sessionId, String runId, String workspace, List<TaskSpec> specs,
         Consumer<SessionEvent> events, BooleanSupplier cancelled, ModelClient executionClient, UsageSink usageSink,
-        String dispatchId, PermissionMode parentPermission) {
+        String dispatchId, PermissionMode parentPermission, List<Path> extraRoots) {
+        public Dispatch {
+            extraRoots = extraRoots == null ? List.of() : List.copyOf(extraRoots);
+        }
+
         public Dispatch(String sessionId, String runId, String workspace, List<TaskSpec> specs,
             Consumer<SessionEvent> events, BooleanSupplier cancelled, ModelClient executionClient, UsageSink usageSink,
             String dispatchId) {
-            this(sessionId, runId, workspace, specs, events, cancelled, executionClient, usageSink, dispatchId, null);
+            this(sessionId, runId, workspace, specs, events, cancelled, executionClient, usageSink, dispatchId, null,
+                List.of());
         }
 
         /** 父 run 的显式授权快照；模型参数不能设置该字段。 */
         public Dispatch withParentPermission(PermissionMode permission) {
             return new Dispatch(sessionId, runId, workspace, specs, events, cancelled, executionClient, usageSink,
-                dispatchId, permission);
+                dispatchId, permission, extraRoots);
+        }
+
+        /** 项目附加目录：由父会话的工具准备阶段注入，模型参数不能设置该字段。 */
+        public Dispatch withExtraRoots(List<Path> roots) {
+            return new Dispatch(sessionId, runId, workspace, specs, events, cancelled, executionClient, usageSink,
+                dispatchId, parentPermission, roots);
         }
 
         public Dispatch(String sessionId, String runId, String workspace, List<TaskSpec> specs,
@@ -206,7 +218,7 @@ public class MultiAgentService {
         /** 绑定持久化编号：调度开始时才生成，之前为空表示「还没落库」。 */
         public Dispatch withDispatchId(String id) {
             return new Dispatch(sessionId, runId, workspace, specs, events, cancelled, executionClient, usageSink,
-                id == null ? "" : id, parentPermission);
+                id == null ? "" : id, parentPermission, extraRoots);
         }
 
         UsageSink usageSinkOrNull() {
@@ -365,9 +377,8 @@ public class MultiAgentService {
             arbitrationId = "arb_" + randomSuffix();
             raiseArbitration(dispatch, new ArbitrationRequired(arbitrationId,
                 crossSession ? ArbitrationRequired.KIND_CROSS_SESSION : ArbitrationRequired.KIND_CONFLICT, "",
-                List.of("调整任务顺序重新生成", "放弃其中一份变更", "人工修改后重跑"),
-                (crossSession ? "## 🔴 跨会话变更冲突\n\n" : "## 🔴 变更冲突\n\n") + merge.describe()
-                    + "\n\n> 父 Agent 不会自动合并冲突文件，请决定调整顺序、重新生成或放弃某份变更。"));
+                List.of("调整任务顺序重新生成", "放弃其中一份变更", "人工修改后重跑"), (crossSession ? "## 🔴 跨会话变更冲突\n\n" : "## 🔴 变更冲突\n\n")
+                    + merge.describe() + "\n\n> 父 Agent 不会自动合并冲突文件，请决定调整顺序、重新生成或放弃某份变更。"));
         }
 
         VerificationGate.Report verificationReport = null;
@@ -405,8 +416,7 @@ public class MultiAgentService {
         }
         String report = buildReport(outcomes, merge, verificationReport, dissents, completed, budget.snapshot());
         if (arbitrationId.isEmpty() && !blocksCrossSession() && merge.hasExternalConflict()) {
-            report = report + "\n\n## ⚠️ 跨会话占用\n\n" + merge.describe()
-                + "\n\n> 以上是其他会话尚未接受的改动；本批改动不会自动与它们合并，接受前请先确认。";
+            report = report + "\n\n## ⚠️ 跨会话占用\n\n" + merge.describe() + "\n\n> 以上是其他会话尚未接受的改动；本批改动不会自动与它们合并，接受前请先确认。";
         }
         if (dispatchStore != null) {
             dispatchStore.saveDispatch(dispatchId, dispatch.sessionId(), dispatch.runId(), dispatch.workspace(),
@@ -603,7 +613,9 @@ public class MultiAgentService {
             return new Attempt(agentId, List.of(), sandbox, null, false,
                 "会话权限档位为 READ_ONLY，无法派发需要写入或命令的子任务；请先在界面切换到「完全放行」", JdbcDispatchStore.Usage.EMPTY);
         }
-        ToolRegistry tools = toolFactory.registryForScope(dispatch.workspace(), spec.scope(), sink);
+        // 子 Agent 的范围与父会话一致：项目附加目录也要开放，否则多目录项目里的子任务会看不见兄弟目录
+        ToolRegistry tools =
+            toolFactory.registryForScope(dispatch.workspace(), spec.scope(), sink, dispatch.extraRoots());
         // 上下文预算与收尾门跟随主会话配置，避免子 Agent 用更小的窗口和额外的收尾门做不完任务
         AgentLoop.Config config = new AgentLoop.Config(agent.maxSteps(), 3, 5, systemPrompt(spec, dispatch), List::of,
             0, agent.contextMaxChars(), agent.completionChecksEnabled());
@@ -1011,8 +1023,7 @@ public class MultiAgentService {
             if (holder.sessionId().equals(dispatch.sessionId())) {
                 continue;
             }
-            held.add(new MergePrecheck.Held("其他会话 " + holder.sessionId() + " 的 " + holder.taskId(),
-                holder.changes()));
+            held.add(new MergePrecheck.Held("其他会话 " + holder.sessionId() + " 的 " + holder.taskId(), holder.changes()));
         }
         return held;
     }

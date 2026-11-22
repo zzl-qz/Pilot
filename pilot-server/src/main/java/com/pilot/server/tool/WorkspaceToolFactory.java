@@ -210,6 +210,11 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
         return registryForScope(workspace, scope, sandbox, List.of());
     }
 
+    /**
+     * @param extraRoots 父会话所属项目绑定的其他文件夹；子 Agent 能访问的目录与父会话一致，
+     *                   但写权限仍由 {@link AgentScope} 限定，不因为多看几个目录而变大
+     */
+
     /** @param extraRoots 项目关联的其他文件夹；子 Agent 白名单里没有它们，仍只看默认工作区 */
     public ToolRegistry registryForScope(String workspace, AgentScope scope, SandboxSink sandbox,
         List<Path> extraRoots) {

@@ -15,6 +15,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import com.pilot.core.multi.DiffSandbox;
 import com.pilot.core.multi.RiskLevel;
+import com.pilot.core.project.InMemoryProjectRepository;
 import com.pilot.core.session.InMemorySessionRepository;
 import com.pilot.core.session.SessionRepository;
 import com.pilot.core.tool.command.CommandTaskManager;
@@ -67,7 +68,7 @@ class WorkspaceOverviewToolTest {
 
     private WorkspaceOverviewService overviewService(SessionRepository sessions, SandboxStore sandboxes) {
         return new WorkspaceOverviewService(sessions, sandboxes, new RunRegistry(),
-            new CommandTaskManager(commandStorage, JsonMapper.builder().build()));
+            new CommandTaskManager(commandStorage, JsonMapper.builder().build()), new InMemoryProjectRepository());
     }
 
     private SandboxStore sandboxes() {

@@ -11,6 +11,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.pilot.core.project.InMemoryProjectRepository;
 import com.pilot.core.session.InMemorySessionRepository;
 import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.server.run.RunRegistry;
@@ -50,7 +51,7 @@ class WorkspaceOverviewControllerTest {
 
     private WorkspaceOverviewController controller() {
         return new WorkspaceOverviewController(new WorkspaceOverviewService(new InMemorySessionRepository(),
-            new SandboxStore(JsonMapper.builder().build(), new PilotDataDir(dataDir.toString())),
-            new RunRegistry(), new CommandTaskManager(commandStorage, JsonMapper.builder().build())));
+            new SandboxStore(JsonMapper.builder().build(), new PilotDataDir(dataDir.toString())), new RunRegistry(),
+            new CommandTaskManager(commandStorage, JsonMapper.builder().build()), new InMemoryProjectRepository()));
     }
 }

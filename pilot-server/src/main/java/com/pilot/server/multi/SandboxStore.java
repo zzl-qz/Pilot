@@ -32,6 +32,7 @@ import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Component;
 
+import com.pilot.core.coordination.ProjectCoordinationScope;
 import com.pilot.core.multi.ArtifactDiff;
 import com.pilot.core.multi.ArtifactFile;
 import com.pilot.core.multi.ArtifactManifest;
@@ -470,6 +471,7 @@ public class SandboxStore {
      *
      * @return 工作区一致且带改动的沙箱；工作区路径非法或目录不存在时为空
      */
+    /** 只看单个目录：没有项目上下文时（测试、旧调用）的兼容入口。 */
     public synchronized List<Holder> holders(String workspace) {
         return holders(workspace, null);
     }
@@ -478,6 +480,26 @@ public class SandboxStore {
     public synchronized List<Holder> holders(String workspace, Instant modifiedSince) {
         Path root = rootOf(workspace);
         if (root == null) {
+            return List.of();
+        }
+        return holders(ProjectCoordinationScope.of(null, List.of(root)), modifiedSince);
+    }
+
+    /** 按协调范围列出尚未接受的沙箱。 */
+    public synchronized List<Holder> holders(ProjectCoordinationScope scope) {
+        return holders(scope, null);
+    }
+
+    /**
+     * 按协调范围列出尚未接受的沙箱：沙箱工作区落在范围内即算同一处，项目附加目录同样纳入。
+     *
+     * <p>只读：不触发任何写盘，也不改变各会话的状态。某个会话的状态损坏时跳过它并留下告警，
+     * 不能让一个坏会话把整次跨会话预检拖垮。
+     *
+     * @return 范围内带改动的沙箱；范围为空时为空
+     */
+    public synchronized List<Holder> holders(ProjectCoordinationScope scope, Instant modifiedSince) {
+        if (scope == null || scope.isEmpty()) {
             return List.of();
         }
         List<Holder> result = new ArrayList<>();
@@ -494,9 +516,9 @@ public class SandboxStore {
                 if (modifiedSince != null && !modifiedSince(sandboxFile, modifiedSince)) {
                     continue;
                 }
-                List<SandboxChange> pending = sandbox.changes().stream()
-                    .filter(change -> change.status() == ChangeStatus.PENDING).toList();
-                if (pending.isEmpty() || !root.equals(rootOf(sandbox.workspace()))) {
+                List<SandboxChange> pending =
+                    sandbox.changes().stream().filter(change -> change.status() == ChangeStatus.PENDING).toList();
+                if (pending.isEmpty() || !scope.includes(sandbox.workspace())) {
                     continue;
                 }
                 result.add(new Holder(sessionId, sandbox.id(), sandbox.taskId(), pending));
@@ -667,6 +689,16 @@ public class SandboxStore {
     }
 
     public ApplyReport accept(String sessionId, String sandboxId, Path workspace, String expectedHash) {
+        return accept(sessionId, sandboxId, workspace, expectedHash,
+            ProjectCoordinationScope.of(null, List.of(workspace)));
+    }
+
+    /**
+     * @param scope 调用方解析出的协调范围；只用于把「谁占着同一批文件」提示完整，
+     *              写权限边界仍是这个沙箱自己的 {@code workspace}
+     */
+    public ApplyReport accept(String sessionId, String sandboxId, Path workspace, String expectedHash,
+        ProjectCoordinationScope scope) {
         return withWorkspaceLock(workspace, () -> {
             synchronized (this) {
                 recoverApply(sessionId, sandboxId, workspace);
@@ -693,7 +725,7 @@ public class SandboxStore {
                             List.of(), "整批变更已接受");
                     } catch (IOException | RuntimeException e) {
                         return new ApplyReport(false, List.of(), skipped, List.of(e.getMessage()),
-                            "应用未完成：" + e.getMessage() + occupantHint(sessionId, workspace, pending));
+                            "应用未完成：" + e.getMessage() + occupantHint(sessionId, scope, pending));
                     }
                 }
             }
@@ -701,16 +733,12 @@ public class SandboxStore {
     }
 
     /** 写盘被拒时补上「谁占着同一批文件」，避免用户只能逐个窗口排查。 */
-    private String occupantHint(String sessionId, Path workspace, List<SandboxChange> pending) {
+    private String occupantHint(String sessionId, ProjectCoordinationScope scope, List<SandboxChange> pending) {
         Set<String> paths = pending.stream().map(SandboxChange::path).collect(Collectors.toSet());
-        List<String> owners = holders(workspace.toString()).stream()
-            .filter(holder -> !holder.sessionId().equals(sessionId))
+        List<String> owners = holders(scope).stream().filter(holder -> !holder.sessionId().equals(sessionId))
             .filter(holder -> holder.changes().stream().anyMatch(change -> paths.contains(change.path())))
-            .map(holder -> "会话 " + holder.sessionId() + " 的 " + holder.taskId())
-            .distinct()
-            .toList();
-        return owners.isEmpty() ? ""
-            : "；可能占用同一批文件的：" + String.join("、", owners) + "，等它接受或放弃后重试";
+            .map(holder -> "会话 " + holder.sessionId() + " 的 " + holder.taskId()).distinct().toList();
+        return owners.isEmpty() ? "" : "；可能占用同一批文件的：" + String.join("、", owners) + "，等它接受或放弃后重试";
     }
 
     private void finishApply(String sessionId, String sandboxId, Path workspace, WorkspaceApplyJournal.Journal journal)
