@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Locale;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 
 import com.pilot.core.exec.ExecutionLimits;
 
@@ -27,6 +28,7 @@ public record MultiAgentProperties(Boolean enabled, Integer maxParallel, Integer
     public static final String CROSS_SESSION_WARN = "warn";
     public static final String CROSS_SESSION_BLOCK = "block";
 
+    @ConstructorBinding
     public MultiAgentProperties {
         enabled = enabled == null || enabled;
         maxParallel = maxParallel == null || maxParallel < 1 ? 2 : Math.min(maxParallel, 6);
