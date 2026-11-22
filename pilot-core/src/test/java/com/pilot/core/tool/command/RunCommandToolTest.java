@@ -5,11 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -28,25 +26,6 @@ class RunCommandToolTest {
     Path workspace;
 
     @Test
-    void commandEnvironmentDropsSecretsButKeepsBuildVariables() {
-        Map<String, String> env = new LinkedHashMap<>();
-        env.put("PATH", "/usr/bin");
-        env.put("HOME", "/Users/dev");
-        env.put("USER", "dev");
-        env.put("OPENAI_API_KEY", "sk-test");
-        env.put("GITHUB_TOKEN", "ghp_xxx");
-
-        RunCommandTool.prepareEnvironment(env);
-
-        assertFalse(env.containsKey("OPENAI_API_KEY"));
-        assertFalse(env.containsKey("GITHUB_TOKEN"));
-        assertEquals("/Users/dev", env.get("HOME"));
-        assertEquals("dev", env.get("USER"));
-        assertTrue(env.get("PATH").contains("/usr/bin"), env.get("PATH"));
-        assertFalse(env.get("JAVA_HOME").isBlank());
-    }
-
-    @Test
     void rejectsExecutableOutsideWhitelist() {
         RunCommandTool tool = tool();
 
@@ -57,8 +36,8 @@ class RunCommandToolTest {
 
     @Test
     void missingUnixFileCommandPointsAtFileTools() {
-        String text = RunCommandTool.launchFailureText(
-            "ERROR: 无法启动命令 ls：Cannot run program \"ls\": CreateProcess error=2", "ls", 1);
+        String text = RunCommandTool
+            .launchFailureText("ERROR: 无法启动命令 ls：Cannot run program \"ls\": CreateProcess error=2", "ls", 1);
 
         assertTrue(text.contains("list_dir / read_file / search_text"), text);
         assertFalse(text.contains("不要原样重试"), "第一次不该升级成「不要重试」: " + text);
@@ -68,8 +47,8 @@ class RunCommandToolTest {
     void missingWindowsRmSuggestsExplicitPowerShellRemoval() {
         Assumptions.assumeTrue(System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win"));
 
-        String text = RunCommandTool.launchFailureText(
-            "ERROR: 无法启动命令 rm：Cannot run program \"rm\": CreateProcess error=2", "rm", 1);
+        String text = RunCommandTool
+            .launchFailureText("ERROR: 无法启动命令 rm：Cannot run program \"rm\": CreateProcess error=2", "rm", 1);
 
         assertTrue(text.contains("PowerShell Remove-Item -LiteralPath"), text);
         assertTrue(text.contains("不要原样重试 rm"), text);
@@ -77,8 +56,8 @@ class RunCommandToolTest {
 
     @Test
     void secondMissingUnixFileCommandAsksToStopRetrying() {
-        String text = RunCommandTool.launchFailureText(
-            "ERROR: 无法启动命令 cat：Cannot run program \"cat\": CreateProcess error=2", "cat", 2);
+        String text = RunCommandTool
+            .launchFailureText("ERROR: 无法启动命令 cat：Cannot run program \"cat\": CreateProcess error=2", "cat", 2);
 
         assertTrue(text.contains("不要原样重试"), text);
         // Windows 给 PowerShell 等价命令；macOS/Linux 上 cat 本来就有，不能再写「Windows 上」。
@@ -92,8 +71,8 @@ class RunCommandToolTest {
     /** 缺 rg 在三个系统上都可能发生，纠偏该指向 search_text 而不是只提文件工具。 */
     @Test
     void missingSearchCommandPointsAtSearchText() {
-        String text = RunCommandTool.launchFailureText(
-            "ERROR: 无法启动命令 rg：Cannot run program \"rg\": CreateProcess error=2", "rg", 1);
+        String text = RunCommandTool
+            .launchFailureText("ERROR: 无法启动命令 rg：Cannot run program \"rg\": CreateProcess error=2", "rg", 1);
 
         assertTrue(text.contains("search_text"), text);
         assertTrue(text.contains("glob_files"), text);
@@ -104,10 +83,11 @@ class RunCommandToolTest {
     void onlyMissingUnixFileCommandsCountAsCorrectable() {
         assertTrue(RunCommandTool.missingFileCommand("ls",
             "Cannot run program \"ls\" (in directory \"E:\\work\"): CreateProcess error=2, 系统找不到指定的文件。"));
-        assertTrue(RunCommandTool.missingFileCommand("rg",
-            "Cannot run program \"rg\": error=2, No such file or directory"));
+        assertTrue(
+            RunCommandTool.missingFileCommand("rg", "Cannot run program \"rg\": error=2, No such file or directory"));
         boolean windows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
-        assertEquals(windows, RunCommandTool.missingFileCommand("rm", "Cannot run program \"rm\": CreateProcess error=2"));
+        assertEquals(windows,
+            RunCommandTool.missingFileCommand("rm", "Cannot run program \"rm\": CreateProcess error=2"));
         assertFalse(RunCommandTool.missingFileCommand("mvn", "Cannot run program \"mvn\": CreateProcess error=2"));
         assertFalse(RunCommandTool.missingFileCommand("cat", "Not a directory"));
     }
@@ -219,28 +199,6 @@ class RunCommandToolTest {
         assertTrue(result.startsWith("ERROR: git add 只允许工作区内的相对路径"), result);
     }
 
-    @Test
-    void prefersBundledRuntimeOnPath() throws Exception {
-        Path bin = workspace.resolve("runtime-bin");
-        Files.createDirectories(bin);
-        // resolveOnPath 在 Windows 只认 .exe/.cmd/.bat（直接执行 Unix 脚本会报 Win32 错误），
-        // 测试按平台创建对应的文件名。
-        boolean windows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
-        Path python = bin.resolve(windows ? "python3.cmd" : "python3");
-        Files.writeString(python, windows ? "@echo bundled-python\r\n" : "#!/bin/sh\necho bundled-python\n");
-        String previous = System.getProperty("pilot.runtime.bin");
-        System.setProperty("pilot.runtime.bin", bin.toString());
-        try {
-            assertEquals(python.toAbsolutePath(), RunCommandTool.resolveOnPath("python3").toAbsolutePath());
-        } finally {
-            if (previous == null) {
-                System.clearProperty("pilot.runtime.bin");
-            } else {
-                System.setProperty("pilot.runtime.bin", previous);
-            }
-        }
-    }
-
     /** mvnw 本身也要映射到工作区 wrapper，而不是去 PATH 里找一个不存在的 mvnw。 */
     @Test
     void mapsMvnwToWorkspaceWrapper() throws Exception {
@@ -320,29 +278,13 @@ class RunCommandToolTest {
 
     @Test
     void resolvesBuildToolFromPath() {
-        Path resolved = RunCommandTool.resolveOnPath("mvn");
+        boolean windows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+        Path resolved = CommandRuntimeEnvironment.resolveOnPath("mvn", System.getenv("PATH"), windows);
 
-        assertNull(RunCommandTool.resolveOnPath("definitely-not-a-real-binary-xyz"));
+        assertNull(CommandRuntimeEnvironment.resolveOnPath("definitely-not-a-real-binary-xyz", System.getenv("PATH"),
+            windows));
         assertTrue(resolved != null && resolved.getFileName().toString().toLowerCase().contains("mvn"),
             String.valueOf(resolved));
-    }
-
-    @Test
-    void preservesDirectoryAndWindowsSuffixPriority() throws Exception {
-        Path first = Files.createDirectory(workspace.resolve("中文 tools"));
-        Path second = Files.createDirectory(workspace.resolve("fallback"));
-        Path unix = Files.createFile(first.resolve("tool"));
-        Path batch = Files.createFile(first.resolve("tool.bat"));
-        Path laterExe = Files.createFile(second.resolve("tool.exe"));
-        String path = String.join(File.pathSeparator, "bad\0path", " " + first + " ", second.toString());
-
-        assertEquals(unix, RunCommandTool.resolveOnPath("tool", path, false));
-        assertEquals(batch, RunCommandTool.resolveOnPath("tool", path, true));
-        Path cmd = Files.createFile(first.resolve("tool.cmd"));
-        assertEquals(cmd, RunCommandTool.resolveOnPath("tool", path, true));
-        Files.delete(cmd);
-        Files.delete(batch);
-        assertEquals(laterExe, RunCommandTool.resolveOnPath("tool", path, true));
     }
 
     @Test

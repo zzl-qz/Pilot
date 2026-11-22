@@ -1,6 +1,5 @@
 package com.pilot.core.tool.command;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -16,14 +15,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import com.pilot.core.exec.EnvironmentSanitizer;
 import com.pilot.core.exec.OsSandbox;
 import com.pilot.core.exec.ProcessSupport;
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.message.ToolNames;
 import com.pilot.core.prompt.PromptLibrary;
-import com.pilot.core.runtime.ExecutablePath;
-import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
 import com.pilot.core.tool.ProducesCheck;
 import com.pilot.core.tool.ReadGuard;
 import com.pilot.core.tool.Tool;
@@ -159,8 +155,8 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         if (commandTasks != null) {
             properties.put("background",
                 Map.of("type", "boolean", "default", false, "description", "后台运行并立即返回任务 ID；默认 false，等待命令结束"));
-            properties.put("interactive", Map.of("type", "boolean", "default", false,
-                "description", "保留标准输入，启动后用 command_input 写输入（需要 background=true 且只有单条命令）；默认 false"));
+            properties.put("interactive", Map.of("type", "boolean", "default", false, "description",
+                "保留标准输入，启动后用 command_input 写输入（需要 background=true 且只有单条命令）；默认 false"));
         }
         return ToolSchemas.object(properties, List.of("command"));
     }
@@ -470,16 +466,17 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         if (!chained && !redirected) {
             SegmentCheck only = checks.getFirst();
             List<String> command = withWrapper(only.tokens());
-            return new Preparation(new Prepared(command, only.tokens(), workdir, background,
-                timeoutMs, trackChanges, readOnly, only.env(), interactive, shellLabel(command)), null);
+            return new Preparation(new Prepared(command, only.tokens(), workdir, background, timeoutMs, trackChanges,
+                readOnly, only.env(), interactive, shellLabel(command)), null);
         }
         // 串联或重定向才进 shell。每段仍用解析出的绝对路径，shell 只负责连接符和已经校验过的重定向。
         List<List<String>> checked = checks.stream().map(SegmentCheck::tokens).toList();
         String display = String.join(" ", segmentsDisplay(checked, operators));
         if (WINDOWS) {
             List<List<String>> resolved = withWrapperSegments(checked);
-            Path pwsh = resolveOnPath("pwsh");
-            Path shell = pwsh != null ? pwsh : resolveOnPath("powershell");
+            Path pwsh = CommandRuntimeEnvironment.resolveOnPath("pwsh", System.getenv("PATH"), WINDOWS);
+            Path shell = pwsh != null ? pwsh
+                : CommandRuntimeEnvironment.resolveOnPath("powershell", System.getenv("PATH"), WINDOWS);
             if (shell == null) {
                 return Preparation.error("ERROR: Windows 上执行命令需要 PowerShell（powershell.exe 或 pwsh.exe），当前都没找到");
             }
@@ -935,10 +932,8 @@ public final class RunCommandTool implements Tool, ProducesCheck {
 
     /** Windows 上没有这些 Unix 文件命令，工具描述里直接给出替代工具。 */
     private static String windowsFileCommandNote() {
-        return WINDOWS
-            ? "Windows 上 ls/cat/head/tail/find/dir 没有对应可执行文件，请改用 list_dir / read_file / search_text。"
-                + "删除文件不要直接运行 rm；请显式使用 powershell -NoProfile -Command \"Remove-Item -LiteralPath '工作区内路径'\"。"
-            : "";
+        return WINDOWS ? "Windows 上 ls/cat/head/tail/find/dir 没有对应可执行文件，请改用 list_dir / read_file / search_text。"
+            + "删除文件不要直接运行 rm；请显式使用 powershell -NoProfile -Command \"Remove-Item -LiteralPath '工作区内路径'\"。" : "";
     }
 
     /** 取命令的叶子名（去掉目录与 .exe 后缀）。 */
@@ -1065,7 +1060,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         }
         ProcessBuilder builder =
             new ProcessBuilder(sandbox.command()).directory(workdir.toFile()).redirectErrorStream(true);
-        prepareEnvironment(builder.environment());
+        CommandRuntimeEnvironment.prepareEnvironment(builder.environment());
         // 显式前缀放在 JDK 默认值之后，这样 JAVA_HOME=/path mvn 才会用到用户指定的值。
         if (extra != null) {
             builder.environment().putAll(extra);
@@ -1074,36 +1069,6 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     }
 
     private record CommandLaunch(ProcessBuilder builder, String label) {
-    }
-
-    static void prepareEnvironment(Map<String, String> env) {
-        EnvironmentSanitizer sanitizer = EnvironmentSanitizer.defaults();
-        env.keySet().removeIf(key -> !sanitizer.allowed(key));
-        useCurrentJdk(env);
-        // 分页器和 git 询问会把没有终端的命令一直挂住。放在清洗之后，避免被允许名单删掉。
-        env.putIfAbsent("CI", "true");
-        env.put("PAGER", "cat");
-        env.put("GIT_PAGER", "cat");
-        env.put("GIT_TERMINAL_PROMPT", "0");
-    }
-
-    /**
-     * 子进程继承服务进程的环境变量，其中 {@code JAVA_HOME} 可能指向更老的 JDK
-     * （例如系统默认 17），导致 {@code mvn test} 无法加载本项目编译出的 Java 24 字节码。
-     *
-     * <p>Pilot 自己必然运行在项目要求的 JDK 上，因此把 {@code JAVA_HOME} 与 PATH 首项
-     * 都指向当前运行时的 JDK，保证构建命令看到的是同一个 Java。
-     */
-    private static void useCurrentJdk(Map<String, String> env) {
-        String pathKey = ExecutablePath.key(env);
-        String javaHome = System.getProperty("java.home");
-        if (javaHome != null && !javaHome.isBlank()) {
-            Path bin = Path.of(javaHome, "bin");
-            env.put("JAVA_HOME", javaHome);
-            String current = env.getOrDefault(pathKey, "");
-            env.put(pathKey, joinPath(bin.toString(), stripPrefix(current, bin.toString())));
-        }
-        env.put(pathKey, joinPath(RuntimeEnvironment.bundledBinPath().strip(), env.getOrDefault(pathKey, "")));
     }
 
     private static String render(String displayCommand, List<String> actual, int exitCode, long latencyMs,
@@ -1134,9 +1099,9 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         Path wrapper = null;
         // mvnw/gradlew 本身也映射到工作区 wrapper：直接按名字查 PATH 是找不到的
         if ("mvn".equals(head) || "mvnw".equals(head)) {
-            wrapper = findWrapper("mvnw");
+            wrapper = CommandRuntimeEnvironment.findWrapper(paths.root(), "mvnw", WINDOWS);
         } else if ("gradle".equals(head) || "gradlew".equals(head)) {
-            wrapper = findWrapper("gradlew");
+            wrapper = CommandRuntimeEnvironment.findWrapper(paths.root(), "gradlew", WINDOWS);
         }
         if (wrapper != null) {
             // Git 检出或打包可能丢失执行位；只为已识别的构建 wrapper 加解释器，绝不执行 shell -c。
@@ -1146,7 +1111,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             }
             command.add(wrapper.toAbsolutePath().toString());
         } else {
-            Path resolved = resolveOnPath(tokens.get(0));
+            Path resolved = CommandRuntimeEnvironment.resolveOnPath(tokens.get(0), System.getenv("PATH"), WINDOWS);
             command.add(resolved == null ? tokens.get(0) : resolved.toAbsolutePath().toString());
         }
         command.addAll(tokens.subList(1, tokens.size()));
@@ -1163,7 +1128,9 @@ public final class RunCommandTool implements Tool, ProducesCheck {
      * 三平台都能看出这次到底把命令交给了谁——只看「实际执行」里的一串参数看不出这件事。
      */
     private static String shellLabel(List<String> command) {
-        if (command.isEmpty()) return "直接执行";
+        if (command.isEmpty()) {
+            return "直接执行";
+        }
         String head = executableName(command.get(0)).toLowerCase(Locale.ROOT);
         return switch (head) {
             case "cmd" -> "cmd";
@@ -1179,60 +1146,6 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         wrapped.add("/c");
         wrapped.addAll(command);
         return wrapped;
-    }
-
-    /** 在 PATH 中查找可执行文件；Windows 需要补全 .exe/.cmd/.bat 后缀。 */
-    static Path resolveOnPath(String name) {
-        return resolveOnPath(name, effectivePath(), HostOs.isWindows());
-    }
-
-    static Path resolveOnPath(String name, String path, boolean windows) {
-        var directories = ExecutablePath.directories(path, String::trim);
-        // Windows 上只看带后缀的文件：Maven 的 bin 目录同时有 Unix 脚本 mvn 和 mvn.cmd，
-        // 直接执行 Unix 脚本会报 "不是有效的 Win32 应用程序"
-        String[] names = windows ? new String[] {name + ".exe", name + ".cmd", name + ".bat"} : new String[] {name};
-        return ExecutablePath.candidates(directories, names).filter(Files::isRegularFile).findFirst().orElse(null);
-    }
-
-    /** PATH 前面先放内置的 Python/Node，再放当前 JDK，避免用到系统里另一套解释器。 */
-    private static String effectivePath() {
-        String base = System.getenv("PATH");
-        String javaHome = System.getProperty("java.home");
-        if (javaHome != null && !javaHome.isBlank()) {
-            base = joinPath(Path.of(javaHome, "bin").toString(), base);
-        }
-        return joinPath(RuntimeEnvironment.bundledBinPath().strip(), base);
-    }
-
-    private static String joinPath(String front, String rest) {
-        if (front == null || front.isBlank()) {
-            return rest == null ? "" : rest;
-        }
-        rest = stripPrefix(rest, front);
-        if (rest == null || rest.isBlank()) {
-            return front;
-        }
-        return front + File.pathSeparator + rest;
-    }
-
-    private static String stripPrefix(String path, String prefix) {
-        if (path == null || path.isBlank() || prefix == null || prefix.isBlank()) {
-            return path == null ? "" : path;
-        }
-        String head = prefix + File.pathSeparator;
-        return path.startsWith(head) ? path.substring(head.length()) : path.equals(prefix) ? "" : path;
-    }
-
-    private Path findWrapper(String baseName) {
-        boolean windows = HostOs.isWindows();
-        List<String> names = windows ? List.of(baseName + ".cmd", baseName + ".bat") : List.of(baseName);
-        for (String name : names) {
-            Path candidate = paths.root().resolve(name);
-            if (Files.isRegularFile(candidate)) {
-                return candidate;
-            }
-        }
-        return null;
     }
 
     private static long timeout(Map<String, Object> args, boolean background) {

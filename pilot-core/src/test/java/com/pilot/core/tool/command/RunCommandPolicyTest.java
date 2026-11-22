@@ -128,7 +128,7 @@ class RunCommandPolicyTest {
     @Test
     void safeEnvPrefixRunsAndDangerousPrefixIsRejected() {
         Assumptions.assumeFalse(WINDOWS);
-        Assumptions.assumeTrue(RunCommandTool.resolveOnPath("node") != null);
+        Assumptions.assumeTrue(CommandRuntimeEnvironment.resolveOnPath("node", System.getenv("PATH"), WINDOWS) != null);
 
         String result = tool.execute(Map.of("command", "NODE_ENV=from-prefix node -p process.env.NODE_ENV"));
 
