@@ -26,8 +26,25 @@ public final class MergePrecheck {
      * @param path   冲突文件
      * @param owners 参与的 Agent 标识
      * @param detail 冲突细节（行区间）
+     * @param external 是否牵扯其他会话尚未接受的沙箱
      */
-    public record Conflict(String path, List<String> owners, String detail) {
+    public record Conflict(String path, List<String> owners, String detail, boolean external) {
+        public Conflict(String path, List<String> owners, String detail) {
+            this(path, owners, detail, false);
+        }
+    }
+
+    /**
+     * 另一个会话里尚未接受的改动；只参与冲突判定，不参与合并与硬校验。
+     *
+     * @param owner   占用方标识，用于在报告里说明"谁占着"
+     * @param changes 该占用方的待接受改动
+     */
+    public record Held(String owner, List<SandboxChange> changes) {
+        public Held {
+            owner = owner == null ? "" : owner;
+            changes = changes == null ? List.of() : List.copyOf(changes);
+        }
     }
 
     /**
@@ -35,14 +52,28 @@ public final class MergePrecheck {
      * @param conflicts   冲突清单
      */
     public record Report(boolean hasConflict, List<Conflict> conflicts) {
+        /** 本批子 Agent 之间的冲突。 */
+        public boolean hasOwnConflict() {
+            return conflicts.stream().anyMatch(conflict -> !conflict.external());
+        }
+
+        /** 牵扯其他会话未接受沙箱的冲突。 */
+        public boolean hasExternalConflict() {
+            return conflicts.stream().anyMatch(Conflict::external);
+        }
+
+        public List<Conflict> externalConflicts() {
+            return conflicts.stream().filter(Conflict::external).toList();
+        }
+
         public String describe() {
             if (!hasConflict) {
                 return "合并预检通过：没有文件重叠冲突。";
             }
             StringBuilder out = new StringBuilder("合并预检发现 ").append(conflicts.size()).append(" 处冲突：");
             for (Conflict conflict : conflicts) {
-                out.append("\n- ").append(conflict.path()).append("（").append(String.join(" / ", conflict.owners()))
-                    .append("）：").append(conflict.detail());
+                out.append("\n- ").append(conflict.external() ? "【跨会话】" : "").append(conflict.path()).append("（")
+                    .append(String.join(" / ", conflict.owners())).append("）：").append(conflict.detail());
             }
             return out.toString();
         }
@@ -52,12 +83,31 @@ public final class MergePrecheck {
     }
 
     public static Report check(Collection<DiffSandbox> sandboxes) {
+        return check(sandboxes, List.of());
+    }
+
+    /**
+     * 连同其他会话尚未接受的改动一起预检。
+     *
+     * <p>其他会话之间的冲突与本批无关，不报；只报至少牵扯本批一份改动的冲突。
+     *
+     * @param held 其他会话的占用，不参与合并与硬校验
+     */
+    public static Report check(Collection<DiffSandbox> sandboxes, Collection<Held> held) {
         Map<String, Map<String, List<SandboxChange>>> byPath = new LinkedHashMap<>();
+        Set<String> externalOwners = new LinkedHashSet<>();
         if (sandboxes != null) {
             for (DiffSandbox sandbox : sandboxes) {
                 for (SandboxChange change : sandbox.changes()) {
-                    byPath.computeIfAbsent(change.path(), key -> new LinkedHashMap<>())
-                        .computeIfAbsent(owner(change), key -> new ArrayList<>()).add(change);
+                    index(byPath, owner(change), change);
+                }
+            }
+        }
+        if (held != null) {
+            for (Held item : held) {
+                for (SandboxChange change : item.changes()) {
+                    externalOwners.add(item.owner());
+                    index(byPath, item.owner(), change);
                 }
             }
         }
@@ -69,12 +119,22 @@ public final class MergePrecheck {
                 continue;
             }
             List<String> names = List.copyOf(owners.keySet());
+            if (externalOwners.containsAll(names)) {
+                continue;
+            }
             String detail = overlapping(owners);
             if (detail != null) {
-                conflicts.add(new Conflict(entry.getKey(), names, detail));
+                conflicts.add(
+                    new Conflict(entry.getKey(), names, detail, names.stream().anyMatch(externalOwners::contains)));
             }
         }
         return new Report(!conflicts.isEmpty(), List.copyOf(conflicts));
+    }
+
+    private static void index(Map<String, Map<String, List<SandboxChange>>> byPath, String owner,
+        SandboxChange change) {
+        byPath.computeIfAbsent(change.path(), key -> new LinkedHashMap<>())
+            .computeIfAbsent(owner, key -> new ArrayList<>()).add(change);
     }
 
     /** 多份改动是否落在同一区域；返回 {@code null} 表示可以自动合并。 */

@@ -66,4 +66,18 @@ class ExecutionConfigurationTest {
             .run(context -> assertNotNull(context.getStartupFailure()));
         runner.withPropertyValues("pilot.execution.cpus=").run(context -> assertNotNull(context.getStartupFailure()));
     }
+
+    @Test
+    void crossSessionConflictDefaultsToWarnAndFallsBackOnUnknownValues() {
+        assertEquals(MultiAgentProperties.CROSS_SESSION_WARN, multi(null).crossSessionConflict());
+        assertEquals(MultiAgentProperties.CROSS_SESSION_WARN, multi("  ").crossSessionConflict());
+        assertEquals(MultiAgentProperties.CROSS_SESSION_WARN, multi("bogus").crossSessionConflict());
+        assertEquals(MultiAgentProperties.CROSS_SESSION_BLOCK, multi(" BLOCK ").crossSessionConflict());
+        assertEquals(MultiAgentProperties.CROSS_SESSION_OFF, multi("off").crossSessionConflict());
+        assertEquals(MultiAgentProperties.DEFAULT_CROSS_SESSION_WINDOW_MINUTES, multi(null).crossSessionWindowMinutes());
+    }
+
+    private static MultiAgentProperties multi(String crossSession) {
+        return new MultiAgentProperties(null, null, null, null, null, null, crossSession, null);
+    }
 }

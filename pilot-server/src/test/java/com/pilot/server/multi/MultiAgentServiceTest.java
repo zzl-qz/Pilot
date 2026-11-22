@@ -2,6 +2,7 @@ package com.pilot.server.multi;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -33,6 +34,7 @@ import com.pilot.core.message.ToolCall;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ModelUsage;
+import com.pilot.core.multi.DiffSandbox;
 import com.pilot.core.multi.RiskLevel;
 import com.pilot.core.multi.TaskSpec;
 import com.pilot.core.multi.TaskStatus;
@@ -73,6 +75,8 @@ class MultiAgentServiceTest {
 
     private List<SessionEvent> events;
 
+    private SandboxStore store;
+
     private MultiAgentService service(ModelClient client) throws IOException {
         return service(client, PermissionMode.AUTO);
     }
@@ -83,14 +87,20 @@ class MultiAgentServiceTest {
 
     private MultiAgentService service(ModelClient client, PermissionMode mode, JdbcDispatchStore dispatchStore)
         throws IOException {
+        return service(client, mode, dispatchStore, null);
+    }
+
+    /** @param crossSession 跨会话冲突策略；{@code null} 用默认 {@code warn} */
+    private MultiAgentService service(ModelClient client, PermissionMode mode, JdbcDispatchStore dispatchStore,
+        String crossSession) throws IOException {
         Files.createDirectories(workspace.resolve("src"));
         Files.writeString(workspace.resolve("src/A.java"), "class A {}\n");
         AgentProperties agent = new AgentProperties(workspace.toString(), mode, 8, 3, 5, 300, 2, 1, 60_000, true);
         WorkspaceToolFactory factory =
             new WorkspaceToolFactory(agent, new WebSearchProperties(false, "http://127.0.0.1:9", "", ""),
                 SnapshotSink.none(), JsonMapper.builder().build());
-        SandboxStore store = new SandboxStore(JsonMapper.builder().build(), new PilotDataDir(dataDir.toString()));
-        MultiAgentProperties properties = new MultiAgentProperties(true, 2, 2, 8, 30, List.of());
+        store = new SandboxStore(JsonMapper.builder().build(), new PilotDataDir(dataDir.toString()));
+        MultiAgentProperties properties = new MultiAgentProperties(true, 2, 2, 8, 30, List.of(), crossSession);
         VerificationGate gate = (root, base, changes) -> VerificationGate.Report.skipped("测试环境跳过编译");
         events = new CopyOnWriteArrayList<>();
         return new MultiAgentService(client, factory, store, gate, properties, new PilotDataDir(dataDir.toString()),
@@ -375,6 +385,57 @@ class MultiAgentServiceTest {
         assertFalse(result.completed(), "跳过校验不能报告整批通过");
         assertEquals("skipped", result.verification().status());
         assertFalse(Files.exists(workspace.resolve("src/New.java")));
+    }
+
+    /** 其他会话尚未接受的改动占着同一文件时，block 档必须交人工裁决，且不落盘、不进硬校验。 */
+    @Test
+    void crossSessionHoldOnSameFileStopsAtHumanDecision() throws IOException {
+        MultiAgentService service =
+            service(creatingSharedThenReport(), PermissionMode.AUTO, null, MultiAgentProperties.CROSS_SESSION_BLOCK);
+        holdSharedFromAnotherSession();
+
+        MultiAgentService.Result result = service.dispatch(dispatch(
+            List.of(TaskSpec.editable("T1", "新增类", "新增 Shared", List.of(), List.of("src/**"), RiskLevel.LOW))));
+
+        assertFalse(result.completed(), result.report());
+        assertNull(result.verification(), "跨会话冲突必须拦在硬校验之前");
+        ArbitrationRequired arbitration = events.stream().filter(ArbitrationRequired.class::isInstance)
+            .map(ArbitrationRequired.class::cast).findFirst().orElseThrow();
+        assertEquals(ArbitrationRequired.KIND_CROSS_SESSION, arbitration.kind());
+        assertTrue(arbitration.report().contains("ses_other"), arbitration.report());
+        assertTrue(arbitration.report().contains("T7"), arbitration.report());
+        assertFalse(Files.exists(workspace.resolve("src/Shared.java")), "存在跨会话冲突时不能落盘");
+    }
+
+    /** 默认 warn 档只把占用写进报告，不发起仲裁，也不阻断本批进入校验。 */
+    @Test
+    void crossSessionHoldOnlyWarnsByDefault() throws IOException {
+        MultiAgentService service = service(creatingSharedThenReport());
+        holdSharedFromAnotherSession();
+
+        MultiAgentService.Result result = service.dispatch(dispatch(
+            List.of(TaskSpec.editable("T1", "新增类", "新增 Shared", List.of(), List.of("src/**"), RiskLevel.LOW))));
+
+        assertTrue(result.arbitrationId().isEmpty(), "warn 档不发起仲裁");
+        assertEquals("skipped", result.verification().status(), "warn 档照常进入校验");
+        assertTrue(result.report().contains("跨会话占用"), result.report());
+        assertTrue(events.stream().noneMatch(ArbitrationRequired.class::isInstance));
+    }
+
+    /** 子 Agent 第一次请求新建 src/Shared.java，之后收尾。 */
+    private static ModelClient creatingSharedThenReport() {
+        AtomicInteger requests = new AtomicInteger();
+        return (messages, tools) -> requests.getAndIncrement() == 0
+            ? new ModelResponse("", List.of(
+                new ToolCall("create", "create_file", Map.of("path", "src/Shared.java", "content", "class Shared {}\n"))))
+            : new ModelResponse(REPORT, List.of());
+    }
+
+    /** 另一个会话持有一份尚未接受的 src/Shared.java 新建改动。 */
+    private void holdSharedFromAnotherSession() {
+        DiffSandbox other = new DiffSandbox("sbx_other", "agent_other", "T7", "", workspace);
+        other.add("src/Shared.java", null, "class Shared { other }\n", false, RiskLevel.LOW);
+        store.add("ses_other", other);
     }
 
     @Test

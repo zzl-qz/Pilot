@@ -91,4 +91,51 @@ class MergePrecheckTest {
 
         assertEquals(2, MergePrecheck.mergedChanges(List.of(one, two)).size());
     }
+
+    @Test
+    void externalHoldOnTheSameRegionIsReportedAsCrossSession() {
+        String base = numberedFile(30);
+        DiffSandbox one = sandbox("agentA", "T1");
+        one.add("src/A.java", base, replaceLine(base, 10, "A-changed"), true, RiskLevel.MEDIUM);
+        DiffSandbox other = sandbox("agentX", "T9");
+        other.add("src/A.java", base, replaceLine(base, 10, "X-changed"), true, RiskLevel.LOW);
+
+        MergePrecheck.Report report =
+            MergePrecheck.check(List.of(one), List.of(new MergePrecheck.Held("其他会话 ses_x 的 T9", other.changes())));
+
+        assertTrue(report.hasExternalConflict());
+        assertFalse(report.hasOwnConflict(), "只有一个本批改动，不存在本批内部冲突");
+        assertTrue(report.describe().contains("【跨会话】"), report.describe());
+    }
+
+    @Test
+    void externalHoldOnAnotherRegionIsNotAConflict() {
+        String base = numberedFile(40);
+        DiffSandbox one = sandbox("agentA", "T1");
+        one.add("src/A.java", base, replaceLine(base, 3, "A-changed"), true, RiskLevel.MEDIUM);
+        DiffSandbox other = sandbox("agentX", "T9");
+        other.add("src/A.java", base, replaceLine(base, 35, "X-changed"), true, RiskLevel.LOW);
+
+        MergePrecheck.Report report =
+            MergePrecheck.check(List.of(one), List.of(new MergePrecheck.Held("其他会话 ses_x 的 T9", other.changes())));
+
+        assertFalse(report.hasConflict(), report.describe());
+    }
+
+    @Test
+    void conflictsBetweenOtherSessionsOnlyAreNotReported() {
+        String base = numberedFile(30);
+        DiffSandbox mine = sandbox("agentA", "T1");
+        mine.add("src/Other.java", base, replaceLine(base, 2, "A-changed"), true, RiskLevel.MEDIUM);
+        DiffSandbox left = sandbox("agentX", "T8");
+        left.add("src/A.java", base, replaceLine(base, 10, "X"), true, RiskLevel.LOW);
+        DiffSandbox right = sandbox("agentY", "T9");
+        right.add("src/A.java", base, replaceLine(base, 10, "Y"), true, RiskLevel.LOW);
+
+        MergePrecheck.Report report =
+            MergePrecheck.check(List.of(mine), List.of(new MergePrecheck.Held("其他会话 ses_x 的 T8", left.changes()),
+                new MergePrecheck.Held("其他会话 ses_y 的 T9", right.changes())));
+
+        assertFalse(report.hasConflict(), "与本批无关的会话间冲突不报，避免噪音：" + report.describe());
+    }
 }

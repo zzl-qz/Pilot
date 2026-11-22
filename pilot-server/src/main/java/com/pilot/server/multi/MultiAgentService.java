@@ -1,6 +1,8 @@
 package com.pilot.server.multi;
 
 import java.nio.file.Path;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -346,7 +348,7 @@ public class MultiAgentService {
         }
 
         List<DiffSandbox> boxes = collectedSandboxes(states);
-        MergePrecheck.Report merge = MergePrecheck.check(boxes);
+        MergePrecheck.Report merge = MergePrecheck.check(boxes, heldByOtherSessions(dispatch));
         List<DissentReport> dissents =
             states.values().stream().filter(state -> state.dissent != null).map(state -> state.dissent).toList();
 
@@ -357,13 +359,15 @@ public class MultiAgentService {
             DissentReport first = dissents.get(0);
             raiseArbitration(dispatch, new ArbitrationRequired(arbitrationId, ArbitrationRequired.KIND_DISSENT,
                 first.taskId(), DissentReport.options(first.sides().size()), first.toText()));
-        } else if (merge.hasConflict()) {
+        } else if (merge.hasOwnConflict() || (blocksCrossSession() && merge.hasExternalConflict())) {
+            boolean crossSession = !merge.hasOwnConflict();
             markConflicts(merge, states, dispatch);
             arbitrationId = "arb_" + randomSuffix();
-            raiseArbitration(dispatch,
-                new ArbitrationRequired(arbitrationId, ArbitrationRequired.KIND_CONFLICT, "",
-                    List.of("调整任务顺序重新生成", "放弃其中一份变更", "人工修改后重跑"),
-                    "## 🔴 变更冲突\n\n" + merge.describe() + "\n\n> 父 Agent 不会自动合并冲突文件，请决定调整顺序、重新生成或放弃某份变更。"));
+            raiseArbitration(dispatch, new ArbitrationRequired(arbitrationId,
+                crossSession ? ArbitrationRequired.KIND_CROSS_SESSION : ArbitrationRequired.KIND_CONFLICT, "",
+                List.of("调整任务顺序重新生成", "放弃其中一份变更", "人工修改后重跑"),
+                (crossSession ? "## 🔴 跨会话变更冲突\n\n" : "## 🔴 变更冲突\n\n") + merge.describe()
+                    + "\n\n> 父 Agent 不会自动合并冲突文件，请决定调整顺序、重新生成或放弃某份变更。"));
         }
 
         VerificationGate.Report verificationReport = null;
@@ -400,6 +404,10 @@ public class MultiAgentService {
             budget.complete();
         }
         String report = buildReport(outcomes, merge, verificationReport, dissents, completed, budget.snapshot());
+        if (arbitrationId.isEmpty() && !blocksCrossSession() && merge.hasExternalConflict()) {
+            report = report + "\n\n## ⚠️ 跨会话占用\n\n" + merge.describe()
+                + "\n\n> 以上是其他会话尚未接受的改动；本批改动不会自动与它们合并，接受前请先确认。";
+        }
         if (dispatchStore != null) {
             dispatchStore.saveDispatch(dispatchId, dispatch.sessionId(), dispatch.runId(), dispatch.workspace(),
                 completed ? JdbcDispatchStore.DispatchStatus.AWAITING_ACCEPTANCE : arbitrationId.isEmpty()
@@ -985,6 +993,32 @@ public class MultiAgentService {
                 update(state, TaskStatus.CONFLICT, "沙箱改动与其他任务重叠，等待人工裁决", dispatch);
             }
         }
+    }
+
+    /**
+     * 同工作区其他会话尚未接受的改动；跨会话预检关闭时为空。
+     *
+     * <p>占用方名字带不带 {@code @} 很关键：{@link #markConflicts} 用 {@code @} 拆任务标识，
+     * 外部占用的任务不属于本批，这里刻意不写 {@code @}，避免误把同名任务标成冲突。
+     */
+    private List<MergePrecheck.Held> heldByOtherSessions(Dispatch dispatch) {
+        if (MultiAgentProperties.CROSS_SESSION_OFF.equals(properties.crossSessionConflict())) {
+            return List.of();
+        }
+        List<MergePrecheck.Held> held = new ArrayList<>();
+        Instant modifiedSince = Instant.now().minus(properties.crossSessionWindowMinutes(), ChronoUnit.MINUTES);
+        for (SandboxStore.Holder holder : sandboxes.holders(dispatch.workspace(), modifiedSince)) {
+            if (holder.sessionId().equals(dispatch.sessionId())) {
+                continue;
+            }
+            held.add(new MergePrecheck.Held("其他会话 " + holder.sessionId() + " 的 " + holder.taskId(),
+                holder.changes()));
+        }
+        return held;
+    }
+
+    private boolean blocksCrossSession() {
+        return MultiAgentProperties.CROSS_SESSION_BLOCK.equals(properties.crossSessionConflict());
     }
 
     private List<DiffSandbox> collectedSandboxes(Map<String, TaskState> states) {

@@ -9,6 +9,8 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -57,6 +59,85 @@ class SandboxStoreTest {
         assertTrue(report.ok(), report.message());
         assertEquals("a\nCHANGED\nc\n", Files.readString(workspace.resolve("src/A.java")));
         assertEquals(1, store.diffs("ses_1").size());
+    }
+
+    /** 跨会话预检只关心同一工作区里还没接受的沙箱，别的仓库的不能混进来。 */
+    @Test
+    void holdersListPendingSandboxesOfTheSameWorkspaceOnly() throws IOException {
+        SandboxStore store = store();
+        store.add("ses_1", pend("sbx_1", "T1", workspace));
+        store.add("ses_2", pend("sbx_2", "T2", workspace));
+        Path elsewhere = Files.createDirectories(workspace.resolveSibling("other-workspace"));
+        store.add("ses_3", pend("sbx_3", "T3", elsewhere));
+
+        List<SandboxStore.Holder> holders = store.holders(workspace.toString());
+
+        assertEquals(2, holders.size(), holders.toString());
+        assertTrue(holders.stream()
+            .anyMatch(holder -> holder.sessionId().equals("ses_2") && holder.taskId().equals("T2")), holders.toString());
+        assertTrue(holders.stream().noneMatch(holder -> holder.sessionId().equals("ses_3")), holders.toString());
+    }
+
+    /** 一个会话的状态坏了不能让整次派发失败；跳过它，其余会话照常参与预检。 */
+    @Test
+    void holdersSkipCorruptedSessionInsteadOfFailingEveryDispatch() throws IOException {
+        SandboxStore store = store();
+        store.add("ses_1", pend("sbx_1", "T1", workspace));
+        Path broken = Files.createDirectories(new PilotDataDir(dataDir.toString()).file("multi", "ses_bad"));
+        Files.writeString(broken.resolve("sbx_bad.json"), "{not json");
+
+        List<SandboxStore.Holder> holders = store.holders(workspace.toString());
+
+        assertEquals(1, holders.size(), holders.toString());
+        assertEquals("ses_1", holders.getFirst().sessionId());
+    }
+
+    @Test
+    void holdersExcludeRejectedChangesAndExposeImmutableSnapshots() throws IOException {
+        SandboxStore store = store();
+        store.add("ses_1", pend("sbx_1", "T1", workspace));
+
+        List<SandboxStore.Holder> holders = store.holders(workspace.toString());
+        assertThrows(UnsupportedOperationException.class, () -> holders.getFirst().changes().clear());
+
+        assertTrue(store.reject("ses_1", "sbx_1"));
+
+        assertTrue(store.holders(workspace.toString()).isEmpty());
+    }
+
+    @Test
+    void holdersCanExcludeSandboxesOlderThanTheCoordinationWindow() throws IOException {
+        SandboxStore store = store();
+        store.add("ses_1", pend("sbx_1", "T1", workspace));
+        Path persisted = dataDir.resolve("multi/ses_1/sbx_1.json");
+        Files.setLastModifiedTime(persisted, FileTime.from(Instant.now().minusSeconds(5 * 60 * 60L)));
+
+        assertTrue(store.holders(workspace.toString(), Instant.now().minusSeconds(4 * 60 * 60L)).isEmpty());
+        assertEquals(1, store.holders(workspace.toString()).size());
+    }
+
+    /** 写盘被拒时要说明谁占着同一批文件，否则用户只能挨个窗口排查。 */
+    @Test
+    void failedAcceptNamesTheOtherSessionHoldingTheSameFiles() throws Exception {
+        SandboxStore store = store();
+        store.add("ses_a", pend("sbx_a", "T1", workspace));
+        store.add("ses_b", pend("sbx_b", "T2", workspace));
+        Files.writeString(workspace.resolve("src/A.java"), "a\nexternal edit\nc\n");
+
+        SandboxStore.ApplyReport second = store.accept("ses_b", "sbx_b", workspace);
+
+        assertFalse(second.ok());
+        assertTrue(second.message().contains("ses_a"), second.message());
+        assertTrue(second.message().contains("T1"), second.message());
+    }
+
+    /** 造一个带工作区、且有一处改动的待接受沙箱。 */
+    private DiffSandbox pend(String sandboxId, String taskId, Path root) throws IOException {
+        Files.createDirectories(root.resolve("src"));
+        Files.writeString(root.resolve("src/A.java"), ORIGINAL);
+        DiffSandbox sandbox = new DiffSandbox(sandboxId, "agent_" + sandboxId, taskId, "", root);
+        sandbox.add("src/A.java", ORIGINAL, "a\n" + taskId + "\nc\n", true, RiskLevel.MEDIUM);
+        return sandbox;
     }
 
     @Test

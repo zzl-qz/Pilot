@@ -30,6 +30,8 @@ spring:
 
 pilot:
   multi:
+    # 只把近期其他会话尚未接受的改动纳入跨会话冲突预检。
+    cross-session-window-minutes: ${PILOT_MULTI_CROSS_SESSION_WINDOW_MINUTES:240}
     budget:
       # 单次派发墙钟上限（秒）。到期后停止准入，并尽力中断在途子任务；仍是本地软限制。
       max-dispatch-seconds: ${PILOT_MULTI_BUDGET_MAX_DISPATCH_SECONDS:1800}

@@ -17,6 +17,8 @@ public record ArbitrationRequired(String arbitrationId, String kind, String task
     public static final String KIND_DISSENT = "dissent";
     /** 沙箱改动合并冲突。 */
     public static final String KIND_CONFLICT = "conflict";
+    /** 其他会话尚未接受的改动与本批改动撞车。 */
+    public static final String KIND_CROSS_SESSION = "cross-session";
 
     public ArbitrationRequired {
         arbitrationId = arbitrationId == null ? "" : arbitrationId;

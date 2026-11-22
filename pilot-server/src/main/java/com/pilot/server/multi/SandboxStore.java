@@ -6,6 +6,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -69,6 +70,20 @@ public class SandboxStore {
 
     /** 待仲裁事项。 */
     public record Arbitration(String id, String kind, String taskId, List<String> options, String report) {
+    }
+
+    /**
+     * 某个会话尚未接受的沙箱；用于跨会话占用预检。
+     *
+     * @param sessionId 持有方会话
+     * @param sandboxId 沙箱标识
+     * @param taskId    产出该沙箱的子任务
+     * @param changes   待接受改动
+     */
+    public record Holder(String sessionId, String sandboxId, String taskId, List<SandboxChange> changes) {
+        public Holder {
+            changes = changes == null ? List.of() : List.copyOf(changes);
+        }
     }
 
     /** 界面展示用的清单摘要（不含文件内容）。 */
@@ -447,6 +462,58 @@ public class SandboxStore {
         return List.copyOf(sandboxes.getOrDefault(sessionId, List.of()));
     }
 
+    /**
+     * 列出同一工作区里所有会话尚未接受的沙箱。
+     *
+     * <p>只读：不触发任何写盘，也不改变各会话的状态。某个会话的状态损坏时跳过它并留下告警，
+     * 不能让一个坏会话把整次跨会话预检拖垮。
+     *
+     * @return 工作区一致且带改动的沙箱；工作区路径非法或目录不存在时为空
+     */
+    public synchronized List<Holder> holders(String workspace) {
+        return holders(workspace, null);
+    }
+
+    /** 只返回指定时间之后有持久化更新的沙箱；取不到文件时间时按降级策略跳过该项。 */
+    public synchronized List<Holder> holders(String workspace, Instant modifiedSince) {
+        Path root = rootOf(workspace);
+        if (root == null) {
+            return List.of();
+        }
+        List<Holder> result = new ArrayList<>();
+        for (String sessionId : knownSessions()) {
+            List<DiffSandbox> boxes;
+            try {
+                boxes = sandboxes(sessionId);
+            } catch (RuntimeException e) {
+                log.warn("跳过损坏的多 Agent 会话 {}，不影响本次预检：{}", sessionId, e.getMessage());
+                continue;
+            }
+            for (DiffSandbox sandbox : boxes) {
+                Path sandboxFile = sessionDir(sessionId).resolve(sanitize(sandbox.id()) + ".json");
+                if (modifiedSince != null && !modifiedSince(sandboxFile, modifiedSince)) {
+                    continue;
+                }
+                List<SandboxChange> pending = sandbox.changes().stream()
+                    .filter(change -> change.status() == ChangeStatus.PENDING).toList();
+                if (pending.isEmpty() || !root.equals(rootOf(sandbox.workspace()))) {
+                    continue;
+                }
+                result.add(new Holder(sessionId, sandbox.id(), sandbox.taskId(), pending));
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    private boolean modifiedSince(Path file, Instant modifiedSince) {
+        try {
+            return !Files.getLastModifiedTime(file).toInstant().isBefore(modifiedSince);
+        } catch (IOException e) {
+            log.debug("跳过缺少更新时间的跨会话沙箱 {}：{}", file.getFileName(), e.getMessage());
+            return false;
+        }
+    }
+
     public synchronized Optional<DiffSandbox> find(String sessionId, String sandboxId) {
         return sandboxes(sessionId).stream().filter(box -> box.id().equals(sandboxId)).findFirst();
     }
@@ -626,11 +693,24 @@ public class SandboxStore {
                             List.of(), "整批变更已接受");
                     } catch (IOException | RuntimeException e) {
                         return new ApplyReport(false, List.of(), skipped, List.of(e.getMessage()),
-                            "应用未完成：" + e.getMessage());
+                            "应用未完成：" + e.getMessage() + occupantHint(sessionId, workspace, pending));
                     }
                 }
             }
         });
+    }
+
+    /** 写盘被拒时补上「谁占着同一批文件」，避免用户只能逐个窗口排查。 */
+    private String occupantHint(String sessionId, Path workspace, List<SandboxChange> pending) {
+        Set<String> paths = pending.stream().map(SandboxChange::path).collect(Collectors.toSet());
+        List<String> owners = holders(workspace.toString()).stream()
+            .filter(holder -> !holder.sessionId().equals(sessionId))
+            .filter(holder -> holder.changes().stream().anyMatch(change -> paths.contains(change.path())))
+            .map(holder -> "会话 " + holder.sessionId() + " 的 " + holder.taskId())
+            .distinct()
+            .toList();
+        return owners.isEmpty() ? ""
+            : "；可能占用同一批文件的：" + String.join("、", owners) + "，等它接受或放弃后重试";
     }
 
     private void finishApply(String sessionId, String sandboxId, Path workspace, WorkspaceApplyJournal.Journal journal)
@@ -1037,6 +1117,54 @@ public class SandboxStore {
 
     private Path sessionDir(String sessionId) {
         return dataDir.file("multi", sanitize(sessionId));
+    }
+
+    /** 已落盘的会话目录名；目录名就是 sessionId。读不到时本次预检退化为不查。 */
+    private List<String> knownSessions() {
+        Path multi = dataDir.file("multi");
+        if (!Files.isDirectory(multi)) {
+            return List.of();
+        }
+        List<String> sessions = new ArrayList<>();
+        try (DirectoryStream<Path> dirs = Files.newDirectoryStream(multi)) {
+            for (Path dir : dirs) {
+                if (Files.isDirectory(dir)) {
+                    sessions.add(dir.getFileName().toString());
+                }
+            }
+        } catch (IOException e) {
+            log.warn("读取多 Agent 会话目录失败，本次跳过跨会话占用检查：{}", e.getMessage());
+            return List.of();
+        }
+        return sessions;
+    }
+
+    /** 工作区根；路径非法或目录不存在时返回 null，避免把不存在的路径当成同一个工作区。 */
+    private static Path rootOf(String workspace) {
+        if (workspace == null || workspace.isBlank()) {
+            return null;
+        }
+        Path path;
+        try {
+            path = Path.of(workspace);
+        } catch (RuntimeException e) {
+            log.warn("跳过无法解析的工作区路径：{}", workspace);
+            return null;
+        }
+        return rootOf(path);
+    }
+
+    private static Path rootOf(Path workspace) {
+        if (workspace == null) {
+            return null;
+        }
+        try {
+            Path root = new PathValidator(workspace).root();
+            return Files.isDirectory(root) ? root : null;
+        } catch (RuntimeException e) {
+            log.warn("跳过无法校验的工作区：{}", workspace);
+            return null;
+        }
     }
 
     private static void atomicWrite(Path file, String content) throws IOException {
