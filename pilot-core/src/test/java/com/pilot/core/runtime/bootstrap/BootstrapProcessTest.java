@@ -37,15 +37,23 @@ class BootstrapProcessTest {
     @Test
     void argumentArraysPreserveSpacesUnicodeAndShellCharacters() throws Exception {
         String argument = "中文 path with spaces & $() %TEMP% ! 引号\"";
-        var result = SourceEnvironment.execute(command(argument), Path.of(System.getProperty("user.dir")),
+        var result = BootstrapProcess.execute(command(argument), Path.of(System.getProperty("user.dir")),
             System.getenv(), Duration.ofSeconds(5), false);
         assertEquals(0, result.code());
         assertEquals(argument, result.output());
     }
 
     @Test
+    void sourceEnvironmentFacadePreservesTheExecutionContract() throws Exception {
+        var result = SourceEnvironment.execute(command("facade"), Path.of(System.getProperty("user.dir")),
+            System.getenv(), Duration.ofSeconds(5), false);
+        assertEquals(0, result.code());
+        assertEquals("facade", result.output());
+    }
+
+    @Test
     void boundedOutputIsDrainedWithoutBlockingChild() throws Exception {
-        var result = SourceEnvironment.execute(command("large"), Path.of(System.getProperty("user.dir")),
+        var result = BootstrapProcess.execute(command("large"), Path.of(System.getProperty("user.dir")),
             System.getenv(), Duration.ofSeconds(5), false);
         assertEquals(0, result.code());
         assertTrue(result.output().length() <= 4 * 1024 * 1024);
@@ -53,7 +61,7 @@ class BootstrapProcessTest {
 
     @Test
     void timeoutStopsTheOwnedProcess() {
-        assertThrows(IOException.class, () -> SourceEnvironment.execute(command("slow"),
+        assertThrows(IOException.class, () -> BootstrapProcess.execute(command("slow"),
             Path.of(System.getProperty("user.dir")), System.getenv(), Duration.ofMillis(100), false));
     }
 }

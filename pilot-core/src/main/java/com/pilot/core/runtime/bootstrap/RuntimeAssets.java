@@ -125,7 +125,7 @@ public final class RuntimeAssets {
                 unzip(archive, staging);
             } else {
                 // 压缩包已由随源码固定的哈希验证，仍检查条目路径，防止越出私有目录。
-                var listing = SourceEnvironment.execute(List.of("tar", "-tzf", archive.toString()), root,
+                var listing = BootstrapProcess.execute(List.of("tar", "-tzf", archive.toString()), root,
                     System.getenv(), ARCHIVE_LIST_TIMEOUT, false);
                 if (listing.code() != 0) {
                     throw new IOException("运行环境压缩包无法读取，请检查系统 tar 工具");
@@ -133,7 +133,7 @@ public final class RuntimeAssets {
                 for (String line : listing.output().lines().toList()) {
                     safeEntry(staging, line);
                 }
-                SourceEnvironment.run(List.of("tar", "-xzf", archive.toString(), "-C", staging.toString()), root,
+                BootstrapProcess.run(List.of("tar", "-xzf", archive.toString(), "-C", staging.toString()), root,
                     System.getenv(), ARCHIVE_EXTRACT_TIMEOUT);
             }
             Path extracted;

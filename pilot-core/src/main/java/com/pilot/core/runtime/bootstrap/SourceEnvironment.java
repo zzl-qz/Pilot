@@ -1,9 +1,7 @@
 package com.pilot.core.runtime.bootstrap;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -13,7 +11,6 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
@@ -131,7 +128,7 @@ public final class SourceEnvironment {
     }
 
     private int probe(Path home, Path libraries) throws Exception {
-        return execute(
+        return BootstrapProcess.execute(
             List.of(java(home), "--enable-native-access=ALL-UNNAMED", "-cp", MobileBridgeLayout.classpath(libraries),
                 MobileBridgeLayout.MAIN_CLASS, "--check-runtime"),
             root, childEnvironment(home, null), BRIDGE_CHECK_TIMEOUT, false).code();
@@ -150,9 +147,9 @@ public final class SourceEnvironment {
                     StandardCopyOption.REPLACE_EXISTING);
             }
         }
-        var result =
-            execute(List.of("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script.toString(),
-                "-Installer", installer.toString()), root, environment, VC_RUNTIME_INSTALL_TIMEOUT, true);
+        var result = BootstrapProcess.execute(List.of("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+            "-File", script.toString(), "-Installer", installer.toString()), root, environment,
+            VC_RUNTIME_INSTALL_TIMEOUT, true);
         if (!List.of(0, 3010, 1638).contains(result.code())) {
             throw new IOException("VC++ 自动安装未完成，可能需要管理员授权；手机连接暂不可用，其他功能可继续使用");
         }
@@ -176,8 +173,8 @@ public final class SourceEnvironment {
             return false;
         }
         try {
-            var result = execute(List.of(java(home), "-XshowSettings:properties", "-version"), root, environment,
-                VERSION_PROBE_TIMEOUT, false);
+            var result = BootstrapProcess.execute(List.of(java(home), "-XshowSettings:properties", "-version"), root,
+                environment, VERSION_PROBE_TIMEOUT, false);
             var arch = Pattern.compile("os.arch\\s*=\\s*(\\S+)").matcher(result.output());
             return result.code() == 0
                 && result.output().matches("(?s).*java.specification.version\\s*=\\s*(2[5-9]|[3-9][0-9])\\s.*")
@@ -193,8 +190,8 @@ public final class SourceEnvironment {
             return false;
         }
         try {
-            var result = execute(List.of("/usr/sbin/sysctl", "-n", "hw.optional.arm64"), root, System.getenv(),
-                SYSCTL_TIMEOUT, false);
+            var result = BootstrapProcess.execute(List.of("/usr/sbin/sysctl", "-n", "hw.optional.arm64"), root,
+                System.getenv(), SYSCTL_TIMEOUT, false);
             return result.code() == 0 && result.output().trim().equals("1");
         } catch (Exception e) {
             return false;
@@ -227,11 +224,11 @@ public final class SourceEnvironment {
             if (npm == null) {
                 return false;
             }
-            var result =
-                execute(List.of(node.toString(), "-p", "'PILOT_NODE_RUNTIME '+process.versions.node+' '+process.arch"),
-                    root, environment, VERSION_PROBE_TIMEOUT, false);
+            var result = BootstrapProcess.execute(
+                List.of(node.toString(), "-p", "'PILOT_NODE_RUNTIME '+process.versions.node+' '+process.arch"), root,
+                environment, VERSION_PROBE_TIMEOUT, false);
             return result.code() == 0 && nodeVersionMatches(result.output(), platform)
-                && execute(List.of(node.toString(), npm.toString(), "--version"), root, environment,
+                && BootstrapProcess.execute(List.of(node.toString(), npm.toString(), "--version"), root, environment,
                     VERSION_PROBE_TIMEOUT, false).code() == 0;
         } catch (Exception e) {
             return false;
@@ -293,7 +290,7 @@ public final class SourceEnvironment {
             List.of(java(Path.of(System.getProperty("java.home"))), "--enable-native-access=ALL-UNNAMED", "-jar",
                 root.resolve("pilot-server/target/pilot-server-0.0.1-SNAPSHOT.jar").toString()));
         server.addAll(List.of(args));
-        run(server, root, env, SERVER_RUN_LIMIT);
+        BootstrapProcess.run(server, root, env, SERVER_RUN_LIMIT);
     }
 
     private void build(Path node, Map<String, String> env) throws Exception {
@@ -301,7 +298,8 @@ public final class SourceEnvironment {
         if (npm == null) {
             throw new IOException("Node 安装缺少 npm，请重新准备运行环境");
         }
-        run(List.of(node.toString(), root.resolve("tools/ask-frontend-deps.mjs").toString(), npm.toString()), root, env,
+        BootstrapProcess.run(
+            List.of(node.toString(), root.resolve("tools/ask-frontend-deps.mjs").toString(), npm.toString()), root, env,
             FRONTEND_DEPS_TIMEOUT);
         Path maven = assets.install(assets.asset("maven"));
         Path boot;
@@ -318,7 +316,7 @@ public final class SourceEnvironment {
         if (offline) {
             build.add("-o");
         }
-        run(build, root, env, BUILD_TIMEOUT);
+        BootstrapProcess.run(build, root, env, BUILD_TIMEOUT);
     }
 
     private Map<String, String> childEnvironment(Path javaHome, Path node) {
@@ -353,64 +351,12 @@ public final class SourceEnvironment {
 
     public static void run(List<String> command, Path directory, Map<String, String> env, Duration timeout)
         throws Exception {
-        if (execute(command, directory, env, timeout, true).code() != 0) {
-            throw new IOException("环境准备命令失败，请查看上方构建输出；未继续启动应用");
-        }
+        BootstrapProcess.run(command, directory, env, timeout);
     }
 
     public static Execution execute(List<String> command, Path directory, Map<String, String> env, Duration timeout,
         boolean inherit) throws Exception {
-        ProcessBuilder builder = new ProcessBuilder(command).directory(directory.toFile()).redirectErrorStream(true);
-        builder.environment().putAll(env);
-        if (inherit) {
-            builder.inheritIO();
-        }
-        Process child = builder.start();
-        if (!inherit) {
-            child.getOutputStream().close();
-        }
-        Thread cleanup = new Thread(() -> {
-            child.descendants().forEach(ProcessHandle::destroy);
-            child.destroy();
-        });
-        Runtime.getRuntime().addShutdownHook(cleanup);
-        var output = new ByteArrayOutputStream();
-        Thread reader = inherit ? null : Thread.startVirtualThread(() -> {
-            try (var input = child.getInputStream()) {
-                byte[] bytes = new byte[8192];
-                int count;
-                while ((count = input.read(bytes)) != -1) {
-                    synchronized (output) {
-                        if (output.size() + count <= 4 * 1024 * 1024) {
-                            output.write(bytes, 0, count);
-                        }
-                    }
-                }
-            } catch (IOException e) {
-                // 进程取消或超时会关闭管道。
-            }
-        });
-        try {
-            if (!child.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
-                throw new IOException("环境准备命令超时");
-            }
-            if (reader != null) {
-                reader.join(1000);
-            }
-            synchronized (output) {
-                return new Execution(child.exitValue(), output.toString(StandardCharsets.UTF_8));
-            }
-        } finally {
-            child.descendants().forEach(ProcessHandle::destroy);
-            child.destroyForcibly();
-            if (reader != null) {
-                reader.interrupt();
-            }
-            try {
-                Runtime.getRuntime().removeShutdownHook(cleanup);
-            } catch (IllegalStateException e) {
-                // JVM 正在退出，由已经注册的钩子完成本进程的子进程清理。
-            }
-        }
+        BootstrapProcess.Execution result = BootstrapProcess.execute(command, directory, env, timeout, inherit);
+        return new Execution(result.code(), result.output());
     }
 }
