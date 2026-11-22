@@ -337,4 +337,28 @@ class SessionServiceTest {
             release.countDown();
         }
     }
+
+    @Test
+    void activityListenerSeesSessionCreationAndArchive() {
+        List<String> seen = new CopyOnWriteArrayList<>();
+        sessions.setActivityListener(new SessionActivityListener() {
+            @Override
+            public void started(Session session) {
+                seen.add("started:" + session.id());
+            }
+
+            @Override
+            public void stopped(Session session) {
+                seen.add("stopped:" + session.id());
+            }
+        });
+
+        String id = sessions.createSession("新会话").id();
+        assertTrue(sessions.setArchived(id, true));
+        assertTrue(sessions.setArchived(id, false));
+        // 不存在或状态未变化的归档请求不产生通知
+        Assertions.assertFalse(sessions.setArchived("ses_missing", true));
+
+        assertEquals(List.of("started:" + id, "stopped:" + id, "started:" + id), seen);
+    }
 }

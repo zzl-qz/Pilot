@@ -33,15 +33,15 @@ public final class SessionEventTransport {
         long maxSendNanos, Map<String, Long> closed) {
     }
 
-    ScheduledExecutorService timer() {
+    public ScheduledExecutorService timer() {
         return timer;
     }
 
-    void opened() {
+    public void opened() {
         active.incrementAndGet();
     }
 
-    boolean reserve(long bytes) {
+    public boolean reserve(long bytes) {
         long current;
         do {
             current = queuedBytes.get();
@@ -53,20 +53,20 @@ public final class SessionEventTransport {
         return true;
     }
 
-    void release(long bytes) {
+    public void release(long bytes) {
         queuedBytes.addAndGet(-bytes);
     }
 
-    void sent(long bytes) {
+    public void sent(long bytes) {
         sentBytes.addAndGet(bytes);
     }
 
-    void frameSent(long elapsedNanos) {
+    public void frameSent(long elapsedNanos) {
         sentFrames.incrementAndGet();
         maxSendNanos.accumulateAndGet(elapsedNanos, Math::max);
     }
 
-    void closed(String reason) {
+    public void closed(String reason) {
         active.decrementAndGet();
         closed.computeIfAbsent(reason, ignored -> new AtomicLong()).incrementAndGet();
     }

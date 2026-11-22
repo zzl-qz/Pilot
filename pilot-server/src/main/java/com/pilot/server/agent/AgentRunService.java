@@ -152,6 +152,14 @@ public class AgentRunService implements RunStarter {
         this.worktrees = worktrees;
     }
 
+    /** 工作区协调事件投影；轻量装配（测试）不注入时不发布，也不影响运行。 */
+    private volatile com.pilot.server.coordination.CoordinationEventRelay coordinationEvents;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setCoordinationEvents(com.pilot.server.coordination.CoordinationEventRelay coordinationEvents) {
+        this.coordinationEvents = coordinationEvents;
+    }
+
     /** 可恢复调度状态；为空时（测试构造）不做检查点，也不影响执行。 */
     private final RunStateTracker runStates;
     private final com.pilot.server.store.ToolCallJournalFactory journals;
@@ -1611,6 +1619,10 @@ public class AgentRunService implements RunStarter {
             sessions.publish(sessionId, runId, event);
         } catch (RuntimeException e) {
             log.warn("Dropped event {} for session {}", event.type().wireName(), sessionId, e);
+        }
+        var coordination = coordinationEvents;
+        if (coordination != null) {
+            coordination.sessionEvent(sessionId, runId, event);
         }
     }
 

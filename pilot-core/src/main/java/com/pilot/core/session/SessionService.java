@@ -31,9 +31,16 @@ public final class SessionService implements AutoCloseable {
     private final SessionRepository repository;
     private final SessionEventTransport transport;
     private final java.util.concurrent.ConcurrentMap<String, Object> locks = new java.util.concurrent.ConcurrentHashMap<>();
+    /** 会话开停通知；默认空实现，装配方按需注册一个实例。 */
+    private volatile SessionActivityListener activityListener = SessionActivityListener.NONE;
 
     public SessionService() {
         this(Clock.systemUTC(), new InMemorySessionRepository());
+    }
+
+    /** 注册会话开停通知（后注册的替换先前的）。 */
+    public void setActivityListener(SessionActivityListener listener) {
+        this.activityListener = listener == null ? SessionActivityListener.NONE : listener;
     }
 
     public SessionService(Clock clock) {
@@ -86,8 +93,10 @@ public final class SessionService implements AutoCloseable {
         String normalizedWorkspace = workspace == null || workspace.isBlank() ? null : workspace.strip();
         String normalizedProject = projectId == null || projectId.isBlank() ? null : projectId.strip();
         String normalizedParent = parentSessionId == null || parentSessionId.isBlank() ? null : parentSessionId.strip();
-        return repository.create("ses_" + UUID.randomUUID(), title.strip(), normalizedWorkspace, clock.instant(),
-            normalizedProject, isBlank, normalizedParent);
+        Session created = repository.create("ses_" + UUID.randomUUID(), title.strip(), normalizedWorkspace,
+            clock.instant(), normalizedProject, isBlank, normalizedParent);
+        activityListener.started(created);
+        return created;
     }
 
     /** 兼容调用：按普通对话创建（非空白）。 */
@@ -102,7 +111,18 @@ public final class SessionService implements AutoCloseable {
 
     /** 归档 / 取消归档。 */
     public boolean setArchived(String sessionId, boolean archived) {
-        return repository.setArchived(sessionId, archived);
+        if (!repository.setArchived(sessionId, archived)) {
+            return false;
+        }
+        Optional<Session> session = repository.find(sessionId);
+        if (session.isPresent()) {
+            if (archived) {
+                activityListener.stopped(session.get());
+            } else {
+                activityListener.started(session.get());
+            }
+        }
+        return true;
     }
 
     /** 切换会话当前使用的文件夹。 */
