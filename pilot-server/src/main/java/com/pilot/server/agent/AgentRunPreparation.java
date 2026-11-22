@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Component;
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.message.ToolNames;
+import com.pilot.core.multi.profile.AgentProfileCatalog;
 import com.pilot.core.model.ContextComposition;
 import com.pilot.core.model.NativeCapability;
 import com.pilot.core.loop.AgentLoop;
@@ -48,6 +50,9 @@ import com.pilot.core.workspace.AgentScope;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.MultiAgentProperties;
+import com.pilot.server.model.ModelSettings;
+import com.pilot.server.multi.DispatchAgentsTool;
+import com.pilot.server.multi.SpawnAgentTool;
 import com.pilot.server.run.ReviewMode;
 import com.pilot.server.run.TaskControlService;
 import com.pilot.server.skill.InstallSkillTool;
@@ -141,11 +146,73 @@ public final class AgentRunPreparation {
             promptSources, systemPrompt, inheritedDeferred);
     }
 
+    public void configureExecutionTools(ToolRegistry tools, GoalExecutionPolicy goalPolicy,
+        Set<String> availableTools, String sessionId, String runId, String workspace, boolean unattended,
+        TaskControlService.TaskContract executionTask, com.pilot.core.model.ModelClient measuredChild,
+        com.pilot.core.model.ModelClient executionClient, PermissionGate sessionGate, AgentLoop.Config config,
+        java.util.function.BooleanSupplier cancelled, SpawnAgentTool.UsageSink childUsage,
+        AgentProfileCatalog profiles, com.pilot.core.model.ModelClient configuredModel, boolean reviewActive,
+        List<String> inheritedDeferred,
+        Consumer<com.pilot.core.event.SessionEvent> sink, com.pilot.core.approval.ApprovalBroker approvals,
+        com.pilot.core.session.ConversationRepository conversations, ModelSettings modelSettings,
+        com.pilot.server.multi.MultiAgentService multiAgent, com.pilot.server.git.GitWorktrees worktrees) {
+        if (goalPolicy != null) {
+            boolean readOnlySession = reviewActive
+                || properties.permissionMode() == com.pilot.core.permission.PermissionMode.READ_ONLY
+                || tools.availableTools().stream().noneMatch(t -> t instanceof com.pilot.core.tool.WritesFiles);
+            goalPolicy.withCommandLookup(id -> commandTasks.get(sessionId, id)).withReadOnlySession(readOnlySession);
+            goalPolicy.withAvailableTools(availableTools)
+                .withUpdates(state -> sink.accept(new com.pilot.core.event.ExecutionUpdated(state.mode(), state.phase(),
+                    state.requests(), state.reason(), state.gap())));
+            tools.register(goalPolicy.promotionTool());
+            if (taskControls.load(sessionId).automation() != null) {
+                tools.register(goalPolicy.researchTool());
+            }
+        }
+        if (!reviewActive) {
+            SpawnAgentTool spawnAgent = new SpawnAgentTool(measuredChild, tools, sessionGate, approvals, config,
+                () -> conversations.load(sessionId), sink, cancelled, childUsage, profiles);
+            if (configuredModel instanceof com.pilot.server.model.ModelClientProvider provider) {
+                spawnAgent.withChildRoute(() -> modelSettings.snapshot().childModel(), provider::clientFor);
+            }
+            if (worktrees != null) {
+                Path base = toolFactory.resolve(workspace);
+                spawnAgent.withCheckouts(base, new com.pilot.server.multi.SubagentCheckouts(ignored -> {
+                    try {
+                        com.pilot.server.git.GitWorktrees.Created created = worktrees.create(base, "");
+                        Path checkout = Path.of(created.path());
+                        String diff = String.join("\n", worktrees.preview(checkout).files());
+                        return new com.pilot.server.multi.SubagentCheckouts.Opened(checkout, diff, "");
+                    } catch (RuntimeException failure) {
+                        return new com.pilot.server.multi.SubagentCheckouts.Opened(null, "",
+                            failure.getMessage() == null ? "无法创建独立检出" : failure.getMessage());
+                    }
+                }));
+                spawnAgent.withWorkspaceTools(path -> toolFactory.registryFor(path.toString()), path -> {
+                    com.pilot.server.git.GitWorktrees.Handoff handed = worktrees.handoff(path);
+                    return handed.note();
+                });
+            }
+            tools.register(spawnAgent);
+            if (multiProperties.enabled()) {
+                tools.register(new DispatchAgentsTool(multiAgent, sessionId, runId, workspace,
+                    sink, cancelled, executionClient, profiles, childUsage)
+                    .withParentPermission(unattended && executionTask.automation().fullAccess()
+                        ? com.pilot.core.permission.PermissionMode.AUTO : null));
+            }
+        }
+        tools.enable(inheritedDeferred);
+    }
+
     public String currentTaskContext(String sessionId) {
         return taskControls.stablePrompt(sessionId)
             + "\n历史目标或验收范围不明时，先 read_task_history 恢复用户原文，不能按摘要自行缩小范围。"
             + "\n\n" + PROMPTS.render("system/today", Map.of("today", LocalDate.now().toString())).strip()
             + "\n\n" + planBrief(sessionId);
+    }
+
+    public Supplier<String> taskContextSource(String sessionId) {
+        return () -> currentTaskContext(sessionId);
     }
 
     public List<Message> activateSkill(List<Message> history, String workspace, String requestedSkill) {

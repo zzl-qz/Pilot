@@ -70,7 +70,6 @@ import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.MultiAgentProperties;
 import com.pilot.server.model.ModelSettings;
-import com.pilot.server.multi.DispatchAgentsTool;
 import com.pilot.server.multi.MultiAgentService;
 import com.pilot.server.multi.SpawnAgentTool;
 import com.pilot.server.run.EvidenceStatus;
@@ -721,7 +720,9 @@ public class AgentRunService implements RunStarter {
         try {
             BudgetProgress before = BudgetProgress.from(plans.load(sessionId), taskControls.load(sessionId));
             PreparedRunContext runContext = prepareExecutionContext(sessionId, runId, input, handle, continuation);
-            status = execute(sessionId, runId, input, attachments, imagePositions, handle, continuation, runContext);
+            ExecutionRunContext execution = configureExecutionContext(sessionId, runId, runContext,
+                handle.cancelled::get);
+            status = execute(sessionId, runId, input, attachments, imagePositions, handle, continuation, execution);
             captureResult(sessionId, runId);
             resultCaptured = true;
             continued = maybeAutoContinue(sessionId, runId, status, handle, before);
@@ -1099,10 +1100,6 @@ public class AgentRunService implements RunStarter {
         return true;
     }
 
-    private String currentTaskContext(String sessionId) {
-        return preparation.currentTaskContext(sessionId);
-    }
-
     private PreparedRunContext prepareExecutionContext(String sessionId, String runId, String input,
         RunHandle handle, boolean continuation) {
         List<Message> history = conversations.load(sessionId);
@@ -1146,31 +1143,27 @@ public class AgentRunService implements RunStarter {
             preparation.configurePreflight(loop, prepared, input, continuation));
         Consumer<AgentLoop.Result> logPreflightTelemetry = result -> preparation.logPreflightTelemetry(runId,
             preflight.get(), activeLoopRef.get().observedPathsSnapshot(), result.changedFiles());
+        RunUsageAccumulator runUsage = new RunUsageAccumulator();
+        AtomicReference<RunCompleted> lastCompleted = new AtomicReference<>();
+        Consumer<SessionEvent> sink = runEventSink(sessionId, runId, handle, planSink, runUsage, lastCompleted);
         return new PreparedRunContext(history, executionTask, unattended, planSink, prepared, sessionGate,
             preparation.readGuardOf(prepared.tools()), activeLoopRef, configurePreflight, activatedHistory,
-            logPreflightTelemetry);
+            logPreflightTelemetry, preparation.taskContextSource(sessionId), runUsage, lastCompleted, sink);
     }
 
-    private String execute(String sessionId, String runId, String input, List<Attachment> attachments,
-        List<Integer> imagePositions, RunHandle handle, boolean continuation, PreparedRunContext runContext) {
-        List<Message> history = runContext.history();
-        TaskControlService.TaskContract executionTask = runContext.executionTask();
-        boolean unattended = runContext.unattended();
-        PlanSink planSink = runContext.planSink();
+    private ExecutionRunContext configureExecutionContext(String sessionId, String runId,
+        PreparedRunContext runContext, java.util.function.BooleanSupplier cancelled) {
         var prepared = runContext.prepared();
-        AtomicReference<AgentLoop> activeLoopRef = runContext.activeLoopRef();
+        boolean unattended = runContext.unattended();
+        TaskControlService.TaskContract executionTask = runContext.executionTask();
         String workspace = prepared.workspace();
-        Path resolvedWorkspace = prepared.resolvedWorkspace();
-        ReviewMode review = prepared.review();
+        boolean reviewActive = prepared.review().active();
         ToolRegistry tools = prepared.tools();
         List<String> inheritedDeferred = prepared.inheritedDeferredTools();
         Set<String> availableTools = prepared.availableTools();
-        RunUsageAccumulator runUsage = new RunUsageAccumulator();
-        // 收尾事件里的检查摘要要用于校验证据，sink 里先留一份
-        AtomicReference<RunCompleted> lastCompleted = new AtomicReference<>();
-        // 事件类型计数：压缩次数、工具调用量、失败码分布都从这里来
-        Consumer<SessionEvent> sink = runEventSink(sessionId, runId, handle, planSink, runUsage, lastCompleted);
-        Consumer<List<Message>> checkpoint = messages -> conversations.save(sessionId, messages);
+        RunUsageAccumulator runUsage = runContext.runUsage();
+        AtomicReference<RunCompleted> lastCompleted = runContext.lastCompleted();
+        Consumer<SessionEvent> sink = runContext.sink();
         List<ContextComposition.Source> promptSources = prepared.promptSources();
         Consumer<RequestReport> reports = report -> {
             synchronized (runUsage) {
@@ -1180,81 +1173,49 @@ public class AgentRunService implements RunStarter {
         };
         ModelClient measuredMain = new MeteredModelClient(modelClient, sessionId, "main", promptSources, reports)
             .withRunContext(sessionId, runId);
-        ModelClient measuredChild =
-            new MeteredModelClient(modelClient, sessionId + ":subagent", "subagent", List.of(), reports)
-                .withRunContext(sessionId, runId);
+        ModelClient measuredChild = new MeteredModelClient(modelClient, sessionId + ":subagent", "subagent", List.of(),
+            reports).withRunContext(sessionId, runId);
         AgentLoop.Config config = new AgentLoop.Config(properties.maxSteps(), properties.repeatRemindAt(),
-            properties.repeatAbortAt(), prepared.systemPrompt(),
-            // 收尾时读一次计划，把「本轮是否真的做完」一并写进 run.completed
-            () -> plans.load(sessionId),
-            // 计划没做完时自动继续，而不是停下来等用户点「继续执行」
+            properties.repeatAbortAt(), prepared.systemPrompt(), () -> plans.load(sessionId),
             properties.maxPlanContinues(), properties.contextMaxChars(), properties.completionChecksEnabled());
-        GoalExecutionPolicy goalPolicy = (unattended || (!review.active() && properties.goalModeEnabledValue()))
+        GoalExecutionPolicy goalPolicy = (unattended || (!reviewActive && properties.goalModeEnabledValue()))
             ? new GoalExecutionPolicy(measuredMain, objectMapper, taskControls, sessionId,
-                toolFactory.resolve(workspace), handle.cancelled::get, properties.maxSteps(),
-                properties.directMaxRequests(), properties.directMaxInputTokens(), properties.directMaxOutputTokens(),
+                toolFactory.resolve(workspace), cancelled, properties.maxSteps(), properties.directMaxRequests(),
+                properties.directMaxInputTokens(), properties.directMaxOutputTokens(),
                 properties.directMaxActiveMillis(), properties.directMaxInvestigationTools(),
                 properties.goalMaxInputTokens(), properties.goalMaxOutputTokens(), properties.goalMaxActiveMillis())
             : null;
-        if (goalPolicy != null) {
-            boolean readOnlySession =
-                review.active() || properties.permissionMode() == com.pilot.core.permission.PermissionMode.READ_ONLY
-                    || tools.availableTools().stream().noneMatch(t -> t instanceof com.pilot.core.tool.WritesFiles);
-            goalPolicy.withCommandLookup(id -> commandTasks.get(sessionId, id)).withReadOnlySession(readOnlySession);
-            goalPolicy.withAvailableTools(availableTools)
-                .withUpdates(state -> sink.accept(new com.pilot.core.event.ExecutionUpdated(state.mode(), state.phase(),
-                    state.requests(), state.reason(), state.gap())));
-            tools.register(goalPolicy.promotionTool());
-            if (taskControls.load(sessionId).automation() != null) {
-                tools.register(goalPolicy.researchTool());
-            }
-        }
         ModelClient executionClient = goalPolicy == null ? measuredMain : goalPolicy.budgetedClient();
-        // 子代理在构造时冻结并过滤工具快照，使用 run 级共享池；请求/usage 仍计入父任务事故熔断，
-        // reviewer/finalization 的额外预留不对工作型子请求开放。
         SpawnAgentTool.UsageSink childUsage = childUsageSink(goalPolicy, runUsage, sessionId, runId);
-        // 用户创建自动任务时单独授权全工具访问；普通任务仍沿用工作区 allow/deny/ask。
-        // 自动任务的调研门禁在 ExecutionPolicy 中执行，不被这里的工具权限绕过。
+        AgentProfileCatalog profiles = agentProfiles == null ? AgentProfileCatalog.EMPTY
+            : agentProfiles.catalogFor(workspace);
+        preparation.configureExecutionTools(tools, goalPolicy, availableTools, sessionId, runId, workspace, unattended,
+            executionTask, measuredChild, executionClient, runContext.sessionGate(), config, cancelled, childUsage,
+            profiles, modelClient, reviewActive, inheritedDeferred, sink, approvals, conversations, modelSettings,
+            multiAgent, worktrees);
+        return new ExecutionRunContext(runContext, runUsage, lastCompleted, sink, measuredMain, config, goalPolicy,
+            executionClient);
+    }
+
+    private String execute(String sessionId, String runId, String input, List<Attachment> attachments,
+        List<Integer> imagePositions, RunHandle handle, boolean continuation, ExecutionRunContext execution) {
+        PreparedRunContext runContext = execution.prepared();
+        RunUsageAccumulator runUsage = execution.runUsage();
+        AtomicReference<RunCompleted> lastCompleted = execution.lastCompleted();
+        Consumer<SessionEvent> sink = execution.sink();
+        ModelClient measuredMain = execution.measuredMain();
+        AgentLoop.Config config = execution.config();
+        GoalExecutionPolicy goalPolicy = execution.goalPolicy();
+        ModelClient executionClient = execution.executionClient();
+        List<Message> history = runContext.history();
+        var prepared = runContext.prepared();
+        AtomicReference<AgentLoop> activeLoopRef = runContext.activeLoopRef();
+        String workspace = prepared.workspace();
+        Path resolvedWorkspace = prepared.resolvedWorkspace();
+        ReviewMode review = prepared.review();
+        ToolRegistry tools = prepared.tools();
+        Consumer<List<Message>> checkpoint = messages -> conversations.save(sessionId, messages);
         PermissionGate sessionGate = runContext.sessionGate();
-        // 本 run 可用的自定义代理目录（两级扫描，热更新）；测试未注入时为空目录
-        AgentProfileCatalog profiles =
-            agentProfiles == null ? AgentProfileCatalog.EMPTY : agentProfiles.catalogFor(workspace);
-        // 审查 run 不派子代理：单一视角审到底，也避免派发工具把只读裁剪绕出去。
-        if (!review.active()) {
-            SpawnAgentTool spawnAgent = new SpawnAgentTool(measuredChild, tools, sessionGate, approvals, config,
-                () -> conversations.load(sessionId), sink, handle.cancelled::get, childUsage, profiles);
-            if (modelClient instanceof com.pilot.server.model.ModelClientProvider provider) {
-                spawnAgent.withChildRoute(() -> modelSettings.snapshot().childModel(), provider::clientFor);
-            }
-            if (worktrees != null) {
-                Path base = toolFactory.resolve(workspace);
-                spawnAgent.withCheckouts(base, new com.pilot.server.multi.SubagentCheckouts(ignored -> {
-                    try {
-                        com.pilot.server.git.GitWorktrees.Created created = worktrees.create(base, "");
-                        java.nio.file.Path checkout = java.nio.file.Path.of(created.path());
-                        String diff = String.join("\n", worktrees.preview(checkout).files());
-                        return new com.pilot.server.multi.SubagentCheckouts.Opened(checkout, diff, "");
-                    } catch (RuntimeException failure) {
-                        return new com.pilot.server.multi.SubagentCheckouts.Opened(null, "",
-                            failure.getMessage() == null ? "无法创建独立检出" : failure.getMessage());
-                    }
-                }));
-                spawnAgent.withWorkspaceTools(path -> toolFactory.registryFor(path.toString()), path -> {
-                    com.pilot.server.git.GitWorktrees.Handoff handed = worktrees.handoff(path);
-                    return handed.note();
-                });
-            }
-            tools.register(spawnAgent);
-            // 多智能体调度：父 Agent 只能派活，子 Agent 的改动一律进沙箱
-            if (multiProperties.enabled()) {
-                tools.register(new DispatchAgentsTool(multiAgent, sessionId, runId, workspace, sink,
-                    handle.cancelled::get, executionClient, profiles, childUsage)
-                    .withParentPermission(unattended && executionTask.automation().fullAccess()
-                        ? com.pilot.core.permission.PermissionMode.AUTO : null));
-            }
-        }
-        // 再补一次：dispatch_agents 这类延迟工具只在 config 之后注册，第一遍 enable 时还不存在。
-        tools.enable(inheritedDeferred);
         // 与会话数据库、快照保持一致，统一落在数据目录（默认项目下的 .pilot）
         JsonlTraceRecorder traceRecorder =
             new JsonlTraceRecorder(dataDir.file("traces", sessionId + ".jsonl"), objectMapper);
@@ -1263,7 +1224,7 @@ public class AgentRunService implements RunStarter {
             .withPendingMessages(() -> pollSteering(sessionId))
             .withLiveReasoning(
                 delta -> sessions.preview(sessionId, runId, new com.pilot.core.event.AssistantReasoning(delta)))
-            .withTaskContext(() -> currentTaskContext(sessionId))
+            .withTaskContext(runContext.taskContextSource())
             .withCompletionClaim(() -> claimCompletion(sessionId, handle)).withRestoredPaths(snapshots::restoredPaths)
             .withQualityWorkspace(resolvedWorkspace)
             .withQualityTexts(snapshots::originalText, path -> WorkspaceTexts.read(resolvedWorkspace, path))
@@ -1573,7 +1534,13 @@ public class AgentRunService implements RunStarter {
         boolean unattended, PlanSink planSink, AgentRunPreparation.PreparedRun prepared, PermissionGate sessionGate,
         com.pilot.core.tool.ReadGuard readGuard, AtomicReference<AgentLoop> activeLoopRef,
         Consumer<AgentLoop> configurePreflight, List<Message> activatedHistory,
-        Consumer<AgentLoop.Result> logPreflightTelemetry) {
+        Consumer<AgentLoop.Result> logPreflightTelemetry, java.util.function.Supplier<String> taskContextSource,
+        RunUsageAccumulator runUsage, AtomicReference<RunCompleted> lastCompleted, Consumer<SessionEvent> sink) {
+    }
+
+    private record ExecutionRunContext(PreparedRunContext prepared, RunUsageAccumulator runUsage,
+        AtomicReference<RunCompleted> lastCompleted, Consumer<SessionEvent> sink, ModelClient measuredMain,
+        AgentLoop.Config config, GoalExecutionPolicy goalPolicy, ModelClient executionClient) {
     }
 
     static final class RunUsageAccumulator {
