@@ -246,6 +246,8 @@ export const api = {
   worktreeRemove: (path?: string) => apiJson<ApiResults['worktreeRemove']>(`/api/worktrees?path=${encodeURIComponent(path || '')}`, { method: 'DELETE' }),
   worktreeHandoff: (sessionId: string) => apiJson<ApiResults['worktreeHandoff']>(`/api/worktrees/handoff?sessionId=${encodeURIComponent(sessionId)}`, { method: 'POST' }),
   workspaceRoots: () => apiJson<ApiResults['workspaceRoots']>('/api/workspaces/roots'),
+  /** 工作区看板：一次拿到该目录下所有会话在做什么；只读，改动仍走各会话自己的接受入口。 */
+  workspaceOverview: (path: string) => apiJson<ApiResults['workspaceOverview']>(`/api/workspaces/overview?path=${encodeURIComponent(path)}`),
   workspaceBrowse: (path?: string) => apiJson<ApiResults['workspaceBrowse']>(`/api/workspaces/browse?path=${encodeURIComponent(path || '')}`),
   settings: (signal?: AbortSignal) => apiJson<ApiResults['settings']>('/api/settings', { signal }),
   // 后端是 PUT：之前发 POST 会 405，权限与模型保存点了没反应

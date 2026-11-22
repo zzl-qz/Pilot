@@ -98,6 +98,8 @@ export interface ApiResults {
   compactContext: { changed?: boolean; message?: string };
   sandboxAction: S.SandboxStoreApplyReport;
   sandboxManifest: S.MultiAgentControllerSandboxManifestReport;
+  /** 工作区看板：该目录下所有会话的当前状态（只读）。 */
+  workspaceOverview: S.WorkspaceOverviewServiceOverview;
   resolveArbitration: ActionResponse;
   diff: S.ChangeServiceChangeReport;
   fileDiff: S.ChangeServiceFilePatch;

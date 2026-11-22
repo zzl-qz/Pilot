@@ -39,6 +39,7 @@ class CommandTaskManagerTest {
             waitUntil(() -> manager.logs("session_a", id, 0, 100).text().contains("你好🧪live"));
             assertEquals("RUNNING", manager.get("session_a", id).status());
             assertTrue(manager.hasRunningInWorkspace(workspace));
+            assertEquals(id, manager.runningInWorkspace(workspace).getFirst().taskId());
             CommandTaskManager.LogChunk first = manager.logs("session_a", id, 0, 3);
             assertEquals("你好🧪", first.text());
             assertEquals(3, first.nextOffset());

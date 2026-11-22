@@ -365,10 +365,16 @@ public final class CommandTaskManager implements AutoCloseable {
             .forEach(entry -> requestStop(entry, CommandTaskStatus.CANCELLED, "会话已关闭"));
     }
 
-    public boolean hasRunningInWorkspace(Path workspace) {
+    /** 正在占用该工作区（含父子目录）的后台命令，用于把「谁挡着」告诉用户。 */
+    public List<Task> runningInWorkspace(Path workspace) {
         Path path = canonical(workspace);
-        return entries.values().stream().anyMatch(entry -> running(entry.task)
-            && (Path.of(entry.task.workdir()).startsWith(path) || path.startsWith(Path.of(entry.task.workdir()))));
+        return entries.values().stream().filter(entry -> running(entry.task)).filter(
+            entry -> Path.of(entry.task.workdir()).startsWith(path) || path.startsWith(Path.of(entry.task.workdir())))
+            .map(entry -> entry.task).toList();
+    }
+
+    public boolean hasRunningInWorkspace(Path workspace) {
+        return !runningInWorkspace(workspace).isEmpty();
     }
 
     public boolean hasRunningTasks() {

@@ -16,6 +16,7 @@ import { PreviewPanel } from './inspector/PreviewPanel.js';
 import { CommandsPanel } from './inspector/CommandsPanel.js';
 import { CapabilitiesPanel } from './inspector/CapabilitiesPanel.js';
 import { BrowserPanel } from './inspector/BrowserPanel.js';
+import { WorkspaceOverviewPanel } from './inspector/WorkspaceOverviewPanel.js';
 
 const TABS = [
   { id: 'products', label: '成果', title: '交付文件、来源与技能审核' },
@@ -26,6 +27,7 @@ const TABS = [
 ];
 const MORE_TABS = [
   { id: 'capabilities', label: '能力', title: '当前生效的工具、技能与 MCP 服务器' },
+  { id: 'overview', label: '会话看板', title: '同一工作区里所有会话在做什么；只读汇总，改动仍回各自会话处理' },
   { id: 'browser', label: '浏览器', title: '内置浏览器与智能体操作' },
   { id: 'research', label: '开源参考', title: '已阅读来源、复用决定与许可证说明' },
   { id: 'activity', label: '活动', title: '事件时间线' }
@@ -66,6 +68,7 @@ export function Inspector() {
           {tab === 'preview' && <PreviewPanel />}
           {tab === 'commands' && <CommandsPanel />}
           {tab === 'capabilities' && <CapabilitiesPanel />}
+          {tab === 'overview' && <WorkspaceOverviewPanel />}
           {tab === 'browser' && <BrowserPanel toolsMenuOpen={moreOpen} />}
           {tab === 'products' && <WorkProductsPanel />}
           {tab === 'files' && <FileWorkbench key={sessionId} />}

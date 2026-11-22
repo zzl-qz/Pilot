@@ -1691,3 +1691,49 @@ export interface ProjectNotesControllerResult {
   items: ProjectNotesControllerNoteHit[];
   hasMore: boolean;
 }
+
+/** WorkspaceOverviewService.java / Overview */
+export interface WorkspaceOverviewServiceOverview {
+  workspace: string;
+  sessions: WorkspaceOverviewServiceSessionView[];
+  fileOwners: WorkspaceOverviewServiceFileOwner[];
+  generatedAt: string;
+}
+
+/** WorkspaceOverviewService.java / SessionView */
+export interface WorkspaceOverviewServiceSessionView {
+  sessionId: string;
+  title: string;
+  running: boolean;
+  tasks: WorkspaceOverviewServiceTaskView[];
+  arbitrations: WorkspaceOverviewServiceArbitrationView[];
+  pendingFiles: (string)[];
+  runningCommands: WorkspaceOverviewServiceCommandView[];
+}
+
+/** WorkspaceOverviewService.java / TaskView */
+export interface WorkspaceOverviewServiceTaskView {
+  taskId: string;
+  title: string;
+  status: string;
+  detail: string;
+}
+
+/** WorkspaceOverviewService.java / ArbitrationView */
+export interface WorkspaceOverviewServiceArbitrationView {
+  arbitrationId: string;
+  kind: string;
+  taskId: string;
+}
+
+/** WorkspaceOverviewService.java / CommandView */
+export interface WorkspaceOverviewServiceCommandView {
+  taskId: string;
+  command: string;
+}
+
+/** WorkspaceOverviewService.java / FileOwner */
+export interface WorkspaceOverviewServiceFileOwner {
+  path: string;
+  sessions: (string)[];
+}

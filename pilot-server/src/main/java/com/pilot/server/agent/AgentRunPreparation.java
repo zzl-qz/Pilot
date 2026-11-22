@@ -57,6 +57,7 @@ import com.pilot.server.config.MultiAgentProperties;
 import com.pilot.server.model.ModelSettings;
 import com.pilot.server.multi.DispatchAgentsTool;
 import com.pilot.server.multi.SpawnAgentTool;
+import com.pilot.server.multi.WorkspaceOverviewService;
 import com.pilot.server.run.ReviewMode;
 import com.pilot.server.run.TaskControlService;
 import com.pilot.server.skill.InstallSkillTool;
@@ -89,6 +90,8 @@ public final class AgentRunPreparation {
     private final PlanRepository plans;
     private final ObjectMapper objectMapper;
     private final SkillService skills;
+    /** 工作区看板；容器装配时注入，单测直接构造时为 null，此时不注册汇总工具。 */
+    private WorkspaceOverviewService workspaceOverview;
     private final PreFlightLocator preFlightLocator = new PreFlightLocator();
 
     private SkillInstallService skillInstaller;
@@ -122,6 +125,11 @@ public final class AgentRunPreparation {
     public void setWorkProducts(WorkProductService workProducts, SkillDraftService skillDrafts) {
         this.workProducts = workProducts;
         this.skillDrafts = skillDrafts;
+    }
+
+    @Autowired(required = false)
+    public void setWorkspaceOverview(WorkspaceOverviewService workspaceOverview) {
+        this.workspaceOverview = workspaceOverview;
     }
 
     @Autowired(required = false)
@@ -462,6 +470,9 @@ public final class AgentRunPreparation {
         tools.register(new CommandInputTool(commandTasks, sessionId));
         tools.register(new StopCommandTool(commandTasks, sessionId));
         tools.register(new ReadTaskHistoryTool(sessions, sessionId));
+        if (workspaceOverview != null) {
+            tools.register(new WorkspaceOverviewTool(workspaceOverview, toolFactory.resolve(workspace)));
+        }
         if (workProducts != null) {
             tools.register(new PublishArtifactTool(workProducts, objectMapper, sessionId, runId));
         }
