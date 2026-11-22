@@ -46,8 +46,6 @@ import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.loop.ContextCompactor;
 import com.pilot.core.message.Attachment;
 import com.pilot.core.message.Message;
-import com.pilot.core.message.ToolCall;
-import com.pilot.core.message.ToolNames;
 import com.pilot.core.model.ContextComposition;
 import com.pilot.core.model.MeteredModelClient;
 import com.pilot.core.model.ModelClient;
@@ -58,27 +56,15 @@ import com.pilot.core.multi.profile.AgentProfileCatalog;
 import com.pilot.core.permission.PermissionGate;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.plan.PlanSink;
-import com.pilot.core.project.ProjectRepository;
-import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.quality.IndependentCodeReviewer;
 import com.pilot.core.quality.WorkspaceTexts;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
-import com.pilot.core.skill.SkillCatalog;
-import com.pilot.core.tool.EnableToolsTool;
 import com.pilot.core.tool.ToolRegistry;
-import com.pilot.core.tool.UseSkillTool;
-import com.pilot.core.tool.command.CommandInputTool;
-import com.pilot.core.tool.command.CommandLogsTool;
-import com.pilot.core.tool.command.CommandStatusTool;
-import com.pilot.core.tool.command.CommandTasksTool;
 import com.pilot.core.tool.command.CommandTaskManager;
-import com.pilot.core.tool.command.RunCommandTool;
-import com.pilot.core.tool.command.StopCommandTool;
 import com.pilot.core.trace.JsonlTraceRecorder;
 import com.pilot.core.util.WireEnum;
-import com.pilot.core.workspace.AgentScope;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.common.data.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
@@ -96,9 +82,6 @@ import com.pilot.server.run.RunStarter;
 import com.pilot.server.run.RunStateTracker;
 import com.pilot.server.run.TaskControlService;
 import com.pilot.server.run.TaskControlStatus;
-import com.pilot.server.skill.InstallSkillTool;
-import com.pilot.server.skill.SkillInstallService;
-import com.pilot.server.skill.SkillService;
 import com.pilot.server.tool.WorkspaceToolFactory;
 import com.pilot.server.validation.ValidationEvidence;
 import com.pilot.server.workspace.RunSnapshotService;
@@ -135,11 +118,7 @@ public class AgentRunService implements RunStarter {
         Set.of(TaskControlStatus.BLOCKED, TaskControlStatus.BUDGET_LIMITED, TaskControlStatus.WAITING,
             TaskControlStatus.NEED_INPUT, TaskControlStatus.UNVERIFIED, TaskControlStatus.NO_PROGRESS,
             TaskControlStatus.REVIEW_UNAVAILABLE, TaskControlStatus.VERIFICATION_FAILED);
-    /** 提示词正文在 {@code prompts/} 资源里，这里只做变量注入与拼接。 */
-    private static final PromptLibrary PROMPTS = PromptLibrary.standard();
-    private final PreFlightLocator preFlightLocator = new PreFlightLocator();
     private final RepositoryContext repositoryContext;
-
     private final SessionService sessions;
     private final ModelClient modelClient;
     private final WorkspaceToolFactory toolFactory;
@@ -161,13 +140,13 @@ public class AgentRunService implements RunStarter {
     private final ConcurrentMap<String, Integer> autoContinueAttempts = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, String> autoContinueSignature = new ConcurrentHashMap<>();
     /** 会话级已启用的延迟工具，按激活顺序保存，让续跑与追问沿用同一个尾部扩展段。 */
-    private final ConcurrentMap<String, List<String>> sessionEnabledDeferredTools = new ConcurrentHashMap<>();
+    private final AgentRunPreparation preparation;
+    private final DeferredToolRegistry deferredTools;
     private final ObjectMapper objectMapper;
     private final PilotDataDir dataDir;
     private final MultiAgentService multiAgent;
     private final MultiAgentProperties multiProperties;
     private final com.pilot.server.observability.RunMetrics metrics;
-    private final SkillService skills;
     private com.pilot.server.git.GitWorktrees worktrees;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -188,28 +167,6 @@ public class AgentRunService implements RunStarter {
     @org.springframework.beans.factory.annotation.Autowired
     private org.springframework.beans.factory.ObjectProvider<com.pilot.server.schedule.ScheduleService> scheduleService;
     private volatile com.pilot.server.desktop.DesktopViewportReset viewportReset;
-    private com.pilot.server.work.products.WorkProductService workProducts;
-    private com.pilot.server.work.products.SkillDraftService skillDrafts;
-    private SkillInstallService skillInstaller;
-    private ProjectRepository projects;
-
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    public void setProjects(ProjectRepository projects) {
-        this.projects = projects;
-    }
-
-    @org.springframework.beans.factory.annotation.Autowired
-    public void setSkillInstaller(SkillInstallService skillInstaller) {
-        this.skillInstaller = skillInstaller;
-    }
-
-    @org.springframework.beans.factory.annotation.Autowired
-    public void setWorkProducts(com.pilot.server.work.products.WorkProductService workProducts,
-        com.pilot.server.work.products.SkillDraftService skillDrafts) {
-        this.workProducts = workProducts;
-        this.skillDrafts = skillDrafts;
-    }
-
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setAgentProfiles(AgentProfileService agentProfiles) {
         this.agentProfiles = agentProfiles;
@@ -225,34 +182,6 @@ public class AgentRunService implements RunStarter {
         this.verificationPolicies = verificationPolicies;
     }
 
-    /** 兼容旧调用：不启用检查点与幂等账本。 */
-    public AgentRunService(SessionService sessions, ModelClient modelClient, WorkspaceToolFactory toolFactory,
-        PermissionGate permissionGate, ApprovalBroker approvals, AgentProperties properties,
-        ModelSettings modelSettings, RunSnapshotService snapshots, RunRegistry registry,
-        com.pilot.core.session.RunRepository runRepository, ConversationRepository conversations,
-        com.pilot.core.session.PlanRepository plans, ObjectMapper objectMapper, PilotDataDir dataDir,
-        com.pilot.server.store.QueuedMessageRepository queuedMessages, MultiAgentService multiAgent,
-        MultiAgentProperties multiProperties, com.pilot.server.observability.RunMetrics metrics,
-        TaskControlService taskControls, CommandTaskManager commandTasks) {
-        this(sessions, modelClient, toolFactory, permissionGate, approvals, properties, modelSettings, snapshots,
-            registry, runRepository, conversations, plans, objectMapper, dataDir, queuedMessages, multiAgent,
-            multiProperties, metrics, taskControls, commandTasks, null, null, null, null);
-    }
-
-    /** 技能链路构造：技能可用，检查点与幂等账本关闭；测试与轻量装配用。 */
-    public AgentRunService(SessionService sessions, ModelClient modelClient, WorkspaceToolFactory toolFactory,
-        PermissionGate permissionGate, ApprovalBroker approvals, AgentProperties properties,
-        ModelSettings modelSettings, RunSnapshotService snapshots, RunRegistry registry,
-        com.pilot.core.session.RunRepository runRepository, ConversationRepository conversations,
-        com.pilot.core.session.PlanRepository plans, ObjectMapper objectMapper, PilotDataDir dataDir,
-        com.pilot.server.store.QueuedMessageRepository queuedMessages, MultiAgentService multiAgent,
-        MultiAgentProperties multiProperties, com.pilot.server.observability.RunMetrics metrics,
-        TaskControlService taskControls, CommandTaskManager commandTasks, SkillService skills) {
-        this(sessions, modelClient, toolFactory, permissionGate, approvals, properties, modelSettings, snapshots,
-            registry, runRepository, conversations, plans, objectMapper, dataDir, queuedMessages, multiAgent,
-            multiProperties, metrics, taskControls, commandTasks, skills, null, null, null);
-    }
-
     @org.springframework.beans.factory.annotation.Autowired
     public AgentRunService(SessionService sessions, ModelClient modelClient, WorkspaceToolFactory toolFactory,
         PermissionGate permissionGate, ApprovalBroker approvals, AgentProperties properties,
@@ -261,7 +190,8 @@ public class AgentRunService implements RunStarter {
         com.pilot.core.session.PlanRepository plans, ObjectMapper objectMapper, PilotDataDir dataDir,
         com.pilot.server.store.QueuedMessageRepository queuedMessages, MultiAgentService multiAgent,
         MultiAgentProperties multiProperties, com.pilot.server.observability.RunMetrics metrics,
-        TaskControlService taskControls, CommandTaskManager commandTasks, SkillService skills,
+        TaskControlService taskControls, CommandTaskManager commandTasks, AgentRunPreparation preparation,
+        DeferredToolRegistry deferredTools,
         RunStateTracker runStates, com.pilot.server.store.ToolCallJournalFactory journals,
         com.pilot.server.validation.ValidationLedger validations) {
         this.sessions = sessions;
@@ -292,32 +222,13 @@ public class AgentRunService implements RunStarter {
         this.multiAgent = multiAgent;
         this.multiProperties = multiProperties;
         this.metrics = metrics;
-        this.skills = skills;
+        this.preparation = preparation;
+        this.deferredTools = deferredTools;
         this.executor = Executors.newFixedThreadPool(properties.runThreads(), runnable -> {
             Thread thread = new Thread(runnable, "pilot-agent-run");
             thread.setDaemon(true);
             return thread;
         });
-    }
-
-    /**
-     * 把工作区 {@code .pilot/settings.json} 里的 allow/deny/ask 规则叠在原 gate 前面。
-     * 没有任何规则时原样返回，行为与之前完全一致。
-     */
-    private static PermissionGate withWorkspaceRules(PermissionGate base, java.nio.file.Path workspace) {
-        com.pilot.core.permission.PermissionRules rules = com.pilot.core.permission.PermissionRules.load(workspace);
-        if (rules.isEmpty()) {
-            return base;
-        }
-        // 规则对只读工具同样生效（例如禁止读 .env），未命中才回落到档位
-        return (call, tool) -> {
-            com.pilot.core.permission.PermissionResult baseline = base.check(call, tool);
-            if (baseline.decision() == com.pilot.core.permission.PermissionDecision.DENY) {
-                return baseline;
-            }
-            com.pilot.core.permission.PermissionResult ruled = rules.evaluate(call);
-            return ruled != null ? ruled : baseline;
-        };
     }
 
     @Override
@@ -809,7 +720,8 @@ public class AgentRunService implements RunStarter {
         boolean resultCaptured = false;
         try {
             BudgetProgress before = BudgetProgress.from(plans.load(sessionId), taskControls.load(sessionId));
-            status = execute(sessionId, runId, input, attachments, imagePositions, handle, continuation);
+            PreparedRunContext runContext = prepareExecutionContext(sessionId, runId, input, handle, continuation);
+            status = execute(sessionId, runId, input, attachments, imagePositions, handle, continuation, runContext);
             captureResult(sessionId, runId);
             resultCaptured = true;
             continued = maybeAutoContinue(sessionId, runId, status, handle, before);
@@ -960,7 +872,7 @@ public class AgentRunService implements RunStarter {
         inboxes.remove(sessionId);
         autoContinueAttempts.remove(sessionId);
         autoContinueSignature.remove(sessionId);
-        sessionEnabledDeferredTools.remove(sessionId);
+        deferredTools.forget(sessionId);
         try {
             queuedMessages.clearHold(sessionId);
         } catch (RuntimeException e) {
@@ -1187,146 +1099,19 @@ public class AgentRunService implements RunStarter {
         return true;
     }
 
-    /**
-     * 组装本轮 system：正文全部来自 {@code prompts/} 资源，这里只注入环境与当前计划。
-     *
-     * <p>计划每轮重新注入：压缩会折叠历史，但 system 是重建的，AGENTS.md 里的约定不会丢。
-     * 计划与日期排在 system 最尾：
-     * 越动态的段越靠后，前缀缓存按 token 匹配，尾部变化只损失尾部缓存。
-     *
-     * <p>正文段落按 {@code availableTools} 过滤：依赖的工具没注册，对应段落不进提示词，
-     * 避免教模型调用不存在的工具。仓库快照不进 system（每轮 git status 变化会断全部缓存），
-     * 改在会话首条 run 时作为 user 消息注入一次。
-     */
-    private String systemPrompt(String sessionId, String workspace, Set<String> availableTools, SkillCatalog catalog,
-        ReviewMode review) {
-        return systemPromptParts(sessionId, workspace, availableTools, catalog, review).stream()
-            .map(ContextComposition.Source::text).collect(java.util.stream.Collectors.joining("\n\n"));
-    }
-
-    private List<ContextComposition.Source> systemPromptParts(String sessionId, String workspace,
-        Set<String> availableTools, SkillCatalog catalog, ReviewMode review) {
-        Map<String, String> variables = new java.util.LinkedHashMap<>(PromptLibrary.environment(workspace));
-        variables.put("skills", skills.catalogText(catalog));
-        List<ContextComposition.Source> parts = new ArrayList<>(PROMPTS.systemParts(variables, availableTools));
-        String rules = projectRules(workspace);
-        if (!rules.isEmpty()) {
-            parts.add(new ContextComposition.Source("rules", rules));
-        }
-        String memory = ProjectRuleLoader.loadMemory(toolFactory.resolve(workspace), PROMPTS);
-        if (!memory.isEmpty()) {
-            parts.add(new ContextComposition.Source("rules", memory));
-        }
-        if (review.active()) {
-            parts.add(new ContextComposition.Source("system",
-                PROMPTS.render("review/protocol", Map.of("scope", review.scopeText())).strip()));
-        }
-        return List.copyOf(parts);
-    }
-
     private String currentTaskContext(String sessionId) {
-        // 稳定的任务数据放前面；计划只在 update_plan 后变化，作为尾部提醒追加。
-        // 运行中的命令状态不再每轮塞进上下文：需要时用 command_status 查询，避免缓存前缀抖动。
-        return taskControls.stablePrompt(sessionId) + "\n历史目标或验收范围不明时，先 read_task_history 恢复用户原文，不能按摘要自行缩小范围。" + "\n\n"
-            + PROMPTS.render("system/today", Map.of("today", java.time.LocalDate.now().toString())).strip() + "\n\n"
-            + planBrief(sessionId);
+        return preparation.currentTaskContext(sessionId);
     }
 
-    private static void addNativeToolNames(Set<String> names, Set<com.pilot.core.model.NativeCapability> capabilities) {
-        if (capabilities.contains(com.pilot.core.model.NativeCapability.WEB_SEARCH)) {
-            names.add(ToolNames.WEB_SEARCH);
-        }
-        if (capabilities.contains(com.pilot.core.model.NativeCapability.WEB_FETCH)) {
-            names.add(ToolNames.WEB_FETCH);
-        }
-    }
-
-    /**
-     * 审查 run 的只读工具表：复用子代理的 scope 裁剪机制（同一条硬隔离路径），
-     * 写文件与派发工具对模型「不存在」而不是「被拒绝」，避免无谓的重试浪费。
-     * 命令保留：git 只读子命令在内置白名单里，写命令照旧走权限门。
-     */
-    private ToolRegistry reviewTools(String workspace) {
-        AgentScope scope = AgentScope.readOnly(List.of(), List.of())
-            .withTools(List.of("read_*", "list_*", "glob_*", "search_*", com.pilot.core.tool.code.CodeSymbolTool.NAME,
-                ToolNames.RUN_COMMAND, ToolNames.WEB_SEARCH, ToolNames.WEB_FETCH), List.of());
-        return toolFactory.registryForScope(workspace, scope, com.pilot.core.tool.SandboxSink.rejectAll());
-    }
-
-    /**
-     * 本轮会话的完整工具名单：基础工具集 + 本方法调用点下方按条件注册的
-     * {@code spawn_agent} / {@code dispatch_agents}。系统提示词据此过滤依赖段。
-     *
-     * <p>条件注册的工具在这里声明第二遍是权衡的结果：SpawnAgentTool 持有 config，
-     * 注册无法提前到 systemPrompt 之前；谁改注册条件，谁同步改这里。
-     */
-    private Set<String> sessionTools(ToolRegistry base) {
-        Set<String> names = new java.util.LinkedHashSet<>(base.names());
-        names.add(ToolNames.SPAWN_AGENT);
-        if (multiProperties.enabled()) {
-            names.add(ToolNames.DISPATCH_AGENTS);
-        }
-        return Set.copyOf(names);
-    }
-
-    /**
-     * 用户显式点名技能时，把技能指引作为独立 user 消息注入在用户输入之前（与仓库快照同模式）。
-     *
-     * <p>不进 system：500 行正文会破坏跨轮前缀缓存，而 user 消息随历史可压缩、续跑不丢；
-     * 激活语义（用户指定了什么）本就属于对话流。会话启动到运行之间技能被删除时注入说明，不静默忽略。
-     */
-    private List<Message> withSkillActivation(List<Message> history, String workspace, RunHandle handle) {
-        if (handle.skill == null) {
-            return history;
-        }
-        String activate = skills.activateText(skills.catalogFor(workspace), handle.skill);
-        if (activate == null) {
-            activate = "（用户指定了技能 " + handle.skill + "，但该技能当前不可用：未找到或校验未通过。）";
-        }
-        List<Message> seeded = new ArrayList<>(history);
-        seeded.add(Message.user(activate));
-        return List.copyOf(seeded);
-    }
-
-    /** 把工作区和祖先目录的项目约定注入 system，并保留每份文件的来源。 */
-    private String projectRules(String workspace) {
-        Path root;
-        try {
-            root = toolFactory.resolve(workspace);
-        } catch (RuntimeException e) {
-            return "";
-        }
-        return ProjectRuleLoader.load(root, PROMPTS);
-    }
-
-    private String planBrief(String sessionId) {
-        List<PlanItem> items = plans.load(sessionId);
-        if (items.isEmpty()) {
-            return "";
-        }
-        List<PlanItem> open = items.stream().filter(PlanItem::open).toList();
-        if (open.isEmpty()) {
-            return PROMPTS.render("system/plan-done", Map.of()).strip();
-        }
-        String list =
-            open.stream().map(item -> "- [" + item.status() + "] " + item.step()).collect(Collectors.joining("\n"));
-        return PROMPTS.render("system/plan-context", Map.of("planItems", list)).strip();
-    }
-
-    private String execute(String sessionId, String runId, String input, List<Attachment> attachments,
-        List<Integer> imagePositions, RunHandle handle, boolean continuation) {
+    private PreparedRunContext prepareExecutionContext(String sessionId, String runId, String input,
+        RunHandle handle, boolean continuation) {
         List<Message> history = conversations.load(sessionId);
-        // 不在任务开头冻住客户端。MeteredModelClient 每次请求前 snapshot，已进入 chat 的那一次仍用当时的模型。
         Set<com.pilot.core.model.NativeCapability> nativeCapabilities = modelClient.nativeCapabilities();
-        String workspace = sessions.find(sessionId).map(Session::workspace).orElse(null);
-        // /review 独立审查模式：只读工具表 + 固定审查协议，写文件与派发工具在本 run 里不存在。
-        // 权限语义不变（只读命令照常放行，写命令照旧审批），不新加档位也不影响普通 run。
         TaskControlService.TaskContract executionTask = taskControls.load(sessionId);
         boolean unattended = executionTask != null && executionTask.automation() != null;
-        ReviewMode review = ReviewMode.parse(unattended ? executionTask.originalGoal() : input);
-        Path resolvedWorkspace = toolFactory.resolve(workspace);
-        PathValidator workspaceValidator = new PathValidator(resolvedWorkspace);
         AtomicReference<AgentLoop> activeLoopRef = new AtomicReference<>();
+        AtomicReference<Path> resolvedWorkspaceRef = new AtomicReference<>();
+        AtomicReference<PathValidator> workspaceValidatorRef = new AtomicReference<>();
         AtomicReference<List<PlanItem>> previousPlanRef = new AtomicReference<>(plans.load(sessionId));
         PlanSink planSink = (items, explanation) -> {
             List<PlanItem> beforePlan = previousPlanRef.getAndSet(items);
@@ -1335,38 +1120,58 @@ public class AgentRunService implements RunStarter {
                 new PlanUpdated(items.stream()
                     .map(item -> new PlanUpdated.PlanItemPayload(item.step(), item.status(), item.note())).toList(),
                     explanation));
-            maybeRefreshPlanPhaseHint(activeLoopRef.get(), resolvedWorkspace, workspaceValidator, beforePlan, items);
+            preparation.refreshPlanPhaseHint(activeLoopRef.get(), resolvedWorkspaceRef.get(), workspaceValidatorRef.get(),
+                beforePlan, items);
         };
-        ToolRegistry tools =
-            review.active() ? reviewTools(workspace) : sessionTools(sessionId, runId, workspace, planSink);
-        // 本会话已启用的延迟工具在这里先放回去：否则系统提示词按工具名过滤的段落与首条请求对不上。
-        // 审查 run 用独立只读工具表，不继承写/扩展工具。
-        List<String> inheritedDeferred = review.active() ? List.of() : inheritedDeferredTools(sessionId, history);
-        tools.enable(inheritedDeferred);
-        // 本地工具保留供同一轮自动降级；原生客户端只在请求序列化时隐藏对应定义。
-        // 初始目录用于系统提示词；use_skill 每次读取当前目录，让本轮新安装的技能立即可用。
-        SkillCatalog catalog = skills.catalogFor(workspace);
-        if (!review.active() && (!catalog.list().isEmpty() || (skills.enabled() && skillInstaller != null))) {
-            tools.register(new UseSkillTool(() -> skills.catalogFor(workspace)));
-        }
-        // 条件注册的 spawn_agent / dispatch_agents 位于 config 构造之后，先算出最终工具名，
-        // 让 system prompt 只注入本轮真实可用的工具说明。
-        // 审查 run 用 reviewTools 的最终名单：它既不注册也不允许派发工具，
-        // 不能再补 spawn_agent / dispatch_agents，否则提示词会介绍本轮根本调不到的工具。
-        if (unattended && scheduleService != null) {
-            tools.register(scheduleService.getObject().wakeTool(sessionId));
-        }
-        Set<String> availableTools =
-            new java.util.LinkedHashSet<>(review.active() ? tools.names() : sessionTools(tools));
-        addNativeToolNames(availableTools, nativeCapabilities);
+        AgentRunPreparation.PreparationInput preparationInput = new AgentRunPreparation.PreparationInput(sessionId,
+            runId, input, handle.skill, continuation, history, unattended,
+            executionTask == null ? null : executionTask.originalGoal(),
+            executionTask != null && executionTask.automation() != null && executionTask.automation().fullAccess(),
+            nativeCapabilities, deferredTools.snapshot(sessionId));
+        AgentRunPreparation.PreparedRun prepared = preparation.prepare(preparationInput, planSink, tools -> {
+            if (unattended && scheduleService != null) {
+                tools.register(scheduleService.getObject().wakeTool(sessionId));
+            }
+        });
+        resolvedWorkspaceRef.set(prepared.resolvedWorkspace());
+        workspaceValidatorRef.set(prepared.workspaceValidator());
+        PermissionGate sessionGate = unattended && executionTask.automation().fullAccess()
+            ? (call, tool) -> com.pilot.core.permission.PermissionResult.allow()
+            : preparation.withWorkspaceRules(permissionGate, toolFactory.resolve(prepared.workspace()));
+        List<Message> activatedHistory = continuation ? history
+            : preparation.activateSkill(repositoryContext.withRepositoryBrief(history, prepared.workspace(), sessionId),
+                prepared.workspace(), handle.skill);
+        AtomicReference<PreFlightLocator.Result> preflight = new AtomicReference<>();
+        Consumer<AgentLoop> configurePreflight = loop -> preflight.set(
+            preparation.configurePreflight(loop, prepared, input, continuation));
+        Consumer<AgentLoop.Result> logPreflightTelemetry = result -> preparation.logPreflightTelemetry(runId,
+            preflight.get(), activeLoopRef.get().observedPathsSnapshot(), result.changedFiles());
+        return new PreparedRunContext(history, executionTask, unattended, planSink, prepared, sessionGate,
+            preparation.readGuardOf(prepared.tools()), activeLoopRef, configurePreflight, activatedHistory,
+            logPreflightTelemetry);
+    }
+
+    private String execute(String sessionId, String runId, String input, List<Attachment> attachments,
+        List<Integer> imagePositions, RunHandle handle, boolean continuation, PreparedRunContext runContext) {
+        List<Message> history = runContext.history();
+        TaskControlService.TaskContract executionTask = runContext.executionTask();
+        boolean unattended = runContext.unattended();
+        PlanSink planSink = runContext.planSink();
+        var prepared = runContext.prepared();
+        AtomicReference<AgentLoop> activeLoopRef = runContext.activeLoopRef();
+        String workspace = prepared.workspace();
+        Path resolvedWorkspace = prepared.resolvedWorkspace();
+        ReviewMode review = prepared.review();
+        ToolRegistry tools = prepared.tools();
+        List<String> inheritedDeferred = prepared.inheritedDeferredTools();
+        Set<String> availableTools = prepared.availableTools();
         RunUsageAccumulator runUsage = new RunUsageAccumulator();
         // 收尾事件里的检查摘要要用于校验证据，sink 里先留一份
         AtomicReference<RunCompleted> lastCompleted = new AtomicReference<>();
         // 事件类型计数：压缩次数、工具调用量、失败码分布都从这里来
         Consumer<SessionEvent> sink = runEventSink(sessionId, runId, handle, planSink, runUsage, lastCompleted);
         Consumer<List<Message>> checkpoint = messages -> conversations.save(sessionId, messages);
-        List<ContextComposition.Source> promptSources =
-            systemPromptParts(sessionId, workspace, availableTools, catalog, review);
+        List<ContextComposition.Source> promptSources = prepared.promptSources();
         Consumer<RequestReport> reports = report -> {
             synchronized (runUsage) {
                 publish(sessionId, runId, new ModelRequestCompleted(report));
@@ -1378,14 +1183,12 @@ public class AgentRunService implements RunStarter {
         ModelClient measuredChild =
             new MeteredModelClient(modelClient, sessionId + ":subagent", "subagent", List.of(), reports)
                 .withRunContext(sessionId, runId);
-        AgentLoop.Config config =
-            new AgentLoop.Config(properties.maxSteps(), properties.repeatRemindAt(), properties.repeatAbortAt(),
-                promptSources.stream().map(ContextComposition.Source::text)
-                    .collect(java.util.stream.Collectors.joining("\n\n")),
-                // 收尾时读一次计划，把「本轮是否真的做完」一并写进 run.completed
-                () -> plans.load(sessionId),
-                // 计划没做完时自动继续，而不是停下来等用户点「继续执行」
-                properties.maxPlanContinues(), properties.contextMaxChars(), properties.completionChecksEnabled());
+        AgentLoop.Config config = new AgentLoop.Config(properties.maxSteps(), properties.repeatRemindAt(),
+            properties.repeatAbortAt(), prepared.systemPrompt(),
+            // 收尾时读一次计划，把「本轮是否真的做完」一并写进 run.completed
+            () -> plans.load(sessionId),
+            // 计划没做完时自动继续，而不是停下来等用户点「继续执行」
+            properties.maxPlanContinues(), properties.contextMaxChars(), properties.completionChecksEnabled());
         GoalExecutionPolicy goalPolicy = (unattended || (!review.active() && properties.goalModeEnabledValue()))
             ? new GoalExecutionPolicy(measuredMain, objectMapper, taskControls, sessionId,
                 toolFactory.resolve(workspace), handle.cancelled::get, properties.maxSteps(),
@@ -1412,9 +1215,7 @@ public class AgentRunService implements RunStarter {
         SpawnAgentTool.UsageSink childUsage = childUsageSink(goalPolicy, runUsage, sessionId, runId);
         // 用户创建自动任务时单独授权全工具访问；普通任务仍沿用工作区 allow/deny/ask。
         // 自动任务的调研门禁在 ExecutionPolicy 中执行，不被这里的工具权限绕过。
-        PermissionGate sessionGate = unattended && executionTask.automation().fullAccess()
-            ? (call, tool) -> com.pilot.core.permission.PermissionResult.allow()
-            : withWorkspaceRules(permissionGate, toolFactory.resolve(workspace));
+        PermissionGate sessionGate = runContext.sessionGate();
         // 本 run 可用的自定义代理目录（两级扫描，热更新）；测试未注入时为空目录
         AgentProfileCatalog profiles =
             agentProfiles == null ? AgentProfileCatalog.EMPTY : agentProfiles.catalogFor(workspace);
@@ -1478,22 +1279,11 @@ public class AgentRunService implements RunStarter {
             .withToolJournal(runId, journals == null ? com.pilot.core.tool.ToolCallJournal.none()
                 : journals.forWorkspace(sessionId, toolFactory.resolve(workspace)));
 
-        com.pilot.core.tool.ReadGuard readGuard = readGuardOf(tools);
+        com.pilot.core.tool.ReadGuard readGuard = runContext.readGuard();
         if (readGuard != null) {
             loop.withContextShrinkListener(readGuard::invalidateDeliveredViews);
         }
-        PreFlightLocator.Result preflight = null;
-        if (!continuation && properties.preflightLocalizationEnabledValue()) {
-            preflight = preFlightLocator.locate(resolvedWorkspace, workspaceValidator, input, Set.of());
-            if (preflight.hasCandidates()) {
-                loop.withInitialPhaseHint(preflight.renderBlock(), preflight.candidatePaths());
-            }
-            loop.withSteeringHintProvider(text -> {
-                PreFlightLocator.Result steered =
-                    preFlightLocator.locate(resolvedWorkspace, workspaceValidator, text, loop.observedPathsSnapshot());
-                return steered.renderBlock();
-            });
-        }
+        runContext.configurePreflight().accept(loop);
         activeLoopRef.set(loop);
 
         if (goalPolicy != null) {
@@ -1506,12 +1296,9 @@ public class AgentRunService implements RunStarter {
             TaskControlService.TaskContract activeTask = taskControls.load(sessionId);
             String completionGoal = activeTask == null ? null : activeTask.originalGoal();
             AgentLoop.Result result = continuation ? loop.resume(history, sink, checkpoint, completionGoal)
-                : loop.run(input, attachments, imagePositions,
-                    withSkillActivation(repositoryContext.withRepositoryBrief(history, workspace, sessionId), workspace,
-                        handle), sink,
-                    checkpoint);
+                : loop.run(input, attachments, imagePositions, runContext.activatedHistory(), sink, checkpoint);
             conversations.save(sessionId, result.conversation());
-            logPreflightTelemetry(runId, preflight, loop.observedPathsSnapshot(), result.changedFiles());
+            runContext.logPreflightTelemetry().accept(result);
             log.info("Agent run {} completed: failureCode={}, messages={}, workspace={}", runId, result.failureCode(),
                 result.conversation().size(), workspace == null ? properties.workspace() : workspace);
             // 失败/部分交付也要把已经跑过的检查记进证据账本；不能因为收尾是 TASK_INCOMPLETE
@@ -1551,7 +1338,7 @@ public class AgentRunService implements RunStarter {
             return TaskControlStatus.FAILED.name();
         } finally {
             if (!review.active()) {
-                sessionEnabledDeferredTools.put(sessionId, tools.enabledDeferredTools());
+                deferredTools.remember(sessionId, tools.enabledDeferredTools());
             }
             try {
                 finishSnapshots(runId);
@@ -1571,69 +1358,6 @@ public class AgentRunService implements RunStarter {
         } catch (RuntimeException e) {
             log.warn("完成运行快照失败 {}", runId, e);
         }
-    }
-
-    private static com.pilot.core.tool.ReadGuard readGuardOf(ToolRegistry tools) {
-        for (com.pilot.core.tool.Tool tool : tools.tools()) {
-            if (tool instanceof com.pilot.core.tool.file.ReadFileTool read) {
-                return read.guard();
-            }
-        }
-        return null;
-    }
-
-    /** 仅当计划完成数增加且切换到全新 in_progress 步骤，并且能产出高置信未读候选时刷新尾部阶段锚点。 */
-    private void maybeRefreshPlanPhaseHint(AgentLoop activeLoop, Path workspaceRoot, PathValidator validator,
-        List<PlanItem> before, List<PlanItem> after) {
-        if (activeLoop == null || !properties.preflightLocalizationEnabledValue() || after == null || after.isEmpty()) {
-            return;
-        }
-        long beforeDone = before == null ? 0 : before.stream().filter(PlanItem::done).count();
-        long afterDone = after.stream().filter(PlanItem::done).count();
-        if (afterDone <= beforeDone) {
-            return;
-        }
-        String beforeActive = activeStepOf(before);
-        String afterActive = activeStepOf(after);
-        if (afterActive.isBlank() || afterActive.equals(beforeActive)) {
-            return;
-        }
-        PreFlightLocator.Result next =
-            preFlightLocator.locate(workspaceRoot, validator, afterActive, activeLoop.observedPathsSnapshot());
-        if (next.hasCandidates()) {
-            activeLoop.refreshPhaseHint(next.renderBlock(), next.candidatePaths());
-        }
-    }
-
-    private static String activeStepOf(List<PlanItem> items) {
-        if (items == null) {
-            return "";
-        }
-        return items.stream().filter(item -> PlanItem.IN_PROGRESS.equals(item.status())).map(PlanItem::step).findFirst()
-            .orElse("");
-    }
-
-    private static void logPreflightTelemetry(String runId, PreFlightLocator.Result preflight,
-        Set<String> observedPaths, List<String> changedFiles) {
-        if (preflight == null) {
-            return;
-        }
-        if (!preflight.hasCandidates()) {
-            log.debug("Pre-flight localization skipped run={}: elapsedMs={}, anchors={}, timedOut={}, reason={}", runId,
-                preflight.elapsedMs(), preflight.anchorCount(), preflight.timedOut(), preflight.skipReason());
-            return;
-        }
-        Set<String> normalizedObserved = observedPaths.stream().filter(java.util.Objects::nonNull)
-            .map(p -> p.strip().replace('\\', '/')).collect(Collectors.toSet());
-        Set<String> normalizedChanged = changedFiles.stream().filter(java.util.Objects::nonNull)
-            .map(p -> p.strip().replace('\\', '/')).collect(Collectors.toSet());
-        Set<String> candidates = preflight.candidatePaths();
-        long hitRead = candidates.stream().filter(normalizedObserved::contains).count();
-        long hitEdit = candidates.stream().filter(normalizedChanged::contains).count();
-        log.info(
-            "Pre-flight localization run={}: elapsedMs={}, anchors={}, candidates={}, hitRead={}, hitEdit={}, timedOut={}",
-            runId, preflight.elapsedMs(), preflight.anchorCount(), candidates.size(), hitRead, hitEdit,
-            preflight.timedOut());
     }
 
     private SpawnAgentTool.UsageSink childUsageSink(GoalExecutionPolicy goalPolicy, RunUsageAccumulator runUsage,
@@ -1845,10 +1569,13 @@ public class AgentRunService implements RunStarter {
         }
     }
 
-    /**
-     * UI 的 run.usage 是“当前主循环快照”，子循环的局部累计不能直接转发，否则会把父数值倒退。
-     * 这里保存最后一份主快照并叠加子请求增量，两条来源都只在本 run 内存在。
-     */
+    private record PreparedRunContext(List<Message> history, TaskControlService.TaskContract executionTask,
+        boolean unattended, PlanSink planSink, AgentRunPreparation.PreparedRun prepared, PermissionGate sessionGate,
+        com.pilot.core.tool.ReadGuard readGuard, AtomicReference<AgentLoop> activeLoopRef,
+        Consumer<AgentLoop> configurePreflight, List<Message> activatedHistory,
+        Consumer<AgentLoop.Result> logPreflightTelemetry) {
+    }
+
     static final class RunUsageAccumulator {
         private RunUsageUpdated main = new RunUsageUpdated(0, 0, 0, 0, 1, false);
         private int childRequests;
@@ -1912,83 +1639,6 @@ public class AgentRunService implements RunStarter {
             this.sessionId = sessionId;
             this.skill = skill == null || skill.isBlank() ? null : skill.strip();
         }
-    }
-
-    /** 会话命令有独立的任务归属；默认和受限子代理工具集不共享这个入口。 */
-    private ToolRegistry sessionTools(String sessionId, String runId, String workspace, PlanSink planSink) {
-        ToolRegistry tools = new ToolRegistry();
-        toolFactory.usePlan(() -> plans.load(sessionId));
-        try {
-            toolFactory.registryFor(workspace, planSink).tools().stream()
-                .filter(tool -> !ToolNames.RUN_COMMAND.equals(tool.name())
-                    && !com.pilot.core.tool.EnableToolsTool.NAME.equals(tool.name()))
-                .forEach(tools::register);
-        } finally {
-            toolFactory.usePlan(null);
-        }
-        tools.register(new com.pilot.core.tool.EnableToolsTool(tools));
-        RunCommandTool commands =
-            new RunCommandTool(new PathValidator(toolFactory.resolve(workspace)), commandTasks, sessionId, snapshots);
-        for (com.pilot.core.tool.Tool tool : tools.tools()) {
-            if (tool instanceof com.pilot.core.tool.file.ReadFileTool read) {
-                commands.withReads(read.guard());
-            }
-        }
-        tools.register(commands);
-        tools.register(new CommandStatusTool(commandTasks, sessionId, snapshots));
-        tools.register(new CommandTasksTool(commandTasks));
-        tools.register(new CommandLogsTool(commandTasks, sessionId));
-        tools.register(new CommandInputTool(commandTasks, sessionId));
-        tools.register(new StopCommandTool(commandTasks, sessionId));
-        tools.register(new ReadTaskHistoryTool(sessions, sessionId));
-        if (workProducts != null) {
-            tools.register(new com.pilot.server.work.products.PublishArtifactTool(workProducts, objectMapper, sessionId, runId));
-        }
-        if (skillDrafts != null && skills != null && skills.enabled()) {
-            tools.register(new com.pilot.server.work.products.ProposeSkillTool(skillDrafts, objectMapper, sessionId, runId));
-        }
-        if (skillInstaller != null && skills != null && skills.enabled()) {
-            tools.register(new InstallSkillTool(skillInstaller, skills, objectMapper, workspace));
-        }
-        // 浏览器与 MCP：始终注册，是否可见由工具自己的 availability 在运行时决定。
-        toolFactory.sessionExtras(sessionId, workspace).forEach(tools::register);
-        return tools;
-    }
-
-    /**
-     * 续跑、手动继续、后续追问要沿用的延迟工具集合。
-     *
-     * <p>内存里有记录就直接用；进程重启后接着跑旧会话时没有记录，从历史恢复：
-     * 既包括 {@code enable_tools} 当时打开的名字，也包括已经直接调用过的延迟工具
-     * （能出现在历史里说明那一轮已经打开过）。
-     * 这里不预先做延迟工具名单过滤：{@link ToolRegistry#enable} 会再筛一次，并忽略未注册的名字。
-     */
-    private List<String> inheritedDeferredTools(String sessionId, List<Message> history) {
-        List<String> remembered = sessionEnabledDeferredTools.get(sessionId);
-        if (remembered != null) {
-            return remembered;
-        }
-        ArrayList<String> called = new ArrayList<>();
-        for (Message message : history) {
-            for (ToolCall call : message.toolCalls()) {
-                if (EnableToolsTool.NAME.equals(call.name())) {
-                    openedNames(call).stream().filter(name -> !called.contains(name)).forEach(called::add);
-                } else if (!called.contains(call.name())) {
-                    called.add(call.name());
-                }
-            }
-        }
-        return List.copyOf(called);
-    }
-
-    /** {@code enable_tools} 调用参数里点名的工具名；格式不对就当成没打开过。 */
-    private static List<String> openedNames(ToolCall call) {
-        Object raw = call.args() == null ? null : call.args().get("names");
-        if (raw instanceof List<?> values) {
-            return values.stream().filter(Objects::nonNull).map(value -> value.toString().strip())
-                .filter(name -> !name.isEmpty()).toList();
-        }
-        return raw == null || raw.toString().isBlank() ? List.of() : List.of(raw.toString().strip());
     }
 
     private void publish(String sessionId, String runId, SessionEvent event) {

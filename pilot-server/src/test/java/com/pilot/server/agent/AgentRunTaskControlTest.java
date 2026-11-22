@@ -729,14 +729,19 @@ class AgentRunTaskControlTest {
                     finished.add(status);
                 }
             };
+            RunSnapshotService snapshots = new RunSnapshotService(mapper, data);
+            MultiAgentProperties multiProperties = new MultiAgentProperties(false, 1, 1, 8, 30, List.of());
+            AgentRunPreparation preparation = new AgentRunPreparation(sessions, factory, properties, multiProperties,
+                tasks, commandTasks, snapshots, plans, mapper,
+                new SkillService(new com.pilot.server.config.SkillProperties(true, null), properties, data));
             service = new AgentRunService(sessions, model, factory, new PolicyPermissionGate(PermissionMode.READ_ONLY),
                 ApprovalBroker.denyAll(), properties,
                 new ModelSettings(new ModelProperties("", "http://localhost", "test", List.of()),
                     new InMemorySettingsStore()),
-                new RunSnapshotService(mapper, data), new RunRegistry(), RunRepository.noop(), conversations, plans,
+                snapshots, new RunRegistry(), RunRepository.noop(), conversations, plans,
                 mapper, data, new QueuedMessageRepository(), null,
-                new MultiAgentProperties(false, 1, 1, 8, 30, List.of()), metrics, tasks, commandTasks,
-                new SkillService(new com.pilot.server.config.SkillProperties(true, null), properties, data));
+                multiProperties, metrics, tasks, commandTasks, preparation, new DeferredToolRegistry(), null, null,
+                null);
         }
 
         void start(TaskControlService.Requirements requirements) {

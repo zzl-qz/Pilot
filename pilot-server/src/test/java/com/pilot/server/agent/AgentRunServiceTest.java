@@ -901,7 +901,7 @@ class AgentRunServiceTest {
             var properties =
                 new AgentProperties(workspace.toString(), PermissionMode.AUTO, 8, 3, 5, 300, 1, 0, 60000, false);
             var skillService = new SkillService(new SkillProperties(true, null), properties, dataDir);
-            fixture.service.setSkillInstaller(new SkillInstallService(skillService, dataDir, (url, target) -> {
+            fixture.preparation.setSkillInstaller(new SkillInstallService(skillService, dataDir, (url, target) -> {
                 Path directory = Files.createDirectories(target.resolve("skills/demo"));
                 Files.writeString(directory.resolve("SKILL.md"),
                     "---\nname: demo\ndescription: Demo skill\n---\nInstalled instruction marker");
@@ -1228,6 +1228,7 @@ class AgentRunServiceTest {
         final String sessionId = sessions.createSession("test", workspace.toString()).id();
         final RunMetrics metrics;
         final AgentRunService service;
+        final AgentRunPreparation preparation;
         final com.pilot.core.tool.command.CommandTaskManager commandTasks;
         /** 会话级扩展工具：默认空，测试在 start 前覆盖成 browser 之类延迟工具。 */
         List<com.pilot.core.tool.Tool> sessionExtras = List.of();
@@ -1319,15 +1320,20 @@ class AgentRunServiceTest {
                     finished.add(status);
                 }
             };
+            RunSnapshotService snapshots = new RunSnapshotService(mapper, dataDir);
+            TaskControlService taskControls = new TaskControlService(mapper, dataDir);
+            SkillService skills = new SkillService(new SkillProperties(true, null), properties, dataDir);
+            MultiAgentProperties multiProperties = new MultiAgentProperties(false, 1, 1, 8, 30, List.of());
+            preparation = new AgentRunPreparation(sessions, factory, properties, multiProperties, taskControls,
+                commandTasks, snapshots, plans, mapper, skills);
             service = new AgentRunService(sessions, model, factory, new PolicyPermissionGate(mode),
                 ApprovalBroker.denyAll(), properties,
                 new ModelSettings(new ModelProperties("", "http://localhost", "test", List.of()),
                     new InMemorySettingsStore()),
-                new RunSnapshotService(mapper, dataDir), new RunRegistry(), RunRepository.noop(), conversations, plans,
+                snapshots, new RunRegistry(), RunRepository.noop(), conversations, plans,
                 mapper, dataDir, new QueuedMessageRepository(), null,
-                new MultiAgentProperties(false, 1, 1, 8, 30, List.of()), metrics,
-                new TaskControlService(mapper, dataDir), commandTasks,
-                new SkillService(new SkillProperties(true, null), properties, dataDir));
+                multiProperties, metrics, taskControls, commandTasks, preparation, new DeferredToolRegistry(), null,
+                null, null);
         }
 
         void start() {
@@ -1477,14 +1483,20 @@ class AgentRunServiceTest {
                 doneStatuses.add(status);
             }
         };
+        RunSnapshotService snapshots = new RunSnapshotService(mapper, dir);
+        TaskControlService taskControls = new TaskControlService(mapper, dir);
+        MultiAgentProperties multiProperties = new MultiAgentProperties(false, 1, 1, 8, 30, List.of());
+        AgentRunPreparation preparation = new AgentRunPreparation(fixture.sessions, realPlanFactory, props,
+            multiProperties, taskControls, fixture.commandTasks, snapshots, fixture.plans, mapper,
+            new SkillService(new SkillProperties(true, null), props, dir));
         return new AgentRunService(fixture.sessions, model, realPlanFactory,
             new PolicyPermissionGate(PermissionMode.AUTO), ApprovalBroker.denyAll(), props,
             new ModelSettings(new ModelProperties("", "http://localhost", "test", List.of()),
                 new InMemorySettingsStore()),
-            new RunSnapshotService(mapper, dir), new RunRegistry(), RunRepository.noop(), fixture.conversations,
+            snapshots, new RunRegistry(), RunRepository.noop(), fixture.conversations,
             fixture.plans, mapper, dir, new QueuedMessageRepository(), null,
-            new MultiAgentProperties(false, 1, 1, 8, 30, List.of()), metrics, new TaskControlService(mapper, dir),
-            fixture.commandTasks, new SkillService(new SkillProperties(true, null), props, dir));
+            multiProperties, metrics, taskControls, fixture.commandTasks, preparation, new DeferredToolRegistry(),
+            null, null, null);
     }
 
     private static void runAndWait(AgentRunService runService, Fixture fixture, BlockingQueue<String> doneStatuses,
@@ -1530,14 +1542,20 @@ class AgentRunServiceTest {
                 "无外部编译器环境下 WorkspaceToolFactory 也应默认暴露 code_symbol");
             assertTrue(built.find(CodeSymbolTool.NAME).orElseThrow().parallelSafe());
 
+            RunSnapshotService snapshots = new RunSnapshotService(mapper, dir);
+            TaskControlService taskControls = new TaskControlService(mapper, dir);
+            MultiAgentProperties multiProperties = new MultiAgentProperties(false, 1, 1, 8, 30, List.of());
+            AgentRunPreparation preparation = new AgentRunPreparation(fixture.sessions, realFactory, disabled,
+                multiProperties, taskControls, fixture.commandTasks, snapshots, fixture.plans, mapper,
+                new SkillService(new SkillProperties(true, null), disabled, dir));
             AgentRunService runService = new AgentRunService(fixture.sessions, model, realFactory,
                 new PolicyPermissionGate(PermissionMode.AUTO), ApprovalBroker.denyAll(), disabled,
                 new ModelSettings(new ModelProperties("", "http://localhost", "test", List.of()),
                     new InMemorySettingsStore()),
-                new RunSnapshotService(mapper, dir), new RunRegistry(), RunRepository.noop(), fixture.conversations,
+                snapshots, new RunRegistry(), RunRepository.noop(), fixture.conversations,
                 fixture.plans, mapper, dir, new QueuedMessageRepository(), null,
-                new MultiAgentProperties(false, 1, 1, 8, 30, List.of()), metrics, new TaskControlService(mapper, dir),
-                fixture.commandTasks, new SkillService(new SkillProperties(true, null), disabled, dir));
+                multiProperties, metrics, taskControls, fixture.commandTasks, preparation, new DeferredToolRegistry(),
+                null, null, null);
             try {
                 String runId = runService.claimRun(fixture.sessionId).orElseThrow();
                 String prompt = "排查 PaymentGateway 的 charge 逻辑";
