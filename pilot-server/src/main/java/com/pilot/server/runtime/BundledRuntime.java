@@ -21,7 +21,7 @@ import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
 import com.pilot.core.runtime.bootstrap.SourceEnvironment;
 import com.pilot.core.util.FileTrees;
 import com.pilot.core.util.HostOs;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
 
 import lombok.extern.slf4j.Slf4j;
 

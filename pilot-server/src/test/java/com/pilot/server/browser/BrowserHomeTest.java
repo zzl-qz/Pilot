@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.runtime.SourceLayout;
 
 class BrowserHomeTest {

@@ -25,8 +25,9 @@ import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.session.EventSubscription;
 import com.pilot.core.session.SessionService;
-import com.pilot.server.common.web.AsyncEventStream;
-import com.pilot.server.common.web.SessionLookup;
+import com.pilot.server.session.lookup.SessionLookup;
+import com.pilot.server.session.events.AsyncEventStream;
+import com.pilot.server.session.events.SessionEventTransport;
 
 import lombok.RequiredArgsConstructor;
 import tools.jackson.databind.ObjectMapper;
@@ -37,6 +38,7 @@ import tools.jackson.databind.ObjectMapper;
 public class SessionHistoryController {
     private final SessionService sessions;
     private final ObjectMapper objectMapper;
+    private final SessionEventTransport eventTransport;
 
     @Value("${pilot.events.queue-bytes:8388608}")
     private long streamBytes = 8L * 1024 * 1024;
@@ -93,7 +95,7 @@ public class SessionHistoryController {
 
     @GetMapping("/stream-metrics")
     public Map<String, Object> streamMetrics() {
-        return Map.of("delivery", sessions.streamMetrics(), "transport", AsyncEventStream.metrics());
+        return Map.of("delivery", sessions.streamMetrics(), "transport", eventTransport.metrics());
     }
 
     @GetMapping("/{id}/events/{sequence}")
@@ -134,7 +136,8 @@ public class SessionHistoryController {
         var registered = new CompletableFuture<Void>();
         AtomicReference<AsyncEventStream> transport = new AtomicReference<>();
         Runnable finish = () -> finishStream(transport.get(), id, revision, subscription.get());
-        var stream = new AsyncEventStream(request, response, streamBytes, Duration.ofMillis(streamTimeout), () -> {
+        var stream = new AsyncEventStream(eventTransport, request, response, streamBytes,
+            Duration.ofMillis(streamTimeout), () -> {
             var current = subscription.get();
             if (current != null) {
                 current.close();

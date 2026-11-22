@@ -29,7 +29,8 @@ import com.pilot.core.session.SessionService;
 import com.pilot.server.attachment.AttachmentLimits;
 import com.pilot.server.attachment.AttachmentReferences;
 import com.pilot.server.attachment.AttachmentService;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
+import com.pilot.server.store.StorageHealthService;
 import com.pilot.server.maintenance.backup.BackupService;
 import com.pilot.server.run.RunRegistry;
 import com.pilot.server.store.EventCodec;
@@ -120,7 +121,8 @@ class RetentionServiceTest {
             List.of(Message.user("共享", List.of(new Attachment("shared.png", "image/png", shared.toString())))));
         var service = new RetentionService(1, 0, 1, 1, provider, snapshots, mock(BackupService.class), data, current,
             files, ledger, new RunRegistry(),
-            new AttachmentReferences(provider, mapper, current, conversations, snapshots, files));
+            new AttachmentReferences(provider, mapper, current, conversations, snapshots, files),
+            new StorageHealthService());
         var report = service.purgeNow();
 
         assertEquals(1, report.events());
@@ -150,7 +152,7 @@ class RetentionServiceTest {
         return new RetentionService(0, 0, 0, attachmentsDays, store, mock(RunSnapshotService.class),
             mock(BackupService.class), dataDir, sessions, attachments,
             new ValidationLedger(dataDir, JsonMapper.builder().build()), new RunRegistry(),
-            mock(AttachmentReferences.class));
+            mock(AttachmentReferences.class), new StorageHealthService());
     }
 
     private static Path attachment(Path dir, String name) throws IOException {

@@ -38,7 +38,7 @@ import com.pilot.core.multi.TaskSpec;
 import com.pilot.core.multi.TaskStatus;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.tool.SnapshotSink;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.MultiAgentBudget;
 import com.pilot.server.config.MultiAgentProperties;

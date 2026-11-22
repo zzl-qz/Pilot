@@ -28,7 +28,7 @@ import com.pilot.core.message.ToolCall;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.SessionService;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.SkillProperties;
 import com.pilot.server.skill.SkillService;

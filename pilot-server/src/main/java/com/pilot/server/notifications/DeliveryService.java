@@ -21,8 +21,8 @@ import java.util.concurrent.Semaphore;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-import com.pilot.server.common.data.DataMaintenance;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.DataMaintenance;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.results.ResultInboxService;
 import com.pilot.server.store.AutomationStore;
 

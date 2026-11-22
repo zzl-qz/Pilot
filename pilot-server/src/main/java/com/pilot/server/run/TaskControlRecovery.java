@@ -13,11 +13,11 @@ import lombok.RequiredArgsConstructor;
 @Component
 @RequiredArgsConstructor
 public class TaskControlRecovery implements ApplicationRunner {
-    private com.pilot.server.common.data.DataMaintenance maintenance =
-        new com.pilot.server.common.data.DataMaintenance();
+    private com.pilot.server.store.DataMaintenance maintenance =
+        new com.pilot.server.store.DataMaintenance();
 
     @org.springframework.beans.factory.annotation.Autowired
-    void useMaintenance(com.pilot.server.common.data.PilotDataDir dataDir) {
+    void useMaintenance(com.pilot.server.store.PilotDataDir dataDir) {
         this.maintenance = dataDir.maintenance();
     }
 

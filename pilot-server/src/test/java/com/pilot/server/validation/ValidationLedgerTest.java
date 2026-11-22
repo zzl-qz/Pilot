@@ -18,8 +18,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 
-import com.pilot.server.common.data.PilotDataDir;
-import com.pilot.server.common.data.StorageHealth;
+import com.pilot.server.store.PilotDataDir;
+import com.pilot.server.store.StorageHealthService;
 import com.pilot.server.store.SqliteStore;
 
 import tools.jackson.databind.json.JsonMapper;
@@ -28,9 +28,11 @@ class ValidationLedgerTest {
 
     @TempDir
     Path dataDir;
+    private final StorageHealthService storageHealth = new StorageHealthService();
 
     private ValidationLedger ledger() {
-        return new ValidationLedger(new PilotDataDir(dataDir.toString()), JsonMapper.builder().build());
+        return new ValidationLedger(new PilotDataDir(dataDir.toString()), JsonMapper.builder().build(),
+            new DefaultListableBeanFactory().getBeanProvider(SqliteStore.class), storageHealth);
     }
 
     private static ValidationEvidence evidence(String hash, String status) {
@@ -100,18 +102,17 @@ class ValidationLedgerTest {
 
     @Test
     void failedPersistenceCannotBeReportedAsReliableEvidence() throws IOException {
-        StorageHealth.reset();
         Path blockedRoot = dataDir.resolve("not-a-directory");
         Files.writeString(blockedRoot, "file");
-        ValidationLedger ledger =
-            new ValidationLedger(new PilotDataDir(blockedRoot.toString()), JsonMapper.builder().build());
+        ValidationLedger ledger = new ValidationLedger(new PilotDataDir(blockedRoot.toString()),
+            JsonMapper.builder().build(), new DefaultListableBeanFactory().getBeanProvider(SqliteStore.class),
+            storageHealth);
         ledger.record(evidence("hash-a", "passed"));
 
         ValidationLedger.Report report = ledger.report("ses_1", "hash-a");
         assertFalse(report.current());
         assertTrue(report.reason().contains("未能可靠落盘"), report.reason());
-        assertFalse(StorageHealth.snapshot().healthy());
-        StorageHealth.reset();
+        assertFalse(storageHealth.snapshot().healthy());
     }
 
     @Test
@@ -139,7 +140,8 @@ class ValidationLedgerTest {
                 return super.writeValueAsString(value);
             }
         };
-        ValidationLedger writer = new ValidationLedger(new PilotDataDir(dataDir.toString()), controlled);
+        ValidationLedger writer = new ValidationLedger(new PilotDataDir(dataDir.toString()), controlled,
+            new DefaultListableBeanFactory().getBeanProvider(SqliteStore.class), storageHealth);
         try (var executor = Executors.newSingleThreadExecutor()) {
             var recording = executor.submit(() -> writer.record(evidence("hash-a", "failed")));
             try {
@@ -156,7 +158,6 @@ class ValidationLedgerTest {
         fail.set(false);
         writer.record(evidence("hash-a", "passed"));
         assertTrue(ledger().report("ses_1", "hash-a").current());
-        StorageHealth.reset();
     }
 
     @Test
@@ -167,7 +168,7 @@ class ValidationLedgerTest {
         var provider = beans.getBeanProvider(SqliteStore.class);
         JsonMapper mapper = JsonMapper.builder().build();
         PilotDataDir normal = new PilotDataDir(dataDir.toString());
-        new ValidationLedger(normal, mapper, provider).record(evidence("hash", "passed"));
+        new ValidationLedger(normal, mapper, provider, storageHealth).record(evidence("hash", "passed"));
         Path blocked = Files.writeString(dataDir.resolve("not-directory"), "file");
         PilotDataDir blockedMarker = new PilotDataDir(dataDir.toString()) {
             @Override
@@ -179,11 +180,11 @@ class ValidationLedgerTest {
             }
         };
         try {
-            new ValidationLedger(blockedMarker, mapper, provider).record(evidence("hash", "failed"));
+            new ValidationLedger(blockedMarker, mapper, provider, storageHealth).record(evidence("hash", "failed"));
             assertTrue(sqlite.validationPending("ses_1"));
-            assertFalse(new ValidationLedger(normal, mapper, provider).report("ses_1", "hash").current());
+            assertFalse(new ValidationLedger(normal, mapper, provider, storageHealth).report("ses_1", "hash").current());
         } finally {
-            StorageHealth.reset();
+            Files.deleteIfExists(blocked);
         }
     }
 }

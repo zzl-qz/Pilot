@@ -1,4 +1,4 @@
-package com.pilot.server.common.data;
+package com.pilot.server.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;

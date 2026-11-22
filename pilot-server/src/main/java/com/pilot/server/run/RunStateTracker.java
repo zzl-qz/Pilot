@@ -30,9 +30,9 @@ import com.pilot.core.session.RunCheckpoint;
 import com.pilot.core.session.RunCheckpointRepository;
 import com.pilot.core.util.Texts;
 import com.pilot.core.util.WireEnum;
-import com.pilot.server.common.data.DataMaintenance;
-import com.pilot.server.common.data.PilotDataDir;
-import com.pilot.server.common.data.StorageHealth;
+import com.pilot.server.store.DataMaintenance;
+import com.pilot.server.store.PilotDataDir;
+import com.pilot.server.store.StorageHealthService;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -67,15 +67,22 @@ public class RunStateTracker {
     }
 
     private final RunCheckpointRepository repository;
+    private final StorageHealthService storageHealth;
     private final String instanceId;
     private final ConcurrentMap<String, String> activeRuns = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, String> lostLeases = new ConcurrentHashMap<>();
 
+    @org.springframework.beans.factory.annotation.Autowired
     public RunStateTracker(RunCheckpointRepository repository,
-        @Value("${pilot.instance.id:}") String configuredInstanceId) {
+        @Value("${pilot.instance.id:}") String configuredInstanceId, StorageHealthService storageHealth) {
         this.repository = repository;
+        this.storageHealth = storageHealth;
         this.instanceId = configuredInstanceId == null || configuredInstanceId.isBlank()
             ? "pilot-" + UUID.randomUUID().toString().substring(0, 8) : configuredInstanceId.strip();
+    }
+
+    public RunStateTracker(RunCheckpointRepository repository, String configuredInstanceId) {
+        this(repository, configuredInstanceId, new StorageHealthService());
     }
 
     public String instanceId() {
@@ -262,7 +269,7 @@ public class RunStateTracker {
         if (runId != null) {
             lostLeases.put(runId, action);
         }
-        StorageHealth.markDegraded("run-checkpoint", runId == null ? action : action + "：" + runId);
+        storageHealth.markDegraded("run-checkpoint", runId == null ? action : action + "：" + runId);
         log.warn("{}，运行 {}", action, runId, cause);
     }
 

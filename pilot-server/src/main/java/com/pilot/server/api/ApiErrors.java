@@ -1,4 +1,4 @@
-package com.pilot.server.common.web;
+package com.pilot.server.api;
 
 import java.util.Map;
 

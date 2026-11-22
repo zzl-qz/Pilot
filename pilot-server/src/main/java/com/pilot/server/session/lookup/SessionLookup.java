@@ -1,4 +1,4 @@
-package com.pilot.server.common.web;
+package com.pilot.server.session.lookup;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;

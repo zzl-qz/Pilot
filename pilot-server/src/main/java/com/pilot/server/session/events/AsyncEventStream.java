@@ -1,16 +1,12 @@
-package com.pilot.server.common.web;
+package com.pilot.server.session.events;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayDeque;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 
 import jakarta.servlet.AsyncContext;
 import jakarta.servlet.AsyncEvent;
@@ -27,21 +23,7 @@ import lombok.extern.slf4j.Slf4j;
 public final class AsyncEventStream implements AutoCloseable {
     /** 这么久没有事件就发一次心跳，防止代理把空闲连接掐掉。 */
     private static final long HEARTBEAT_INTERVAL_NANOS = Duration.ofSeconds(20).toNanos();
-    private static final java.util.concurrent.ScheduledExecutorService TIMER =
-        Executors.newSingleThreadScheduledExecutor(task -> {
-            Thread thread = new Thread(task, "pilot-stream-monitor");
-            thread.setDaemon(true);
-            return thread;
-        });
-    private static final AtomicLong ACTIVE = new AtomicLong();
-    private static final AtomicLong BYTES = new AtomicLong();
-    private static final AtomicLong PEAK = new AtomicLong();
-
-    private static final AtomicLong SENT = new AtomicLong();
-    private static final AtomicLong FRAMES = new AtomicLong();
-    private static final AtomicLong MAX_SEND_NANOS = new AtomicLong();
-
-    private static final Map<String, AtomicLong> CLOSED = new ConcurrentHashMap<>();
+    private final SessionEventTransport transport;
     private final AsyncContext context;
     private final ServletOutputStream output;
     private final long byteLimit;
@@ -70,19 +52,9 @@ public final class AsyncEventStream implements AutoCloseable {
         }
     }
 
-    public record Metrics(long connections, long queuedBytes, long peakQueuedBytes, long sentBytes, long sentFrames,
-        long maxSendNanos, Map<String, Long> closed) {
-    }
-
-    public static Metrics metrics() {
-        Map<String, Long> reasons = new java.util.TreeMap<>();
-        CLOSED.forEach((key, value) -> reasons.put(key, value.get()));
-        return new Metrics(ACTIVE.get(), BYTES.get(), PEAK.get(), SENT.get(), FRAMES.get(), MAX_SEND_NANOS.get(),
-            Map.copyOf(reasons));
-    }
-
-    public AsyncEventStream(HttpServletRequest request, HttpServletResponse response, long byteLimit, Duration timeout,
-        Runnable onClosed, Runnable heartbeat) throws IOException {
+    public AsyncEventStream(SessionEventTransport transport, HttpServletRequest request, HttpServletResponse response,
+        long byteLimit, Duration timeout, Runnable onClosed, Runnable heartbeat) throws IOException {
+        this.transport = transport;
         this.byteLimit = byteLimit;
         this.timeoutNanos = timeout.toNanos();
         this.onClosed = onClosed;
@@ -94,7 +66,7 @@ public final class AsyncEventStream implements AutoCloseable {
         context = request.startAsync();
         context.setTimeout(0);
         output = response.getOutputStream();
-        ACTIVE.incrementAndGet();
+        transport.opened();
         context.addListener(new AsyncListener() {
             public void onComplete(AsyncEvent event) {
                 terminate("complete");
@@ -121,7 +93,7 @@ public final class AsyncEventStream implements AutoCloseable {
                     terminate("write_error");
                 }
             });
-            monitor = TIMER.scheduleAtFixedRate(this::check, 100, 100, TimeUnit.MILLISECONDS);
+            monitor = transport.timer().scheduleAtFixedRate(this::check, 100, 100, TimeUnit.MILLISECONDS);
             if (closed.get()) {
                 monitor.cancel(false);
             }
@@ -169,11 +141,10 @@ public final class AsyncEventStream implements AutoCloseable {
             if (closed.get() || ending) {
                 return false;
             }
-            overflow = pendingBytes + data.length > byteLimit || queue.size() >= 4096 || !reserve(data.length);
+            overflow = pendingBytes + data.length > byteLimit || queue.size() >= 4096 || !transport.reserve(data.length);
             if (!overflow) {
                 queue.add(new Frame(data));
                 pendingBytes += data.length;
-                PEAK.accumulateAndGet(BYTES.get(), Math::max);
             }
         }
         if (overflow) {
@@ -193,14 +164,13 @@ public final class AsyncEventStream implements AutoCloseable {
                     int count = Math.min(8192, frame.data.length - frame.offset);
                     output.write(frame.data, frame.offset, count);
                     frame.offset += count;
-                    SENT.addAndGet(count);
+                    transport.sent(count);
                     if (frame.offset == frame.data.length) {
                         pendingBytes -= frame.data.length;
-                        BYTES.addAndGet(-frame.data.length);
+                        transport.release(frame.data.length);
                         queue.remove();
                         lock.notifyAll();
-                        FRAMES.incrementAndGet();
-                        MAX_SEND_NANOS.accumulateAndGet(System.nanoTime() - frame.enqueued, Math::max);
+                        transport.frameSent(System.nanoTime() - frame.enqueued);
                     }
                 }
                 // 非阻塞 flush 仅在可写时执行，不能退回阻塞式 send。
@@ -216,17 +186,6 @@ public final class AsyncEventStream implements AutoCloseable {
         if (complete) {
             terminate("complete");
         }
-    }
-
-    private static boolean reserve(long bytes) {
-        long current;
-        do {
-            current = BYTES.get();
-            if (bytes > 128L * 1024 * 1024 - current) {
-                return false;
-            }
-        } while (!BYTES.compareAndSet(current, current + bytes));
-        return true;
     }
 
     private void check() {
@@ -277,13 +236,12 @@ public final class AsyncEventStream implements AutoCloseable {
             timer.cancel(false);
         }
         synchronized (lock) {
-            BYTES.addAndGet(-pendingBytes);
+            transport.release(pendingBytes);
             pendingBytes = 0;
             queue.clear();
             lock.notifyAll();
         }
-        ACTIVE.decrementAndGet();
-        CLOSED.computeIfAbsent(reason, ignored -> new AtomicLong()).incrementAndGet();
+        transport.closed(reason);
         try {
             context.complete();
         } catch (RuntimeException ignored) {

@@ -26,8 +26,8 @@ import org.springframework.stereotype.Component;
 import com.pilot.core.message.Attachment;
 import com.pilot.core.tool.file.DocumentIntake;
 import com.pilot.core.util.FileTrees;
-import com.pilot.server.common.data.PilotDataDir;
-import com.pilot.server.common.data.StorageHealth;
+import com.pilot.server.store.PilotDataDir;
+import com.pilot.server.store.StorageHealthService;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -58,20 +58,31 @@ public class AttachmentService {
 
     private final AttachmentLimits limits;
     private final Path root;
+    private final StorageHealthService storageHealth;
 
     @Autowired
     public AttachmentService(@Value("${pilot.attachments.dir:}") String configured, PilotDataDir dataDir,
-        AttachmentLimits limits) {
-        this(configured == null || configured.isBlank() ? dataDir.file("attachments") : Path.of(configured), limits);
+        AttachmentLimits limits, StorageHealthService storageHealth) {
+        this(configured == null || configured.isBlank() ? dataDir.file("attachments") : Path.of(configured), limits,
+            storageHealth);
+    }
+
+    public AttachmentService(String configured, PilotDataDir dataDir, AttachmentLimits limits) {
+        this(configured, dataDir, limits, new StorageHealthService());
     }
 
     AttachmentService(Path root) {
-        this(root, AttachmentLimits.defaults());
+        this(root, AttachmentLimits.defaults(), new StorageHealthService());
     }
 
     AttachmentService(Path root, AttachmentLimits limits) {
+        this(root, limits, new StorageHealthService());
+    }
+
+    private AttachmentService(Path root, AttachmentLimits limits, StorageHealthService storageHealth) {
         this.root = root.toAbsolutePath().normalize();
         this.limits = limits;
+        this.storageHealth = storageHealth;
     }
 
     private record PendingAttachment(String name, String mime, byte[] bytes, boolean inlineText) {
@@ -305,7 +316,7 @@ public class AttachmentService {
             }
         } catch (IOException e) {
             log.warn("遍历附件目录失败: {}", root, e);
-            StorageHealth.markDegraded("attachment-purge", e.getMessage());
+            storageHealth.markDegraded("attachment-purge", e.getMessage());
         }
         return new PurgeStats(files, dirs);
     }

@@ -21,7 +21,7 @@ import com.pilot.core.event.ToolStarted;
 import com.pilot.core.session.InMemoryRunCheckpointRepository;
 import com.pilot.core.session.RunCheckpoint;
 import com.pilot.core.session.RunCheckpointRepository;
-import com.pilot.server.common.data.StorageHealth;
+import com.pilot.server.store.StorageHealthService;
 
 class RunStateTrackerTest {
 
@@ -29,15 +29,12 @@ class RunStateTrackerTest {
     void failedCheckpointWriteMarksTheRunUnreliableAndReportsDegradation() {
         RunCheckpointRepository repository = mock(RunCheckpointRepository.class);
         doThrow(new IllegalStateException("模拟数据库写入失败")).when(repository).save(any());
-        RunStateTracker tracker = new RunStateTracker(repository, "instance");
-        try {
-            tracker.begin("session", "run", "/work");
-            assertTrue(tracker.leaseLost("run"));
-            assertTrue(StorageHealth.snapshot().issues().stream()
-                .anyMatch(issue -> issue.area().equals("run-checkpoint") && issue.reason().contains("run")));
-        } finally {
-            StorageHealth.reset();
-        }
+        StorageHealthService storageHealth = new StorageHealthService();
+        RunStateTracker tracker = new RunStateTracker(repository, "instance", storageHealth);
+        tracker.begin("session", "run", "/work");
+        assertTrue(tracker.leaseLost("run"));
+        assertTrue(storageHealth.snapshot().issues().stream()
+            .anyMatch(issue -> issue.area().equals("run-checkpoint") && issue.reason().contains("run")));
     }
 
     private static ToolCompleted completed(String callId) {

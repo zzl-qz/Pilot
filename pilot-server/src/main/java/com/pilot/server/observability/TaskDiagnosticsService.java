@@ -26,8 +26,7 @@ import com.pilot.core.session.RunCheckpoint;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.command.CommandTaskManager;
-import com.pilot.server.common.data.StorageHealth;
-import com.pilot.server.common.data.StorageHealth.Snapshot;
+import com.pilot.server.store.StorageHealthService;
 import com.pilot.server.run.RecoveryReportService;
 import com.pilot.server.run.RunStateTracker;
 import com.pilot.server.validation.ValidationEvidence;
@@ -73,6 +72,7 @@ public class TaskDiagnosticsService {
     private final ValidationLedger validations;
     private final RecoveryReportService recovery;
     private final ObjectProvider<CommandTaskManager> commandTasks;
+    private final StorageHealthService storageHealthService;
 
     public Diagnostics diagnose(String sessionId) {
         Session session = sessions.find(sessionId).orElse(null);
@@ -128,8 +128,8 @@ public class TaskDiagnosticsService {
             storageHealth(), usage == null ? null : usage.details());
     }
 
-    private static String storageHealth() {
-        Snapshot snapshot = StorageHealth.snapshot();
+    private String storageHealth() {
+        StorageHealthService.Snapshot snapshot = storageHealthService.snapshot();
         if (snapshot.healthy()) {
             return "正常";
         }

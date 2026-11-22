@@ -12,8 +12,8 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-import com.pilot.server.common.data.DataMaintenance;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.DataMaintenance;
+import com.pilot.server.store.PilotDataDir;
 
 /** 保护整个 API 操作，包含控制器前后的附件及手机回执写入。 */
 @Component

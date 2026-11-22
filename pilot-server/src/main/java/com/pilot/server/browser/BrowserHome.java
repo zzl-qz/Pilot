@@ -5,7 +5,7 @@ import java.nio.file.Path;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.runtime.SourceLayout;
 
 /**

@@ -28,7 +28,7 @@ import com.pilot.core.skill.SkillCatalog;
 import com.pilot.core.skill.SkillManifest;
 import com.pilot.core.skill.SkillProblem;
 import com.pilot.core.util.FileTrees;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
 
 import lombok.extern.slf4j.Slf4j;
 

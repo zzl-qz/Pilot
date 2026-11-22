@@ -1,4 +1,4 @@
-package com.pilot.server.common.web;
+package com.pilot.server.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -6,6 +6,8 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
+
+import com.pilot.server.session.lookup.SessionLookup;
 
 class ApiErrorsTest {
     @Test

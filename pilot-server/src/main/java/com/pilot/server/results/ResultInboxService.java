@@ -22,7 +22,7 @@ import com.pilot.core.message.ToolNames;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.util.WireEnum;
-import com.pilot.server.common.web.SessionLookup;
+import com.pilot.server.session.lookup.SessionLookup;
 import com.pilot.server.run.EvidenceStatus;
 import com.pilot.server.run.ExecutionPhase;
 import com.pilot.server.run.TaskControlService;

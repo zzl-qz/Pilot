@@ -30,7 +30,8 @@ import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.server.attachment.AttachmentReferences;
 import com.pilot.server.attachment.AttachmentService;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
+import com.pilot.server.store.StorageHealthService;
 import com.pilot.server.multi.SandboxStore;
 import com.pilot.server.run.RunStarter;
 import com.pilot.server.run.TaskControlService;
@@ -108,6 +109,7 @@ class SessionCleanupServiceTest {
             mock(RunRepository.class), mock(SandboxStore.class), runs, mock(TaskControlService.class),
             mock(CommandTaskManager.class), browser, mock(ValidationLedger.class), mock(ToolCallJournalFactory.class),
             mock(RunCheckpointRepository.class), mock(WorkProductService.class), mock(SkillDraftService.class),
-            fileWorkbench, documents, mock(AttachmentService.class), dataDir, references, mock(SessionNotes.class));
+            fileWorkbench, documents, mock(AttachmentService.class), dataDir, references, mock(SessionNotes.class),
+            new StorageHealthService());
     }
 }

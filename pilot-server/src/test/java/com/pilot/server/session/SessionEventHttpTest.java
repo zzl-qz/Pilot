@@ -32,7 +32,7 @@ import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.event.AssistantPreview;
 import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.session.SessionService;
-import com.pilot.server.common.web.AsyncEventStream;
+import com.pilot.server.session.events.SessionEventTransport;
 
 /** 真实 Tomcat/Socket 验证非阻塞发送，MockMvc 的输出流不支持 WriteListener。 */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -45,12 +45,14 @@ class SessionEventHttpTest {
     @Autowired
     SessionService sessions;
     @Autowired
+    SessionEventTransport eventTransport;
+    @Autowired
     ServletWebServerApplicationContext application;
 
     @AfterEach
     void releasesSubscriptionsAndServletStreamsBeforeNextTest() throws Exception {
         await(() -> sessions.subscriberCount() == 0);
-        await(() -> AsyncEventStream.metrics().connections() == 0);
+        await(() -> eventTransport.metrics().connections() == 0);
         var tomcat = (TomcatWebServer)application.getWebServer();
         var protocol = (AbstractProtocol<?>)tomcat.getTomcat().getConnector().getProtocolHandler();
         await(() -> protocol.getWaitingProcessorCount() == 0);
@@ -173,10 +175,10 @@ class SessionEventHttpTest {
             }
             assertTrue(System.nanoTime() - started < Duration.ofSeconds(10).toNanos());
             await(() -> sessions.subscriberCount() == 0);
-            await(() -> AsyncEventStream.metrics().connections() == 0);
-            assertEquals(0, AsyncEventStream.metrics().queuedBytes());
-            assertTrue(AsyncEventStream.metrics().closed().getOrDefault("byte_or_count_limit", 0L)
-                + AsyncEventStream.metrics().closed().getOrDefault("send_timeout", 0L) > 0);
+            await(() -> eventTransport.metrics().connections() == 0);
+            assertEquals(0, eventTransport.metrics().queuedBytes());
+            assertTrue(eventTransport.metrics().closed().getOrDefault("byte_or_count_limit", 0L)
+                + eventTransport.metrics().closed().getOrDefault("send_timeout", 0L) > 0);
         } finally {
             sessions.delete(id);
         }
@@ -185,25 +187,25 @@ class SessionEventHttpTest {
     @Test
     void stoppedReaderIsClosedByDeadlineEvenWhenQueueIsNotFull() throws Exception {
         String id = sessions.createSession("发送期限").id();
-        long before = AsyncEventStream.metrics().closed().getOrDefault("send_timeout", 0L);
+        long before = eventTransport.metrics().closed().getOrDefault("send_timeout", 0L);
         try (Socket socket = open("/api/sessions/" + id + "/events?after=0")) {
             await(() -> sessions.subscriberCount() > 0);
             boolean waiting = false;
             for (int i = 0; i < 300; i++) {
                 sessions.publish(id, "r", new AssistantDelta("x".repeat(60_000)));
                 Thread.sleep(10);
-                if (AsyncEventStream.metrics().queuedBytes() > 0) {
+                if (eventTransport.metrics().queuedBytes() > 0) {
                     Thread.sleep(100);
-                    if (AsyncEventStream.metrics().queuedBytes() > 0) {
+                    if (eventTransport.metrics().queuedBytes() > 0) {
                         waiting = true;
                         break;
                     }
                 }
             }
             assertTrue(waiting, "实际 socket 必须进入不可写状态");
-            await(() -> AsyncEventStream.metrics().closed().getOrDefault("send_timeout", 0L) > before);
+            await(() -> eventTransport.metrics().closed().getOrDefault("send_timeout", 0L) > before);
             await(() -> sessions.subscriberCount() == 0);
-            assertEquals(0, AsyncEventStream.metrics().queuedBytes());
+            assertEquals(0, eventTransport.metrics().queuedBytes());
         } finally {
             sessions.delete(id);
         }

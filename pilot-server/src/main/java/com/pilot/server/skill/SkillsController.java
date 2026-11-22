@@ -19,8 +19,8 @@ import org.springframework.web.server.ResponseStatusException;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.skill.SkillManifest;
 import com.pilot.core.skill.SkillProblem;
-import com.pilot.server.common.web.ApiErrors;
-import com.pilot.server.common.web.SessionLookup;
+import com.pilot.server.api.ApiErrors;
+import com.pilot.server.session.lookup.SessionLookup;
 
 import lombok.RequiredArgsConstructor;
 

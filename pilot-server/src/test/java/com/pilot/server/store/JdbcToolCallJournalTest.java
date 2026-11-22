@@ -16,7 +16,7 @@ import org.junit.jupiter.api.io.TempDir;
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.tool.ReadToolOutputTool;
 import com.pilot.core.tool.ToolCallJournal;
-import com.pilot.server.common.data.StorageHealth;
+import com.pilot.server.store.StorageHealthService;
 
 import tools.jackson.databind.json.JsonMapper;
 
@@ -28,10 +28,11 @@ class JdbcToolCallJournalTest {
 
     @TempDir
     Path dir;
+    private final StorageHealthService storageHealth = new StorageHealthService();
 
     private JdbcToolCallJournal journal(Path workspace) {
         return new JdbcToolCallJournal(new SqliteStore(dir.resolve("pilot.db")), JsonMapper.builder().build(), "ses_1",
-            workspace);
+            workspace, storageHealth);
     }
 
     private static ToolCall call(String content) {
@@ -64,13 +65,8 @@ class JdbcToolCallJournalTest {
         try (var connection = new SqliteStore(dir.resolve("pilot.db")).open(); var sql = connection.createStatement()) {
             sql.executeUpdate("UPDATE tool_call_journal SET changed_paths = 'invalid json'");
         }
-        try {
-            assertThrows(IllegalStateException.class, () -> journal.replay("run_1", call));
-            assertTrue(
-                StorageHealth.snapshot().issues().stream().anyMatch(issue -> issue.area().equals("tool-journal")));
-        } finally {
-            StorageHealth.reset();
-        }
+        assertThrows(IllegalStateException.class, () -> journal.replay("run_1", call));
+        assertTrue(storageHealth.snapshot().issues().stream().anyMatch(issue -> issue.area().equals("tool-journal")));
     }
 
     @Test
@@ -84,7 +80,7 @@ class JdbcToolCallJournalTest {
         assertEquals(raw, journal.observation("run_observe", "call_observe").orElseThrow());
         assertTrue(journal.observation("other_run", "call_observe").isEmpty());
         var other = new JdbcToolCallJournal(new SqliteStore(dir.resolve("pilot.db")), JsonMapper.builder().build(),
-            "ses_other", dir);
+            "ses_other", dir, storageHealth);
         assertTrue(other.observation("run_observe", "call_observe").isEmpty());
         other.recordObservation("run_observe", call, "other session cannot overwrite");
         journal.recordObservation("run_observe", call, "duplicate call cannot overwrite");

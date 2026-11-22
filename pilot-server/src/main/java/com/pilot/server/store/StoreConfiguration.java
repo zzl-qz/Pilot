@@ -18,7 +18,7 @@ import com.pilot.core.session.PlanRepository;
 import com.pilot.core.session.RunCheckpointRepository;
 import com.pilot.core.session.RunRepository;
 import com.pilot.core.session.SessionRepository;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
 
 import tools.jackson.databind.ObjectMapper;
 

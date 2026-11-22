@@ -14,8 +14,8 @@ import org.springframework.web.server.ResponseStatusException;
 import com.pilot.core.contract.Contracts;
 import com.pilot.core.contract.Contracts.Contract;
 import com.pilot.core.exec.ExecutionBackends;
-import com.pilot.server.common.data.DataMaintenance;
-import com.pilot.server.common.data.StorageHealth;
+import com.pilot.server.store.DataMaintenance;
+import com.pilot.server.store.StorageHealthService;
 import com.pilot.server.compat.PluginCompatService;
 import com.pilot.server.maintenance.backup.BackupService;
 
@@ -34,11 +34,12 @@ public class MaintenanceController {
     private final RetentionService retention;
     private final ExecutionBackends.Selection execution;
     private final PluginCompatService plugins;
+    private final StorageHealthService storageHealth;
 
     @GetMapping("/status")
     public Status status() {
         BackupService.Status status = backups.status();
-        return new Status(status, retention.retentionDays(), retention.attachmentsDays(), StorageHealth.snapshot(),
+        return new Status(status, retention.retentionDays(), retention.attachmentsDays(), storageHealth.snapshot(),
             execution.describe(), execution.isolated(), execution.degraded(), execution.reason());
     }
 
@@ -90,7 +91,7 @@ public class MaintenanceController {
     }
 
     public record Status(BackupService.Status backup, int retentionDays, int attachmentsDays,
-        StorageHealth.Snapshot storage, String executionIsolation, boolean isolated, boolean degraded,
+        StorageHealthService.Snapshot storage, String executionIsolation, boolean isolated, boolean degraded,
         String degradedReason) {
     }
 }

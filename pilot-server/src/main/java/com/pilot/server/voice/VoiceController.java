@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
-import com.pilot.server.common.web.ApiErrors;
+import com.pilot.server.api.ApiErrors;
 
 import lombok.RequiredArgsConstructor;
 

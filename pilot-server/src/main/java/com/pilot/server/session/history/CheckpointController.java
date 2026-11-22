@@ -22,7 +22,7 @@ import com.pilot.core.session.PlanRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.attachment.AttachmentReferences;
-import com.pilot.server.common.web.SessionLookup;
+import com.pilot.server.session.lookup.SessionLookup;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.run.RunStarter;
 import com.pilot.server.run.TaskControlService;

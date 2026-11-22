@@ -9,7 +9,7 @@ import java.time.Instant;
 
 import org.springframework.stereotype.Component;
 
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
 
 import lombok.extern.slf4j.Slf4j;
 

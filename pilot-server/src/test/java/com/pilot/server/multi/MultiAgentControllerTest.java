@@ -22,7 +22,7 @@ import com.pilot.core.multi.RiskLevel;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
 
 import tools.jackson.databind.json.JsonMapper;

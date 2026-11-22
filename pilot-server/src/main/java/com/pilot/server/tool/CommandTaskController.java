@@ -13,7 +13,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.command.CommandTaskManager;
-import com.pilot.server.common.web.SessionLookup;
+import com.pilot.server.session.lookup.SessionLookup;
 
 import lombok.RequiredArgsConstructor;
 

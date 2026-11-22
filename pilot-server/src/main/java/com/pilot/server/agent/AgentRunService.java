@@ -66,7 +66,7 @@ import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.core.trace.JsonlTraceRecorder;
 import com.pilot.core.util.WireEnum;
 import com.pilot.core.workspace.PathValidator;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.MultiAgentProperties;
 import com.pilot.server.model.ModelSettings;

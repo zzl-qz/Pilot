@@ -21,7 +21,8 @@ import com.pilot.core.message.Attachment;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.attachment.AttachmentLimits;
 import com.pilot.server.attachment.AttachmentService;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
+import com.pilot.server.store.StorageHealthService;
 import com.pilot.server.store.EventCodec;
 import com.pilot.server.store.JdbcSessionRepository;
 import com.pilot.server.store.SqliteStore;
@@ -163,7 +164,8 @@ class RestoreServiceTest {
         var beans = new DefaultListableBeanFactory();
         beans.registerSingleton("store", sqlite);
         var backup = new BackupService(beans.getBeanProvider(SqliteStore.class), directory, mapper,
-            new AttachmentService(attachments.toString(), directory, AttachmentLimits.defaults())).backup();
+            new AttachmentService(attachments.toString(), directory, AttachmentLimits.defaults()),
+            new StorageHealthService()).backup();
         assertTrue(backup.ok(), backup.message());
         return new Fixture(Path.of(backup.directory()), sessions, id, workspace);
     }

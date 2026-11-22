@@ -32,9 +32,9 @@ import org.springframework.stereotype.Component;
 
 import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.server.attachment.AttachmentService;
-import com.pilot.server.common.data.DataMaintenance;
-import com.pilot.server.common.data.PilotDataDir;
-import com.pilot.server.common.data.StorageHealth;
+import com.pilot.server.store.DataMaintenance;
+import com.pilot.server.store.PilotDataDir;
+import com.pilot.server.store.StorageHealthService;
 import com.pilot.server.git.GitWorktrees;
 import com.pilot.server.store.SqliteStore;
 
@@ -79,7 +79,7 @@ public class BackupService {
     }
 
     public record Status(String dataDir, long databaseBytes, int backups, String lastBackupAt,
-        StorageHealth.Snapshot storage, List<String> includedDirectories, List<WorkspaceStatus> workspaces) {
+        StorageHealthService.Snapshot storage, List<String> includedDirectories, List<WorkspaceStatus> workspaces) {
         public Status {
             includedDirectories = includedDirectories == null ? List.of() : List.copyOf(includedDirectories);
         }
@@ -89,6 +89,7 @@ public class BackupService {
     private final PilotDataDir dataDir;
     private final ObjectMapper mapper;
     private final AttachmentService attachments;
+    private final StorageHealthService storageHealth;
 
     private ObjectProvider<CommandTaskManager> commandTasks;
     private String defaultWorkspace = System.getProperty("user.dir");
@@ -176,7 +177,7 @@ public class BackupService {
             Files.writeString(target.resolve(BackupManifest.COMPLETE), Instant.now().toString(),
                 StandardCharsets.UTF_8);
             long bytes = manifest.stream().mapToLong(item -> ((Number)item.get("bytes")).longValue()).sum();
-            StorageHealth.recovered("backup");
+            storageHealth.recovered("backup");
             log.info("备份完成: {}（{} 个文件，{} 字节）", target, manifest.size(), bytes);
             String message = "备份完成。Pilot 受管数据已核验";
             if (workspaces.stream().anyMatch(workspace -> !workspace.included())) {
@@ -202,7 +203,7 @@ public class BackupService {
                 e.addSuppressed(cleanupFailure);
             }
             if (!(e instanceof DataMaintenance.Busy)) {
-                StorageHealth.markDegraded("backup", e.getMessage());
+                storageHealth.markDegraded("backup", e.getMessage());
                 log.warn("备份失败: {}", target, e);
             }
             return new BackupReport(false, target.toString(), 0, 0, "备份失败：" + e.getMessage(), Instant.now(), List.of());
@@ -216,7 +217,7 @@ public class BackupService {
             try {
                 databaseBytes = Files.size(sqlite.path());
             } catch (IOException e) {
-                StorageHealth.markDegraded("database", e.getMessage());
+                storageHealth.markDegraded("database", e.getMessage());
             }
         }
         Path backups = dataDir.file("backups");
@@ -230,7 +231,7 @@ public class BackupService {
         }
         directories.sort(Comparator.comparing(path -> path.getFileName().toString()));
         String last = directories.isEmpty() ? "" : directories.getLast().getFileName().toString();
-        return new Status(dataDir.root().toString(), databaseBytes, directories.size(), last, StorageHealth.snapshot(),
+        return new Status(dataDir.root().toString(), databaseBytes, directories.size(), last, storageHealth.snapshot(),
             includedDirectories(), directories.isEmpty() ? List.of() : workspaceStatus(directories.getLast()));
     }
 
@@ -275,9 +276,9 @@ public class BackupService {
         }
         boolean valid = failures.isEmpty();
         if (valid) {
-            StorageHealth.recovered("backup");
+            storageHealth.recovered("backup");
         } else {
-            StorageHealth.markDegraded("backup", String.join("；", failures));
+            storageHealth.markDegraded("backup", String.join("；", failures));
         }
         return new VerificationReport(valid, latest.toString(), checked, failures, valid ? verified : "最近备份校验失败");
     }

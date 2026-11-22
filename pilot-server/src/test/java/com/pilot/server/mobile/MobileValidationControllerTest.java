@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.pilot.core.session.SessionService;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.validation.ValidationEvidence;
 import com.pilot.server.validation.ValidationLedger;
 import com.pilot.server.validation.ValidationReason;

@@ -5,7 +5,7 @@ import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.tool.ToolArtifacts;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
 
 import lombok.RequiredArgsConstructor;
 

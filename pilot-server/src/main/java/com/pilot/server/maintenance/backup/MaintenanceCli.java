@@ -16,7 +16,8 @@ import org.springframework.context.ConfigurableApplicationContext;
 
 import com.pilot.server.attachment.AttachmentLimits;
 import com.pilot.server.attachment.AttachmentService;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.StorageHealthService;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.store.SqliteStore;
 
 import tools.jackson.databind.ObjectMapper;
@@ -87,8 +88,10 @@ public final class MaintenanceCli {
             PilotDataDir directory = new PilotDataDir(data.toString());
             var beans = new DefaultListableBeanFactory();
             beans.registerSingleton("store", SqliteStore.existing(db));
+            var storageHealth = new StorageHealthService();
             var service = new BackupService(beans.getBeanProvider(SqliteStore.class), directory, mapper,
-                new AttachmentService(input.toString(), directory, AttachmentLimits.defaults()));
+                new AttachmentService(input.toString(), directory, AttachmentLimits.defaults(), storageHealth),
+                storageHealth);
             String defaultWorkspace = System.getenv("PILOT_WORKSPACE");
             if (defaultWorkspace != null && !defaultWorkspace.isBlank()) {
                 service.useDefaultWorkspace(defaultWorkspace);

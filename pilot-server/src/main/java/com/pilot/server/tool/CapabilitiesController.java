@@ -22,7 +22,7 @@ import com.pilot.core.tool.Availability;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.server.capability.LocalCapabilityService;
-import com.pilot.server.common.web.SessionLookup;
+import com.pilot.server.session.lookup.SessionLookup;
 import com.pilot.server.compat.PluginCompatService;
 import com.pilot.server.compat.PluginCompatService.Counts;
 import com.pilot.server.compat.PluginCompatService.Item;

@@ -76,7 +76,7 @@ import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.trace.JsonlTraceRecorder;
 import com.pilot.core.util.Texts;
 import com.pilot.core.workspace.AgentScope;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.MultiAgentBudget;
 import com.pilot.server.config.MultiAgentProperties;

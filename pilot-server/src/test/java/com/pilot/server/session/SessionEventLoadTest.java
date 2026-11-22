@@ -32,14 +32,14 @@ import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.session.SessionRepository;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;
-import com.pilot.server.common.web.AsyncEventStream;
+import com.pilot.server.session.events.SessionEventTransport;
 
 import tools.jackson.databind.ObjectMapper;
 
 /** 真实 TCP 与 HTTP 的可选负载测量；内存仓储隔离传输成本，SQLite 另有独立测量。 */
 @EnabledIfSystemProperty(named = "pilot.events.benchmark", matches = "true")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {"pilot.store=memory",
-    "pilot.events.session-connections=64", "logging.level.com.pilot.server.common.web.AsyncEventStream=DEBUG"})
+    "pilot.events.session-connections=64", "logging.level.com.pilot.server.session.events.AsyncEventStream=DEBUG"})
 class SessionEventLoadTest {
     @org.springframework.beans.factory.annotation.Value("${local.server.port}")
     int port;
@@ -47,6 +47,8 @@ class SessionEventLoadTest {
     SessionService sessions;
     @Autowired
     SessionRepository repository;
+    @Autowired
+    SessionEventTransport eventTransport;
 
     @DynamicPropertySource
     static void config(DynamicPropertyRegistry registry) {
@@ -100,7 +102,7 @@ class SessionEventLoadTest {
                 report.put("receivedFrames", results.stream().mapToLong(Result::frames).sum());
                 report.put("receivedBytes", results.stream().mapToLong(Result::bytes).sum());
                 report.put("core", sessions.streamMetrics());
-                report.put("transport", AsyncEventStream.metrics());
+                report.put("transport", eventTransport.metrics());
                 report.put("heapUsed", Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory());
                 reports.add(report);
                 System.out.println("HTTP_EVENT_BENCHMARK " + new ObjectMapper().writeValueAsString(report));
@@ -110,12 +112,12 @@ class SessionEventLoadTest {
                 sessions.delete(id);
             }
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-            while ((sessions.streamMetrics().workers() != 0 || AsyncEventStream.metrics().connections() != 0)
+            while ((sessions.streamMetrics().workers() != 0 || eventTransport.metrics().connections() != 0)
                 && System.nanoTime() < deadline) {
                 Thread.sleep(10);
             }
             assertEquals(0, sessions.streamMetrics().queuedBytes());
-            assertEquals(0, AsyncEventStream.metrics().queuedBytes());
+            assertEquals(0, eventTransport.metrics().queuedBytes());
             System.gc();
             reports.getLast().put("heapAfterCleanupGc",
                 Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory());
@@ -181,7 +183,7 @@ class SessionEventLoadTest {
                 }
             }
             throw new AssertionError("回放提前断开，已收到 " + count + "，core=" + sessions.streamMetrics() + "，transport="
-                + AsyncEventStream.metrics());
+                + eventTransport.metrics());
         } finally {
             connection.disconnect();
         }

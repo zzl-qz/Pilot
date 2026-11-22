@@ -33,8 +33,8 @@ import com.pilot.core.session.SessionService;
 import com.pilot.core.util.Texts;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.core.workspace.WorkspaceViolationException;
-import com.pilot.server.common.web.ApiErrors;
-import com.pilot.server.common.web.SessionLookup;
+import com.pilot.server.api.ApiErrors;
+import com.pilot.server.session.lookup.SessionLookup;
 
 import lombok.RequiredArgsConstructor;
 

@@ -21,7 +21,7 @@ import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.InMemoryConversationRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.run.TaskControlService;
 import com.pilot.server.run.TaskControlStatus;
 import com.pilot.server.validation.ValidationEvidence;

@@ -6,7 +6,7 @@ import org.springframework.context.annotation.Configuration;
 import com.pilot.core.mcp.McpManager;
 import com.pilot.core.mcp.McpTrustStore;
 import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
 
 import tools.jackson.databind.ObjectMapper;
 

@@ -25,7 +25,8 @@ import com.pilot.core.session.SessionService;
 import com.pilot.core.skill.SkillSource;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolRegistry;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
+import com.pilot.server.store.StorageHealthService;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.SkillProperties;
 import com.pilot.server.maintenance.MaintenanceController;
@@ -156,7 +157,7 @@ class PluginContractCompatTest {
 
     @Test
     void contractsEndpointPublishesVersionedReferences() {
-        var controller = new MaintenanceController(null, null, null, service());
+        var controller = new MaintenanceController(null, null, null, service(), new StorageHealthService());
         var response = controller.contracts();
         assertEquals(Contracts.publishedContracts().size(), response.contracts().size());
         assertTrue(response.catalogue().containsKey("tool.read_file@1"));

@@ -58,7 +58,7 @@ import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.attachment.AttachmentReferences;
 import com.pilot.server.attachment.ReadAttachmentTool;
 import com.pilot.server.capability.LocalResourcesTool;
-import com.pilot.server.common.data.WorkspaceToolLookup;
+import com.pilot.server.compat.WorkspaceToolLookup;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.WebSearchProperties;
 

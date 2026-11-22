@@ -6,6 +6,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.tool.ToolCallJournal;
+import com.pilot.server.store.StorageHealthService;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -22,6 +23,7 @@ import lombok.RequiredArgsConstructor;
 public class ToolCallJournalFactory {
     private final ObjectProvider<SqliteStore> store;
     private final ObjectMapper mapper;
+    private final StorageHealthService storageHealth;
 
     /** 删除会话时清掉其幂等账本；没有持久化存储时什么都不做。 */
     public int deleteSession(String sessionId) {
@@ -29,7 +31,7 @@ public class ToolCallJournalFactory {
         if (sqlite == null) {
             return 0;
         }
-        return new JdbcToolCallJournal(sqlite, mapper, sessionId, null).deleteBySession(sessionId);
+        return new JdbcToolCallJournal(sqlite, mapper, sessionId, null, storageHealth).deleteBySession(sessionId);
     }
 
     public ToolCallJournal forWorkspace(String sessionId, Path workspace) {
@@ -37,6 +39,6 @@ public class ToolCallJournalFactory {
         if (sqlite == null || workspace == null) {
             return ToolCallJournal.none();
         }
-        return new JdbcToolCallJournal(sqlite, mapper, sessionId, workspace);
+        return new JdbcToolCallJournal(sqlite, mapper, sessionId, workspace, storageHealth);
     }
 }

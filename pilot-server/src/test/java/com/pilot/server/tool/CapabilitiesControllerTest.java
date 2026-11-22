@@ -20,7 +20,7 @@ import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.server.capability.LocalCapabilityService;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.compat.PluginCompatService;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.SkillProperties;

@@ -36,7 +36,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mockito;
 
 import com.pilot.core.session.SessionService;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.store.AutomationStore;
 import com.pilot.server.work.products.WorkProductService;
 import com.pilot.server.store.SqliteStore;

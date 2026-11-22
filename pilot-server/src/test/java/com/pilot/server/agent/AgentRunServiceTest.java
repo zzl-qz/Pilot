@@ -62,7 +62,7 @@ import com.pilot.core.tool.UpdatePlanTool;
 import com.pilot.core.tool.code.CodeSymbolTool;
 import com.pilot.core.tool.file.ReadFileTool;
 import com.pilot.core.workspace.PathValidator;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.MultiAgentProperties;
 import com.pilot.server.config.SkillProperties;

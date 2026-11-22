@@ -41,7 +41,7 @@ import com.pilot.core.multi.TaskStatus;
 import com.pilot.core.util.FileTrees;
 import com.pilot.core.util.HostOs;
 import com.pilot.core.workspace.PathValidator;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
 
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;

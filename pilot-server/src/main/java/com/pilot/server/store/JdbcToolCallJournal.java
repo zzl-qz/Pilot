@@ -15,7 +15,7 @@ import com.pilot.core.message.ToolCall;
 import com.pilot.core.multi.DiffSandbox;
 import com.pilot.core.tool.ToolCallJournal;
 import com.pilot.core.util.Sha256;
-import com.pilot.server.common.data.StorageHealth;
+import com.pilot.server.store.StorageHealthService;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -35,12 +35,15 @@ public final class JdbcToolCallJournal implements ToolCallJournal {
     private final ObjectMapper mapper;
     private final String sessionId;
     private final Path workspace;
+    private final StorageHealthService storageHealth;
 
-    public JdbcToolCallJournal(SqliteStore store, ObjectMapper mapper, String sessionId, Path workspace) {
+    public JdbcToolCallJournal(SqliteStore store, ObjectMapper mapper, String sessionId, Path workspace,
+        StorageHealthService storageHealth) {
         this.store = store;
         this.mapper = mapper;
         this.sessionId = sessionId;
         this.workspace = workspace == null ? null : workspace.toAbsolutePath().normalize();
+        this.storageHealth = storageHealth;
     }
 
     @Override
@@ -203,7 +206,7 @@ public final class JdbcToolCallJournal implements ToolCallJournal {
     }
 
     private IllegalStateException unavailable(String message, Exception cause) {
-        StorageHealth.markDegraded("tool-journal", message + "（" + sessionId + "）");
+        storageHealth.markDegraded("tool-journal", message + "（" + sessionId + "）");
         return new IllegalStateException(message, cause);
     }
 

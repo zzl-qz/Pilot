@@ -35,7 +35,7 @@ import com.pilot.core.tool.command.CommandChangeTracker;
 import com.pilot.core.util.FileTrees;
 import com.pilot.core.util.Sha256;
 import com.pilot.core.util.Texts;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.workspace.ChangeService.RunChangeReport;
 
 import tools.jackson.databind.ObjectMapper;

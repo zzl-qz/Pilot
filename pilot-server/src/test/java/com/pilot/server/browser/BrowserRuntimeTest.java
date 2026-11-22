@@ -30,7 +30,7 @@ import com.pilot.core.tool.Availability;
 import com.pilot.core.tool.SnapshotSink;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolRegistry;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.WebSearchProperties;
 import com.pilot.server.runtime.RuntimeMirrors;

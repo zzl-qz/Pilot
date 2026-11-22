@@ -19,7 +19,8 @@ import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.session.InMemoryRunCheckpointRepository;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.command.CommandTaskManager;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
+import com.pilot.server.store.StorageHealthService;
 import com.pilot.server.run.RecoveryReportService;
 import com.pilot.server.run.RunStateTracker;
 import com.pilot.server.validation.ValidationLedger;
@@ -98,10 +99,12 @@ class TaskDiagnosticsRunTest {
     private Fixture fixture() {
         SessionService sessions = new SessionService();
         String sessionId = sessions.createSession("运行诊断", root.toString()).id();
-        RunStateTracker tracker = new RunStateTracker(new InMemoryRunCheckpointRepository(), "test");
+        StorageHealthService storageHealth = new StorageHealthService();
+        RunStateTracker tracker = new RunStateTracker(new InMemoryRunCheckpointRepository(), "test", storageHealth);
         var diagnostics = new TaskDiagnosticsService(sessions, tracker,
             new ValidationLedger(new PilotDataDir(root.resolve("data").toString()), JsonMapper.builder().build()),
-            new RecoveryReportService(), new DefaultListableBeanFactory().getBeanProvider(CommandTaskManager.class));
+            new RecoveryReportService(), new DefaultListableBeanFactory().getBeanProvider(CommandTaskManager.class),
+            storageHealth);
         return new Fixture(sessions, sessionId, tracker, diagnostics);
     }
 

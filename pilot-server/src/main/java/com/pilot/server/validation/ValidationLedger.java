@@ -21,8 +21,8 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import com.pilot.server.common.data.PilotDataDir;
-import com.pilot.server.common.data.StorageHealth;
+import com.pilot.server.store.PilotDataDir;
+import com.pilot.server.store.StorageHealthService;
 import com.pilot.server.store.SqliteStore;
 
 import tools.jackson.databind.ObjectMapper;
@@ -69,21 +69,29 @@ public class ValidationLedger {
     private final PilotDataDir dataDir;
     private final ObjectMapper mapper;
     private final SqliteStore sqlite;
+    private final StorageHealthService storageHealth;
     private final ConcurrentMap<String, State> states = new ConcurrentHashMap<>();
 
     @Autowired
-    public ValidationLedger(PilotDataDir dataDir, ObjectMapper mapper, ObjectProvider<SqliteStore> store) {
-        this(dataDir, mapper, store.getIfAvailable());
+    public ValidationLedger(PilotDataDir dataDir, ObjectMapper mapper, ObjectProvider<SqliteStore> store,
+        StorageHealthService storageHealth) {
+        this(dataDir, mapper, store.getIfAvailable(), storageHealth);
     }
 
     public ValidationLedger(PilotDataDir dataDir, ObjectMapper mapper) {
-        this(dataDir, mapper, (SqliteStore)null);
+        this(dataDir, mapper, (SqliteStore)null, new StorageHealthService());
     }
 
-    private ValidationLedger(PilotDataDir dataDir, ObjectMapper mapper, SqliteStore sqlite) {
+    public ValidationLedger(PilotDataDir dataDir, ObjectMapper mapper, ObjectProvider<SqliteStore> store) {
+        this(dataDir, mapper, store.getIfAvailable(), new StorageHealthService());
+    }
+
+    private ValidationLedger(PilotDataDir dataDir, ObjectMapper mapper, SqliteStore sqlite,
+        StorageHealthService storageHealth) {
         this.dataDir = dataDir;
         this.mapper = mapper;
         this.sqlite = sqlite;
+        this.storageHealth = storageHealth;
     }
 
     @PostConstruct
@@ -100,7 +108,7 @@ public class ValidationLedger {
                 sqlite.pendingValidationSessions().forEach(this::state);
             }
         } catch (IOException | RuntimeException e) {
-            StorageHealth.markDegraded("validation", "读取待保存的校验证据失败：" + e.getMessage());
+            storageHealth.markDegraded("validation", "读取待保存的校验证据失败：" + e.getMessage());
         }
     }
 
@@ -202,7 +210,7 @@ public class ValidationLedger {
                 }
             }
         } catch (IOException e) {
-            StorageHealth.markDegraded("validation", "清理过期证据失败：" + e.getMessage());
+            storageHealth.markDegraded("validation", "清理过期证据失败：" + e.getMessage());
             log.warn("清理过期证据失败", e);
         }
         return removed;
@@ -231,13 +239,13 @@ public class ValidationLedger {
     }
 
     private State failed(String sessionId, List<ValidationEvidence> entries, String reason) {
-        StorageHealth.markDegraded("validation", sessionId + " " + reason);
+        storageHealth.markDegraded("validation", sessionId + " " + reason);
         return new State(entries, reason);
     }
 
     private void recoverHealth() {
         if (states.values().stream().noneMatch(state -> state.issue() != null)) {
-            StorageHealth.recovered("validation");
+            storageHealth.recovered("validation");
         }
     }
 

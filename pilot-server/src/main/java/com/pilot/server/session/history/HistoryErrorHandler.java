@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import com.pilot.core.session.EventTooLargeException;
 import com.pilot.core.session.SessionService;
-import com.pilot.server.common.web.ApiErrors;
+import com.pilot.server.api.ApiErrors;
 
 @RestControllerAdvice
 public class HistoryErrorHandler {

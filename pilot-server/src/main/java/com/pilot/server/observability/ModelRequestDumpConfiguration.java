@@ -4,7 +4,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.model.diagnostics.ModelRequestDumper;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
 
 /**
  * 将 {@code pilot.debug.dump-model-requests}（默认关闭）同步到 {@link ModelRequestDumper}。

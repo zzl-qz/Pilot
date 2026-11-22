@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.pilot.server.common.web.ApiErrors;
+import com.pilot.server.api.ApiErrors;
 
 import tools.jackson.databind.JsonNode;
 

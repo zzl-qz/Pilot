@@ -30,8 +30,8 @@ import com.pilot.core.multi.DiffSandbox;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.attachment.AttachmentLimits;
 import com.pilot.server.attachment.AttachmentService;
-import com.pilot.server.common.data.PilotDataDir;
-import com.pilot.server.common.data.StorageHealth;
+import com.pilot.server.store.PilotDataDir;
+import com.pilot.server.store.StorageHealthService;
 import com.pilot.server.store.EventCodec;
 import com.pilot.server.store.JdbcConversationRepository;
 import com.pilot.server.store.JdbcSessionRepository;
@@ -43,6 +43,7 @@ class BackupServiceTest {
 
     @TempDir
     Path dataDir;
+    private final StorageHealthService storageHealth = new StorageHealthService();
 
     @SuppressWarnings("unchecked")
     private BackupService service(SqliteStore store) {
@@ -51,7 +52,7 @@ class BackupServiceTest {
         AttachmentService attachments = Mockito.mock(AttachmentService.class);
         Mockito.when(attachments.root()).thenReturn(dataDir.resolve(".pilot/attachments"));
         return new BackupService(provider, new PilotDataDir(dataDir.resolve(".pilot").toString()),
-            JsonMapper.builder().build(), attachments);
+            JsonMapper.builder().build(), attachments, storageHealth);
     }
 
     @Test
@@ -105,7 +106,7 @@ class BackupServiceTest {
         AttachmentService attachments = Mockito.mock(AttachmentService.class);
         Mockito.when(attachments.root()).thenReturn(external);
         BackupService backups = new BackupService(provider, new PilotDataDir(dataDir.resolve(".pilot").toString()),
-            JsonMapper.builder().build(), attachments);
+            JsonMapper.builder().build(), attachments, storageHealth);
 
         BackupService.BackupReport report = backups.backup();
 
@@ -128,7 +129,8 @@ class BackupServiceTest {
         AttachmentService attachments = Mockito.mock(AttachmentService.class);
         Mockito.when(attachments.root()).thenReturn(nested);
         BackupService backups =
-            new BackupService(provider, new PilotDataDir(root.toString()), JsonMapper.builder().build(), attachments);
+            new BackupService(provider, new PilotDataDir(root.toString()), JsonMapper.builder().build(), attachments,
+                storageHealth);
 
         BackupService.BackupReport report = backups.backup();
 
@@ -157,20 +159,19 @@ class BackupServiceTest {
     }
 
     @Test
-    void statusReportsBackupCountAndStorageHealth() throws IOException {
+    void statusReportsBackupCountAndStorageHealthService() throws IOException {
         Path root = dataDir.resolve(".pilot");
         Files.createDirectories(root);
         SqliteStore store = new SqliteStore(root.resolve("pilot.db"));
         BackupService backups = service(store);
         backups.backup();
 
-        StorageHealth.markDegraded("validation", "磁盘只读");
+        storageHealth.markDegraded("validation", "磁盘只读");
         BackupService.Status status = backups.status();
 
         assertEquals(1, status.backups());
         assertFalse(status.storage().healthy());
         assertTrue(status.storage().issues().getFirst().reason().contains("磁盘只读"));
-        StorageHealth.reset();
     }
 
     @Test
@@ -313,7 +314,6 @@ class BackupServiceTest {
         assertFalse(report.ok());
         assertTrue(report.message().contains("缺少消息引用的附件"), report.message());
         assertEquals(0, backups.status().backups());
-        StorageHealth.reset();
     }
 
     @Test
@@ -337,14 +337,13 @@ class BackupServiceTest {
         assertTrue(backup.verifyLatestBackup().valid());
         Files.delete(upload);
         assertFalse(backup.backup().ok());
-        StorageHealth.reset();
     }
 
     @SuppressWarnings("unchecked")
     private BackupService service(SqliteStore sqlite, PilotDataDir data, AttachmentService attachments) {
         ObjectProvider<SqliteStore> provider = Mockito.mock(ObjectProvider.class);
         Mockito.when(provider.getIfAvailable()).thenReturn(sqlite);
-        return new BackupService(provider, data, JsonMapper.builder().build(), attachments);
+        return new BackupService(provider, data, JsonMapper.builder().build(), attachments, storageHealth);
     }
 
     private static void writeLegacyBackup(Path legacy) throws IOException {

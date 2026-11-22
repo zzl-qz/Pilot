@@ -34,7 +34,7 @@ import org.mockito.Mockito;
 
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.session.SessionService;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.git.GitWorktrees;
 import com.pilot.server.run.RunStarter;
 import com.pilot.server.run.TaskControlService;

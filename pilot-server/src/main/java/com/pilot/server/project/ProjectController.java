@@ -31,7 +31,7 @@ import com.pilot.core.project.Project;
 import com.pilot.core.project.ProjectRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
-import com.pilot.server.common.web.ApiErrors;
+import com.pilot.server.api.ApiErrors;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.session.SessionCleanupService;
 import com.pilot.server.workspace.ProjectRulesFile;

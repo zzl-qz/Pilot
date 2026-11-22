@@ -1,4 +1,4 @@
-package com.pilot.server.common.data;
+package com.pilot.server.store;
 
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;

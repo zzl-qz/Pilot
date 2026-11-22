@@ -25,7 +25,6 @@ import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.skill.SkillCatalog;
 import com.pilot.core.skill.SkillManifest;
-import com.pilot.server.common.data.WorkspaceToolLookup;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.skill.SkillService;
 

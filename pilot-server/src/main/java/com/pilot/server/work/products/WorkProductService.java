@@ -29,7 +29,7 @@ import com.pilot.core.session.SessionService;
 import com.pilot.core.util.FileNames;
 import com.pilot.core.util.Sha256;
 import com.pilot.core.workspace.PathValidator;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.store.AutomationStore;
 import com.pilot.server.tool.WorkspaceToolFactory;
 import com.pilot.server.validation.ValidationReason;

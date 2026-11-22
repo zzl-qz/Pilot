@@ -20,7 +20,8 @@ import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.attachment.AttachmentLimits;
 import com.pilot.server.attachment.AttachmentService;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
+import com.pilot.server.store.StorageHealthService;
 import com.pilot.server.git.GitWorktrees;
 import com.pilot.server.store.EventCodec;
 import com.pilot.server.store.JdbcSessionRepository;
@@ -168,6 +169,6 @@ class WorkspaceBackupTest {
         var beans = new DefaultListableBeanFactory();
         beans.registerSingleton("store", sqlite);
         return new BackupService(beans.getBeanProvider(SqliteStore.class), data, mapper,
-            new AttachmentService("", data, AttachmentLimits.defaults()));
+            new AttachmentService("", data, AttachmentLimits.defaults()), new StorageHealthService());
     }
 }

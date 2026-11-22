@@ -13,9 +13,9 @@ import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.server.attachment.AttachmentReferences;
 import com.pilot.server.attachment.AttachmentService;
-import com.pilot.server.common.data.DataMaintenance;
-import com.pilot.server.common.data.PilotDataDir;
-import com.pilot.server.common.data.StorageHealth;
+import com.pilot.server.store.DataMaintenance;
+import com.pilot.server.store.PilotDataDir;
+import com.pilot.server.store.StorageHealthService;
 import com.pilot.server.multi.SandboxStore;
 import com.pilot.server.run.RunStarter;
 import com.pilot.server.run.TaskControlService;
@@ -56,6 +56,7 @@ public class SessionCleanupService {
     private final AttachmentReferences attachmentReferences;
     private final SessionNotes notes;
     private final DataMaintenance maintenance;
+    private final StorageHealthService storageHealth;
 
     public SessionCleanupService(SessionService sessions, ConversationRepository conversations, PlanRepository plans,
         RunRepository runs, SandboxStore sandboxes, RunStarter runStarter, TaskControlService taskControls,
@@ -63,7 +64,7 @@ public class SessionCleanupService {
         ToolCallJournalFactory journals, RunCheckpointRepository checkpoints, WorkProductService products,
         SkillDraftService skillDrafts, FileWorkbenchService fileWorkbench, DocumentService documents,
         AttachmentService attachments, PilotDataDir dataDir, AttachmentReferences attachmentReferences,
-        SessionNotes notes) {
+        SessionNotes notes, StorageHealthService storageHealth) {
         this.fileWorkbench = fileWorkbench;
         this.documents = documents;
         this.products = products;
@@ -84,6 +85,7 @@ public class SessionCleanupService {
         this.attachmentReferences = attachmentReferences;
         this.notes = notes;
         this.maintenance = dataDir.maintenance();
+        this.storageHealth = storageHealth;
     }
 
     /**
@@ -94,13 +96,13 @@ public class SessionCleanupService {
         try (var activity = maintenance.activity()) {
             synchronized (attachmentReferences) {
                 boolean removed = deleteSession(sessionId);
-                StorageHealth.recovered(area);
+                storageHealth.recovered(area);
                 return removed;
             }
         } catch (CleanupException e) {
             throw e;
         } catch (RuntimeException e) {
-            StorageHealth.markDegraded(area, "会话 " + sessionId + " 清理未完成，可重试：" + e.getMessage());
+            storageHealth.markDegraded(area, "会话 " + sessionId + " 清理未完成，可重试：" + e.getMessage());
             throw new CleanupException(sessionId, "会话清理未完成，可重试：" + e.getMessage(), e);
         }
     }
@@ -145,7 +147,7 @@ public class SessionCleanupService {
                 attachments.deleteBySession(sessionId);
             }
         } catch (RuntimeException e) {
-            StorageHealth.markDegraded("attachment-purge", "读取附件引用失败，已保留附件：" + e.getMessage());
+            storageHealth.markDegraded("attachment-purge", "读取附件引用失败，已保留附件：" + e.getMessage());
         }
         return removed;
     }

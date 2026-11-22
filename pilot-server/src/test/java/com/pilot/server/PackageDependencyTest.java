@@ -52,16 +52,16 @@ class PackageDependencyTest {
     }
 
     @Test
-    void commonDependsOnNoBusinessPackage() {
-        assertOnlyDependsOn(server, "common.data", Set.of());
-        assertOnlyDependsOn(server, "common.web", Set.of());
+    void commonPackageHasBeenRemoved() {
+        assertTrue(server.keySet().stream().noneMatch(pkg -> pkg.equals("common") || pkg.startsWith("common.")),
+            "不要重新引入职责不明确的 common 包");
     }
 
     @Test
     void configAndStoreStayAtTheBottom() {
         // config 只放跨业务的配置项和不依赖业务的基础装配；store 只放 SQLite 与 core 仓储接口的实现。
-        assertOnlyDependsOn(server, "config", Set.of("common.data", "runtime"));
-        assertOnlyDependsOn(server, "store", Set.of("common.data"));
+        assertOnlyDependsOn(server, "config", Set.of("runtime", "store"));
+        assertOnlyDependsOn(server, "store", Set.of());
     }
 
     @Test

@@ -20,9 +20,9 @@ import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.attachment.AttachmentReferences;
 import com.pilot.server.attachment.AttachmentService;
-import com.pilot.server.common.data.DataMaintenance;
-import com.pilot.server.common.data.PilotDataDir;
-import com.pilot.server.common.data.StorageHealth;
+import com.pilot.server.store.DataMaintenance;
+import com.pilot.server.store.PilotDataDir;
+import com.pilot.server.store.StorageHealthService;
 import com.pilot.server.maintenance.backup.BackupService;
 import com.pilot.server.run.RunRegistry;
 import com.pilot.server.store.SqliteStore;
@@ -56,6 +56,7 @@ public class RetentionService {
     private final ValidationLedger validations;
     private final RunRegistry registry;
     private final AttachmentReferences attachmentReferences;
+    private final StorageHealthService storageHealth;
 
     public RetentionService(@Value("${pilot.retention.days:0}") int retentionDays,
         @Value("${pilot.retention.backups-days:0}") int backupDays,
@@ -63,7 +64,7 @@ public class RetentionService {
         @Value("${pilot.retention.attachments-days:0}") int attachmentsDays, ObjectProvider<SqliteStore> store,
         RunSnapshotService snapshots, BackupService backups, PilotDataDir dataDir, SessionService sessions,
         AttachmentService attachments, ValidationLedger validations, RunRegistry registry,
-        AttachmentReferences attachmentReferences) {
+        AttachmentReferences attachmentReferences, StorageHealthService storageHealth) {
         this.retentionDays = retentionDays;
         this.backupDays = backupDays;
         this.validationDays = validationDays;
@@ -77,6 +78,7 @@ public class RetentionService {
         this.validations = validations;
         this.registry = registry;
         this.attachmentReferences = attachmentReferences;
+        this.storageHealth = storageHealth;
     }
 
     @Scheduled(cron = "${pilot.retention.cron:0 30 3 * * *}")
@@ -173,12 +175,12 @@ public class RetentionService {
                     }
                 } catch (IOException e) {
                     log.warn("清理 {} 失败", file, e);
-                    StorageHealth.markDegraded("retention", e.getMessage());
+                    storageHealth.markDegraded("retention", e.getMessage());
                 }
             }
         } catch (IOException e) {
             log.warn("遍历数据目录失败: {}", directory, e);
-            StorageHealth.markDegraded("retention", e.getMessage());
+            storageHealth.markDegraded("retention", e.getMessage());
         }
         return removed;
     }

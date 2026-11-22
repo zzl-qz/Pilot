@@ -20,7 +20,8 @@ import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import com.pilot.core.session.InMemoryRunCheckpointRepository;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.command.CommandTaskManager;
-import com.pilot.server.common.data.PilotDataDir;
+import com.pilot.server.store.PilotDataDir;
+import com.pilot.server.store.StorageHealthService;
 import com.pilot.server.run.RecoveryReportService;
 import com.pilot.server.run.RunStateTracker;
 import com.pilot.server.validation.ValidationEvidence;
@@ -44,9 +45,11 @@ class TaskDiagnosticsServiceTest {
         SessionService sessions = new SessionService();
         sessionId = sessions.createSession("校验证据诊断", workspace.toString()).id();
         ledger = new ValidationLedger(new PilotDataDir(root.resolve("data").toString()), JsonMapper.builder().build());
+        StorageHealthService storageHealth = new StorageHealthService();
         diagnostics = new TaskDiagnosticsService(sessions,
-            new RunStateTracker(new InMemoryRunCheckpointRepository(), "test-instance"), ledger,
-            new RecoveryReportService(), new DefaultListableBeanFactory().getBeanProvider(CommandTaskManager.class));
+            new RunStateTracker(new InMemoryRunCheckpointRepository(), "test-instance", storageHealth), ledger,
+            new RecoveryReportService(), new DefaultListableBeanFactory().getBeanProvider(CommandTaskManager.class),
+            storageHealth);
     }
 
     @ParameterizedTest
