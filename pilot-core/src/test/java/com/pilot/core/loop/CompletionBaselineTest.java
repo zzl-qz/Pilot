@@ -11,12 +11,11 @@ import org.junit.jupiter.api.Test;
 
 import com.pilot.core.lint.LintGate;
 import com.pilot.core.message.Message;
-import com.pilot.core.prompt.PromptLibrary;
 
 class CompletionBaselineTest {
     @Test
     void unchangedEarlierFailureIsNotDemandedAgain() {
-        CompletionGate gate = new CompletionGate(PromptLibrary.standard(), true, "修复登录", LintGate.disabled());
+        CompletionGate gate = new CompletionGate(true, "修复登录", LintGate.disabled());
         gate.baseline(List.of("mvn test → exit 1"));
 
         CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/A.java"), List.of("mvn test → exit 1"), List.of(),

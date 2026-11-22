@@ -52,7 +52,6 @@ import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.permission.PermissionGate;
 import com.pilot.core.permission.PolicyPermissionGate;
 import com.pilot.core.plan.PlanItem;
-import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.quality.IndependentCodeReviewer;
 import com.pilot.core.quality.TextChange;
 import com.pilot.core.tool.ReadToolOutputTool;
@@ -74,9 +73,6 @@ import com.pilot.core.util.WireEnum;
  * 本类有可变状态，一次运行请创建一个实例；运行应放到独立线程。
  */
 public final class AgentLoop {
-    /** 提示词模板的唯一入口；外部目录通过 {@code PILOT_PROMPTS_DIR} 覆盖。 */
-    private static final PromptLibrary PROMPTS = PromptLibrary.standard();
-
     /**
      * 默认系统提示词，正文在 {@code prompts/system/*.md}。生产路径由 {@code AgentRunService}
      * 用工作区名等信息重新渲染；这里保留给无会话场景与测试。
@@ -84,7 +80,7 @@ public final class AgentLoop {
      * <p>按空工具集过滤：默认场景没有注册任何工具，条件注册的段落（技能目录、子代理、
      * 并行派发）随之消失——工具不存在，用法教学就不进提示词，也无需提供技能目录变量。
      */
-    public static final String DEFAULT_SYSTEM_PROMPT = PROMPTS.system(PromptLibrary.environment(null), Set.of());
+    public static final String DEFAULT_SYSTEM_PROMPT = LoopPromptCatalog.defaultSystemPrompt();
 
     /**
      * @param repeatRemindAt       相同调用连续得到相同结果达到该次数时注入提醒；0 表示不提醒
@@ -519,7 +515,7 @@ public final class AgentLoop {
         }
         List<Message> messages = seed(history);
         String goal = userInput.strip();
-        this.completionGate = new CompletionGate(PROMPTS, config.completionChecks(), goal, lintGate);
+        this.completionGate = new CompletionGate(config.completionChecks(), goal, lintGate);
         this.completionGate.useProjectConstraints(projectConstraints);
         lintGate.lock(qualityWorkspace);
         messages.add(Message.user(goal, attachments == null ? List.of() : attachments,
@@ -545,7 +541,7 @@ public final class AgentLoop {
         if (messages.size() <= 1) {
             throw new IllegalArgumentException("history is empty, nothing to resume");
         }
-        this.completionGate = new CompletionGate(PROMPTS, config.completionChecks(), goal, lintGate);
+        this.completionGate = new CompletionGate(config.completionChecks(), goal, lintGate);
         this.completionGate.useProjectConstraints(projectConstraints);
         lintGate.lock(qualityWorkspace);
         this.completionGate.restoreFrom(history);
@@ -620,7 +616,7 @@ public final class AgentLoop {
 
                 int remainingSteps = config.maxSteps() - step + 1;
                 if (remainingSteps <= Math.min(2, Math.max(1, config.maxSteps() / 4))) {
-                    runtimeGuidance.add(PROMPTS.render("loop/budget-approaching", Map.of()));
+                    runtimeGuidance.add(LoopPromptCatalog.render("loop/budget-approaching", Map.of()));
                 }
 
                 ModelTurn turn = callModel(messages, events, usage, runtimeGuidance);
@@ -1410,43 +1406,9 @@ public final class AgentLoop {
         if (!hasGuidance && !hasRules && !hasHint) {
             return List.copyOf(messages);
         }
-        List<Message> request = new ArrayList<>(messages);
-        if (hasHint) {
-            request.add(Message.system(activeHint.content()));
-        }
-        if (hasGuidance) {
-            appendGuidance(request, guidance);
-        }
-        if (hasRules) {
-            request.add(Message.system("[路径规则]\n" + rules.strip()));
-        }
-        return List.copyOf(request);
-    }
-
-    /**
-     * 临时纠偏默认走尾部 system；以 {@link Message#RUNTIME_CHECKPOINT_MARKER} 开头的行为检查点走临时 user 角色，
-     * 仅对本次请求生效（不落盘、不推进真实用户轮次），确保模型在长推理链里确实响应收敛信号。
-     */
-    private static void appendGuidance(List<Message> request, String guidance) {
-        String trimmed = guidance.strip();
-        if (trimmed.isEmpty()) {
-            return;
-        }
-        if (trimmed.startsWith(Message.RUNTIME_CHECKPOINT_MARKER)) {
-            request.add(Message.user(trimmed));
-            return;
-        }
-        int marker = trimmed.indexOf("\n\n" + Message.RUNTIME_CHECKPOINT_MARKER);
-        if (marker >= 0) {
-            String before = trimmed.substring(0, marker).strip();
-            String checkpoint = trimmed.substring(marker + 2).strip();
-            if (!before.isEmpty()) {
-                request.add(Message.system("[Runtime guidance; applies only to this request]\n" + before));
-            }
-            request.add(Message.user(checkpoint));
-            return;
-        }
-        request.add(Message.system("[Runtime guidance; applies only to this request]\n" + trimmed));
+        return new RuntimePromptAssembler()
+            .assemble(new RuntimePromptAssembler.Input(messages, hasGuidance ? guidance : "",
+                hasHint ? activeHint.content() : "", hasRules ? "[路径规则]\n" + rules.strip() : ""));
     }
 
     private void notifyContextShrink() {
@@ -1524,13 +1486,14 @@ public final class AgentLoop {
     /** 重复调用提醒：模板在 {@code prompts/loop/repeat-reminder.md}。 */
     private static String repeatReminder(List<ToolCall> calls, int count) {
         String tools = calls.stream().map(ToolCall::name).distinct().collect(Collectors.joining(", "));
-        return PROMPTS.render("loop/repeat-reminder", Map.of("count", String.valueOf(count), "tool", tools)).strip();
+        return LoopPromptCatalog.render("loop/repeat-reminder", Map.of("count", String.valueOf(count), "tool", tools))
+            .strip();
     }
 
     /** 动态任务仍在运行但观察没有变化时，要求模型换成有意义的等待/替代动作。 */
     private static String stuckReminder(List<ToolCall> calls, int count, String unchangedState) {
         String tools = calls.stream().map(ToolCall::name).distinct().collect(Collectors.joining(", "));
-        return PROMPTS
+        return LoopPromptCatalog
             .render("loop/stuck-nudge", Map.of("pattern", "重复观察后台工具：" + tools, "repeatCount", String.valueOf(count),
                 "unchangedState", unchangedState, "blockedActions", "- 不要立刻用相同参数高频轮询\n- 不要重新启动同一个后台任务"))
             .strip();

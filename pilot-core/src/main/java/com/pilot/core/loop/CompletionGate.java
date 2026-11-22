@@ -15,7 +15,6 @@ import com.pilot.core.lint.LintGate;
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.plan.PlanItem;
-import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.quality.IndependentCodeReviewer;
 import com.pilot.core.quality.RefactorEvidenceGate;
 import com.pilot.core.quality.TextChange;
@@ -63,7 +62,6 @@ final class CompletionGate {
         }
     }
 
-    private final PromptLibrary prompts;
     private final boolean enabled;
     private final String goal;
     private final RefactorEvidenceGate evidenceGate;
@@ -87,12 +85,11 @@ final class CompletionGate {
      * @param goal    本轮原始任务，自审时回灌给模型对照；续跑没有原始输入时为 {@code null}
      * @param enabled 关闭后直接放行，不做任何催办
      */
-    CompletionGate(PromptLibrary prompts, boolean enabled, String goal) {
-        this(prompts, enabled, goal, LintGate.enabled());
+    CompletionGate(boolean enabled, String goal) {
+        this(enabled, goal, LintGate.enabled());
     }
 
-    CompletionGate(PromptLibrary prompts, boolean enabled, String goal, LintGate lintGate) {
-        this.prompts = prompts;
+    CompletionGate(boolean enabled, String goal, LintGate lintGate) {
         this.enabled = enabled;
         this.goal = goal;
         this.evidenceGate = new RefactorEvidenceGate(goal);
@@ -219,7 +216,8 @@ final class CompletionGate {
             && !GoalIntent.looksLikeResearch(goal)) {
             if (actionPrompts < MAX_ACTION_PROMPTS) {
                 actionPrompts++;
-                String prompt = prompts.render("completion/act", Map.of("goal", Texts.oneLine(goal, 500))).strip();
+                String prompt =
+                    LoopPromptCatalog.render("completion/act", Map.of("goal", Texts.oneLine(goal, 500))).strip();
                 return new Nudge(prompt, "实现类目标尚无任何改动，已要求直接动手", actionPrompts, MAX_ACTION_PROMPTS);
             }
             return new Nudge("目标要求实际改动，但本轮仍没有文件改动。停止并如实报告未完成原因。", "实现类目标提醒后仍无改动，已停止", MAX_ACTION_PROMPTS,
@@ -267,7 +265,7 @@ final class CompletionGate {
                 verifyPrompts++;
                 String checkDesc = checks.isEmpty() ? "（本轮没有跑过构建或测试）" : codeDirtySincePassingCheck
                     ? bullets(checks) + "\n（注意：上述验证早于最近一次代码修改，请对最新代码重跑验证）" : bullets(checks);
-                String prompt = prompts
+                String prompt = LoopPromptCatalog
                     .render("completion/verify", Map.of("changedFiles", bullets(changedFiles), "checks", checkDesc))
                     .strip();
                 String reason = codeDirtySincePassingCheck && hasPassingCheck(checks) ? "最近一次代码整理后尚未重新验证，已要求重跑测试"
@@ -304,14 +302,14 @@ final class CompletionGate {
             String prompt;
             if (changed) {
                 int done = (int)plan.stream().filter(PlanItem::done).count();
-                prompt = prompts.render("completion/review",
+                prompt = LoopPromptCatalog.render("completion/review",
                     Map.of("goal", goalText, "toolCalls", String.valueOf(toolCalls), "changedFiles",
                         bullets(changedFiles), "planProgress",
                         plan.isEmpty() ? "（本轮没有维护计划）" : done + "/" + plan.size() + " 已完成", "openSteps",
                         openSteps.isEmpty() ? "（无）" : bullets(openSteps), "checks",
                         checks.isEmpty() ? "（未执行验证）" : bullets(checks), "constraints", constraintBlock()));
             } else {
-                prompt = prompts.render("completion/review-readonly", Map.of("goal", goalText, "toolCalls",
+                prompt = LoopPromptCatalog.render("completion/review-readonly", Map.of("goal", goalText, "toolCalls",
                     String.valueOf(toolCalls), "inspected", inspected.isEmpty() ? "（未记录具体路径）" : bullets(inspected)));
                 if (!projectConstraints.isBlank()) {
                     prompt = prompt + constraintBlock();

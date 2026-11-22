@@ -25,18 +25,16 @@ import com.pilot.core.quality.IndependentCodeReviewer;
 import com.pilot.core.quality.TextChange;
 
 class CompletionGateTest {
-    private static final PromptLibrary PROMPTS = PromptLibrary.standard();
-
     @Test
     void allowsFinishingWhenNothingChanged() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "解释一下调用链");
+        CompletionGate gate = new CompletionGate(true, "解释一下调用链");
 
         assertNull(gate.evaluate(Set.of(), List.of(), List.of(), List.of()));
     }
 
     @Test
     void actionGoalWithoutAnyChangeStopsAfterOnePromptInsteadOfClaimingCompletion() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复登录接口的空指针");
+        CompletionGate gate = new CompletionGate(true, "修复登录接口的空指针");
 
         CompletionGate.Nudge nudge = gate.evaluate(Set.of(), List.of(), List.of(), List.of());
 
@@ -53,7 +51,7 @@ class CompletionGateTest {
     @Test
     void consultationGoalWithActionWordIsNotPushedToAct() {
         for (String goal : List.of("看看怎么优化", "给我一些简历优化建议", "评估这份简历的优化空间")) {
-            CompletionGate gate = new CompletionGate(PROMPTS, true, goal);
+            CompletionGate gate = new CompletionGate(true, goal);
 
             assertNull(gate.evaluate(Set.of(), List.of(), List.of(), List.of()), goal);
         }
@@ -63,14 +61,14 @@ class CompletionGateTest {
     void explicitReadOnlyDeliveryDoesNotRequestRepositoryChanges() {
         for (String goal : List.of("实现与验证已完成，本轮只读收尾，请阅读报告并总结", "总结已经实现的代码，不要修改任何仓库文件",
             "Summarize the implemented changes. Do not edit any files.")) {
-            CompletionGate gate = new CompletionGate(PROMPTS, true, goal);
+            CompletionGate gate = new CompletionGate(true, goal);
             assertNull(gate.evaluate(Set.of(), List.of(), List.of(), List.of()), goal);
         }
     }
 
     @Test
     void readOnlyHandoffDoesNotResumeOldImplementationPlanOrWaiveVerification() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "本轮只读收尾，不要修改任何仓库文件");
+        CompletionGate gate = new CompletionGate(true, "本轮只读收尾，不要修改任何仓库文件");
         assertNull(gate.evaluate(Set.of(), List.of(), List.of(), List.of("实现登录接口")));
 
         CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/A.java"), List.of(), List.of(), List.of());
@@ -82,7 +80,7 @@ class CompletionGateTest {
     void implementingReadOnlyFeaturesAndProtectingSpecificFilesStillRequiresAction() {
         for (String goal : List.of("实现只读接口，不要修改测试文件", "修复读取问题，不要修改 package.json", "修复只读收尾误触发写代码的 bug",
             "Implement a read-only API. Do not edit the tests.")) {
-            CompletionGate gate = new CompletionGate(PROMPTS, true, goal);
+            CompletionGate gate = new CompletionGate(true, goal);
             CompletionGate.Nudge nudge = gate.evaluate(Set.of(), List.of(), List.of(), List.of());
             assertNotNull(nudge, goal);
             assertTrue(nudge.reason().contains("动手"), goal);
@@ -92,7 +90,7 @@ class CompletionGateTest {
     @Test
     void codeGoalWithActionWordStillRequiresAction() {
         for (String goal : List.of("优化首页加载性能", "修复登录接口的空指针")) {
-            CompletionGate gate = new CompletionGate(PROMPTS, true, goal);
+            CompletionGate gate = new CompletionGate(true, goal);
 
             CompletionGate.Nudge nudge = gate.evaluate(Set.of(), List.of(), List.of(), List.of());
 
@@ -103,14 +101,14 @@ class CompletionGateTest {
 
     @Test
     void questionGoalMentioningActionWordsIsNotPushedToAct() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "为什么这里没有修复");
+        CompletionGate gate = new CompletionGate(true, "为什么这里没有修复");
 
         assertNull(gate.evaluate(Set.of(), List.of(), List.of(), List.of()));
     }
 
     @Test
     void asksForVerificationWhenCodeChangedWithoutPassingCheck() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+        CompletionGate gate = new CompletionGate(true, "修一个 bug");
 
         CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/A.java"), List.of(), List.of(), List.of());
 
@@ -121,7 +119,7 @@ class CompletionGateTest {
 
     @Test
     void documentationOnlyChangeDoesNotRequireBuild() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "更新文档");
+        CompletionGate gate = new CompletionGate(true, "更新文档");
 
         // 第一道门（验证）跳过，但第二道门（自审）仍会问一次
         CompletionGate.Nudge nudge = gate.evaluate(Set.of("README.md"), List.of(), List.of(), List.of());
@@ -132,7 +130,7 @@ class CompletionGateTest {
 
     @Test
     void passingCheckSkipsVerificationPrompt() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+        CompletionGate gate = new CompletionGate(true, "修一个 bug");
 
         CompletionGate.Nudge nudge =
             gate.evaluate(Set.of("src/A.java"), List.of("mvnw test → exit 0"), List.of(), List.of());
@@ -143,14 +141,14 @@ class CompletionGateTest {
 
     @Test
     void independentReviewerAvoidsDuplicateSelfReview() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+        CompletionGate gate = new CompletionGate(true, "修一个 bug");
 
         assertNull(gate.evaluate(Set.of("src/A.java"), List.of("mvnw test → exit 0"), List.of(), List.of(), true));
     }
 
     @Test
     void independentReviewerStillRequiresCodeVerification() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+        CompletionGate gate = new CompletionGate(true, "修一个 bug");
 
         CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/A.java"), List.of(), List.of(), List.of(), true);
         assertNotNull(nudge);
@@ -161,7 +159,7 @@ class CompletionGateTest {
     void unrelatedSuccessfulCommandsDoNotVerifyCodeChanges() {
         for (String check : List.of("git status --short → exit 0", "git diff → exit 0", "node --version → exit 0",
             "java -version → exit 0", "npm --version → exit 0", "cargo metadata → exit 0")) {
-            CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+            CompletionGate gate = new CompletionGate(true, "修一个 bug");
 
             CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/A.java"), List.of(check), List.of(), List.of());
 
@@ -172,7 +170,7 @@ class CompletionGateTest {
 
     @Test
     void pipedTestNeedsUnmaskedExitCodeBeforeItCanVerifyChanges() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "实现 CSV 解析并验证");
+        CompletionGate gate = new CompletionGate(true, "实现 CSV 解析并验证");
         Set<String> changed = Set.of("src/csv.js");
         CompletionGate.Nudge nudge =
             gate.evaluate(changed, List.of("node --test | tail -12 → exit 0"), List.of(), List.of());
@@ -193,7 +191,7 @@ class CompletionGateTest {
     void successfulBuildTestLintAndFormatChecksVerifyCodeChanges() {
         for (String check : List.of("mvnw -q test → exit 0", "gradlew :app:build → exit 0", "npm run lint → exit 0",
             "node --test → exit 0", "python3 -m pytest -q → exit 0", "cargo check → exit 0", "go vet ./... → exit 0")) {
-            CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+            CompletionGate gate = new CompletionGate(true, "修一个 bug");
 
             CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/A.java"), List.of(check), List.of(), List.of());
 
@@ -204,7 +202,7 @@ class CompletionGateTest {
 
     @Test
     void formatOnlyCheckDoesNotVerifyCodeChanges() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+        CompletionGate gate = new CompletionGate(true, "修一个 bug");
 
         CompletionGate.Nudge nudge =
             gate.evaluate(Set.of("src/A.java"), List.of("git diff --check → exit 0"), List.of(), List.of());
@@ -217,12 +215,12 @@ class CompletionGateTest {
     void exitZeroInsideCommandCannotHideItsRealFailureOrUnfinishedState() {
         for (String check : List.of("node -e process.exit(1) exit 0 → exit 1",
             "node -e process.exit(1) exit 0 → RUNNING", "node -e process.exit(1) exit 0 → TIMED_OUT（进程退出码 0）")) {
-            CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+            CompletionGate gate = new CompletionGate(true, "修一个 bug");
             CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/A.java"), List.of(check), List.of(), List.of());
             assertNotNull(nudge, check);
             assertTrue(nudge.reason().contains("未验证"), check + ": " + nudge.reason());
         }
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+        CompletionGate gate = new CompletionGate(true, "修一个 bug");
         CompletionGate.Nudge passed =
             gate.evaluate(Set.of("src/A.java"), List.of("mvn -Dlabel=exit_1 test → exit 0"), List.of(), List.of());
         assertNotNull(passed);
@@ -231,7 +229,7 @@ class CompletionGateTest {
 
     @Test
     void passingCheckWithoutALaterEditDoesNotAskToRerun() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+        CompletionGate gate = new CompletionGate(true, "修一个 bug");
 
         CompletionGate.Nudge nudge =
             gate.evaluate(Set.of("src/A.java"), List.of("mvn test → exit 0"), List.of(), List.of());
@@ -243,7 +241,7 @@ class CompletionGateTest {
 
     @Test
     void verificationIsAskedAtMostTwiceThenStopsWithoutPassingUnverifiedCode() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "修一个 bug");
+        CompletionGate gate = new CompletionGate(true, "修一个 bug");
         Set<String> changed = Set.of("src/A.java");
 
         CompletionGate.Nudge first = gate.evaluate(changed, List.of(), List.of(), List.of());
@@ -259,7 +257,7 @@ class CompletionGateTest {
 
     @Test
     void readonlyResearchWithTooFewToolCallsGetsReviewed() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "梳理一下请求调用链");
+        CompletionGate gate = new CompletionGate(true, "梳理一下请求调用链");
         gate.countToolCall();
         gate.countToolCall();
 
@@ -271,7 +269,7 @@ class CompletionGateTest {
 
     @Test
     void readonlyTaskThatIsNotResearchFinishesQuietly() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "你好");
+        CompletionGate gate = new CompletionGate(true, "你好");
         gate.countToolCall();
         gate.countToolCall();
 
@@ -280,7 +278,7 @@ class CompletionGateTest {
 
     @Test
     void recordsInspectedPathsForReadonlyReview() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "分析这个模块");
+        CompletionGate gate = new CompletionGate(true, "分析这个模块");
         gate.countToolCall();
         gate.countToolCall();
         gate.recordTarget(new ToolCall("call_1", "read_file", Map.of("path", "src/A.java")));
@@ -294,7 +292,7 @@ class CompletionGateTest {
 
     @Test
     void restoresInspectedPathsAndToolCountFromPersistedHistory() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "分析这个模块的调用链");
+        CompletionGate gate = new CompletionGate(true, "分析这个模块的调用链");
         List<Message> history = List.of(Message.user("分析这个模块的调用链"),
             Message.assistant("", List.of(new ToolCall("call_1", "read_file", Map.of("path", "src/A.java")))),
             Message.tool("call_1", "class A {}"),
@@ -314,7 +312,7 @@ class CompletionGateTest {
 
     @Test
     void disabledGateNeverNudges() {
-        CompletionGate gate = new CompletionGate(PROMPTS, false, "修一个 bug");
+        CompletionGate gate = new CompletionGate(false, "修一个 bug");
         gate.countToolCall();
         gate.countToolCall();
 
@@ -328,7 +326,7 @@ class CompletionGateTest {
         LintRunner runner = (workspace, command, timeout) -> new LintRunner.LintResult(1,
             "src/main/Order.java:2 error 魔法值 86400\n", false, true);
         LintGate lint = new LintGate(true, runner);
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复订单状态", lint);
+        CompletionGate gate = new CompletionGate(true, "修复订单状态", lint);
         Map<String, TextChange> changes = Map.of("src/main/Order.java",
             new TextChange("class Order {}\n", "class Order {\n    int timeout = 86400;\n}\n"));
 
@@ -348,7 +346,7 @@ class CompletionGateTest {
         LintRunner runner = (workspace, command, timeout) -> new LintRunner.LintResult(1,
             "src/main/Order.java:2 error 魔法值 86400\n", false, true);
         CompletionGate gate =
-            new CompletionGate(PROMPTS, true, "修复订单状态", new LintGate(true, runner, LintGate.FailurePolicy.STOP));
+            new CompletionGate(true, "修复订单状态", new LintGate(true, runner, LintGate.FailurePolicy.STOP));
 
         CompletionGate.Nudge nudge =
             gate.evaluate(Set.of("src/main/Order.java"), List.of(), List.of(), List.of(), false, Map.of(), root, null);
@@ -363,7 +361,7 @@ class CompletionGateTest {
         LintRunner runner = (workspace, command, timeout) -> {
             throw new AssertionError("开关关闭时不应执行 lint");
         };
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复订单状态", new LintGate(false, runner));
+        CompletionGate gate = new CompletionGate(true, "修复订单状态", new LintGate(false, runner));
 
         CompletionGate.Nudge nudge = gate.evaluate(Set.of("src/main/Order.java"), List.of(), List.of(), List.of(),
             false, Map.of(), Path.of("."), null);
@@ -374,7 +372,7 @@ class CompletionGateTest {
 
     @Test
     void refactoringAfterPassingTestRequiresFreshVerificationSoBehaviorCannotBreakSilently() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "实现订单与退款服务");
+        CompletionGate gate = new CompletionGate(true, "实现订单与退款服务");
         Set<String> changed = Set.of("src/main/OrderService.java", "src/main/RefundService.java");
         Map<String, TextChange> cleanChanges =
             Map.of("src/main/OrderService.java", new TextChange(null, "class OrderService {}\n"),
@@ -385,14 +383,12 @@ class CompletionGateTest {
         gate.recordOutcome(List.of(), List.of("mvnw test → exit 0"));
 
         // 第二步：收尾时独立代码审查发现重复逻辑，要求精简重构
-        IndependentCodeReviewer reviewer =
-            new IndependentCodeReviewer(
-                (messages,
-                    tools) -> new ModelResponse("",
-                        List.of(new ToolCall("r1", "submit_code_review",
-                            Map.of("verdict", "REFACTOR", "issues",
-                                List.of("OrderService 与 RefundService 重复计算逻辑 -> 抽离公共方法"))))),
-                null, PROMPTS, () -> false);
+        IndependentCodeReviewer reviewer = new IndependentCodeReviewer(
+            (messages, tools) -> new ModelResponse("",
+                List.of(new ToolCall("r1", "submit_code_review",
+                    Map.of("verdict", "REFACTOR", "issues",
+                        List.of("OrderService 与 RefundService 重复计算逻辑 -> 抽离公共方法"))))),
+            null, PromptLibrary.standard(), () -> false);
 
         CompletionGate.Nudge reviewNudge = gate.evaluate(changed, List.of("mvnw test → exit 0"), List.of(), List.of(),
             false, cleanChanges, null, reviewer);
@@ -414,7 +410,7 @@ class CompletionGateTest {
 
     @Test
     void changeAndPassingCheckFromOneToolOutcomeStillRequireIndependentVerification() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复解析器");
+        CompletionGate gate = new CompletionGate(true, "修复解析器");
         Set<String> changed = Set.of("src/main/Parser.java");
 
         gate.recordOutcome(changed, List.of("mvnw test → exit 0"));
@@ -427,7 +423,7 @@ class CompletionGateTest {
 
     @Test
     void baselinePassingCheckCannotVerifyCodeChangedDuringContinuation() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复解析器");
+        CompletionGate gate = new CompletionGate(true, "修复解析器");
         List<String> priorCheck = List.of("mvnw test → exit 0");
         gate.baseline(priorCheck);
 
@@ -441,7 +437,7 @@ class CompletionGateTest {
 
     @Test
     void exhaustedVerificationRemindersStopInsteadOfAllowingUnverifiedCompletion() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复解析器");
+        CompletionGate gate = new CompletionGate(true, "修复解析器");
         Set<String> changed = Set.of("src/main/Parser.java");
 
         assertFalse(gate.evaluate(changed, List.of(), List.of(), List.of()).halt());
@@ -455,7 +451,7 @@ class CompletionGateTest {
 
     @Test
     void exhaustedActionReminderStopsInsteadOfAllowingNoChangeCompletion() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复解析器中的空输入错误");
+        CompletionGate gate = new CompletionGate(true, "修复解析器中的空输入错误");
 
         assertFalse(gate.evaluate(Set.of(), List.of(), List.of(), List.of()).halt());
         CompletionGate.Nudge stopped = gate.evaluate(Set.of(), List.of(), List.of(), List.of());
@@ -467,7 +463,7 @@ class CompletionGateTest {
 
     @Test
     void passingIndependentCodeReviewWithPassingTestsAndCompletePlanSkipsDuplicateSelfReview() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "实现订单与退款服务");
+        CompletionGate gate = new CompletionGate(true, "实现订单与退款服务");
         Set<String> changed = Set.of("src/main/OrderService.java", "src/main/RefundService.java");
         Map<String, TextChange> cleanChanges =
             Map.of("src/main/OrderService.java", new TextChange(null, "class OrderService {}\n"),
@@ -478,7 +474,7 @@ class CompletionGateTest {
         IndependentCodeReviewer passingReviewer = new IndependentCodeReviewer(
             (messages, tools) -> new ModelResponse("",
                 List.of(new ToolCall("r1", "submit_code_review", Map.of("verdict", "PASS", "issues", List.of())))),
-            null, PROMPTS, () -> false);
+            null, PromptLibrary.standard(), () -> false);
 
         assertNull(gate.evaluate(changed, List.of("mvnw test → exit 0"),
             List.of(new PlanItem("完成服务", PlanItem.COMPLETED)), List.of(), false, cleanChanges, null, passingReviewer));
@@ -486,7 +482,7 @@ class CompletionGateTest {
 
     @Test
     void planProgressAppearsInReviewPrompt() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "做三件事");
+        CompletionGate gate = new CompletionGate(true, "做三件事");
         List<PlanItem> plan = List.of(new PlanItem("第一步", PlanItem.COMPLETED), new PlanItem("第二步", PlanItem.PENDING));
 
         CompletionGate.Nudge nudge =
@@ -499,7 +495,7 @@ class CompletionGateTest {
 
     @Test
     void boundaryHardeningGoalRequiresBoundaryTestsAndReverificationBoundedToOnce() {
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "完善字符串解析器的边界情况与鲁棒性");
+        CompletionGate gate = new CompletionGate(true, "完善字符串解析器的边界情况与鲁棒性");
         Map<String, TextChange> cleanChanges = Map.of("src/main/Parser.java",
             new TextChange("class Parser {}\n", "class Parser { int parse() { return 0; } }\n"));
 
@@ -534,7 +530,7 @@ class CompletionGateTest {
         LintRunner runner = (workspace, command, timeout) -> new LintRunner.LintResult(1,
             "src/main/Order.java:2 error 魔法值 86400\n", false, true);
         LintGate lint = new LintGate(true, runner, LintGate.FailurePolicy.RETRY);
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复订单状态", lint);
+        CompletionGate gate = new CompletionGate(true, "修复订单状态", lint);
         gate.recordOutcome(List.of(), List.of("mvnw test → exit 0"));
         Set<String> changed = Set.of("src/main/Order.java");
         List<String> checks = List.of("mvnw test → exit 0");
@@ -559,7 +555,7 @@ class CompletionGateTest {
         LintRunner runner = (workspace, command, timeout) -> new LintRunner.LintResult(1,
             "src/main/Order.java:2 error 魔法值 86400\n", false, true);
         CompletionGate gate =
-            new CompletionGate(PROMPTS, true, "修复订单状态", new LintGate(true, runner, LintGate.FailurePolicy.RETRY));
+            new CompletionGate(true, "修复订单状态", new LintGate(true, runner, LintGate.FailurePolicy.RETRY));
 
         Set<String> changed = Set.of("src/main/Order.java");
         CompletionGate.Nudge first =
@@ -584,7 +580,7 @@ class CompletionGateTest {
         Files.writeString(root.resolve(".pilot/settings.json"), "{\"quality\":{\"command\":\"exit 0\"}}");
         LintRunner runner = (workspace, command, timeout) -> new LintRunner.LintResult(0, "", false, true);
         CompletionGate gate =
-            new CompletionGate(PROMPTS, true, "修复订单状态", new LintGate(true, runner, LintGate.FailurePolicy.RETRY));
+            new CompletionGate(true, "修复订单状态", new LintGate(true, runner, LintGate.FailurePolicy.RETRY));
 
         CompletionGate.Nudge nudge = gate.evaluate(Set.of(".pilot/settings.json"), List.of("mvnw test → exit 0"),
             List.of(), List.of(), false, Map.of(), root, null);
@@ -602,7 +598,7 @@ class CompletionGateTest {
         Files.createDirectories(root.resolve("src"));
         Files.writeString(root.resolve("src/AgentLoop.java"), "class AgentLoop {}\n");
 
-        CompletionGate gate = new CompletionGate(PROMPTS, true, "修复 AgentLoop.java 的超时处理");
+        CompletionGate gate = new CompletionGate(true, "修复 AgentLoop.java 的超时处理");
         gate.recordOutcome(List.of("src/AgentLoop.java", ".tmp-verify/AgentLoop.java"), List.of());
         gate.recordOutcome(List.of(), List.of("mvnw test → exit 0"));
 
@@ -625,13 +621,13 @@ class CompletionGateTest {
     void scratchCheckIgnoresAlreadyDeletedOrGoalRequestedFilesAndSupportsWindowsSeparators() throws Exception {
         Path root = Files.createTempDirectory("scratch-hygiene-edge");
         // 1. 磁盘上已不存在的临时文件不应误报
-        CompletionGate deletedGate = new CompletionGate(PROMPTS, true, "修复构建脚本");
+        CompletionGate deletedGate = new CompletionGate(true, "修复构建脚本");
         assertNull(deletedGate.evaluate(Set.of(".tmp-verify/gone.java"), List.of("mvnw test → exit 0"), List.of(),
             List.of(), true, Map.of(), root, null));
 
         // 2. 用户目标明确要求生成 .bak 文件时不应误报
         Files.writeString(root.resolve("config.bak"), "backup\n");
-        CompletionGate requestedGate = new CompletionGate(PROMPTS, true, "生成 config.bak 备份文件");
+        CompletionGate requestedGate = new CompletionGate(true, "生成 config.bak 备份文件");
         assertNull(requestedGate.evaluate(Set.of("config.bak"), List.of("mvnw test → exit 0"), List.of(), List.of(),
             true, Map.of(), root, null));
 
