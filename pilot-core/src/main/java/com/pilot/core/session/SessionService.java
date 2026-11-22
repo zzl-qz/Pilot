@@ -6,25 +6,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.TreeMap;
 import java.util.UUID;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 
-import com.pilot.core.event.AssistantPreview;
-import com.pilot.core.event.AssistantReasoning;
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.EventType;
 import com.pilot.core.event.RunEnded;
@@ -33,38 +18,19 @@ import com.pilot.core.event.RunFailureCode;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.event.SessionEvent;
 
-import lombok.extern.slf4j.Slf4j;
-
 /**
- * 会话服务：负责 id 生成、状态推进与事件订阅，数据读写委托给 {@link SessionRepository}。
+ * 会话服务：负责会话状态与历史写入，事件传输委托给 {@link SessionEventTransport}。
  *
  * <p>同一会话的「追加事件 + 推送订阅者」在同一把会话锁内完成，因此订阅者收到的事件顺序与
  * {@code sequence} 一致；订阅时捕获高水位并注册监听，锁外分页回放后衔接实时队列。
  *
- * <p>推送不在锁内直接写连接：每个订阅者有一个有界队列和独立投递线程。慢客户端只会把自己
- * 的队列填满并被断开（断线后按游标重连即可补齐），不会拖住会话的发布线程和 Agent 循环。
+ * <p>同一会话的历史写入与传输发布由会话锁排序；订阅者的有界队列和投递线程由 transport 管理。
  */
-@Slf4j
 public final class SessionService implements AutoCloseable {
     private final Clock clock;
     private final SessionRepository repository;
-    private final EventStreamLimits limits;
-    private final LiveOutputCache liveOutputs;
-    private final ScheduledExecutorService monitor;
-    private final SessionPreviewAggregator previews;
-    private final Semaphore replaySlots;
-    private final AtomicInteger replayPages = new AtomicInteger();
-    private final AtomicInteger peakReplayPages = new AtomicInteger();
-    private final AtomicLong previewInputs = new AtomicLong();
-    private final AtomicLong previewOutputs = new AtomicLong();
-    private final AtomicInteger workers = new AtomicInteger();
-    private final AtomicLong queuedBytes = new AtomicLong();
-    private final AtomicLong peakBytes = new AtomicLong();
-    private final AtomicLong delivered = new AtomicLong();
-    private final AtomicLong replayNanos = new AtomicLong();
-    private final ConcurrentMap<String, AtomicLong> closedReasons = new ConcurrentHashMap<>();
-    private final ConcurrentMap<String, CopyOnWriteArrayList<EventDelivery>> subscribers = new ConcurrentHashMap<>();
-    private final ConcurrentMap<String, Object> locks = new ConcurrentHashMap<>();
+    private final SessionEventTransport transport;
+    private final java.util.concurrent.ConcurrentMap<String, Object> locks = new java.util.concurrent.ConcurrentHashMap<>();
 
     public SessionService() {
         this(Clock.systemUTC(), new InMemorySessionRepository());
@@ -84,18 +50,10 @@ public final class SessionService implements AutoCloseable {
 
     public SessionService(Clock clock, SessionRepository repository, EventStreamLimits limits,
         PreviewLimits previewLimits) {
-        this.monitor = Executors.newSingleThreadScheduledExecutor(task -> {
-            Thread thread = new Thread(task, "pilot-event-monitor");
-            thread.setDaemon(true);
-            return thread;
-        });
-        this.previews = new SessionPreviewAggregator(Objects.requireNonNull(previewLimits), monitor);
-        this.liveOutputs = new LiveOutputCache(previewLimits);
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
-        this.limits = Objects.requireNonNull(limits);
-        this.replaySlots =
-            new Semaphore((int)Math.max(1, Math.min(16, limits.totalBytes() / (16L * 1024 * 1024))), true);
+        this.transport = new SessionEventTransport(this.repository, Objects.requireNonNull(limits),
+            Objects.requireNonNull(previewLimits));
     }
 
     public Session createSession(String title) {
@@ -188,12 +146,8 @@ public final class SessionService implements AutoCloseable {
     public boolean delete(String sessionId) {
         Object lock = lockFor(sessionId);
         synchronized (lock) {
-            discardPreview(sessionId);
-            liveOutputs.clear(sessionId);
-            CopyOnWriteArrayList<EventDelivery> existing = subscribers.remove(sessionId);
-            if (existing != null) {
-                existing.forEach(EventDelivery::close);
-            }
+            transport.finishPreview(sessionId, true);
+            transport.clearSession(sessionId);
             boolean deleted = repository.delete(sessionId);
             locks.remove(sessionId, lock);
             return deleted;
@@ -218,17 +172,6 @@ public final class SessionService implements AutoCloseable {
     public void preview(String sessionId, String runId, SessionEvent event) {
         Objects.requireNonNull(runId, "runId must not be null");
         Objects.requireNonNull(event, "event must not be null");
-        String text;
-        boolean reset;
-        if (event instanceof AssistantPreview part) {
-            text = part.text();
-            reset = part.reset();
-        } else if (event instanceof AssistantReasoning part) {
-            text = part.text();
-            reset = part.reset();
-        } else {
-            throw new IllegalArgumentException("preview 只接收正文或推理增量");
-        }
         Object lock = lockFor(sessionId);
         synchronized (lock) {
             LongSupplier sequenceWithoutPending = () -> {
@@ -246,45 +189,22 @@ public final class SessionService implements AutoCloseable {
                 }
                 return repository.latestSequence(sessionId);
             };
-            var update = previews.accept(new SessionPreviewAggregator.PreviewInput(sessionId, runId, event.type(), text,
-                reset, clock.instant()), sequenceWithoutPending,
-                this::deliverPreview, task -> Thread.ofVirtual().name("pilot-preview-flush").start(() -> {
-                    synchronized (lock) {
-                        task.run();
-                    }
-                }));
-            if (update.accepted()) {
-                previewInputs.incrementAndGet();
-            }
+            transport.acceptPreview(sessionId, runId, event, clock.instant(), sequenceWithoutPending, task -> {
+                synchronized (lock) {
+                    task.run();
+                }
+            });
         }
     }
 
-    private void discardPreview(String sessionId) {
-        previews.finish(sessionId, this::deliverPreview, true);
-    }
-
     private void finishPreview(String sessionId) {
-        previews.finish(sessionId, this::deliverPreview, false);
-    }
-
-    private void deliverPreview(SessionPreviewAggregator.PreviewOutput preview) {
-        SessionEvent event = preview.type() == EventType.ASSISTANT_PREVIEW
-            ? new AssistantPreview(preview.text(), preview.reset())
-            : new AssistantReasoning(preview.text(), preview.reset());
-        deliverPreview(preview.sessionId(), preview.runId(), preview.sequence(), event, preview.timestamp());
-    }
-
-    private void deliverPreview(String sessionId, String runId, long sequence, SessionEvent event, Instant timestamp) {
-        previewOutputs.incrementAndGet();
-        deliver(sessionId, liveOutputs.update(EventEnvelope.of(sequence, timestamp, sessionId, runId, event)),
-            EventSize.estimate(event) + 1024);
+        transport.finishPreview(sessionId, false);
     }
 
     /** 追加事件并推送给当前订阅者，返回带序号与时间戳的信封。 */
     public EventEnvelope publish(String sessionId, String runId, SessionEvent event) {
         Objects.requireNonNull(runId, "runId must not be null");
         Objects.requireNonNull(event, "event must not be null");
-        long size = EventSize.estimate(event) + 1024;
         Object lock = lockFor(sessionId);
         synchronized (lock) {
             Session current = repository.find(sessionId).orElseGet(() -> {
@@ -302,27 +222,8 @@ public final class SessionService implements AutoCloseable {
                 repository.markNotBlank(sessionId);
             }
             EventEnvelope envelope = repository.append(sessionId, runId, clock.instant(), event, status);
-            if (event.type() == EventType.RUN_STARTED) {
-                liveOutputs.begin(sessionId, runId);
-            } else if (event.type() == EventType.ASSISTANT_DELTA) {
-                liveOutputs.commit(sessionId, runId, envelope.timestamp());
-            }
-            if (status.terminal()) {
-                liveOutputs.clear(sessionId);
-            }
-            deliver(sessionId, envelope, size);
+            transport.eventAppended(envelope, status.terminal());
             return envelope;
-        }
-    }
-
-    /** 投递不阻塞：队列满说明客户端已经跟不上，摘掉它即可，历史事件还能按游标补。 */
-    private void deliver(String sessionId, EventEnvelope envelope, long size) {
-        CopyOnWriteArrayList<EventDelivery> current = subscribers.get(sessionId);
-        if (current == null) {
-            return;
-        }
-        for (EventDelivery delivery : current) {
-            delivery.offer(envelope, size);
         }
     }
 
@@ -404,11 +305,7 @@ public final class SessionService implements AutoCloseable {
                 repository.advanceHistoryRevision(sessionId);
                 return count;
             });
-            liveOutputs.clear(sessionId);
-            var current = subscribers.get(sessionId);
-            if (current != null) {
-                current.forEach(EventDelivery::close);
-            }
+            transport.clearSession(sessionId);
             return removed;
         }
     }
@@ -445,7 +342,7 @@ public final class SessionService implements AutoCloseable {
         Consumer<EventEnvelope> listener, Consumer<EventReference> references, Consumer<LiveOutput> snapshots,
         Runnable onClosed) {
         Objects.requireNonNull(listener, "listener must not be null");
-        EventDelivery delivery;
+        SessionEventTransport.Registration registration;
         Object lock = lockFor(sessionId);
         synchronized (lock) {
             if (repository.find(sessionId).isEmpty()) {
@@ -457,36 +354,22 @@ public final class SessionService implements AutoCloseable {
             if (expectedRevision != null && revision != expectedRevision) {
                 throw new HistoryChangedException();
             }
-            if (listeners(sessionId).size() >= limits.subscribersPerSession()) {
-                throw new IllegalStateException("会话订阅数量已达上限");
-            }
-            if (workers.incrementAndGet() > limits.subscribers()) {
-                workers.decrementAndGet();
-                throw new IllegalStateException("事件流连接数量已达上限");
-            }
-            try {
-                var latest = repository.latestEvent(sessionId);
-                long highWater = latest.map(SessionRepository.EventPosition::sequence).orElse(0L);
-                delivery = new EventDelivery(sessionId, listener, references, onClosed, Math.max(0, afterSequence),
-                    highWater, revision, snapshots,
-                    snapshots == null ? null
-                        : liveOutputs.snapshot(sessionId, latest.map(SessionRepository.EventPosition::runId).orElse(""),
-                            highWater, revision,
-                            highWater > 0 && !repository.find(sessionId).orElseThrow().status().terminal()));
-            } catch (RuntimeException failure) {
-                workers.decrementAndGet();
-                throw failure;
-            }
-            listeners(sessionId).add(delivery);
+            var latest = repository.latestEvent(sessionId);
+            long highWater = latest.map(SessionRepository.EventPosition::sequence).orElse(0L);
+            LiveOutput snapshot = snapshots == null ? null
+                : transport.snapshot(sessionId, latest.map(SessionRepository.EventPosition::runId).orElse(""), highWater,
+                    revision, highWater > 0 && !repository.find(sessionId).orElseThrow().status().terminal());
+            registration = transport.register(sessionId, listener, references, onClosed, Math.max(0, afterSequence),
+                highWater, revision, snapshots, snapshot);
         }
         // 注册与高水位捕获是短临界区；查询及所有回放发送均由锁外 worker 完成。
-        delivery.start();
-        return delivery;
+        registration.start();
+        return registration.subscription();
     }
 
     /** 当前活跃订阅数，用于连接诊断与资源回归验证。 */
     public int subscriberCount() {
-        return subscribers.values().stream().mapToInt(List::size).sum();
+        return transport.subscriberCount();
     }
 
     public record StreamMetrics(int subscriptions, int workers, long queuedBytes, long peakQueuedBytes,
@@ -496,42 +379,16 @@ public final class SessionService implements AutoCloseable {
     }
 
     public StreamMetrics streamMetrics() {
-        Map<String, Long> reasons = new TreeMap<>();
-        closedReasons.forEach((key, value) -> reasons.put(key, value.get()));
-        return new StreamMetrics(subscriberCount(), workers.get(), queuedBytes.get(), peakBytes.get(), delivered.get(),
-            replayNanos.get(), previewInputs.get(), previewOutputs.get(), previews.pendingSessions(), liveOutputs.bytes(),
-            liveOutputs.size(), replayPages.get(), peakReplayPages.get(), Map.copyOf(reasons));
-    }
-
-    private boolean reserve(long size) {
-        long current;
-        do {
-            current = queuedBytes.get();
-            if (size > limits.totalBytes() - current) {
-                return false;
-            }
-        } while (!queuedBytes.compareAndSet(current, current + size));
-        peakBytes.accumulateAndGet(current + size, Math::max);
-        return true;
+        SessionEventTransport.Metrics metrics = transport.metrics();
+        return new StreamMetrics(metrics.subscriptions(), metrics.workers(), metrics.queuedBytes(),
+            metrics.peakQueuedBytes(), metrics.deliveredEvents(), metrics.replayNanos(), metrics.previewInputs(),
+            metrics.previewOutputs(), metrics.pendingPreviews(), metrics.livePreviewBytes(),
+            metrics.livePreviewSessions(), metrics.replayPages(), metrics.peakReplayPages(), metrics.closeReasons());
     }
 
     private Object lockFor(String sessionId) {
         Objects.requireNonNull(sessionId, "sessionId must not be null");
         return locks.computeIfAbsent(sessionId, key -> new Object());
-    }
-
-    private CopyOnWriteArrayList<EventDelivery> listeners(String sessionId) {
-        return subscribers.computeIfAbsent(sessionId, key -> new CopyOnWriteArrayList<>());
-    }
-
-    private void unsubscribe(String sessionId, EventDelivery delivery) {
-        subscribers.compute(sessionId, (key, current) -> {
-            if (current == null) {
-                return null;
-            }
-            current.remove(delivery);
-            return current.isEmpty() ? null : current;
-        });
     }
 
     private static SessionStatus nextStatus(SessionStatus current, SessionEvent event) {
@@ -576,283 +433,9 @@ public final class SessionService implements AutoCloseable {
         };
     }
 
-    /**
-     * 单个订阅者的有序投递器：有界队列 + 独立虚拟线程。
-     *
-     * <p>队列满、下游抛异常或显式 close 都会让这个订阅者停止工作并回调 {@code onClosed}，
-     * 从而把「客户端跟不上」与「会话发布」彻底解耦。
-     */
-    private record PendingEvent(EventEnvelope event, EventReference reference, long bytes, long enqueued) {
-    }
-
-    private final class EventDelivery implements EventSubscription {
-        private final String sessionId;
-        private final Consumer<EventEnvelope> downstream;
-        private final Consumer<EventReference> references;
-        private final Consumer<LiveOutput> snapshots;
-        private LiveOutput snapshot;
-        private long snapshotBytes;
-        private final Runnable onClosed;
-        private final BlockingQueue<PendingEvent> queue = new ArrayBlockingQueue<>(limits.queueItems());
-        private final AtomicBoolean closed = new AtomicBoolean();
-        private final Object budget = new Object();
-        private final Thread worker;
-        private final long afterSequence;
-        private final long highWater;
-        private final long revision;
-
-        private volatile long sendingAt;
-        private long revisionCheckedAt;
-        private volatile boolean replaying = true;
-        private volatile String reason = "closed";
-        private volatile java.util.concurrent.ScheduledFuture<?> monitor;
-        private long bytes;
-
-        EventDelivery(String sessionId, Consumer<EventEnvelope> downstream, Consumer<EventReference> references,
-            Runnable onClosed, long afterSequence, long highWater, long revision, Consumer<LiveOutput> snapshots,
-            LiveOutput snapshot) {
-            this.snapshots = snapshots;
-            this.snapshot = snapshot;
-            if (snapshot != null) {
-                snapshotBytes = 1024 + 6L * (snapshot.text().length() + snapshot.reasoning().length());
-                if (snapshotBytes > limits.queueBytes() || !reserve(snapshotBytes)) {
-                    throw new IllegalStateException("临时输出交付预算不足");
-                }
-                bytes = snapshotBytes;
-            }
-            this.afterSequence = afterSequence;
-            this.highWater = highWater;
-            this.revision = revision;
-            this.sessionId = sessionId;
-            this.downstream = downstream;
-            this.references = references;
-            this.onClosed = onClosed;
-            this.worker = Thread.ofVirtual().name("pilot-event-delivery").unstarted(this::drain);
-        }
-
-        void start() {
-            long started = System.nanoTime();
-            monitor = SessionService.this.monitor.scheduleAtFixedRate(() -> {
-                long now = System.nanoTime();
-                PendingEvent oldest = queue.peek();
-                long sending = sendingAt;
-                if (sending != 0 && now - sending > TimeUnit.MILLISECONDS.toNanos(limits.sendMillis())) {
-                    close("send_timeout");
-                } else if (oldest != null
-                    && now - oldest.enqueued() > TimeUnit.MILLISECONDS.toNanos(limits.queueWaitMillis())) {
-                    close("queue_timeout");
-                } else if (replaying && now - started > TimeUnit.MILLISECONDS.toNanos(limits.replayMillis())) {
-                    close("replay_timeout");
-                }
-            }, 50, 50, TimeUnit.MILLISECONDS);
-            if (closed.get()) {
-                monitor.cancel(false);
-            }
-            worker.start();
-        }
-
-        private PendingEvent pending(EventEnvelope event, long size) {
-            boolean ephemeral = event.payload().type() == EventType.ASSISTANT_PREVIEW
-                || event.payload().type() == EventType.ASSISTANT_REASONING;
-            if (!ephemeral && references != null && size > limits.referenceBytes()) {
-                return new PendingEvent(null,
-                    new EventReference(event.sequence(), event.sessionId(), event.runId(), event.type()), 512,
-                    System.nanoTime());
-            }
-            return new PendingEvent(event, null, size, System.nanoTime());
-        }
-
-        void offer(EventEnvelope event, long size) {
-            PendingEvent pending = pending(event, size);
-            boolean accepted = false;
-            synchronized (budget) {
-                if (closed.get()) {
-                    return;
-                }
-                if (bytes + pending.bytes() <= limits.queueBytes() && queue.remainingCapacity() > 0
-                    && reserve(pending.bytes())) {
-                    bytes += pending.bytes();
-                    queue.add(pending);
-                    accepted = true;
-                }
-            }
-            if (!accepted) {
-                close("queue_budget");
-            }
-        }
-
-        private void release(PendingEvent pending) {
-            synchronized (budget) {
-                bytes -= pending.bytes();
-                queuedBytes.addAndGet(-pending.bytes());
-            }
-        }
-
-        private boolean checkRevision(boolean force) {
-            long now = System.nanoTime();
-            if (force || now - revisionCheckedAt >= TimeUnit.MILLISECONDS.toNanos(100)) {
-                revisionCheckedAt = now;
-                if (historyRevision(sessionId) != revision) {
-                    close("history_changed");
-                    return false;
-                }
-            }
-            return !closed.get();
-        }
-
-        private void send(PendingEvent pending) {
-            if (!checkRevision(false)) {
-                return;
-            }
-            sendingAt = System.nanoTime();
-            try {
-                if (pending.reference() != null) {
-                    references.accept(pending.reference());
-                } else {
-                    downstream.accept(pending.event());
-                }
-                delivered.incrementAndGet();
-            } finally {
-                sendingAt = 0;
-            }
-        }
-
-        private void drain() {
-            long began = System.nanoTime();
-            try {
-                long cursor = afterSequence;
-                while (!closed.get() && cursor < highWater) {
-                    if (!checkRevision(true)) {
-                        return;
-                    }
-                    replaySlots.acquire();
-                    peakReplayPages.accumulateAndGet(replayPages.incrementAndGet(), Math::max);
-                    try {
-                        List<EventEnvelope> page =
-                            repository.replayPage(sessionId, cursor, highWater, limits.pageSize());
-                        if (page.isEmpty()) {
-                            break;
-                        }
-                        for (EventEnvelope event : page) {
-                            if (closed.get()) {
-                                return;
-                            }
-                            PendingEvent pending = pending(event, EventSize.estimate(event.payload()) + 1024);
-                            synchronized (budget) {
-                                if (pending.bytes() + bytes > limits.queueBytes() || !reserve(pending.bytes())) {
-                                    close("queue_budget");
-                                    return;
-                                }
-                                bytes += pending.bytes();
-                            }
-                            try {
-                                send(pending);
-                            } finally {
-                                release(pending);
-                            }
-                            cursor = event.sequence();
-                        }
-                    } finally {
-                        replayPages.decrementAndGet();
-                        replaySlots.release();
-                    }
-                }
-                replaying = false;
-                replayNanos.addAndGet(System.nanoTime() - began);
-                if (!checkRevision(true)) {
-                    return;
-                }
-                if (snapshots != null && !closed.get()) {
-                    sendingAt = System.nanoTime();
-                    try {
-                        snapshots.accept(snapshot);
-                    } finally {
-                        releaseSnapshot();
-                        sendingAt = 0;
-                    }
-                }
-                while (checkRevision(false)) {
-                    PendingEvent pending = queue.poll(1, TimeUnit.SECONDS);
-                    if (pending != null) {
-                        try {
-                            send(pending);
-                        } finally {
-                            release(pending);
-                        }
-                    }
-                }
-            } catch (InterruptedException failure) {
-                Thread.currentThread().interrupt();
-            } catch (RuntimeException failure) {
-                log.debug("订阅交付失败：{}", failure.getClass().getSimpleName());
-                close(failure instanceof EventTooLargeException ? "event_too_large" : "delivery_error");
-            } finally {
-                releaseSnapshot();
-                close();
-                workers.decrementAndGet();
-            }
-        }
-
-        private void releaseSnapshot() {
-            if (snapshotBytes != 0) {
-                synchronized (budget) {
-                    bytes -= snapshotBytes;
-                    queuedBytes.addAndGet(-snapshotBytes);
-                    snapshotBytes = 0;
-                }
-            }
-            snapshot = null;
-        }
-
-        @Override
-        public boolean isClosed() {
-            return closed.get();
-        }
-
-        @Override
-        public String closeReason() {
-            return reason;
-        }
-
-        @Override
-        public void close() {
-            close("closed");
-        }
-
-        private void close(String why) {
-            if (!closed.compareAndSet(false, true)) {
-                return;
-            }
-            reason = why;
-            unsubscribe(sessionId, this);
-            synchronized (budget) {
-                PendingEvent pending;
-                while ((pending = queue.poll()) != null) {
-                    release(pending);
-                }
-            }
-            var timer = monitor;
-            if (timer != null) {
-                timer.cancel(false);
-            }
-            worker.interrupt();
-            closedReasons.computeIfAbsent(why, ignored -> new java.util.concurrent.atomic.AtomicLong())
-                .incrementAndGet();
-            if (onClosed != null) {
-                Thread.ofVirtual().name("pilot-event-close").start(() -> {
-                    try {
-                        onClosed.run();
-                    } catch (RuntimeException failure) {
-                        log.debug("订阅关闭回调失败", failure);
-                    }
-                });
-            }
-        }
-    }
-
     @Override
     public void close() {
-        subscribers.values().forEach(deliveries -> deliveries.forEach(EventDelivery::close));
-        monitor.shutdownNow();
+        transport.close();
     }
+
 }
