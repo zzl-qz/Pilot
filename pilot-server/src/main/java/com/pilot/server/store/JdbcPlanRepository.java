@@ -19,14 +19,14 @@ public final class JdbcPlanRepository implements PlanRepository {
 
     @Override
     public List<PlanItem> load(String sessionId) {
-        return JdbcSupport.query(store, "SELECT step, status, note FROM plan_items WHERE session_id = ? ORDER BY ord",
+        return store.query( "SELECT step, status, note FROM plan_items WHERE session_id = ? ORDER BY ord",
             statement -> statement.setString(1, sessionId),
             rows -> new PlanItem(rows.getString(1), rows.getString(2), rows.getString(3)), "读取计划失败: " + sessionId);
     }
 
     @Override
     public void save(String sessionId, List<PlanItem> items) {
-        List<JdbcSupport.Binder> rows = new ArrayList<>();
+        List<SqliteStore.Binder> rows = new ArrayList<>();
         for (int ord = 0; ord < items.size(); ord++) {
             PlanItem item = items.get(ord);
             int position = ord;
@@ -38,14 +38,14 @@ public final class JdbcPlanRepository implements PlanRepository {
                 statement.setString(5, item.note());
             });
         }
-        JdbcSupport.inTransaction(store, connection -> {
-            JdbcSupport.exec(connection, DELETE, statement -> statement.setString(1, sessionId));
-            JdbcSupport.batch(connection, INSERT, rows);
+        store.inTransaction( connection -> {
+            store.exec(connection, DELETE, statement -> statement.setString(1, sessionId));
+            store.batch(connection, INSERT, rows);
         }, "保存计划失败: " + sessionId);
     }
 
     @Override
     public void delete(String sessionId) {
-        JdbcSupport.update(store, DELETE, statement -> statement.setString(1, sessionId), "删除计划失败: " + sessionId);
+        store.update( DELETE, statement -> statement.setString(1, sessionId), "删除计划失败: " + sessionId);
     }
 }

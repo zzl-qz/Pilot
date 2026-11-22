@@ -15,7 +15,6 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import com.pilot.core.session.SessionService;
-import com.pilot.server.store.JdbcSupport;
 import com.pilot.server.store.SqliteStore;
 
 /**
@@ -124,7 +123,7 @@ public class SessionNotes {
                 note.createdAt(), note.updatedAt(), sourceOf(note.id(), session), note.status(), note.link()) : note)
                 .toList();
         }
-        return JdbcSupport.query(store,
+        return store.query(
             "SELECT n.id,n.content,n.created_at,n.updated_at,n.status,n.link_kind,n.link_id,"
                 + "s.sequence,s.excerpt,s.role "
                 + "FROM session_notes n LEFT JOIN session_note_sources s ON s.note_id=n.id "
@@ -189,9 +188,9 @@ public class SessionNotes {
             return note;
         }
         Note stored = note;
-        long seq = JdbcSupport.queryOne(store, "SELECT COALESCE(MAX(seq),0)+1 FROM session_notes WHERE session_id=?",
+        long seq = store.queryOne("SELECT COALESCE(MAX(seq),0)+1 FROM session_notes WHERE session_id=?",
             query -> query.setString(1, session), rows -> rows.getLong(1), "读取想法序号失败").orElse(1L);
-        JdbcSupport.update(store,
+        store.update(
             "INSERT INTO session_notes(id,session_id,seq,content,created_at,updated_at,status) VALUES(?,?,?,?,?,?,?)",
             query -> {
                 query.setString(1, stored.id());
@@ -204,7 +203,7 @@ public class SessionNotes {
             }, "保存想法失败");
         if (source != null && source.sequence() != null) {
             String excerpt = source.excerpt() == null ? "" : source.excerpt();
-            JdbcSupport.update(store, "INSERT INTO session_note_sources(note_id,sequence,excerpt,role) VALUES(?,?,?,?)",
+            store.update("INSERT INTO session_note_sources(note_id,sequence,excerpt,role) VALUES(?,?,?,?)",
                 query -> {
                     query.setString(1, stored.id());
                     query.setInt(2, source.sequence());
@@ -232,7 +231,7 @@ public class SessionNotes {
             return next;
         }
         // 允许编辑正文：状态与关联目标必须一起读回来，否则改一次字就把「已转任务」变回收件箱。
-        Object[] state = JdbcSupport.queryOne(store,
+        Object[] state = store.queryOne(
             "SELECT created_at,status,link_kind,link_id FROM session_notes WHERE session_id=? AND id=?", query -> {
                 query.setString(1, session);
                 query.setString(2, noteId);
@@ -243,7 +242,7 @@ public class SessionNotes {
         String status = (String)state[1];
         String linkKind = (String)state[2];
         String linkId = (String)state[3];
-        int changed = JdbcSupport.update(store,
+        int changed = store.update(
             "UPDATE session_notes SET content=?,updated_at=? WHERE session_id=? AND id=?", query -> {
                 query.setString(1, text);
                 query.setString(2, now.toString());
@@ -254,8 +253,7 @@ public class SessionNotes {
             throw new IllegalArgumentException("想法不存在或已删除");
         }
         Source source = sources.containsKey(noteId) ? sourceOf(noteId, session)
-            : JdbcSupport
-                .queryOne(store, "SELECT sequence,excerpt,role FROM session_note_sources WHERE note_id=?",
+            : store.queryOne("SELECT sequence,excerpt,role FROM session_note_sources WHERE note_id=?",
                     query -> query.setString(1, noteId),
                     rows -> new Source((Integer)rows.getObject("sequence"), rows.getString("excerpt"),
                         rows.getString("role"), eventExists(session, (Integer)rows.getObject("sequence"))),
@@ -282,7 +280,7 @@ public class SessionNotes {
             memory.getOrDefault(session, new LinkedHashMap<>()).put(noteId, updated);
             return updated;
         }
-        JdbcSupport.update(store,
+        store.update(
             "UPDATE session_notes SET status=?,link_kind=?,link_id=?,updated_at=? WHERE session_id=? AND id=?",
             query -> {
                 query.setString(1, updated.status());
@@ -333,9 +331,9 @@ public class SessionNotes {
             }
             return;
         }
-        JdbcSupport.update(store, "DELETE FROM session_note_sources WHERE note_id=?",
+        store.update("DELETE FROM session_note_sources WHERE note_id=?",
             query -> query.setString(1, noteId), "删除想法来源失败");
-        JdbcSupport.update(store, "DELETE FROM session_notes WHERE session_id=? AND id=?", query -> {
+        store.update("DELETE FROM session_notes WHERE session_id=? AND id=?", query -> {
             query.setString(1, session);
             query.setString(2, noteId);
         }, "删除想法失败");
@@ -350,10 +348,10 @@ public class SessionNotes {
             memory.remove(session);
             return;
         }
-        JdbcSupport.update(store,
+        store.update(
             "DELETE FROM session_note_sources WHERE note_id IN (SELECT id FROM session_notes WHERE session_id=?)",
             query -> query.setString(1, session), "清理想法来源失败");
-        JdbcSupport.update(store, "DELETE FROM session_notes WHERE session_id=?", query -> query.setString(1, session),
+        store.update("DELETE FROM session_notes WHERE session_id=?", query -> query.setString(1, session),
             "清理想法失败");
     }
 

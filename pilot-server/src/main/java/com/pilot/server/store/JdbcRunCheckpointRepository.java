@@ -24,7 +24,7 @@ public final class JdbcRunCheckpointRepository implements RunCheckpointRepositor
 
     @Override
     public void save(RunCheckpoint checkpoint) {
-        JdbcSupport.update(store, """
+        store.update( """
             INSERT INTO run_checkpoints (run_id, session_id, phase, step, last_tool_call_id,
                 last_successful_step, next_action, workspace, status, owner, lease_expires_at,
                 heartbeat_at, updated_at)
@@ -56,14 +56,14 @@ public final class JdbcRunCheckpointRepository implements RunCheckpointRepositor
 
     @Override
     public Optional<RunCheckpoint> find(String runId) {
-        return JdbcSupport.queryOne(store, "SELECT * FROM run_checkpoints WHERE run_id = ?",
+        return store.queryOne( "SELECT * FROM run_checkpoints WHERE run_id = ?",
             statement -> statement.setString(1, runId), JdbcRunCheckpointRepository::map, "读取运行检查点失败: " + runId);
     }
 
     @Override
     public Optional<RunCheckpoint> activeForSession(String sessionId) {
         String updatedAt = SqliteStore.normalizedInstantSql("updated_at");
-        return JdbcSupport.queryOne(store, """
+        return store.queryOne( """
             SELECT * FROM run_checkpoints WHERE session_id = ?
               AND status IN ('RUNNING', 'INTERRUPTED', 'PAUSED')
             ORDER BY %s DESC LIMIT 1
@@ -74,7 +74,7 @@ public final class JdbcRunCheckpointRepository implements RunCheckpointRepositor
     @Override
     public List<RunCheckpoint> resumable() {
         String updatedAt = SqliteStore.normalizedInstantSql("updated_at");
-        return JdbcSupport.query(store, """
+        return store.query( """
             SELECT * FROM run_checkpoints WHERE status IN ('RUNNING', 'INTERRUPTED', 'PAUSED')
             ORDER BY %s ASC
             """.formatted(updatedAt), statement -> {
@@ -85,7 +85,7 @@ public final class JdbcRunCheckpointRepository implements RunCheckpointRepositor
     public boolean claimLease(String runId, String owner, Instant now, Duration lease) {
         Instant at = now == null ? Instant.now() : now;
         String leaseExpiry = SqliteStore.normalizedInstantSql("lease_expires_at");
-        int updated = JdbcSupport.update(store, """
+        int updated = store.update( """
             UPDATE run_checkpoints
                SET owner = ?, lease_expires_at = ?, heartbeat_at = ?, updated_at = ?
              WHERE run_id = ?
@@ -105,7 +105,7 @@ public final class JdbcRunCheckpointRepository implements RunCheckpointRepositor
     @Override
     public boolean renewLease(String runId, String owner, Instant now, Duration lease) {
         Instant at = now == null ? Instant.now() : now;
-        int updated = JdbcSupport.update(store, """
+        int updated = store.update( """
             UPDATE run_checkpoints SET lease_expires_at = ?, heartbeat_at = ?, updated_at = ?
              WHERE run_id = ? AND owner = ?
             """, statement -> {
@@ -121,7 +121,7 @@ public final class JdbcRunCheckpointRepository implements RunCheckpointRepositor
     @Override
     public void releaseLease(String runId, String status, Instant now) {
         Instant at = now == null ? Instant.now() : now;
-        JdbcSupport.update(store, """
+        store.update( """
             UPDATE run_checkpoints SET status = ?, owner = NULL, lease_expires_at = NULL,
                    updated_at = ? WHERE run_id = ?
             """, statement -> {
@@ -133,7 +133,7 @@ public final class JdbcRunCheckpointRepository implements RunCheckpointRepositor
 
     @Override
     public int deleteBySession(String sessionId) {
-        return JdbcSupport.update(store, "DELETE FROM run_checkpoints WHERE session_id = ?",
+        return store.update( "DELETE FROM run_checkpoints WHERE session_id = ?",
             statement -> statement.setString(1, sessionId), "删除会话检查点失败: " + sessionId);
     }
 

@@ -23,8 +23,8 @@ public final class JdbcProjectRepository implements ProjectRepository {
     @Override
     public Project create(String id, String name, List<String> folders, String baseCommit, Instant now) {
         Project project = new Project(id, name, folders, baseCommit, now, now);
-        JdbcSupport.inTransaction(store, connection -> {
-            JdbcSupport.exec(connection,
+        store.inTransaction(connection -> {
+            store.exec(connection,
                 "INSERT INTO projects (id, name, created_at, updated_at, base_commit, constraints) VALUES (?, ?, ?, ?, ?, ?)",
                 statement -> {
                     statement.setString(1, id);
@@ -34,7 +34,7 @@ public final class JdbcProjectRepository implements ProjectRepository {
                     statement.setString(5, project.baseCommit());
                     statement.setString(6, project.constraints());
                 });
-            JdbcSupport.batch(connection, INSERT_FOLDER, folderBinders(id, project.folders()));
+            store.batch(connection, INSERT_FOLDER, folderBinders(id, project.folders()));
         }, "创建项目失败: " + id);
         return project;
     }
@@ -44,8 +44,7 @@ public final class JdbcProjectRepository implements ProjectRepository {
         if (id == null) {
             return Optional.empty();
         }
-        return JdbcSupport
-            .queryOne(store,
+        return store.queryOne(
                 "SELECT id, name, created_at, updated_at, base_commit, constraints FROM projects WHERE id = ?",
                 statement -> statement.setString(1, id), JdbcProjectRepository::mapHead, "读取项目失败: " + id)
             .map(project -> new Project(project.id(), project.name(), foldersOf(id), project.baseCommit(),
@@ -55,7 +54,7 @@ public final class JdbcProjectRepository implements ProjectRepository {
     @Override
     public List<Project> list() {
         String updatedAt = SqliteStore.normalizedInstantSql("updated_at");
-        List<Project> heads = JdbcSupport.query(store,
+        List<Project> heads = store.query(
             "SELECT id, name, created_at, updated_at, base_commit, constraints FROM projects ORDER BY " + updatedAt
                 + " DESC",
             statement -> {
@@ -65,7 +64,7 @@ public final class JdbcProjectRepository implements ProjectRepository {
         }
         // 一次读完全部文件夹再分组，避免每个项目各查一次（N+1）
         Map<String, List<String>> folders = new HashMap<>();
-        for (Map.Entry<String, String> row : JdbcSupport.query(store,
+        for (Map.Entry<String, String> row : store.query(
             "SELECT project_id, path FROM project_folders ORDER BY project_id, position", statement -> {
             }, rows -> Map.entry(rows.getString("project_id"), rows.getString("path")), "读取项目文件夹失败")) {
             folders.computeIfAbsent(row.getKey(), key -> new ArrayList<>()).add(row.getValue());
@@ -78,7 +77,7 @@ public final class JdbcProjectRepository implements ProjectRepository {
 
     @Override
     public boolean rename(String id, String name, Instant now) {
-        return JdbcSupport.update(store, "UPDATE projects SET name = ?, updated_at = ? WHERE id = ?", statement -> {
+        return store.update("UPDATE projects SET name = ?, updated_at = ? WHERE id = ?", statement -> {
             statement.setString(1, name);
             statement.setString(2, now.toString());
             statement.setString(3, id);
@@ -89,11 +88,11 @@ public final class JdbcProjectRepository implements ProjectRepository {
     public boolean updateFolders(String id, List<String> folders, Instant now) {
         Project project = new Project(id, "placeholder", folders, now, now);
         boolean[] updated = {false};
-        JdbcSupport.inTransaction(store, connection -> {
-            JdbcSupport.exec(connection, "DELETE FROM project_folders WHERE project_id = ?",
+        store.inTransaction(connection -> {
+            store.exec(connection, "DELETE FROM project_folders WHERE project_id = ?",
                 statement -> statement.setString(1, id));
-            JdbcSupport.batch(connection, INSERT_FOLDER, folderBinders(id, project.folders()));
-            updated[0] = JdbcSupport.exec(connection, "UPDATE projects SET updated_at = ? WHERE id = ?", statement -> {
+            store.batch(connection, INSERT_FOLDER, folderBinders(id, project.folders()));
+            updated[0] = store.exec(connection, "UPDATE projects SET updated_at = ? WHERE id = ?", statement -> {
                 statement.setString(1, now.toString());
                 statement.setString(2, id);
             }) > 0;
@@ -104,7 +103,7 @@ public final class JdbcProjectRepository implements ProjectRepository {
     @Override
     public boolean updateConstraints(String id, String constraints, Instant now) {
         Project normalized = new Project(id, "placeholder", List.of(), now, now).withConstraints(constraints, now);
-        return JdbcSupport.update(store, "UPDATE projects SET constraints = ?, updated_at = ? WHERE id = ?",
+        return store.update("UPDATE projects SET constraints = ?, updated_at = ? WHERE id = ?",
             statement -> {
                 statement.setString(1, normalized.constraints());
                 statement.setString(2, now.toString());
@@ -115,10 +114,10 @@ public final class JdbcProjectRepository implements ProjectRepository {
     @Override
     public boolean delete(String id) {
         boolean[] removed = {false};
-        JdbcSupport.inTransaction(store, connection -> {
-            JdbcSupport.exec(connection, "DELETE FROM project_folders WHERE project_id = ?",
+        store.inTransaction(connection -> {
+            store.exec(connection, "DELETE FROM project_folders WHERE project_id = ?",
                 statement -> statement.setString(1, id));
-            removed[0] = JdbcSupport.exec(connection, "DELETE FROM projects WHERE id = ?",
+            removed[0] = store.exec(connection, "DELETE FROM projects WHERE id = ?",
                 statement -> statement.setString(1, id)) > 0;
         }, "删除项目失败: " + id);
         return removed[0];
@@ -132,12 +131,12 @@ public final class JdbcProjectRepository implements ProjectRepository {
     }
 
     private List<String> foldersOf(String projectId) {
-        return JdbcSupport.query(store, "SELECT path FROM project_folders WHERE project_id = ? ORDER BY position",
+        return store.query("SELECT path FROM project_folders WHERE project_id = ? ORDER BY position",
             statement -> statement.setString(1, projectId), rows -> rows.getString(1), "读取项目文件夹失败: " + projectId);
     }
 
-    private static List<JdbcSupport.Binder> folderBinders(String projectId, List<String> folders) {
-        List<JdbcSupport.Binder> binders = new ArrayList<>();
+    private static List<SqliteStore.Binder> folderBinders(String projectId, List<String> folders) {
+        List<SqliteStore.Binder> binders = new ArrayList<>();
         for (int position = 0; position < folders.size(); position++) {
             String path = folders.get(position);
             int index = position;

@@ -26,7 +26,6 @@ import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.util.WireEnum;
 import com.pilot.server.store.EventCodec;
-import com.pilot.server.store.JdbcSupport;
 import com.pilot.server.store.SqliteStore;
 
 /** 结束事件是事实来源；这里只持久化用户的阅读/处理标记。 */
@@ -81,7 +80,7 @@ public class ResultInboxRepository {
         }
         String createdAt = SqliteStore.normalizedInstantSql("created_at");
         String sessionCreatedAt = SqliteStore.normalizedInstantSql("s.created_at");
-        return JdbcSupport.query(store, """
+        return store.query("""
             WITH candidates AS (
                 SELECT e.*, ROW_NUMBER() OVER (PARTITION BY e.run_id
                     ORDER BY %s, s.id, e.sequence DESC) AS result_rank
@@ -132,7 +131,7 @@ public class ResultInboxRepository {
         List<EventEnvelope> result = new ArrayList<>();
         for (int from = 0; from < ids.size(); from += 400) {
             var chunk = ids.subList(from, Math.min(ids.size(), from + 400));
-            result.addAll(JdbcSupport.query(store,
+            result.addAll(store.query(
                 "SELECT * FROM events WHERE run_id IN (" + String.join(",", Collections.nCopies(chunk.size(), "?"))
                     + ") AND type IN ('run.completed','run.failed','run.ended','run.cancelled') ORDER BY sequence",
                 q -> {
@@ -162,7 +161,7 @@ public class ResultInboxRepository {
         }
         for (int from = 0; from < ids.size(); from += 400) {
             var chunk = ids.subList(from, Math.min(ids.size(), from + 400));
-            var rows = JdbcSupport.query(store, "SELECT * FROM result_receipts WHERE id IN ("
+            var rows = store.query("SELECT * FROM result_receipts WHERE id IN ("
                 + String.join(",", Collections.nCopies(chunk.size(), "?")) + ")", q -> {
                     for (int i = 0; i < chunk.size(); i++) {
                         q.setString(i + 1, chunk.get(i));
@@ -178,7 +177,7 @@ public class ResultInboxRepository {
 
     public synchronized Receipt receipt(String id, String revision) {
         Receipt r = store == null ? memory.get(id)
-            : JdbcSupport.queryOne(store, "SELECT * FROM result_receipts WHERE id = ?", q -> q.setString(1, id),
+            : store.queryOne("SELECT * FROM result_receipts WHERE id = ?", q -> q.setString(1, id),
                 row -> new Receipt(row.getString("revision"), row.getInt("seen") != 0, row.getInt("handled") != 0),
                 "读取收件状态失败").orElse(null);
         return r != null && r.revision.equals(revision) ? r : new Receipt(revision, false, false);
@@ -196,7 +195,7 @@ public class ResultInboxRepository {
         if (store == null) {
             memory.put(id, next);
         } else {
-            JdbcSupport.update(store, "INSERT INTO result_receipts(id, revision, seen, handled) VALUES (?, ?, ?, ?) "
+            store.update("INSERT INTO result_receipts(id, revision, seen, handled) VALUES (?, ?, ?, ?) "
                 + "ON CONFLICT(id) DO UPDATE SET revision=excluded.revision, seen=excluded.seen, handled=excluded.handled",
                 q -> {
                     q.setString(1, id);

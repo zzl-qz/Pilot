@@ -188,18 +188,18 @@ public final class JdbcToolCallJournal implements ToolCallJournal {
         }
     }
 
-    private int update(String sql, JdbcSupport.Binder binder, String failure) {
+    private int update(String sql, SqliteStore.Binder binder, String failure) {
         try {
-            return JdbcSupport.update(store, sql, binder, failure);
+            return store.update(sql, binder, failure);
         } catch (RuntimeException e) {
             throw unavailable(failure, e);
         }
     }
 
-    private <T> Optional<T> queryOne(String sql, JdbcSupport.Binder binder, JdbcSupport.RowMapper<T> mapper,
+    private <T> Optional<T> queryOne(String sql, SqliteStore.Binder binder, SqliteStore.RowMapper<T> mapper,
         String failure) {
         try {
-            return JdbcSupport.queryOne(store, sql, binder, mapper, failure);
+            return store.queryOne(sql, binder, mapper, failure);
         } catch (RuntimeException e) {
             throw unavailable(failure, e);
         }

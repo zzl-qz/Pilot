@@ -25,7 +25,7 @@ public final class QueuedMessageRepository {
         if (store == null) {
             return memory.getOrDefault(sessionId, List.of());
         }
-        return JdbcSupport.query(store, "SELECT content FROM queued_messages WHERE session_id = ? ORDER BY position",
+        return store.query("SELECT content FROM queued_messages WHERE session_id = ? ORDER BY position",
             statement -> statement.setString(1, sessionId), rows -> rows.getString(1), "读取排队消息失败");
     }
 
@@ -38,8 +38,7 @@ public final class QueuedMessageRepository {
         if (store == null) {
             return held.contains(sessionId);
         }
-        return JdbcSupport
-            .queryOne(store, "SELECT held FROM queue_holds WHERE session_id = ?",
+        return store.queryOne("SELECT held FROM queue_holds WHERE session_id = ?",
                 statement -> statement.setString(1, sessionId), rows -> rows.getInt(1) != 0, "读取队列暂停状态失败")
             .orElse(false);
     }
@@ -54,12 +53,12 @@ public final class QueuedMessageRepository {
             return;
         }
         if (value) {
-            JdbcSupport.update(store,
+            store.update(
                 "INSERT INTO queue_holds(session_id, held) VALUES (?, 1) "
                     + "ON CONFLICT(session_id) DO UPDATE SET held = 1",
                 statement -> statement.setString(1, sessionId), "保存队列暂停状态失败");
         } else {
-            JdbcSupport.update(store, "DELETE FROM queue_holds WHERE session_id = ?",
+            store.update("DELETE FROM queue_holds WHERE session_id = ?",
                 statement -> statement.setString(1, sessionId), "清理队列暂停状态失败");
         }
     }
@@ -76,11 +75,11 @@ public final class QueuedMessageRepository {
             queues.forEach((id, values) -> memory.put(id, List.copyOf(values)));
             return;
         }
-        JdbcSupport.inTransaction(store, connection -> {
+        store.inTransaction(connection -> {
             for (var entry : queues.entrySet()) {
                 String sessionId = entry.getKey();
                 List<String> messages = entry.getValue();
-                List<JdbcSupport.Binder> rows = new ArrayList<>();
+                List<SqliteStore.Binder> rows = new ArrayList<>();
                 for (int position = 0; position < messages.size(); position++) {
                     String content = messages.get(position);
                     int index = position;
@@ -90,9 +89,9 @@ public final class QueuedMessageRepository {
                         statement.setString(3, content);
                     });
                 }
-                JdbcSupport.exec(connection, "DELETE FROM queued_messages WHERE session_id = ?",
+                store.exec(connection, "DELETE FROM queued_messages WHERE session_id = ?",
                     statement -> statement.setString(1, sessionId));
-                JdbcSupport.batch(connection,
+                store.batch(connection,
                     "INSERT INTO queued_messages(session_id, position, content) VALUES (?, ?, ?)", rows);
             }
         }, "保存排队消息失败");

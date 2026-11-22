@@ -13,6 +13,7 @@ import java.sql.Statement;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -30,6 +31,21 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 public final class SqliteStore {
+    @FunctionalInterface
+    public interface Binder {
+        void bind(PreparedStatement statement) throws SQLException;
+    }
+
+    @FunctionalInterface
+    public interface RowMapper<T> {
+        T map(ResultSet rows) throws SQLException;
+    }
+
+    @FunctionalInterface
+    public interface TransactionWork {
+        void run(Connection connection) throws SQLException;
+    }
+
     private static final DateTimeFormatter INSTANT_FORMAT =
         new DateTimeFormatterBuilder().appendInstant(9).toFormatter();
 
@@ -251,13 +267,78 @@ public final class SqliteStore {
         return path;
     }
 
+    /** 查询多行；返回不可变列表。 */
+    public <T> List<T> query(String sql, Binder binder, RowMapper<T> mapper, String failure) {
+        try (Connection connection = open(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            binder.bind(statement);
+            try (ResultSet rows = statement.executeQuery()) {
+                ArrayList<T> result = new ArrayList<>();
+                while (rows.next()) {
+                    result.add(mapper.map(rows));
+                }
+                return List.copyOf(result);
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(failure, e);
+        }
+    }
+
+    /** 查询单行；没有结果返回空。 */
+    public <T> Optional<T> queryOne(String sql, Binder binder, RowMapper<T> mapper, String failure) {
+        List<T> rows = query(sql, binder, mapper, failure);
+        return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
+    }
+
+    /** 执行一条写语句并返回影响行数。 */
+    public int update(String sql, Binder binder, String failure) {
+        try (Connection connection = open()) {
+            return exec(connection, sql, binder);
+        } catch (SQLException e) {
+            throw new IllegalStateException(failure, e);
+        }
+    }
+
+    /** 事务内执行；抛异常自动回滚，成功后提交。 */
+    public void inTransaction(TransactionWork work, String failure) {
+        transaction(() -> {
+            try (Connection connection = open()) {
+                work.run(connection);
+                return null;
+            } catch (SQLException e) {
+                throw new IllegalStateException(failure, e);
+            }
+        });
+    }
+
+    /** 事务内的单条写语句。 */
+    public int exec(Connection connection, String sql, Binder binder) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            binder.bind(statement);
+            return statement.executeUpdate();
+        }
+    }
+
+    /** 事务内的批量写语句。 */
+    public void batch(Connection connection, String sql, List<Binder> binders) throws SQLException {
+        if (binders.isEmpty()) {
+            return;
+        }
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            for (Binder binder : binders) {
+                binder.bind(statement);
+                statement.addBatch();
+            }
+            statement.executeBatch();
+        }
+    }
+
     public Optional<String> historyCommit(String operationId) {
-        return JdbcSupport.queryOne(this, "SELECT result FROM history_commits WHERE operation_id = ?",
+        return queryOne("SELECT result FROM history_commits WHERE operation_id = ?",
             statement -> statement.setString(1, operationId), rows -> rows.getString(1), "读取历史操作提交记录失败");
     }
 
     public void commitHistoryOperation(String operationId, String result) {
-        JdbcSupport.update(this, "INSERT INTO history_commits(operation_id, result) VALUES (?, ?)", statement -> {
+        update("INSERT INTO history_commits(operation_id, result) VALUES (?, ?)", statement -> {
             statement.setString(1, operationId);
             statement.setString(2, result);
         }, "保存历史操作提交记录失败");
@@ -296,19 +377,19 @@ public final class SqliteStore {
     }
 
     public boolean validationPending(String sessionId) {
-        return JdbcSupport.queryOne(this, "SELECT 1 FROM validation_pending WHERE session_id = ?",
+        return queryOne("SELECT 1 FROM validation_pending WHERE session_id = ?",
             statement -> statement.setString(1, sessionId), rows -> true, "读取校验证据待写入状态失败").isPresent();
     }
 
     public List<String> pendingValidationSessions() {
-        return JdbcSupport.query(this, "SELECT session_id FROM validation_pending", statement -> {
+        return query("SELECT session_id FROM validation_pending", statement -> {
         }, rows -> rows.getString(1), "读取校验证据待写入状态失败");
     }
 
     public void setValidationPending(String sessionId, boolean pending) {
         String sql = pending ? "INSERT OR IGNORE INTO validation_pending(session_id) VALUES (?)"
             : "DELETE FROM validation_pending WHERE session_id = ?";
-        JdbcSupport.update(this, sql, statement -> statement.setString(1, sessionId), "更新校验证据待写入状态失败");
+        update(sql, statement -> statement.setString(1, sessionId), "更新校验证据待写入状态失败");
     }
 
     /**
@@ -345,7 +426,7 @@ public final class SqliteStore {
                     }
                 }
                 for (String session : changed) {
-                    JdbcSupport.exec(connection,
+                    exec(connection,
                         "UPDATE sessions SET history_revision = history_revision + 1 WHERE id = ?",
                         update -> update.setString(1, session));
                 }
@@ -365,7 +446,7 @@ public final class SqliteStore {
     }
 
     private Set<String> recoverableIds(String column, String failure) {
-        return Set.copyOf(JdbcSupport.query(this,
+        return Set.copyOf(query(
             "SELECT DISTINCT " + column + " FROM run_checkpoints WHERE status IN ('RUNNING','INTERRUPTED','PAUSED')",
             statement -> {
             }, rows -> rows.getString(1), failure));

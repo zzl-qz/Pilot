@@ -31,7 +31,7 @@ public final class JdbcConversationRepository implements ConversationRepository 
 
     @Override
     public List<Message> load(String sessionId) {
-        return JdbcSupport.query(store,
+        return store.query(
             "SELECT role, content, tool_calls, tool_call_id, attachments, image_positions, reasoning_content FROM conversation_messages "
                 + "WHERE session_id = ? ORDER BY seq",
             statement -> statement.setString(1, sessionId),
@@ -43,7 +43,7 @@ public final class JdbcConversationRepository implements ConversationRepository 
     @Override
     public void save(String sessionId, List<Message> messages) {
         String now = Instant.now().toString();
-        List<JdbcSupport.Binder> rows = new ArrayList<>();
+        List<SqliteStore.Binder> rows = new ArrayList<>();
         for (int seq = 0; seq < messages.size(); seq++) {
             Message message = messages.get(seq);
             int position = seq + 1;
@@ -65,10 +65,10 @@ public final class JdbcConversationRepository implements ConversationRepository 
                 statement.setString(10, now);
             });
         }
-        JdbcSupport.inTransaction(store, connection -> {
-            JdbcSupport.exec(connection, "DELETE FROM conversation_messages WHERE session_id = ?",
+        store.inTransaction( connection -> {
+            store.exec(connection, "DELETE FROM conversation_messages WHERE session_id = ?",
                 statement -> statement.setString(1, sessionId));
-            JdbcSupport.batch(connection, "INSERT INTO conversation_messages "
+            store.batch(connection, "INSERT INTO conversation_messages "
                 + "(session_id, seq, role, content, tool_calls, tool_call_id, attachments, image_positions, reasoning_content, created_at) "
                 + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows);
         }, "保存对话记忆失败: " + sessionId);
@@ -76,7 +76,7 @@ public final class JdbcConversationRepository implements ConversationRepository 
 
     @Override
     public void delete(String sessionId) {
-        JdbcSupport.update(store, "DELETE FROM conversation_messages WHERE session_id = ?",
+        store.update( "DELETE FROM conversation_messages WHERE session_id = ?",
             statement -> statement.setString(1, sessionId), "删除对话记忆失败: " + sessionId);
     }
 

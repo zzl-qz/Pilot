@@ -23,7 +23,6 @@ import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.event.RunSteered;
 import com.pilot.core.session.SessionService;
-import com.pilot.server.store.JdbcSupport;
 import com.pilot.server.store.SqliteStore;
 
 /** FTS5 trigram 覆盖中文子串；不足三个字符用字面量扫描，结果始终按原事件定位。 */
@@ -61,7 +60,7 @@ public class MessageLibrary {
                 .filter(b -> event(session, b.sequence()) != null).sorted(Comparator.comparingLong(Bookmark::sequence))
                 .toList();
         }
-        return JdbcSupport.query(store,
+        return store.query(
             "SELECT b.* FROM message_bookmarks b JOIN events e ON e.session_id=b.session_id AND e.sequence=b.sequence WHERE b.session_id=? ORDER BY b.sequence",
             q -> q.setString(1, session),
             r -> new Bookmark(r.getLong("sequence"), r.getString("title"), r.getString("preview"), ""), "读取书签失败");
@@ -86,7 +85,7 @@ public class MessageLibrary {
         if (store == null) {
             memory.computeIfAbsent(session, k -> new LinkedHashMap<>()).put(sequence, b);
         } else {
-            JdbcSupport.update(store,
+            store.update(
                 "INSERT INTO message_bookmarks(session_id,sequence,title,preview,created_at) VALUES(?,?,?,?,?) ON CONFLICT(session_id,sequence) DO NOTHING",
                 q -> {
                     q.setString(1, session);
@@ -105,7 +104,7 @@ public class MessageLibrary {
             memory.getOrDefault(session, new HashMap<>()).remove(sequence);
             return;
         }
-        JdbcSupport.update(store, "DELETE FROM message_bookmarks WHERE session_id=? AND sequence=?", q -> {
+        store.update("DELETE FROM message_bookmarks WHERE session_id=? AND sequence=?", q -> {
             q.setString(1, session);
             q.setLong(2, sequence);
         }, "删除书签失败");
@@ -121,8 +120,7 @@ public class MessageLibrary {
         require(session);
         String fingerprint = UUID.nameUUIDFromBytes(sequences.stream().filter(Objects::nonNull).distinct().sorted()
             .toList().toString().getBytes(StandardCharsets.UTF_8)).toString();
-        boolean imported = store == null ? imports.contains(session + fingerprint) : JdbcSupport
-            .queryOne(store, "SELECT fingerprint FROM bookmark_imports WHERE session_id=? AND fingerprint=?", q -> {
+        boolean imported = store == null ? imports.contains(session + fingerprint) : store.queryOne("SELECT fingerprint FROM bookmark_imports WHERE session_id=? AND fingerprint=?", q -> {
                 q.setString(1, session);
                 q.setString(2, fingerprint);
             }, r -> r.getString(1), "读取书签迁移状态失败").isPresent();
@@ -146,7 +144,7 @@ public class MessageLibrary {
         if (store == null) {
             imports.add(session + fingerprint);
         } else {
-            JdbcSupport.update(store, "INSERT OR IGNORE INTO bookmark_imports(session_id,fingerprint) VALUES(?,?)",
+            store.update("INSERT OR IGNORE INTO bookmark_imports(session_id,fingerprint) VALUES(?,?)",
                 q -> {
                     q.setString(1, session);
                     q.setString(2, fingerprint);
@@ -208,7 +206,7 @@ public class MessageLibrary {
                 + ((session != null && !session.isBlank()) ? "AND m.session_id=? " : "")
                 + (saved ? "AND b.sequence IS NOT NULL " : "") + "ORDER BY " + createdAt
                 + " DESC,m.session_id,m.sequence DESC LIMIT 51 OFFSET ?";
-            rows = JdbcSupport.query(store, sql, q -> {
+            rows = store.query(sql, q -> {
                 int i = 1;
                 q.setString(i++, fts ? '"' + term.replace("\"", "\"\"") + '"' : term);
                 if (session != null && !session.isBlank()) {

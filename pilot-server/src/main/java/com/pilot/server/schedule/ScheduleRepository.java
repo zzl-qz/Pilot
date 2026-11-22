@@ -8,7 +8,6 @@ import java.util.Optional;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
-import com.pilot.server.store.JdbcSupport;
 import com.pilot.server.store.SqliteStore;
 
 import tools.jackson.databind.ObjectMapper;
@@ -32,13 +31,13 @@ public class ScheduleRepository {
 
     public synchronized List<ScheduledTask> list() {
         return store == null ? List.copyOf(memory.values())
-            : JdbcSupport.query(store, "SELECT payload FROM scheduled_tasks ORDER BY rowid DESC", s -> {
+            : store.query("SELECT payload FROM scheduled_tasks ORDER BY rowid DESC", s -> {
             }, r -> mapper.readValue(r.getString(1), ScheduledTask.class), "读取定时任务失败");
     }
 
     public synchronized Optional<ScheduledTask> find(String id) {
         return store == null ? Optional.ofNullable(memory.get(id))
-            : JdbcSupport.queryOne(store, "SELECT payload FROM scheduled_tasks WHERE id = ?", s -> s.setString(1, id),
+            : store.queryOne("SELECT payload FROM scheduled_tasks WHERE id = ?", s -> s.setString(1, id),
                 r -> mapper.readValue(r.getString(1), ScheduledTask.class), "读取定时任务失败");
     }
 
@@ -49,7 +48,7 @@ public class ScheduleRepository {
             }
             return;
         }
-        JdbcSupport.update(store, "INSERT INTO scheduled_tasks(id, version, payload) VALUES (?, ?, ?)", s -> {
+        store.update("INSERT INTO scheduled_tasks(id, version, payload) VALUES (?, ?, ?)", s -> {
             s.setString(1, task.id());
             s.setLong(2, task.version());
             s.setString(3, mapper.writeValueAsString(task));
@@ -63,7 +62,7 @@ public class ScheduleRepository {
         if (store == null) {
             return memory.replace(old.id(), old, next);
         }
-        return JdbcSupport.update(store,
+        return store.update(
             "UPDATE scheduled_tasks SET version = ?, payload = ? WHERE id = ? AND version = ?", s -> {
                 s.setLong(1, next.version());
                 s.setString(2, mapper.writeValueAsString(next));
