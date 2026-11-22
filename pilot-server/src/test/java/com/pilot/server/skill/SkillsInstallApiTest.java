@@ -33,6 +33,7 @@ import tools.jackson.databind.ObjectMapper;
 /** 安装全链路 e2e：preview → install → GET 清单可见，冲突与覆盖、参数校验。 */
 @SpringBootTest(properties = {"pilot.store=memory", "pilot.runtime.provision=false", "pilot.web-search.local=false"})
 @AutoConfigureMockMvc
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class SkillsInstallApiTest {
     private static final Path DATA =
         Path.of(System.getProperty("java.io.tmpdir"), "pilot-skills-install-" + UUID.randomUUID());

@@ -21,6 +21,7 @@ import java.util.Map;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
+import com.pilot.core.WindowsJdkLoopbackSensitive;
 
 import com.pilot.core.message.Attachment;
 import com.pilot.core.message.Message;
@@ -31,6 +32,7 @@ import com.sun.net.httpserver.HttpServer;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+@WindowsJdkLoopbackSensitive
 class CacheWireTest {
     private final JsonMapper json = new JsonMapper();
 

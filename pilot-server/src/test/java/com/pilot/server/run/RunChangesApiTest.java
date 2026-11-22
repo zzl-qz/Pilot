@@ -30,6 +30,7 @@ import com.pilot.server.workspace.RunSnapshotService;
 /** 对话区的「本轮改动」卡依赖这个接口：run 粒度、逐文件状态与 diff。 */
 @SpringBootTest(properties = "pilot.store=memory")
 @AutoConfigureMockMvc
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class RunChangesApiTest {
     private static final Path DATA = Path.of(System.getProperty("java.io.tmpdir"), "pilot-changes-api-test");
 

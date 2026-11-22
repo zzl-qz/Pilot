@@ -32,6 +32,7 @@ import com.pilot.server.agent.AgentRunService;
 
 @SpringBootTest(properties = {"pilot.store=memory", "pilot.runtime.provision=false", "pilot.web-search.local=false"})
 @AutoConfigureMockMvc
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class WorkProductsApiTest {
     private static final Path DATA =
         Path.of(System.getProperty("java.io.tmpdir"), "pilot-work-api-" + UUID.randomUUID());

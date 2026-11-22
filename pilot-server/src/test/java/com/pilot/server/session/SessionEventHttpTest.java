@@ -39,6 +39,7 @@ import com.pilot.server.session.events.SessionEventTransport;
     properties = {"pilot.store=memory", "pilot.events.send-timeout-ms=800", "pilot.events.queue-wait-ms=5000",
         "pilot.events.queue-bytes=1048576", "pilot.events.reference-bytes=524288",
         "pilot.events.session-connections=64"})
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class SessionEventHttpTest {
     @org.springframework.beans.factory.annotation.Value("${local.server.port}")
     int port;

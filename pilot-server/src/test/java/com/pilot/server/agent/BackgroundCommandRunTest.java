@@ -36,6 +36,7 @@ import com.pilot.server.run.RunStarter;
 @SpringBootTest(properties = {"pilot.store=memory", "pilot.runtime.provision=false", "pilot.web-search.local=false",
     "pilot.agent.permission-mode=AUTO", "pilot.agent.completion-checks=false"})
 @AutoConfigureMockMvc
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class BackgroundCommandRunTest {
     private static final Path DATA =
         Path.of(System.getProperty("java.io.tmpdir"), "pilot-command-run-" + UUID.randomUUID());

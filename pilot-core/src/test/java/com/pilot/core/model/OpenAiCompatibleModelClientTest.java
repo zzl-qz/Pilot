@@ -21,6 +21,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
+import com.pilot.core.WindowsJdkLoopbackSensitive;
 
 import com.pilot.core.http.BoundedHttp;
 import com.pilot.core.message.Attachment;
@@ -31,6 +32,7 @@ import com.sun.net.httpserver.HttpServer;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+@WindowsJdkLoopbackSensitive
 class OpenAiCompatibleModelClientTest {
     private final JsonMapper json = JsonMapper.builder().build();
 

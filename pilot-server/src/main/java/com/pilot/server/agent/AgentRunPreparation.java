@@ -21,7 +21,9 @@ import com.pilot.core.message.ToolCall;
 import com.pilot.core.message.ToolNames;
 import com.pilot.core.multi.profile.AgentProfileCatalog;
 import com.pilot.core.model.ContextComposition;
+import com.pilot.core.model.MeteredModelClient;
 import com.pilot.core.model.NativeCapability;
+import com.pilot.core.model.RequestReport;
 import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.permission.PermissionDecision;
 import com.pilot.core.permission.PermissionGate;
@@ -90,6 +92,7 @@ public final class AgentRunPreparation {
     private SkillInstallService skillInstaller;
     private WorkProductService workProducts;
     private SkillDraftService skillDrafts;
+    private AgentProfileService agentProfiles;
 
     public AgentRunPreparation(SessionService sessions, WorkspaceToolFactory toolFactory, AgentProperties properties,
         MultiAgentProperties multiProperties, TaskControlService taskControls,
@@ -116,6 +119,28 @@ public final class AgentRunPreparation {
     public void setWorkProducts(WorkProductService workProducts, SkillDraftService skillDrafts) {
         this.workProducts = workProducts;
         this.skillDrafts = skillDrafts;
+    }
+
+    @Autowired(required = false)
+    public void setAgentProfiles(AgentProfileService agentProfiles) {
+        this.agentProfiles = agentProfiles;
+    }
+
+    public AgentLoop.Config loopConfig(PreparedRun prepared, String sessionId) {
+        return new AgentLoop.Config(properties.maxSteps(), properties.repeatRemindAt(), properties.repeatAbortAt(),
+            prepared.systemPrompt(), () -> plans.load(sessionId), properties.maxPlanContinues(),
+            properties.contextMaxChars(), properties.completionChecksEnabled());
+    }
+
+    public com.pilot.core.model.ModelClient meteredMainClient(PreparedRun prepared,
+        com.pilot.core.model.ModelClient delegate, String sessionId, String runId,
+        Consumer<RequestReport> reports) {
+        return new MeteredModelClient(delegate, sessionId, "main", prepared.promptSources(), reports)
+            .withRunContext(sessionId, runId);
+    }
+
+    public AgentProfileCatalog profilesFor(String workspace) {
+        return agentProfiles == null ? AgentProfileCatalog.EMPTY : agentProfiles.catalogFor(workspace);
     }
 
     public PreparedRun prepare(PreparationInput input, PlanSink planSink,
@@ -146,16 +171,19 @@ public final class AgentRunPreparation {
             promptSources, systemPrompt, inheritedDeferred);
     }
 
-    public void configureExecutionTools(ToolRegistry tools, GoalExecutionPolicy goalPolicy,
-        Set<String> availableTools, String sessionId, String runId, String workspace, boolean unattended,
+    public void configureExecutionTools(PreparedRun prepared, GoalExecutionPolicy goalPolicy,
+        String sessionId, String runId, String workspace, boolean unattended,
         TaskControlService.TaskContract executionTask, com.pilot.core.model.ModelClient measuredChild,
         com.pilot.core.model.ModelClient executionClient, PermissionGate sessionGate, AgentLoop.Config config,
         java.util.function.BooleanSupplier cancelled, SpawnAgentTool.UsageSink childUsage,
-        AgentProfileCatalog profiles, com.pilot.core.model.ModelClient configuredModel, boolean reviewActive,
-        List<String> inheritedDeferred,
+        AgentProfileCatalog profiles, com.pilot.core.model.ModelClient configuredModel,
         Consumer<com.pilot.core.event.SessionEvent> sink, com.pilot.core.approval.ApprovalBroker approvals,
         com.pilot.core.session.ConversationRepository conversations, ModelSettings modelSettings,
         com.pilot.server.multi.MultiAgentService multiAgent, com.pilot.server.git.GitWorktrees worktrees) {
+        ToolRegistry tools = prepared.tools();
+        Set<String> availableTools = prepared.availableTools();
+        boolean reviewActive = prepared.review().active();
+        List<String> inheritedDeferred = prepared.inheritedDeferredTools();
         if (goalPolicy != null) {
             boolean readOnlySession = reviewActive
                 || properties.permissionMode() == com.pilot.core.permission.PermissionMode.READ_ONLY

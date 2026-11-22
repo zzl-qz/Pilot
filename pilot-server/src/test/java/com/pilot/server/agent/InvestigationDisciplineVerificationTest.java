@@ -45,6 +45,7 @@ import tools.jackson.databind.json.JsonMapper;
  * 端到端生产行为验证：证明问题不是通过「禁止模型读取」来解决的，
  * 而是通过高密度并行工具 + 区间去重/压缩失效 + Pre-flight 预定位 + 边际信息增益追踪实现健康收敛。
  */
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class InvestigationDisciplineVerificationTest {
     @TempDir
     Path workspace;

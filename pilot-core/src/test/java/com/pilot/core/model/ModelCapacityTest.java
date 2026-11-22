@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import com.pilot.core.WindowsJdkLoopbackSensitive;
 
 import com.pilot.core.message.Attachment;
 import com.pilot.core.message.Message;
@@ -20,6 +21,7 @@ import com.pilot.core.model.diagnostics.ModelRequestScope;
 
 import tools.jackson.databind.json.JsonMapper;
 
+@WindowsJdkLoopbackSensitive
 class ModelCapacityTest {
     @Test
     void reservesOutputAndMarginAndCountsImagesAndSchemas() {

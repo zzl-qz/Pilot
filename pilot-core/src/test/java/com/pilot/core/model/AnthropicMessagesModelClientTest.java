@@ -16,6 +16,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
+import com.pilot.core.WindowsJdkLoopbackSensitive;
 
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
@@ -24,6 +25,7 @@ import com.sun.net.httpserver.HttpServer;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+@WindowsJdkLoopbackSensitive
 class AnthropicMessagesModelClientTest {
     private final JsonMapper mapper = JsonMapper.builder().build();
 

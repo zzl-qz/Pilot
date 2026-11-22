@@ -46,13 +46,11 @@ import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.loop.ContextCompactor;
 import com.pilot.core.message.Attachment;
 import com.pilot.core.message.Message;
-import com.pilot.core.model.ContextComposition;
 import com.pilot.core.model.MeteredModelClient;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelUsage;
 import com.pilot.core.model.RequestReport;
 import com.pilot.core.model.RequestTotals;
-import com.pilot.core.multi.profile.AgentProfileCatalog;
 import com.pilot.core.permission.PermissionGate;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.plan.PlanSink;
@@ -161,15 +159,9 @@ public class AgentRunService implements RunStarter {
     private final com.pilot.server.validation.ValidationStatusService validationStatus;
     /** 验证策略门禁；测试轻量装配不注入时，保持现有行为。 */
     private volatile com.pilot.server.validation.VerificationPolicyService verificationPolicies;
-    /** 自定义子代理目录；测试轻量装配不注入时，spawn/dispatch 的 agent 引用只能拿到空目录。 */
-    private volatile AgentProfileService agentProfiles;
     @org.springframework.beans.factory.annotation.Autowired
     private org.springframework.beans.factory.ObjectProvider<com.pilot.server.schedule.ScheduleService> scheduleService;
     private volatile com.pilot.server.desktop.DesktopViewportReset viewportReset;
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    public void setAgentProfiles(AgentProfileService agentProfiles) {
-        this.agentProfiles = agentProfiles;
-    }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setViewportReset(com.pilot.server.desktop.DesktopViewportReset viewportReset) {
@@ -1158,26 +1150,19 @@ public class AgentRunService implements RunStarter {
         TaskControlService.TaskContract executionTask = runContext.executionTask();
         String workspace = prepared.workspace();
         boolean reviewActive = prepared.review().active();
-        ToolRegistry tools = prepared.tools();
-        List<String> inheritedDeferred = prepared.inheritedDeferredTools();
-        Set<String> availableTools = prepared.availableTools();
         RunUsageAccumulator runUsage = runContext.runUsage();
         AtomicReference<RunCompleted> lastCompleted = runContext.lastCompleted();
         Consumer<SessionEvent> sink = runContext.sink();
-        List<ContextComposition.Source> promptSources = prepared.promptSources();
         Consumer<RequestReport> reports = report -> {
             synchronized (runUsage) {
                 publish(sessionId, runId, new ModelRequestCompleted(report));
                 publish(sessionId, runId, runUsage.request(report));
             }
         };
-        ModelClient measuredMain = new MeteredModelClient(modelClient, sessionId, "main", promptSources, reports)
-            .withRunContext(sessionId, runId);
+        ModelClient measuredMain = preparation.meteredMainClient(prepared, modelClient, sessionId, runId, reports);
         ModelClient measuredChild = new MeteredModelClient(modelClient, sessionId + ":subagent", "subagent", List.of(),
             reports).withRunContext(sessionId, runId);
-        AgentLoop.Config config = new AgentLoop.Config(properties.maxSteps(), properties.repeatRemindAt(),
-            properties.repeatAbortAt(), prepared.systemPrompt(), () -> plans.load(sessionId),
-            properties.maxPlanContinues(), properties.contextMaxChars(), properties.completionChecksEnabled());
+        AgentLoop.Config config = preparation.loopConfig(prepared, sessionId);
         GoalExecutionPolicy goalPolicy = (unattended || (!reviewActive && properties.goalModeEnabledValue()))
             ? new GoalExecutionPolicy(measuredMain, objectMapper, taskControls, sessionId,
                 toolFactory.resolve(workspace), cancelled, properties.maxSteps(), properties.directMaxRequests(),
@@ -1187,11 +1172,10 @@ public class AgentRunService implements RunStarter {
             : null;
         ModelClient executionClient = goalPolicy == null ? measuredMain : goalPolicy.budgetedClient();
         SpawnAgentTool.UsageSink childUsage = childUsageSink(goalPolicy, runUsage, sessionId, runId);
-        AgentProfileCatalog profiles = agentProfiles == null ? AgentProfileCatalog.EMPTY
-            : agentProfiles.catalogFor(workspace);
-        preparation.configureExecutionTools(tools, goalPolicy, availableTools, sessionId, runId, workspace, unattended,
+        var profiles = preparation.profilesFor(workspace);
+        preparation.configureExecutionTools(prepared, goalPolicy, sessionId, runId, workspace, unattended,
             executionTask, measuredChild, executionClient, runContext.sessionGate(), config, cancelled, childUsage,
-            profiles, modelClient, reviewActive, inheritedDeferred, sink, approvals, conversations, modelSettings,
+            profiles, modelClient, sink, approvals, conversations, modelSettings,
             multiAgent, worktrees);
         return new ExecutionRunContext(runContext, runUsage, lastCompleted, sink, measuredMain, config, goalPolicy,
             executionClient);

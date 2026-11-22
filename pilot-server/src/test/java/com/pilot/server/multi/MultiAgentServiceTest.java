@@ -51,6 +51,7 @@ import com.pilot.server.tool.WorkspaceToolFactory;
 
 import tools.jackson.databind.json.JsonMapper;
 
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class MultiAgentServiceTest {
 
     private static final String REPORT = """

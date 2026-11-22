@@ -27,6 +27,7 @@ import com.sun.net.httpserver.HttpServer;
 
 import tools.jackson.databind.json.JsonMapper;
 
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class VoiceServiceTest {
     @Test
     void normalizesEndpointWithoutChangingProviderOrVersionPrefix() {

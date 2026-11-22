@@ -33,6 +33,7 @@ import com.sun.net.httpserver.HttpServer;
     properties = {"pilot.store=memory", "pilot.model.timeout-seconds=120", "pilot.model.idle-timeout-seconds=60",
         "pilot.model.connect-timeout-seconds=4", "pilot.model.options=primary-test,alternate-test"})
 @AutoConfigureMockMvc
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class SettingsApiTest {
     private static final Path DATA = Path.of(System.getProperty("java.io.tmpdir"), "pilot-settings-api-test");
 

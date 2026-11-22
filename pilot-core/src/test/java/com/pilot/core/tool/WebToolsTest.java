@@ -13,11 +13,13 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
+import com.pilot.core.WindowsJdkLoopbackSensitive;
 
 import com.sun.net.httpserver.HttpServer;
 
 import tools.jackson.databind.ObjectMapper;
 
+@WindowsJdkLoopbackSensitive
 class WebToolsTest {
     private final ObjectMapper mapper = new ObjectMapper();
 

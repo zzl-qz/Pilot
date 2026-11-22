@@ -42,6 +42,7 @@ import com.sun.net.httpserver.HttpServer;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class ModelCapabilityDiscoveryTest {
     private static final JsonMapper JSON = new JsonMapper();
     private static final String SEARCH_OK =

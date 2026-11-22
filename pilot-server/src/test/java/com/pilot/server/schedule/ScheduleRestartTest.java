@@ -31,6 +31,7 @@ import com.sun.net.httpserver.HttpServer;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class ScheduleRestartTest {
     @TempDir
     Path root;

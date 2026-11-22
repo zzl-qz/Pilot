@@ -24,6 +24,7 @@ import tools.jackson.databind.ObjectMapper;
 /** 经过真实 Tomcat、分块传输和 Jackson 的入口限流验证，不连接模型。 */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {"pilot.store=memory",
     "pilot.attachments.max-files=2", "pilot.attachments.max-file-bytes=3", "pilot.attachments.max-total-bytes=4"})
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class AttachmentHttpTest {
     @Value("${local.server.port}")
     int port;

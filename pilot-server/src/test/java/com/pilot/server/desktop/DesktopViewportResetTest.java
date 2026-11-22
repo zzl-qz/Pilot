@@ -20,6 +20,7 @@ import com.sun.net.httpserver.HttpServer;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class DesktopViewportResetTest {
     @TempDir
     Path temp;

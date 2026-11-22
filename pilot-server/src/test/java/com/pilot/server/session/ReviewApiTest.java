@@ -36,6 +36,7 @@ import tools.jackson.databind.ObjectMapper;
 /** 审阅面板的两个新接口：撤销改动、能力清单。 */
 @SpringBootTest(properties = "pilot.store=memory")
 @AutoConfigureMockMvc
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class ReviewApiTest {
     private static final Path DATA = Path.of(System.getProperty("java.io.tmpdir"), "pilot-review-" + UUID.randomUUID());
 

@@ -52,6 +52,7 @@ import tools.jackson.databind.ObjectMapper;
 
 @SpringBootTest(properties = "pilot.store=memory")
 @AutoConfigureMockMvc
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class SessionApiTest {
     private static final Path ATTACHMENT_ROOT =
         Path.of(System.getProperty("java.io.tmpdir"), "pilot-session-api-" + UUID.randomUUID());

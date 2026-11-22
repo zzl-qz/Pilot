@@ -9,7 +9,9 @@ import java.net.URI;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import com.pilot.core.WindowsJdkLoopbackSensitive;
 
+@WindowsJdkLoopbackSensitive
 class BootstrapHttpTest {
     @Test
     void configuredProxyHonorsHostAndDomainExclusions() {

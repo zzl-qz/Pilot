@@ -26,6 +26,7 @@ import tools.jackson.databind.ObjectMapper;
 
 @SpringBootTest(properties = {"pilot.store=memory", "pilot.data.dir=${java.io.tmpdir}/pilot-notes-api-${random.uuid}"})
 @AutoConfigureMockMvc
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class SessionNotesApiTest {
     @Autowired
     private MockMvc mvc;

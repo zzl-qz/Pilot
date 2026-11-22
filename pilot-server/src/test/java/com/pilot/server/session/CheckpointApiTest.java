@@ -48,6 +48,7 @@ import tools.jackson.databind.ObjectMapper;
 
 @SpringBootTest(properties = "pilot.store=memory")
 @AutoConfigureMockMvc
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class CheckpointApiTest {
     private static final Path DATA =
         Path.of(System.getProperty("java.io.tmpdir"), "pilot-checkpoints-" + UUID.randomUUID());

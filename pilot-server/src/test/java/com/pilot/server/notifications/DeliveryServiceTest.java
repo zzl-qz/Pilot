@@ -34,6 +34,7 @@ import com.sun.net.httpserver.HttpServer;
 
 import tools.jackson.databind.json.JsonMapper;
 
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class DeliveryServiceTest {
     @TempDir
     Path root;

@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.junit.jupiter.api.Test;
+import com.pilot.core.WindowsJdkLoopbackSensitive;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -23,6 +24,7 @@ import com.sun.net.httpserver.HttpServer;
 import tools.jackson.databind.json.JsonMapper;
 
 /** 模型清单探测：端点写法换算、鉴权头有无、错误 fail-visible。 */
+@WindowsJdkLoopbackSensitive
 class ModelCatalogTest {
     private final JsonMapper json = JsonMapper.builder().build();
     private final HttpClient httpClient = HttpClient.newHttpClient();

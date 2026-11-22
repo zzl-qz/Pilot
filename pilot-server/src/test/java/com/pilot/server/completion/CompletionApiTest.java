@@ -37,6 +37,7 @@ import tools.jackson.databind.json.JsonMapper;
 /** 完成凭证/策略/胶囊的 HTTP 契约；同时验证 Spring 装配没有漏 bean。 */
 @SpringBootTest(properties = "pilot.store=memory")
 @AutoConfigureMockMvc
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class CompletionApiTest {
     private static final Path DATA =
         Path.of(System.getProperty("java.io.tmpdir"), "pilot-completion-api-" + UUID.randomUUID());

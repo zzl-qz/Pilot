@@ -24,6 +24,7 @@ import tools.jackson.databind.ObjectMapper;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = {"pilot.store=memory", "spring.servlet.multipart.max-file-size=4KB",
         "spring.servlet.multipart.max-request-size=3KB", "pilot.voice.max-recording-seconds=73"})
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class VoiceLimitsHttpTest {
     @Value("${local.server.port}")
     int port;

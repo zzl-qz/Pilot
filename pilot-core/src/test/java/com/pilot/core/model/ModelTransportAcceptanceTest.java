@@ -18,6 +18,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
+import com.pilot.core.WindowsJdkLoopbackSensitive;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -28,6 +29,7 @@ import com.sun.net.httpserver.HttpServer;
 import tools.jackson.databind.json.JsonMapper;
 
 /** 独立验收：真实本地 HTTP 响应，不依赖客户端内部实现或外部模型。 */
+@WindowsJdkLoopbackSensitive
 class ModelTransportAcceptanceTest {
     private static final String CHAT = "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":\"完成\"}}]}";
     private static final String STREAM =

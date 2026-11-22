@@ -25,6 +25,7 @@ import com.pilot.core.session.SessionService;
 
 @SpringBootTest(properties = "pilot.store=memory")
 @AutoConfigureMockMvc
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class TaskControlApiTest {
     private static final Path DATA =
         Path.of(System.getProperty("java.io.tmpdir"), "pilot-task-api-" + UUID.randomUUID());

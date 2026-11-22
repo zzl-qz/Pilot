@@ -25,6 +25,7 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -1508,6 +1509,7 @@ class AgentRunServiceTest {
     }
 
     @Test
+    @ExtendWith(com.pilot.server.WindowsJdkLoopbackCondition.class)
     void preflightLocalizationRespectsDisableFlagAndWorkspaceToolsExposeParallelCodeSymbol() throws Exception {
         Files.writeString(workspace.resolve("PaymentGateway.java"), """
             public class PaymentGateway {

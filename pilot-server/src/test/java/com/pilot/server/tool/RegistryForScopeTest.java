@@ -16,6 +16,7 @@ import com.pilot.core.workspace.AgentScope;
 import com.pilot.server.config.WebSearchProperties;
 
 /** 子 Agent 工具表的权限边界：只读不拿通用命令，任何任务都拿不到派发入口。 */
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class RegistryForScopeTest {
 
     @TempDir

@@ -36,6 +36,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import com.pilot.core.message.ToolCall;
+import com.pilot.core.WindowsJdkLoopbackSensitive;
 import com.pilot.core.permission.PermissionDecision;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PolicyPermissionGate;
@@ -54,6 +55,7 @@ import tools.jackson.databind.ObjectMapper;
  * 运行时目录默认取仓库的 {@code .pilot/browser}（服务启动时由 BrowserRuntime 安装），
  * 也可用 {@code -Dpilot.browser.home=...} 指定。
  */
+@WindowsJdkLoopbackSensitive
 class BrowserIntegrationTest {
     private static final String PAGE = """
         <!doctype html><html><head><meta charset="utf-8"><title>Pilot Demo</title></head><body>

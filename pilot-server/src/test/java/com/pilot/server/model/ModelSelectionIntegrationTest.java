@@ -43,6 +43,7 @@ import tools.jackson.databind.ObjectMapper;
 @SpringBootTest(properties = {"pilot.store=memory", "pilot.runtime.provision=false", "pilot.web-search.local=false",
     "pilot.agent.goal-mode-enabled=false", "pilot.agent.completion-checks=false"})
 @AutoConfigureMockMvc
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class ModelSelectionIntegrationTest {
     private static final Path DATA =
         Path.of(System.getProperty("java.io.tmpdir"), "pilot-model-selection-" + UUID.randomUUID());

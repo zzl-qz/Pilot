@@ -30,6 +30,7 @@ import tools.jackson.databind.ObjectMapper;
 @SpringBootTest(
     properties = {"pilot.store=memory", "pilot.data.dir=${java.io.tmpdir}/pilot-schedule-api-${random.uuid}"})
 @AutoConfigureMockMvc
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class ScheduleApiTest {
     @Autowired
     MockMvc mvc;

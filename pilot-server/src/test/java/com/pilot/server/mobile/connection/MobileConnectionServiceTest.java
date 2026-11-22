@@ -20,6 +20,7 @@ import com.pilot.server.security.SecurityProperties;
 
 import tools.jackson.databind.ObjectMapper;
 
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class MobileConnectionServiceTest {
     @TempDir
     Path directory;

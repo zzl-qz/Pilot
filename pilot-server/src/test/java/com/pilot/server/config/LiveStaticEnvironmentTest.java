@@ -12,6 +12,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.mock.env.MockEnvironment;
 
 @SpringBootTest(properties = "pilot.store=memory")
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class LiveStaticEnvironmentTest {
     @Autowired
     private Environment environment;

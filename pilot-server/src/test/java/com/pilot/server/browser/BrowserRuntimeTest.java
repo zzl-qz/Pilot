@@ -38,6 +38,7 @@ import com.pilot.server.tool.WorkspaceToolFactory;
 
 import tools.jackson.databind.ObjectMapper;
 
+@com.pilot.server.WindowsJdkLoopbackSensitive
 class BrowserRuntimeTest {
     @TempDir
     Path data;
