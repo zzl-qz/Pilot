@@ -10,7 +10,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Set;
 
-import com.pilot.core.multi.DiffSandbox;
+import com.pilot.core.util.Sha256;
 
 /** 项目、镜像和依赖清单共同分区。锁文件不进入容器，构建只能修改自己的缓存。 */
 public final class DependencyCache implements AutoCloseable {
@@ -43,10 +43,10 @@ public final class DependencyCache implements AutoCloseable {
                     throw new IOException("依赖清单无效");
                 }
                 key.append('\n').append(snapshot.relativize(file).toString().replace('\\', '/')).append(':')
-                    .append(DiffSandbox.fingerprint(Files.readString(file)));
+                    .append(Sha256.hex(Files.readString(file)));
             }
         }
-        Path folder = root.resolve(DiffSandbox.fingerprint(key.toString()));
+        Path folder = root.resolve(Sha256.hex(key.toString()));
         if (Files.isSymbolicLink(folder)) {
             throw new IOException("依赖缓存目录不能是链接");
         }
