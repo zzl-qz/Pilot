@@ -15,13 +15,13 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import java.util.function.LongSupplier;
 
 import com.pilot.core.event.AssistantPreview;
 import com.pilot.core.event.AssistantReasoning;
@@ -45,24 +45,16 @@ import lombok.extern.slf4j.Slf4j;
  * 的队列填满并被断开（断线后按游标重连即可补齐），不会拖住会话的发布线程和 Agent 循环。
  */
 @Slf4j
-public final class SessionService {
-    /** 单个订阅者允许积压的事件数。超过即视为客户端跟不上，直接断开。 */
-    private static final ScheduledExecutorService MONITOR = Executors.newSingleThreadScheduledExecutor(task -> {
-        Thread thread = new Thread(task, "pilot-event-monitor");
-        thread.setDaemon(true);
-        return thread;
-    });
-
+public final class SessionService implements AutoCloseable {
     private final Clock clock;
     private final SessionRepository repository;
     private final EventStreamLimits limits;
-    private final PreviewLimits previewLimits;
     private final LiveOutputCache liveOutputs;
+    private final ScheduledExecutorService monitor;
+    private final SessionPreviewAggregator previews;
     private final Semaphore replaySlots;
     private final AtomicInteger replayPages = new AtomicInteger();
     private final AtomicInteger peakReplayPages = new AtomicInteger();
-    private final ConcurrentMap<String, PendingPreview> previews = new ConcurrentHashMap<>();
-    private final AtomicInteger pendingPreviews = new AtomicInteger();
     private final AtomicLong previewInputs = new AtomicLong();
     private final AtomicLong previewOutputs = new AtomicLong();
     private final AtomicInteger workers = new AtomicInteger();
@@ -92,7 +84,12 @@ public final class SessionService {
 
     public SessionService(Clock clock, SessionRepository repository, EventStreamLimits limits,
         PreviewLimits previewLimits) {
-        this.previewLimits = Objects.requireNonNull(previewLimits);
+        this.monitor = Executors.newSingleThreadScheduledExecutor(task -> {
+            Thread thread = new Thread(task, "pilot-event-monitor");
+            thread.setDaemon(true);
+            return thread;
+        });
+        this.previews = new SessionPreviewAggregator(Objects.requireNonNull(previewLimits), monitor);
         this.liveOutputs = new LiveOutputCache(previewLimits);
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
@@ -234,110 +231,47 @@ public final class SessionService {
         }
         Object lock = lockFor(sessionId);
         synchronized (lock) {
-            PendingPreview pending = previews.get(sessionId);
-            // 当前缓冲已经确认过所属运行；旧运行的迟到回调不能刷掉或替换它。
-            if (pending != null && !pending.runId.equals(runId)) {
-                return;
-            }
-            if (pending == null) {
+            LongSupplier sequenceWithoutPending = () -> {
                 Session session = repository.find(sessionId).orElse(null);
                 if (session == null) {
                     locks.remove(sessionId, lock);
-                    return;
+                    return 0L;
                 }
                 if (session.status().terminal()) {
-                    return;
+                    return 0L;
                 }
                 var latest = repository.latestEvent(sessionId);
                 if (latest.isEmpty() || !latest.get().runId().equals(runId)) {
-                    return;
+                    return 0L;
                 }
-            }
-            previewInputs.incrementAndGet();
-            if (pending != null && (pending.type != event.type() || reset)) {
-                flushPreview(sessionId, pending);
-                pending = null;
-            }
-            long sequence = pending == null ? repository.latestSequence(sessionId) : pending.sequence;
-            if (sequence < 1) {
-                return;
-            }
-            if (reset) {
-                deliverPreview(sessionId, runId, sequence, event, clock.instant());
-                return;
-            }
-            for (int i = 0; i < text.length();) {
-                int point = text.codePointAt(i);
-                int size = point <= 0x7f ? 1 : point <= 0x7ff ? 2 : point <= 0xffff ? 3 : 4;
-                if (pending != null && pending.bytes + size > previewLimits.mergeBytes()) {
-                    flushPreview(sessionId, pending);
-                    pending = null;
-                }
-                if (pending == null) {
-                    if (pendingPreviews.incrementAndGet() > previewLimits.sessions()) {
-                        pendingPreviews.decrementAndGet();
-                        SessionEvent remaining = event.type() == EventType.ASSISTANT_PREVIEW
-                            ? new AssistantPreview(text.substring(i)) : new AssistantReasoning(text.substring(i));
-                        deliverPreview(sessionId, runId, sequence, remaining, clock.instant());
-                        return;
+                return repository.latestSequence(sessionId);
+            };
+            var update = previews.accept(new SessionPreviewAggregator.PreviewInput(sessionId, runId, event.type(), text,
+                reset, clock.instant()), sequenceWithoutPending,
+                this::deliverPreview, task -> Thread.ofVirtual().name("pilot-preview-flush").start(() -> {
+                    synchronized (lock) {
+                        task.run();
                     }
-                    pending = new PendingPreview(runId, event.type(), sequence, clock.instant());
-                    previews.put(sessionId, pending);
-                    PendingPreview expected = pending;
-                    pending.timer = MONITOR.schedule(() -> Thread.ofVirtual().name("pilot-preview-flush").start(() -> {
-                        synchronized (lock) {
-                            if (previews.get(sessionId) == expected) {
-                                flushPreview(sessionId, expected);
-                            }
-                        }
-                    }), previewLimits.mergeMillis(), TimeUnit.MILLISECONDS);
-                }
-                pending.text.appendCodePoint(point);
-                pending.bytes += size;
-                i += Character.charCount(point);
-                if (pending.bytes >= previewLimits.mergeBytes()) {
-                    flushPreview(sessionId, pending);
-                    pending = null;
-                }
+                }));
+            if (update.accepted()) {
+                previewInputs.incrementAndGet();
             }
-        }
-    }
-
-    private static final class PendingPreview {
-        final String runId;
-        final EventType type;
-        final long sequence;
-        final Instant timestamp;
-        final StringBuilder text = new StringBuilder();
-        int bytes;
-        ScheduledFuture<?> timer;
-
-        PendingPreview(String runId, EventType type, long sequence, Instant timestamp) {
-            this.runId = runId;
-            this.type = type;
-            this.sequence = sequence;
-            this.timestamp = timestamp;
         }
     }
 
     private void discardPreview(String sessionId) {
-        PendingPreview pending = previews.remove(sessionId);
-        if (pending != null) {
-            pendingPreviews.decrementAndGet();
-            if (pending.timer != null) {
-                pending.timer.cancel(false);
-            }
-        }
+        previews.finish(sessionId, this::deliverPreview, true);
     }
 
-    private void flushPreview(String sessionId, PendingPreview pending) {
-        if (pending == null || previews.get(sessionId) != pending) {
-            return;
-        }
-        discardPreview(sessionId);
-        SessionEvent event = pending.type == EventType.ASSISTANT_PREVIEW ? new AssistantPreview(pending.text.toString())
-            : new AssistantReasoning(pending.text.toString());
-        deliverPreview(sessionId, pending.runId, pending.sequence, event, pending.timestamp);
+    private void finishPreview(String sessionId) {
+        previews.finish(sessionId, this::deliverPreview, false);
+    }
+
+    private void deliverPreview(SessionPreviewAggregator.PreviewOutput preview) {
+        SessionEvent event = preview.type() == EventType.ASSISTANT_PREVIEW
+            ? new AssistantPreview(preview.text(), preview.reset())
+            : new AssistantReasoning(preview.text(), preview.reset());
+        deliverPreview(preview.sessionId(), preview.runId(), preview.sequence(), event, preview.timestamp());
     }
 
     private void deliverPreview(String sessionId, String runId, long sequence, SessionEvent event, Instant timestamp) {
@@ -358,7 +292,7 @@ public final class SessionService {
                 locks.remove(sessionId, lock);
                 throw new NoSuchSessionException(sessionId);
             });
-            flushPreview(sessionId, previews.get(sessionId));
+            finishPreview(sessionId);
             SessionStatus status = nextStatus(current.status(), event);
             // 发过第一条消息就不再是空白对话。放在 publish 里，发送、重新生成、改历史重跑都覆盖
             if (event.type() == EventType.RUN_STARTED) {
@@ -455,7 +389,7 @@ public final class SessionService {
             if (repository.find(sessionId).isEmpty()) {
                 throw new NoSuchSessionException(sessionId);
             }
-            flushPreview(sessionId, previews.get(sessionId));
+            finishPreview(sessionId);
             int removed = repository.transaction(sessionId, () -> {
                 if (expectedRevision != null && historyRevision(sessionId) != expectedRevision) {
                     throw new HistoryChangedException();
@@ -518,7 +452,7 @@ public final class SessionService {
                 locks.remove(sessionId, lock);
                 throw new NoSuchSessionException(sessionId);
             }
-            flushPreview(sessionId, previews.get(sessionId));
+            finishPreview(sessionId);
             long revision = historyRevision(sessionId);
             if (expectedRevision != null && revision != expectedRevision) {
                 throw new HistoryChangedException();
@@ -565,7 +499,7 @@ public final class SessionService {
         Map<String, Long> reasons = new TreeMap<>();
         closedReasons.forEach((key, value) -> reasons.put(key, value.get()));
         return new StreamMetrics(subscriberCount(), workers.get(), queuedBytes.get(), peakBytes.get(), delivered.get(),
-            replayNanos.get(), previewInputs.get(), previewOutputs.get(), pendingPreviews.get(), liveOutputs.bytes(),
+            replayNanos.get(), previewInputs.get(), previewOutputs.get(), previews.pendingSessions(), liveOutputs.bytes(),
             liveOutputs.size(), replayPages.get(), peakReplayPages.get(), Map.copyOf(reasons));
     }
 
@@ -698,7 +632,7 @@ public final class SessionService {
 
         void start() {
             long started = System.nanoTime();
-            monitor = MONITOR.scheduleAtFixedRate(() -> {
+            monitor = SessionService.this.monitor.scheduleAtFixedRate(() -> {
                 long now = System.nanoTime();
                 PendingEvent oldest = queue.peek();
                 long sending = sendingAt;
@@ -914,5 +848,11 @@ public final class SessionService {
                 });
             }
         }
+    }
+
+    @Override
+    public void close() {
+        subscribers.values().forEach(deliveries -> deliveries.forEach(EventDelivery::close));
+        monitor.shutdownNow();
     }
 }
