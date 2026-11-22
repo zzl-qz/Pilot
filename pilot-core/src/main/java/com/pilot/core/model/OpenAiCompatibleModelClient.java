@@ -50,7 +50,16 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     private ModelProfile profile;
     private volatile boolean cacheParametersDisabled;
     private volatile boolean streamUsageDisabled;
-    private volatile boolean replayAllReasoning;
+    /**
+     * 端点要求 thinking 模式回传历史思考时的补齐档位。
+     *
+     * <p>默认只回传当前轮的思考：历史轮次的思考剥掉能省上下文、也能命中提示词缓存。
+     * 有的端点（DeepSeek、Moonshot 等兼容层）要求所有 assistant 消息都带回
+     * {@code reasoning_content}，拒绝后用 {@link #escalateReasoningReplay} 逐档补到被接受为止。
+     */
+    private volatile ReasoningReplay reasoningReplay = ReasoningReplay.NONE;
+    /** 端点强制回传思考、而历史消息没有保存思考时补的占位说明；只为满足协议，不冒充真实推理。 */
+    static final String MISSING_REASONING = "（该轮历史消息没有保存推理内容）";
 
     public OpenAiCompatibleModelClient(HttpClient httpClient, ObjectMapper objectMapper, URI endpoint, String apiKey,
         String model) {
@@ -128,14 +137,14 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     }
 
     Map<String, Object> requestBody(List<Message> messages, List<ToolDefinition> definitions, boolean streaming) {
-        return requestBody(messages, definitions, streaming, replayAllReasoning);
+        return requestBody(messages, definitions, streaming, reasoningReplay);
     }
 
     private Map<String, Object> requestBody(List<Message> messages, List<ToolDefinition> definitions, boolean streaming,
-        boolean includeEarlierReasoning) {
+        ReasoningReplay replay) {
         ModelCapacity capacity = ModelCapacity.active();
         RequestBudget.enforce(messages, definitions, capacity);
-        List<Map<String, Object>> items = messageItems(messages, includeEarlierReasoning);
+        List<Map<String, Object>> items = messageItems(messages, replay);
         List<Map<String, Object>> tools = definitions == null ? new ArrayList<>()
             : new ArrayList<>(definitions.stream().map(this::toolPayload).map(LinkedHashMap::new).toList());
         Map<String, Object> body = new LinkedHashMap<>();
@@ -172,11 +181,12 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         return body;
     }
 
-    private List<Map<String, Object>> messageItems(List<Message> messages, boolean includeEarlierReasoning) {
+    private List<Map<String, Object>> messageItems(List<Message> messages, ReasoningReplay replay) {
         int lastUser = Message.lastRealUserTurnIndex(messages);
         List<Map<String, Object>> items = new ArrayList<>(messages.size());
         for (int i = 0; i < messages.size(); i++) {
-            items.add(messagePayload(messages.get(i), includeEarlierReasoning || i > lastUser));
+            items.add(messagePayload(messages.get(i), replay.replaysHistory() || i > lastUser,
+                replay.patchesMissingReasoning()));
         }
         return items;
     }
@@ -212,17 +222,36 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             && error.contains("passed back");
     }
 
-    private boolean enableEarlierReasoning(List<Message> messages, boolean requestIncludedEarlierReasoning) {
-        if (requestIncludedEarlierReasoning) {
+    /**
+     * 端点拒绝「思考没回传」后升到下一档：先回放历史里已保存的思考，再给缺失的历史消息补占位。
+     * 历史里本来就没有可回放的思考时跳过中间档，避免原样重发同一个请求。
+     *
+     * @return 是否还有下一档可试；已经补到最满仍被拒时返回 false，由调用方按失败处理
+     */
+    private boolean escalateReasoningReplay(List<Message> messages, ReasoningReplay attempted) {
+        if (attempted == ReasoningReplay.PATCHED) {
             return false;
         }
-        int lastUser = Message.lastRealUserTurnIndex(messages);
-        if (lastUser < 0 || messages.stream().limit(lastUser + 1L)
-            .noneMatch(message -> "assistant".equals(message.role()) && !message.reasoningContent().isBlank())) {
-            return false;
-        }
-        replayAllReasoning = true;
+        ReasoningReplay next = attempted == ReasoningReplay.STORED || !hasEarlierReasoning(messages)
+            ? ReasoningReplay.PATCHED
+            : ReasoningReplay.STORED;
+        reasoningReplay = next;
         return true;
+    }
+
+    /** 当前轮之前是否存在已保存的思考；没有的话回放档补不出任何东西。 */
+    private static boolean hasEarlierReasoning(List<Message> messages) {
+        int lastUser = Message.lastRealUserTurnIndex(messages);
+        if (lastUser < 0) {
+            return false;
+        }
+        for (Message message : messages.subList(0, lastUser + 1)) {
+            if ("assistant".equals(message.role()) && message.reasoningContent() != null
+                && !message.reasoningContent().isBlank()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean markMessage(Map<String, Object> payload, Map<String, Object> marker, boolean stableSystem) {
@@ -278,10 +307,10 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
 
     @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
-        boolean includeEarlierReasoning = replayAllReasoning;
+        ReasoningReplay replay = reasoningReplay;
         HttpRequest request = ModelHttp
             .jsonPost(endpoint, requestTimeout, objectMapper,
-                requestBody(messages, tools, false, includeEarlierReasoning))
+                requestBody(messages, tools, false, replay))
             .header("Authorization", "Bearer " + apiKey).build();
 
         long startedAt = System.nanoTime();
@@ -299,8 +328,13 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             String errorBody = ModelHttp.snippet(response.body());
             if (requiresEarlierReasoningReplay(response.statusCode(), errorBody)
-                && enableEarlierReasoning(messages, includeEarlierReasoning)) {
+                && escalateReasoningReplay(messages, replay)) {
                 return chat(messages, tools);
+            }
+            if (requiresEarlierReasoningReplay(response.statusCode(), errorBody)) {
+                throw new ModelClientException(ModelFailureKind.PERMANENT,
+                    "该端点要求回传历史思考内容（reasoning_content），已回放并补齐可用历史仍被拒绝（"
+                        + elapsedMs(startedAt) + " ms, model=" + model + "）：" + errorBody);
             }
             if ((response.statusCode() == 404 || response.statusCode() == 405)
                 && NativeToolRejectedException.rejected(response.statusCode(), errorBody)) {
@@ -331,16 +365,16 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         }
         List<ToolCall> calls = usable(finishReason) ? toolCalls(message.get("tool_calls")) : List.of();
         return new ModelResponse(content, calls, usage(root.get("usage"), messages, content, calls), finishReason,
-            text(message.get("reasoning_content")));
+            reasoningText(message));
     }
 
     @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> textDelta,
         Consumer<String> reasoningDelta) {
-        boolean includeEarlierReasoning = replayAllReasoning;
+        ReasoningReplay replay = reasoningReplay;
         HttpRequest request = ModelHttp
             .jsonPost(endpoint, requestTimeout, objectMapper,
-                requestBody(messages, tools, true, includeEarlierReasoning))
+                requestBody(messages, tools, true, replay))
             .header("Authorization", "Bearer " + apiKey).header("Accept", "text/event-stream").build();
 
         long startedAt = System.nanoTime();
@@ -350,8 +384,13 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                     String errorBody = ModelHttp
                         .snippet(new String(stream.readNBytes(BoundedHttp.ERROR_BYTES), StandardCharsets.UTF_8));
                     if (requiresEarlierReasoningReplay(response.statusCode(), errorBody)
-                        && enableEarlierReasoning(messages, includeEarlierReasoning)) {
+                        && escalateReasoningReplay(messages, replay)) {
                         return chat(messages, tools, textDelta, reasoningDelta);
+                    }
+                    if (requiresEarlierReasoningReplay(response.statusCode(), errorBody)) {
+                        throw new ModelClientException(ModelFailureKind.PERMANENT,
+                            "该端点要求回传历史思考内容（reasoning_content），已回放并补齐可用历史仍被拒绝（" + elapsedMs(
+                                startedAt) + " ms, model=" + model + "）：" + errorBody);
                     }
                     if ((response.statusCode() == 404 || response.statusCode() == 405)
                         && NativeToolRejectedException.rejected(response.statusCode(), errorBody)) {
@@ -473,7 +512,8 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         return reason == ModelResponse.FinishReason.STOP || reason == ModelResponse.FinishReason.TOOL_CALLS;
     }
 
-    private Map<String, Object> messagePayload(Message message, boolean includeReasoning) {
+    private Map<String, Object> messagePayload(Message message, boolean includeReasoning,
+        boolean patchMissingReasoning) {
         LinkedHashMap<String, Object> payload = new LinkedHashMap<String, Object>();
         payload.put("role", message.role());
         if (message.hasToolCalls()) {
@@ -490,8 +530,14 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         if (message.toolCallId() != null && !message.toolCallId().isBlank()) {
             payload.put("tool_call_id", message.toolCallId());
         }
-        if (includeReasoning && message.reasoningContent() != null && !message.reasoningContent().isBlank()) {
-            payload.put("reasoning_content", message.reasoningContent());
+        if (includeReasoning) {
+            String reasoning = message.reasoningContent() == null ? "" : message.reasoningContent();
+            if (!reasoning.isBlank()) {
+                payload.put("reasoning_content", reasoning);
+            } else if (patchMissingReasoning && "assistant".equals(message.role())) {
+                // 端点要求每条 assistant 都带回思考，而这条历史消息没有保存过：补占位而不是让请求一直 400。
+                payload.put("reasoning_content", MISSING_REASONING);
+            }
         }
         return payload;
     }
@@ -646,6 +692,24 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             return;
         }
         sink.accept(text);
+    }
+
+    /** thinking 模式下历史思考的回传档位，按端点的拒绝反馈逐档升级。 */
+    private enum ReasoningReplay {
+        /** 只回传当前轮的思考，历史轮次剥掉（默认）。 */
+        NONE,
+        /** 回放历史里已保存的思考。 */
+        STORED,
+        /** 回放已保存的思考，并给没保存过的历史 assistant 消息补占位说明。 */
+        PATCHED;
+
+        boolean replaysHistory() {
+            return this != NONE;
+        }
+
+        boolean patchesMissingReasoning() {
+            return this == PATCHED;
+        }
     }
 
     /**

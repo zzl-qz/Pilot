@@ -99,6 +99,22 @@ class OpenAiCompatibleModelClientTest {
         }
     }
 
+    /** 非流式响应里有的兼容端点把推理放在 reasoning 字段：也要收下来，否则下一轮没法回传。 */
+    @Test
+    void parsesReasoningFieldFromNonStreamingResponse() throws IOException {
+        HttpServer server = startServer(new AtomicReference<>(), 200,
+            "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":\"ok\",\"reasoning\":\"先想清楚\"}}]}");
+        server.start();
+        try {
+            ModelResponse response = client(server).chat(List.of(Message.user("开始")), List.of());
+
+            assertEquals("ok", response.content());
+            assertEquals("先想清楚", response.reasoningContent());
+        } finally {
+            server.stop(0);
+        }
+    }
+
     @Test
     void streamsReasoningSeparatelyFromTheAnswer() throws IOException {
         HttpServer server = startServer(new AtomicReference<>(), 200, """

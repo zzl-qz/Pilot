@@ -227,6 +227,56 @@ class CacheWireTest {
         }
     }
 
+    /**
+     * 老会话的历史消息没有保存过思考（列是后加的），回放档补不出任何东西：
+     * 这时必须补占位让请求合法，而不是把整轮任务判成模型错误。
+     */
+    @Test
+    void patchesMissingThinkingWhenHistoryHasNoSavedReasoning() throws Exception {
+        List<String> bodies = new ArrayList<>();
+        HttpServer server = strictReasoningServer(bodies);
+        server.start();
+        try {
+            URI endpoint = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
+            var raw = client(endpoint);
+            List<Message> history = List.of(Message.system("rules"), Message.user("第一问"),
+                Message.assistant("先看 A.java", List.of()), Message.user("第二问"),
+                Message.assistant("", List.of(new ToolCall("c2", "read_file", Map.of())), ""));
+
+            assertEquals("ok", raw.chat(history, List.of()).content());
+
+            assertEquals(2, bodies.size(), "没有可回放的思考时应直接补占位，不重发同一份请求");
+            JsonNode patched = messages(bodies.get(1));
+            assertEquals(OpenAiCompatibleModelClient.MISSING_REASONING,
+                patched.get(2).path("reasoning_content").asString(), "历史里没保存思考的 assistant 消息要补占位");
+            assertEquals(OpenAiCompatibleModelClient.MISSING_REASONING,
+                patched.get(4).path("reasoning_content").asString(), "当前轮没返回思考的 assistant 消息同样要补，否则端点继续拒绝");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    /** 补齐到最满仍被拒：只放弃这一次调用，并说清是端点要求回传思考，不让上层猜。 */
+    @Test
+    void reportsActionableFailureWhenEndpointKeepsRejectingTheReplay() throws Exception {
+        List<String> bodies = new ArrayList<>();
+        HttpServer server = alwaysRejectingReasoningServer(bodies);
+        server.start();
+        try {
+            URI endpoint = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
+            var raw = client(endpoint);
+
+            ModelClientException failure = org.junit.jupiter.api.Assertions
+                .assertThrows(ModelClientException.class, () -> raw.chat(thinkingHistory(), List.of()));
+
+            assertEquals(ModelFailureKind.PERMANENT, failure.kind());
+            assertTrue(failure.getMessage().contains("回传历史思考内容"), "失败消息要说明端点要求回传思考：" + failure.getMessage());
+            assertEquals(3, bodies.size(), "回放历史、补占位各试一次，之后不再重发同样的请求");
+        } finally {
+            server.stop(0);
+        }
+    }
+
     /** Anthropic 同样以真实用户轮次为界：内部提醒不剥离当前轮 thinking，下一条真实提问才停回传。 */
     @Test
     void anthropicKeepsCurrentTurnThinkingUntilTheNextRealUserMessage() throws Exception {
@@ -399,6 +449,43 @@ class CacheWireTest {
 
     private JsonNode messages(String body) {
         return json.readTree(body).path("messages");
+    }
+
+    /** 要求每条 assistant 消息都带回非空思考，否则按线上端点那样回 400。 */
+    private HttpServer strictReasoningServer(List<String> bodies) throws IOException {
+        return reasoningServer(bodies, true);
+    }
+
+    /** 无论怎么补齐都拒绝，用来验证补齐到最满后的失败行为。 */
+    private HttpServer alwaysRejectingReasoningServer(List<String> bodies) throws IOException {
+        return reasoningServer(bodies, false);
+    }
+
+    private HttpServer reasoningServer(List<String> bodies, boolean acceptsCompleteReplay) throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            bodies.add(body);
+            boolean complete = true;
+            for (JsonNode message : messages(body)) {
+                if ("assistant".equals(message.path("role").asString())
+                    && message.path("reasoning_content").asString().isBlank()) {
+                    complete = false;
+                    break;
+                }
+            }
+            boolean accepted = acceptsCompleteReplay && complete;
+            String payload = accepted
+                ? "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":\"ok\"}}]}"
+                : "{\"error\":{\"message\":\"The `reasoning_content` in the thinking mode must be passed back to the API.\"}}";
+            byte[] bytes = payload.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(accepted ? 200 : 400, bytes.length);
+            try (var output = exchange.getResponseBody()) {
+                output.write(bytes);
+            }
+        });
+        return server;
     }
 
     private static boolean alternates(JsonNode messages) {
