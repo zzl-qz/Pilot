@@ -138,4 +138,38 @@ class MergePrecheckTest {
 
         assertFalse(report.hasConflict(), "与本批无关的会话间冲突不报，避免噪音：" + report.describe());
     }
+
+    @Test
+    void keepsOwnConflictWhenAnExternalChangeAlsoTouchesThePath() {
+        String base = numberedFile(30);
+        DiffSandbox first = sandbox("agentA", "T1");
+        DiffSandbox second = sandbox("agentB", "T2");
+        DiffSandbox external = sandbox("agentX", "T9");
+        first.add("src/A.java", base, replaceLine(base, 10, "A"), true, RiskLevel.MEDIUM);
+        second.add("src/A.java", base, replaceLine(base, 10, "B"), true, RiskLevel.MEDIUM);
+        external.add("src/A.java", base, replaceLine(base, 10, "X"), true, RiskLevel.LOW);
+
+        MergePrecheck.Report report = MergePrecheck.check(List.of(first, second),
+            List.of(new MergePrecheck.Held("其他会话 ses_x 的 T9", external.changes())));
+
+        assertTrue(report.hasOwnConflict(), "外部占用不能掩盖本批 Agent 之间的冲突");
+        assertTrue(report.hasExternalConflict());
+    }
+
+    @Test
+    void ignoresConflictsBetweenExternalSessionsWhenTheyDoNotConflictWithThisBatch() {
+        String base = numberedFile(30);
+        DiffSandbox mine = sandbox("agentA", "T1");
+        DiffSandbox left = sandbox("agentX", "T8");
+        DiffSandbox right = sandbox("agentY", "T9");
+        mine.add("src/A.java", base, replaceLine(base, 2, "mine"), true, RiskLevel.MEDIUM);
+        left.add("src/A.java", base, replaceLine(base, 10, "X"), true, RiskLevel.LOW);
+        right.add("src/A.java", base, replaceLine(base, 10, "Y"), true, RiskLevel.LOW);
+
+        MergePrecheck.Report report = MergePrecheck.check(List.of(mine), List.of(
+            new MergePrecheck.Held("其他会话 ses_x 的 T8", left.changes()),
+            new MergePrecheck.Held("其他会话 ses_y 的 T9", right.changes())));
+
+        assertFalse(report.hasConflict(), "与本批无关的外部会话冲突不应进入报告");
+    }
 }

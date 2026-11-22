@@ -27,10 +27,15 @@ public final class MergePrecheck {
      * @param owners 参与的 Agent 标识
      * @param detail 冲突细节（行区间）
      * @param external 是否牵扯其他会话尚未接受的沙箱
+     * @param own      是否牵扯本批子 Agent 之间的冲突
      */
-    public record Conflict(String path, List<String> owners, String detail, boolean external) {
+    public record Conflict(String path, List<String> owners, String detail, boolean external, boolean own) {
         public Conflict(String path, List<String> owners, String detail) {
-            this(path, owners, detail, false);
+            this(path, owners, detail, false, true);
+        }
+
+        public Conflict(String path, List<String> owners, String detail, boolean external) {
+            this(path, owners, detail, external, !external);
         }
     }
 
@@ -54,7 +59,7 @@ public final class MergePrecheck {
     public record Report(boolean hasConflict, List<Conflict> conflicts) {
         /** 本批子 Agent 之间的冲突。 */
         public boolean hasOwnConflict() {
-            return conflicts.stream().anyMatch(conflict -> !conflict.external());
+            return conflicts.stream().anyMatch(Conflict::own);
         }
 
         /** 牵扯其他会话未接受沙箱的冲突。 */
@@ -119,13 +124,36 @@ public final class MergePrecheck {
                 continue;
             }
             List<String> names = List.copyOf(owners.keySet());
-            if (externalOwners.containsAll(names)) {
-                continue;
+            Set<String> participants = new LinkedHashSet<>();
+            List<String> details = new ArrayList<>();
+            boolean ownConflict = false;
+            boolean externalConflict = false;
+            for (int i = 0; i < names.size(); i++) {
+                for (int j = i + 1; j < names.size(); j++) {
+                    String left = names.get(i);
+                    String right = names.get(j);
+                    boolean leftExternal = externalOwners.contains(left);
+                    boolean rightExternal = externalOwners.contains(right);
+                    if (leftExternal && rightExternal) {
+                        continue;
+                    }
+                    String detail = overlapping(Map.of(left, owners.get(left), right, owners.get(right)));
+                    if (detail == null) {
+                        continue;
+                    }
+                    participants.add(left);
+                    participants.add(right);
+                    details.add(detail);
+                    if (leftExternal || rightExternal) {
+                        externalConflict = true;
+                    } else {
+                        ownConflict = true;
+                    }
+                }
             }
-            String detail = overlapping(owners);
-            if (detail != null) {
-                conflicts.add(
-                    new Conflict(entry.getKey(), names, detail, names.stream().anyMatch(externalOwners::contains)));
+            if (ownConflict || externalConflict) {
+                conflicts.add(new Conflict(entry.getKey(), List.copyOf(participants), String.join("；", details),
+                    externalConflict, ownConflict));
             }
         }
         return new Report(!conflicts.isEmpty(), List.copyOf(conflicts));
