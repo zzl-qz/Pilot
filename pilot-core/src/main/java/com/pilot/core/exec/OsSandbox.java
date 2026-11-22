@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
+import com.pilot.core.util.RealPaths;
 import com.pilot.core.util.HostOs;
 
 /**
@@ -295,9 +296,7 @@ public final class OsSandbox {
 
     static List<Path> writableRoots(Path workspace, Family family, List<Path> extraWritable) {
         Path realWorkspace = real(workspace);
-        Set<Path> roots = new LinkedHashSet<>();
-        roots.add(realWorkspace);
-        roots.addAll(extraDirectories(extraWritable, realWorkspace));
+        Set<Path> roots = new LinkedHashSet<>(RealPaths.visible(realWorkspace, extraWritable, false));
         roots.add(real(Path.of(System.getProperty("java.io.tmpdir", "/tmp"))));
         roots.add(real(Path.of("/tmp")));
         if (family == Family.MAC) {
@@ -323,10 +322,7 @@ public final class OsSandbox {
 
     /** 每个可见根的 git 元数据都只读：多挂一个目录不能连带放开它的 hooks 和配置。 */
     static List<Path> protectedWrites(Path workspace, List<Path> extraWritable) {
-        Path root = real(workspace);
-        List<Path> visible = new ArrayList<>();
-        visible.add(root);
-        visible.addAll(extraDirectories(extraWritable, root));
+        List<Path> visible = RealPaths.visible(real(workspace), extraWritable, false);
         List<Path> locked = new ArrayList<>();
         for (Path path : visible) {
             locked.add(path.resolve(".git/config"));
@@ -334,25 +330,6 @@ public final class OsSandbox {
             locked.add(path.resolve(".git/info"));
         }
         return List.copyOf(locked);
-    }
-
-    /** 额外目录只保留真实的、与工作区不重叠的条目，重复项只留一份。 */
-    private static List<Path> extraDirectories(List<Path> extraWritable, Path workspace) {
-        if (extraWritable == null || extraWritable.isEmpty()) {
-            return List.of();
-        }
-        Set<Path> extras = new LinkedHashSet<>();
-        for (Path extra : extraWritable) {
-            if (extra == null) {
-                continue;
-            }
-            Path real = real(extra);
-            if (!Files.isDirectory(real) || real.startsWith(workspace)) {
-                continue;
-            }
-            extras.add(real);
-        }
-        return List.copyOf(extras);
     }
 
     private static String label(String backend, boolean network) {

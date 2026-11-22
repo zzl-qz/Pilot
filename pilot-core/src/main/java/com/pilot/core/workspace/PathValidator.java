@@ -6,9 +6,10 @@ import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+
+import com.pilot.core.util.RealPaths;
 
 /**
  * 工作区路径校验：把模型给出的路径规范化为工作区内的绝对路径。
@@ -52,7 +53,7 @@ public final class PathValidator {
             throw new UncheckedIOException("cannot resolve workspace root: " + absolute, e);
         }
         this.scope = scope;
-        this.roots = bind(extraRoots);
+        this.roots = RealPaths.visible(this.root, extraRoots, true);
     }
 
     public Path root() {
@@ -149,33 +150,6 @@ public final class PathValidator {
         } catch (IOException e) {
             // 悬空链接也属于现存节点；无法解析时必须拒绝，不能退回父目录后继续写入。
             throw new WorkspaceViolationException("无法验证工作区路径: " + value + "（" + e.getMessage() + "）");
-        }
-    }
-
-    /** 额外目录取 real path，跳过不存在、不是目录或与已有根重叠的条目，重复项只留一份。 */
-    private List<Path> bind(List<Path> extraRoots) {
-        List<Path> visible = new ArrayList<>();
-        visible.add(root);
-        if (extraRoots == null) {
-            return List.copyOf(visible);
-        }
-        for (Path extra : extraRoots) {
-            Path real = extra == null ? null : realDirectory(extra);
-            if (real == null || visible.stream().anyMatch(real::startsWith)) {
-                continue;
-            }
-            visible.add(real);
-        }
-        return List.copyOf(visible);
-    }
-
-    /** 不存在或不是目录时返回 {@code null}，由调用方跳过：项目里的目录可能暂时没挂载。 */
-    private static Path realDirectory(Path path) {
-        try {
-            Path absolute = path.toAbsolutePath().normalize();
-            return Files.isDirectory(absolute) ? absolute.toRealPath() : null;
-        } catch (IOException e) {
-            return null;
         }
     }
 
