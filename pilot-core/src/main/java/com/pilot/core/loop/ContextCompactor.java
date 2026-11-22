@@ -11,8 +11,6 @@ import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import com.pilot.core.message.Attachment;
@@ -28,6 +26,7 @@ import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.model.diagnostics.ModelRequestScope;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.tool.ToolCallJournal;
+import com.pilot.core.tool.ToolOutputArchiveReference;
 import com.pilot.core.tool.ToolResults;
 import com.pilot.core.util.Sha256;
 
@@ -82,11 +81,6 @@ public final class ContextCompactor {
 
     /** 占位符化：触发高水位清理时保留最近 35% 预算的完整工具输出，一次腾出足够冷却跑道避免每 4 步反复破缓存。 */
     private static final double PRUNE_KEEP_RATIO = 0.35;
-    /** 归档失败保护标记：只认 tool 消息末尾由 ToolExecutor 追加的真实标记，避免文档/源码正文提到字面量时误伤压缩。 */
-    static final String UNARCHIVED_MARKER = "[工具输出未归档，禁止清理原文]";
-    /** 仅匹配追加在工具输出末尾的真实存档引用，避免把文档/源码正文里引用的占位示例当成存档引用。 */
-    private static final Pattern TRAILING_ARCHIVE_REF = Pattern
-        .compile("(\\[工具输出存档 run_id=[A-Za-z0-9][A-Za-z0-9._-]* call_id=[A-Za-z0-9][A-Za-z0-9._-]*[^\\n\\]]*\\])$");
     /** 硬裁剪时允许钉住的最大元数据字符数，防止 messages[1] 吞掉整个窗口。 */
     private static final int DROP_PIN_MAX_CHARS = 16_000;
     /** 折叠或硬裁剪时最多永久钉住最近几张用户原图，更早原图在摘要正文保留文件名与路径引用。 */
@@ -339,20 +333,11 @@ public final class ContextCompactor {
 
     private static boolean isUnarchivedToolOutput(Message message) {
         return message != null && "tool".equals(message.role())
-            && message.content().stripTrailing().endsWith(UNARCHIVED_MARKER);
-    }
-
-    /** 提取工具输出末尾真实的归档引用；正文或文档里顺带提及的字面量示例不计入。 */
-    static String trailingArchiveReference(String text) {
-        if (text == null || text.isEmpty()) {
-            return null;
-        }
-        Matcher matcher = TRAILING_ARCHIVE_REF.matcher(text.stripTrailing());
-        return matcher.find() ? matcher.group(1) : null;
+            && ToolOutputArchiveReference.isUnarchived(message.content());
     }
 
     private static String archiveReference(String text) {
-        String ref = trailingArchiveReference(text);
+        String ref = ToolOutputArchiveReference.trailingReference(text);
         return ref == null ? "（旧记录没有存档引用；不得重放有副作用的操作）" : "\n" + ref;
     }
 

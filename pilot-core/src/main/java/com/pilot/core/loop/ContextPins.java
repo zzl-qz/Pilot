@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.pilot.core.message.Message;
+import com.pilot.core.tool.ToolOutputArchiveReference;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -180,7 +181,7 @@ final class ContextPins {
     }
 
     private static void addReference(String text, LinkedHashSet<String> references) {
-        String ref = ContextCompactor.trailingArchiveReference(text);
+        String ref = ToolOutputArchiveReference.trailingReference(text);
         if (ref != null) {
             references.add(ref);
         }

@@ -41,6 +41,7 @@ import com.pilot.core.tool.ProducesCheck;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolCallJournal;
 import com.pilot.core.tool.ToolCallScope;
+import com.pilot.core.tool.ToolOutputArchiveReference;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.ToolResult;
 import com.pilot.core.tool.ToolResults;
@@ -263,11 +264,11 @@ public final class ToolExecutor {
                         result += archiveRef;
                     }
                 } else if (!archiveReader) {
-                    result += "\n" + ContextCompactor.UNARCHIVED_MARKER;
+                    result += "\n" + ToolOutputArchiveReference.UNARCHIVED_MARKER;
                 }
             } catch (RuntimeException ignored) {
                 if (!archiveReader) {
-                    result += "\n" + ContextCompactor.UNARCHIVED_MARKER;
+                    result += "\n" + ToolOutputArchiveReference.UNARCHIVED_MARKER;
                 }
             }
         }
