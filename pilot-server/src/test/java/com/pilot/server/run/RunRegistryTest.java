@@ -54,4 +54,19 @@ class RunRegistryTest {
         Assertions.assertTrue(registry.claim("next", "two", workspace));
     }
 
+    /** 409 要能说清是谁占着工作区，不然用户只能挨个会话翻。 */
+    @Test
+    void occupierNamesTheRunHoldingTheWorkspace() throws Exception {
+        RunRegistry registry = new RunRegistry();
+        Path workspace = Files.createDirectories(root.resolve("repo"));
+        Assertions.assertTrue(registry.claim("run-1", "session-1", workspace));
+
+        RunRegistry.Occupant occupier = registry.occupier(workspace).orElseThrow();
+
+        assertEquals("run-1", occupier.runId());
+        assertEquals("session-1", occupier.sessionId());
+        registry.unregister("run-1");
+        Assertions.assertTrue(registry.occupier(workspace).isEmpty());
+    }
+
 }

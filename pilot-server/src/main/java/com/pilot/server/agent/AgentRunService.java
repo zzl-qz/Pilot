@@ -7,6 +7,7 @@ import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -797,6 +798,19 @@ public class AgentRunService implements RunStarter {
             return false;
         }
         return true;
+    }
+
+    @Override
+    public Optional<String> workspaceOccupant(Path workspace) {
+        List<CommandTaskManager.Task> commands = commandTasks.runningInWorkspace(workspace);
+        if (!commands.isEmpty()) {
+            String owners = commands.stream()
+                .map(task -> task.taskId() + "（会话 " + task.sessionId() + "）")
+                .collect(Collectors.joining("、"));
+            return Optional.of("后台命令 " + owners);
+        }
+        return registry.occupier(workspace)
+            .map(occupant -> "会话 " + occupant.sessionId() + " 的运行 " + occupant.runId());
     }
 
     @Override

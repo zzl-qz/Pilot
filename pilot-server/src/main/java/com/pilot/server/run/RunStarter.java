@@ -155,6 +155,15 @@ public interface RunStarter {
         return true;
     }
 
+    /**
+     * 谁正占着这个工作区，用于把「工作区仍有任务在运行」变成能直接行动的提示。
+     *
+     * @return 人类可读的占用方；没有占用或实现方不关心时为空
+     */
+    default Optional<String> workspaceOccupant(Path workspace) {
+        return Optional.empty();
+    }
+
     /** 删除会话时忘掉它留下的内存状态（队列、续跑计数等）。 */
     default void forget(String sessionId) {
     }

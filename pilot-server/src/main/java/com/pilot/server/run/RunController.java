@@ -78,8 +78,10 @@ public class RunController {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "没有该运行的回滚快照: " + runId);
         }
         String operationId = "restore_" + UUID.randomUUID();
-        if (!runStarter.lockWorkspace(operationId, Path.of(meta.workspace()))) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "工作区仍有任务在运行，请结束后再回滚");
+        Path workspace = Path.of(meta.workspace());
+        if (!runStarter.lockWorkspace(operationId, workspace)) {
+            String occupant = runStarter.workspaceOccupant(workspace).map(name -> "；占用方：" + name).orElse("");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "工作区仍有任务在运行，请结束后再回滚" + occupant);
         }
         try {
             return snapshots.rollback(runId);
