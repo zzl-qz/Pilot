@@ -9,10 +9,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.TimeoutException;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -21,6 +25,7 @@ import tools.jackson.databind.ObjectMapper;
 class McpClientTransportTest {
     @TempDir
     Path workspace;
+    private final List<ProcessHandle> childProcesses = new ArrayList<>();
 
     private McpClient client(String mode) {
         Path java = Path.of(System.getProperty("java.home"), "bin",
@@ -30,7 +35,22 @@ class McpClientTransportTest {
                 McpProcessFixture.class.getName(), mode, workspace.resolve("ready").toString()), Map.of(), null);
         McpClient client = new McpClient("fixture", config, workspace, null, new ObjectMapper(), "");
         client.start(Duration.ofSeconds(3));
+        childProcesses.add(client.handle());
         return client;
+    }
+
+    @AfterEach
+    void awaitChildProcesses() {
+        for (ProcessHandle process : childProcesses) {
+            try {
+                process.onExit().get(3, TimeUnit.SECONDS);
+            } catch (TimeoutException e) {
+                throw new AssertionError("MCP fixture process did not exit before temporary workspace cleanup", e);
+            } catch (Exception e) {
+                throw new AssertionError("Could not wait for MCP fixture process exit", e);
+            }
+        }
+        childProcesses.clear();
     }
 
     private void ready() throws Exception {
