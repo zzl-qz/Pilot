@@ -1,5 +1,5 @@
 import type { ApiClient } from '../api.js';
-import type { ApiResults, BrowserStatus } from './api.js';
+import type { ApiResults, BrowserStatus, ExecutionMode } from './api.js';
 import type * as S from './server.js';
 import type { ProjectSummary, SessionSummary, ChangeFile } from './core.js';
 import type { ReducerState, PlanItem, RunUsage } from './thread.js';
@@ -39,6 +39,8 @@ export interface UiState {
   schedulesOpen?: boolean; searchOpen?: boolean; composerEnabled?: boolean; resultUnread?: number;
   resultTarget?: string | null; scheduleTarget?: string | null; scheduleDraft?: string | null; scheduleRepeat?: boolean;
   navigationTarget?: { sessionId: string; sequence: number } | null; changeCount?: number;
+  /** 执行模式：act 允许修改文件与运行命令，plan 为只读分析/规划模式。 */
+  executionMode: ExecutionMode;
   /** 文件工作台要聚焦的工作区文件 id；不改文件本身，只影响面板选中项。 */
   workbenchFileId?: string | null;
 }

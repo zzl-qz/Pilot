@@ -48,6 +48,7 @@ export const initialUi = (): UiState => ({
   sidebarOpen: typeof window.matchMedia === 'function' ? !window.matchMedia('(max-width: 960px)').matches : true,
   inspectorOpen: false,
   inspectorTab: 'changes',
+  executionMode: 'act',
   workbenchFileId: null,
   reviewExpanded: false,
   filters: 'all',

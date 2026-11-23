@@ -62,6 +62,7 @@ export function Composer() {
   const pausing = useStore((state) => state.pausing);
   const cancelling = useStore((state) => state.cancelling);
   const composerEnabled = useStore((state) => state.ui.composerEnabled);
+  const executionMode = useStore((state) => (state.ui.executionMode === 'plan' ? 'plan' : 'act'));
   const permissionMode = useStore((state) => normalizePermission(state.permissionMode));
   const modelOptions = useStore((state) => state.modelOptions);
   const modelSaving = useStore((state) => state.modelSave.busy);
@@ -761,7 +762,7 @@ export function Composer() {
       <div className="composer-attachments" ref={railRef} hidden aria-label="待发送的附件" />
       <form
         id="composer"
-        className={`composer${dragging ? ' is-dragging' : ''}`}
+        className={`composer${dragging ? ' is-dragging' : ''}${executionMode === 'plan' ? ' is-plan-mode' : ''}`}
         onSubmit={(event) => { event.preventDefault(); submit(); }}
         onPaste={(event) => void receiveFiles(event, event.clipboardData, 'paste')}
       >
@@ -774,7 +775,7 @@ export function Composer() {
           aria-readonly={submitting || undefined} tabIndex={0} aria-autocomplete="list" aria-controls={suggestionItems.length ? 'composer-suggestions' : undefined}
           aria-activedescendant={suggestionItems.length ? 'composer-option-' + menuIndex : undefined}
           ref={flowRef}
-          data-placeholder="描述任务，@ 引用文件，/ 快捷指令"
+          data-placeholder={executionMode === 'plan' ? '只读分析模式：提问、排查或规划方案，不会修改文件' : '描述任务，@ 引用文件，/ 快捷指令'}
           onInput={onInput}
           onCompositionEnd={onInput}
           onKeyDown={onComposerKeydown}
@@ -819,6 +820,17 @@ export function Composer() {
                   }} />
               </span>
             </div>
+            <span title={executionMode === 'plan'
+              ? '只读分析模式：仅阅读、分析与规划，不修改文件（点击切回执行模式）'
+              : '执行模式：允许修改文件与运行命令（点击切换为只读分析模式）'}>
+              <Button id="mode-chip" className={'composer-choice composer-mode' + (executionMode === 'plan' ? ' is-plan' : '')}
+                size="sm" variant="ghost"
+                label={executionMode === 'plan' ? '只读分析模式，点击切回执行模式' : '执行模式，点击切换为只读分析模式'}
+                aria-pressed={executionMode === 'plan'}
+                onClick={() => useStore.getState().setUi({ executionMode: executionMode === 'plan' ? 'act' : 'plan' })}>
+                {executionMode === 'plan' ? '分析' : '执行'}
+              </Button>
+            </span>
             <div className="perm-picker">
               <Button id="perm-chip" ref={permTriggerRef} className="composer-choice" size="sm" variant="ghost"
                 label={permissionLabel(permissionMode)} icon={<Icon name="shield" />}

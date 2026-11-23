@@ -1713,12 +1713,25 @@ html[data-theme] .conversation-composer .composer-icon {
 }
 .conversation-composer .composer-choice { min-height: var(--conversation-control); padding-inline: 7px; font-size: 12px; flex: none; }
 .conversation-composer .composer-choice[aria-expanded="true"] { background: var(--ui-selected); color: var(--ink); }
+.conversation-composer .composer-mode { border: 1px solid transparent; transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease; }
+.conversation-composer .composer-mode.is-plan {
+  border-color: color-mix(in srgb, var(--warn) 42%, transparent);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  color: var(--warn);
+  font-weight: 560;
+}
+html[data-theme] .conversation-composer .composer.is-plan-mode {
+  border-color: color-mix(in srgb, var(--warn) 42%, var(--line));
+}
 .conversation-composer .composer-model-picker { flex: 0 1 auto; min-width: 0; max-width: 196px; }
 .conversation-composer .composer-model { width: 100%; max-width: 196px; min-width: 0; }
 .conversation-composer .model-chip-name { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@container composer (max-width: 440px) {
+@container composer (max-width: 480px) {
   html[data-theme] .conversation-composer .composer .composer-bar { flex-wrap: wrap; }
   html[data-theme] .conversation-composer .composer-left { flex: 1 1 100%; }
+}
+@container composer (max-width: 340px) {
+  html[data-theme] .conversation-composer .composer-left { flex-wrap: wrap; }
 }
 .conversation-composer .composer-chevron { width: 12px; height: 12px; transform: rotate(90deg); }
 .conversation-composer .composer-context-picker,

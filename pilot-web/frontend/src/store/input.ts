@@ -64,7 +64,8 @@ export function createInputActions({ set, get }: StoreContext): StoreSlice<'regi
       const payloadContent = skillCall
         ? (skillCall.args || '（用户未提供额外要求，按技能指引执行）')
         : text;
-      const body: InputMessage = { content: payloadContent, attachments: attachments || [], imagePositions: imagePositions || [] };
+      const mode = get().ui.executionMode === 'plan' ? 'plan' : 'act';
+      const body: InputMessage = { content: payloadContent, attachments: attachments || [], imagePositions: imagePositions || [], mode };
       if (skillCall) {
         body.skill = skillCall.skill;
       }
