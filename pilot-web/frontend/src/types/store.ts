@@ -1,5 +1,5 @@
 import type { ApiClient } from '../api.js';
-import type { ApiResults, BrowserStatus, ExecutionMode } from './api.js';
+import type { ApiResults, BrowserStatus, ExecutionMode, UniversalFileResponse } from './api.js';
 import type * as S from './server.js';
 import type { ProjectSummary, SessionSummary, ChangeFile } from './core.js';
 import type { ReducerState, PlanItem, RunUsage } from './thread.js';
@@ -73,7 +73,7 @@ export interface StoreData extends Omit<ReducerState, 'ui'> {
   hasRun: boolean;
   changeReport: S.ChangeServiceChangeReport | null; changesState: string; runChanges: S.ChangeServiceRunChangeReport | null;
   composerApi: ComposerBridge | null; ui: UiState;
-  _previewRequest?: number; _previewData?: S.SessionFilesControllerFileResponse | null; _previewLoading?: boolean;
+  _previewRequest?: number; _previewData?: UniversalFileResponse | null; _previewLoading?: boolean;
   _previewLine?: number | null;
   _changesRequest?: number; _reconnectAttempt?: number; _editTarget?: number | null;
 }

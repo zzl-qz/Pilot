@@ -234,6 +234,17 @@ export const api = {
   filesFlat: (id: string) => apiJson<ApiResults['filesFlat']>(`/api/sessions/${encodeURIComponent(id)}/files/flat`),
   workspaceFiles: (path: string) => apiJson<ApiResults['workspaceFiles']>(`/api/workspaces/files/flat?path=${encodeURIComponent(path)}`),
   file: (id: string, path: string) => apiJson<ApiResults['file']>(`/api/sessions/${encodeURIComponent(id)}/file?path=${encodeURIComponent(path)}`),
+  fileRawUrl: (sessionId: string | null, workspace: string, path: string, download = false) => {
+    const dl = download ? '&download=true' : '';
+    return sessionId
+      ? `/api/sessions/${encodeURIComponent(sessionId)}/file/raw?path=${encodeURIComponent(path)}${dl}`
+      : `/api/workspaces/file/raw?root=${encodeURIComponent(workspace)}&path=${encodeURIComponent(path)}${dl}`;
+  },
+  openFileNative: (sessionId: string | null, workspace: string, path: string, mode: 'open' | 'reveal' = 'open') => (
+    sessionId
+      ? apiJson<{ ok: boolean; message: string; alternative?: string }>(`/api/sessions/${encodeURIComponent(sessionId)}/file/open`, jsonBody('POST', { path, mode }))
+      : apiJson<{ ok: boolean; message: string; alternative?: string }>('/api/workspaces/file/open', jsonBody('POST', { root: workspace, path, mode }))
+  ),
   projects: () => apiJson<ApiResults['projects']>('/api/projects'),
   createProject: (body: { name: string; folders?: string[]; constraints?: string }) => apiJson<ApiResults['createProject']>('/api/projects', jsonBody('POST', body)),
   renameProject: (id: string, body: { name: string }) => apiJson<ApiResults['renameProject']>(`/api/projects/${encodeURIComponent(id)}`, jsonBody('PATCH', body)),

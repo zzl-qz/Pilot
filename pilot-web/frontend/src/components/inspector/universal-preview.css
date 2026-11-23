@@ -1,0 +1,88 @@
+.upv-media-wrap { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.upv-subbar {
+  display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+  border-bottom: 1px solid var(--line-soft); background: var(--panel-2);
+}
+.upv-zoom-label { min-width: 44px; text-align: center; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.upv-image-stage {
+  flex: 1 1 auto; min-height: 220px; overflow: auto; padding: 16px;
+  display: flex; align-items: flex-start; justify-content: center;
+  background-image: linear-gradient(45deg, color-mix(in srgb, var(--ink) 5%, transparent) 25%, transparent 25%),
+    linear-gradient(-45deg, color-mix(in srgb, var(--ink) 5%, transparent) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, color-mix(in srgb, var(--ink) 5%, transparent) 75%),
+    linear-gradient(-45deg, transparent 75%, color-mix(in srgb, var(--ink) 5%, transparent) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+.upv-image { display: block; border-radius: 6px; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.14); }
+.upv-image.is-fit { max-width: 100%; max-height: 100%; object-fit: contain; }
+.upv-pdf-wrap { flex: 1 1 auto; min-height: 360px; display: flex; flex-direction: column; overflow: hidden; }
+.upv-media-stage { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.upv-video { max-width: 100%; max-height: 70vh; border-radius: 8px; background: #000; }
+.upv-audio { width: 100%; max-width: 480px; }
+
+.upv-doc-sheet {
+  flex: 1 1 auto; overflow: auto; padding: 18px 20px; line-height: 1.7;
+  color: var(--ink); font-size: 13.5px;
+}
+.upv-doc-h1 { margin: 14px 0 8px; font-size: 18px; font-weight: 650; }
+.upv-doc-h2 { margin: 12px 0 6px; font-size: 15.5px; font-weight: 620; }
+.upv-doc-h3 { margin: 10px 0 6px; font-size: 14px; font-weight: 600; }
+.upv-doc-p { margin: 0 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.upv-xlsx { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.upv-sheet-tabs {
+  display: flex; gap: 4px; padding: 6px 10px; overflow-x: auto;
+  border-bottom: 1px solid var(--line-soft); background: var(--panel-2); flex: none;
+}
+.upv-sheet-tab {
+  padding: 4px 10px; border: 1px solid var(--line-soft); border-radius: 6px;
+  background: transparent; color: var(--muted); font-size: 11.5px; cursor: pointer; white-space: nowrap;
+}
+.upv-sheet-tab.is-active { background: var(--ui-selected); border-color: var(--accent-line); color: var(--ink); font-weight: 560; }
+.upv-xlsx-grid { flex: 1 1 auto; }
+
+.upv-table-scroll { overflow: auto; margin: 8px 0; }
+.upv-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.upv-table th, .upv-table td {
+  padding: 5px 9px; border: 1px solid var(--line-soft); text-align: left; vertical-align: top;
+  color: var(--ink); overflow-wrap: anywhere;
+}
+.upv-table th { background: var(--panel-2); font-weight: 600; position: sticky; top: 0; z-index: 1; }
+.upv-rownum { color: var(--dim); font-family: var(--mono); width: 38px; text-align: right; background: var(--panel-2); }
+.upv-mono { font-family: var(--mono); font-size: 11.5px; }
+
+.upv-slides { flex: 1 1 auto; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+.upv-slide-card {
+  padding: 14px 16px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--panel-2);
+}
+.upv-slide-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.upv-slide-no {
+  padding: 1px 7px; border-radius: 999px; font-size: 10.5px; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.upv-slide-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; line-height: 1.55; }
+.upv-slide-notes { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line-soft); font-size: 12px; color: var(--muted); }
+.upv-slide-notes summary { cursor: pointer; }
+.upv-slide-notes p { margin: 6px 0 0; white-space: pre-wrap; }
+.upv-archive { flex: 1 1 auto; padding: 0 10px 10px; }
+.upv-trunc { margin: 8px 12px; font-size: 11.5px; color: var(--warn); }
+
+.upv-binary-card {
+  padding: 24px 16px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px;
+  color: var(--muted); font-size: 12.5px;
+}
+.upv-binary-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+
+/* 轻量代码语法高亮 */
+.preview-source-line { display: block; }
+.tok-kw { color: var(--accent); font-weight: 550; }
+.tok-str { color: #2b8a57; }
+.tok-num { color: #b5651d; }
+.tok-com { color: var(--dim); font-style: italic; }
+.tok-type { color: #6f42c1; }
+.tok-fn { color: #1f6feb; }
+html[data-theme="dark"] .tok-str { color: #7ee787; }
+html[data-theme="dark"] .tok-num { color: #f2cc60; }
+html[data-theme="dark"] .tok-type { color: #d2a8ff; }
+html[data-theme="dark"] .tok-fn { color: #79c0ff; }

@@ -23,6 +23,25 @@ export interface WorkbenchAnnotation {
   id: string; fileId: string; page: number; anchor: string; text: string; createdAt: string; status: string;
 }
 export interface WorkbenchOpenResult { ok: boolean; reason: string; alternative: string }
+export type UniversalPreviewKind = 'text' | 'image' | 'pdf' | 'audio' | 'video' | 'docx' | 'xlsx' | 'pptx' | 'archive' | 'binary';
+export interface UniversalDocBlock { type: 'paragraph' | 'table'; level: number; text: string; rows?: string[][] | null }
+export interface UniversalSheetData { name: string; rows: string[][]; totalRows: number; truncated: boolean }
+export interface UniversalSlideData { index: number; title: string; paragraphs: string[]; tables?: string[][][] | null; notes?: string | null }
+export interface UniversalArchiveItem { path: string; directory: boolean; size: number; compressedSize: number }
+export interface UniversalStructuredPreview {
+  kind: UniversalPreviewKind;
+  truncated?: boolean;
+  error?: string | null;
+  blocks?: UniversalDocBlock[] | null;
+  sheets?: UniversalSheetData[] | null;
+  slides?: UniversalSlideData[] | null;
+  entries?: UniversalArchiveItem[] | null;
+}
+export type UniversalFileResponse = S.SessionFilesControllerFileResponse & {
+  kind?: UniversalPreviewKind;
+  mimeType?: string;
+  structured?: UniversalStructuredPreview | null;
+};
 
 export interface ApiResults {
   workProducts: S.WorkProductServiceProduct[];
@@ -125,10 +144,10 @@ export interface ApiResults {
   branch: S.BranchControllerBranchResponse;
   files: S.SessionFilesControllerTreeResponse;
   workspaceTree: S.SessionFilesControllerTreeResponse;
-  workspaceFile: S.SessionFilesControllerFileResponse;
+  workspaceFile: UniversalFileResponse;
   filesFlat: S.SessionFilesControllerFlatResponse;
   workspaceFiles: S.SessionFilesControllerFlatResponse;
-  file: S.SessionFilesControllerFileResponse;
+  file: UniversalFileResponse;
   projects: S.ProjectControllerProjectResponse[];
   createProject: S.ProjectControllerProjectResponse;
   renameProject: S.ProjectControllerProjectResponse;
