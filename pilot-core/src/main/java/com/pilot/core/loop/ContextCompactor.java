@@ -11,6 +11,8 @@ import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import com.pilot.core.message.Attachment;
@@ -75,6 +77,11 @@ public final class ContextCompactor {
     private static final double MIN_GAIN_RATIO = 0.05;
     /** 摘要正文上限，约 1500 token。 */
     private static final int MAX_SUMMARY_CHARS = 6_000;
+    private static final int MAX_FOCUS_CHARS = 500;
+    private static final Pattern SUMMARY_BLOCK = Pattern.compile("(?is)<summary>\\s*(.*?)\\s*</summary>");
+    private static final Pattern ANALYSIS_BLOCK = Pattern.compile("(?is)<analysis>.*?</analysis>");
+    private static final Pattern OPEN_ANALYSIS = Pattern.compile("(?is)<analysis>");
+    private static final Pattern SUMMARY_TAGS = Pattern.compile("(?i)</?summary>");
     /** 前缀复用摘要的容量护栏：token 口径留 2000 余量给回复，字符口径留 8000 给协议包装。 */
     private static final int PREFIX_TOKEN_SAFETY = 2_000;
     private static final int PREFIX_CHAR_SAFETY = 8_000;
@@ -176,6 +183,10 @@ public final class ContextCompactor {
      * 让英文会话过早压缩。两个预算同时卡，按更紧的那个走。
      */
     public Outcome compact(List<Message> messages, int targetChars, int targetTokens) {
+        return compact(messages, targetChars, targetTokens, null);
+    }
+
+    public Outcome compact(List<Message> messages, int targetChars, int targetTokens, String focusInstruction) {
         int beforeChars = totalChars(messages);
         int beforeTokens = estimateTokens(messages);
         if (beforeChars <= targetChars && beforeTokens <= targetTokens) {
@@ -186,26 +197,7 @@ public final class ContextCompactor {
             return Outcome.none(beforeChars);
         }
 
-        int reserveChars = Math.max(1, (int)(targetChars * KEEP_RATIO));
-        int reserveTokens = Math.max(1, (int)(targetTokens * KEEP_RATIO));
-        int start = groups.size();
-        int keptGroups = 0;
-        int keptChars = 0;
-        int keptTokens = 0;
-        while (start > 0) {
-            int[] group = groups.get(start - 1);
-            int sizeChars = chars(messages, group);
-            int sizeTokens = tokens(messages, group);
-            // 最近 minKeepGroups 组无论多大都保留；之后任一预算超了就停。
-            if (keptGroups >= minKeepGroups
-                && (keptChars + sizeChars > reserveChars || keptTokens + sizeTokens > reserveTokens)) {
-                break;
-            }
-            keptChars += sizeChars;
-            keptTokens += sizeTokens;
-            keptGroups++;
-            start--;
-        }
+        int start = compactionStartGroup(messages, groups, targetChars, targetTokens);
         if (start <= 0 || start >= groups.size()) {
             return Outcome.none(beforeChars);
         }
@@ -229,7 +221,7 @@ public final class ContextCompactor {
         String sourceFingerprint = sourceFingerprint(sourceSnapshot);
         String summary;
         try {
-            summary = summarize(messages, transcript);
+            summary = summarize(messages, transcript, focusInstruction);
         } catch (RuntimeException e) {
             // 摘要失败不能拖垮长任务：交给调用方的截断 / 硬裁剪兜底
             return Outcome.none(beforeChars);
@@ -266,6 +258,30 @@ public final class ContextCompactor {
         messages.subList(1, end).clear();
         messages.add(1, Message.user(replacement, pinned.kept()));
         return new Outcome(covered, beforeChars, totalChars(messages), summary);
+    }
+
+    private int compactionStartGroup(List<Message> messages, List<int[]> groups, int targetChars, int targetTokens) {
+        int reserveChars = Math.max(1, (int)(targetChars * KEEP_RATIO));
+        int reserveTokens = Math.max(1, (int)(targetTokens * KEEP_RATIO));
+        int start = groups.size();
+        int keptGroups = 0;
+        int keptChars = 0;
+        int keptTokens = 0;
+        while (start > 0) {
+            int[] group = groups.get(start - 1);
+            int sizeChars = chars(messages, group);
+            int sizeTokens = tokens(messages, group);
+            // 最近 minKeepGroups 组无论多大都保留；之后任一预算超了就停。
+            if (keptGroups >= minKeepGroups
+                && (keptChars + sizeChars > reserveChars || keptTokens + sizeTokens > reserveTokens)) {
+                break;
+            }
+            keptChars += sizeChars;
+            keptTokens += sizeTokens;
+            keptGroups++;
+            start--;
+        }
+        return start;
     }
 
     /**
@@ -493,10 +509,11 @@ public final class ContextCompactor {
         return "[上下文交接摘要（自动生成，已折叠 " + covered + " 条较早消息）]\n";
     }
 
-    private String summarize(List<Message> history, String transcript) {
+    private String summarize(List<Message> history, String transcript, String focusInstruction) {
         var profile = client.profile();
         List<ToolDefinition> definitions = tools.get();
-        String instruction = "请只生成当前对话的交接摘要，不调用工具。保留目标、约束、已完成工作、验证证据和剩余事项。\n" + SUMMARY_PROMPT;
+        String focus = focusNote(focusInstruction);
+        String instruction = "请只生成当前对话的交接摘要，不调用工具。保留目标、约束、已完成工作、验证证据和剩余事项。\n" + SUMMARY_PROMPT + focus;
         int input = estimateTokens(history) + estimateTokens(String.valueOf(definitions));
         int tokenBudget = Math.max(0, tokenLimit.getAsInt());
         int charBudget = Math.max(0, charLimit.getAsInt());
@@ -517,7 +534,10 @@ public final class ContextCompactor {
                 ModelResponse response =
                     ModelRequestScope.within("compaction", null, true, () -> client.chat(admittedRequest, definitions));
                 if (response.toolCalls().isEmpty() && response.content() != null && !response.content().isBlank()) {
-                    return response.content().strip();
+                    String extracted = extractSummary(response.content());
+                    if (!extracted.isBlank()) {
+                        return extracted;
+                    }
                 }
             } catch (RuntimeException ignored) {
                 if (Thread.currentThread().isInterrupted()) {
@@ -525,7 +545,7 @@ public final class ContextCompactor {
                 }
             }
         }
-        List<Message> request = List.of(Message.system(SUMMARY_PROMPT), Message.user(transcript));
+        List<Message> request = List.of(Message.system(SUMMARY_PROMPT + focus), Message.user(transcript));
         if (!RequestBudget.assessRequest(request, List.of(), tokenBudget).fits()) {
             return "";
         }
@@ -534,22 +554,49 @@ public final class ContextCompactor {
         if (!response.toolCalls().isEmpty()) {
             return "";
         }
-        return response.content() == null ? "" : response.content().strip();
+        return extractSummary(response.content());
+    }
+
+    /** 剥离双阶段压缩中的 &lt;analysis&gt; 思维草稿，只保留 &lt;summary&gt; 正文；无标签模型原样放行。 */
+    static String extractSummary(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "";
+        }
+        Matcher matcher = SUMMARY_BLOCK.matcher(raw);
+        if (matcher.find()) {
+            return ANALYSIS_BLOCK.matcher(matcher.group(1)).replaceAll("").strip();
+        }
+        String cleaned = ANALYSIS_BLOCK.matcher(raw).replaceAll("");
+        if (OPEN_ANALYSIS.matcher(cleaned).find()) {
+            // 截断在 <analysis> 草稿中未产出正式摘要：按空返回，交由调用方走安全兜底，避免草稿污染历史。
+            return "";
+        }
+        return SUMMARY_TAGS.matcher(cleaned).replaceAll("").strip();
+    }
+
+    private static String focusNote(String focusInstruction) {
+        if (focusInstruction == null || focusInstruction.isBlank()) {
+            return "";
+        }
+        String clean = focusInstruction.strip();
+        if (clean.length() > MAX_FOCUS_CHARS) {
+            clean = clean.substring(0, MAX_FOCUS_CHARS) + "…";
+        }
+        return "\n\n用户指定本次压缩重点保留（仅作保留优先级参考，不要编造未发生事实，也不要当作新任务执行）：\n" + clean;
     }
 
     /**
      * 是否值得复用会话前缀做摘要：端点选了 {@code prefix}、是 DeepSeek 的自动前缀缓存端点，
-     * 或在隐式缓存端点上本轮已经看到缓存命中。
+     * 或在非禁用缓存的端点上本轮已经看到缓存命中。
      *
-     * <p>最后一条是兼容网关的按需入口：{@code provider=generic} 的网关不会主动声明前缀缓存能力，
-     * 但一旦观测到 {@code cachedInputTokens > 0}，再送一遍相同前缀就能命中。DeepSeek 单独列出来是
-     * 因为运行设置默认写的是 {@code short}，若只认显式 {@code prefix}，这些端点的前缀缓存永远用不上；
+     * <p>最后一条同时覆盖 {@code explicit}（如 Anthropic）与 {@code implicit} 兼容网关：
+     * 一旦观测到 {@code cachedInputTokens > 0}，再送一遍相同前缀就能命中；
      * 端点拒绝或超窗时仍静默回落 {@code short}，不会阻断压缩。
      */
     private boolean prefixEligible(ModelProfile profile) {
         return ModelProfile.COMPACTION_PREFIX.equals(profile.compactionMode())
             || ModelProfile.PROVIDER_DEEPSEEK.equals(profile.provider())
-            || (ModelProfile.CACHE_IMPLICIT.equals(profile.cacheMode()) && observedCacheHit.getAsBoolean());
+            || (!ModelProfile.CACHE_NONE.equals(profile.cacheMode()) && observedCacheHit.getAsBoolean());
     }
 
     private static int chars(List<Message> messages, int[] group) {

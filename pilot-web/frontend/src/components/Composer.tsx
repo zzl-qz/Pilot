@@ -891,7 +891,7 @@ export function Composer() {
               {contextOpen && <ContextUsagePanel status={contextStatus} compacting={compacting}
                 report={latestContextReport} reports={requestReports} usage={runUsage}
                 onClose={() => { setToolbarPanel(null); contextTriggerRef.current?.focus({ preventScroll: true }); }}
-                onCompact={() => useStore.getState().compactContext()}
+                onCompact={(focus) => useStore.getState().compactContext(focus)}
                 onSettings={() => { setToolbarPanel(null); useStore.getState().setUi({ settingsOpen: true, settingsSection: 'model' }); }} />}
             </div>
             <IconButton className="composer-icon schedule-compose" variant="ghost" label="定时执行" icon={<Icon name="clock" />}

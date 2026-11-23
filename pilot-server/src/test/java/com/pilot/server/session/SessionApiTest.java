@@ -3,6 +3,7 @@ package com.pilot.server.session;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -147,8 +148,17 @@ class SessionApiTest {
             return new ContextStatus(18, 42_000, 120_000, true, true);
         }
 
+        private final java.util.concurrent.atomic.AtomicReference<String> lastCompactFocus =
+            new java.util.concurrent.atomic.AtomicReference<>();
+
         @Override
         public CompactionResult compactContext(String sessionId) {
+            return compactContext(sessionId, null);
+        }
+
+        @Override
+        public CompactionResult compactContext(String sessionId, String focus) {
+            lastCompactFocus.set(focus);
             return new CompactionResult(true, 12, 42_000, 16_000, "已压缩 12 条较早消息");
         }
 
@@ -369,6 +379,12 @@ class SessionApiTest {
 
         mvc.perform(post("/api/sessions/{id}/context/compact", sessionId)).andExpect(status().isOk())
             .andExpect(jsonPath("$.compacted").value(true)).andExpect(jsonPath("$.tokensAfter").value(16_000));
+        assertNull(runStarter.lastCompactFocus.get());
+
+        mvc.perform(post("/api/sessions/{id}/context/compact", sessionId).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"focus\":\"保留接口契约\"}")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.compacted").value(true));
+        assertEquals("保留接口契约", runStarter.lastCompactFocus.get());
     }
 
     @Test

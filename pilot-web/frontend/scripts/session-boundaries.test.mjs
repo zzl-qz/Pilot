@@ -221,13 +221,16 @@ test('仍在原会话时压缩、检查点和工作区操作正常刷新及回�
     refreshContext: async () => { refreshed++; }, composerApi: {
       getText: () => '', setText: text => texts.push(text), appendText: text => texts.push(text), focus() {}
     } });
-  api.compactContext = async () => ({});
+  let compactFocus;
+  api.compactContext = async (_id, focus) => { compactFocus = focus; return {}; };
   api.restoreCheckpoint = async () => ({ applied: true, input: '恢复内容' });
   api.forkCheckpoint = async () => ({ sessionId: 'fork', input: '分支内容' });
   api.switchWorkspace = async () => ({});
   api.worktrees = async () => ({ sessionId: 'worktree', branch: 'test' });
   api.worktreeHandoff = async () => ({ workspace: 'parent' });
-  await useStore.getState().compactContext();
+  const compacted = await useStore.getState().compactContext('保留接口契约');
+  assert.equal(compacted, true);
+  assert.equal(compactFocus, '保留接口契约');
   assert.equal(refreshed, 1);
   assert.equal(useStore.getState().compactingContext, false);
   await useStore.getState().restoreCheckpoint(4, 'both', 0);

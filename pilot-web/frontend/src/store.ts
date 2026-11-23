@@ -483,16 +483,21 @@ export const useStore = create<StoreState>()(immer((set, get) => {
 
   ...createRunStateActions({ set, get }),
 
-  async compactContext() {
+  async compactContext(focus) {
     const { sessionId, sessionEpoch } = get();
     const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
-    if (!sessionId || get().compactingContext) return;
+    if (!sessionId || get().compactingContext) return false;
     set((draft) => { draft.compactingContext = true; });
     try {
-      await api.compactContext(sessionId);
-      if (current()) await get().refreshContext();
+      await api.compactContext(sessionId, focus);
+      if (current()) {
+        await get().refreshContext();
+        return true;
+      }
+      return false;
     } catch (error) {
       if (current()) get().showNotice('压缩失败：' + errorInfo(error).message);
+      return false;
     } finally {
       if (current()) set((draft) => { draft.compactingContext = false; });
     }

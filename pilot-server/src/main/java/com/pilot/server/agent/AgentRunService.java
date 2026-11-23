@@ -51,11 +51,14 @@ import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.loop.ContextCompactor;
 import com.pilot.core.message.Attachment;
 import com.pilot.core.message.Message;
+import com.pilot.core.model.ContextComposition;
 import com.pilot.core.model.MeteredModelClient;
+import com.pilot.core.model.ModelCapacity;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelUsage;
 import com.pilot.core.model.RequestReport;
 import com.pilot.core.model.RequestTotals;
+import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.permission.PermissionGate;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PolicyPermissionGate;
@@ -155,6 +158,8 @@ public class AgentRunService implements RunStarter {
     /** 会话级已启用的延迟工具，按激活顺序保存，让续跑与追问沿用同一个尾部扩展段。 */
     private final AgentRunPreparation preparation;
     private final DeferredToolRegistry deferredTools;
+    /** 最近一次主运行冻结的系统提示与工具表快照，让手动压缩与自动压缩保持同一前缀缓存键。 */
+    private final ConcurrentMap<String, SessionPrefixSnapshot> sessionPrefixes = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper;
     private final PilotDataDir dataDir;
     private final MultiAgentService multiAgent;
@@ -457,6 +462,11 @@ public class AgentRunService implements RunStarter {
 
     @Override
     public CompactionResult compactContext(String sessionId) {
+        return compactContext(sessionId, null);
+    }
+
+    @Override
+    public CompactionResult compactContext(String sessionId, String focus) {
         synchronized (inbox(sessionId)) {
             if (registry.activeRun(sessionId).isPresent()) {
                 throw new IllegalStateException("任务运行中不能压缩，请先暂停或等待本轮结束");
@@ -468,22 +478,26 @@ public class AgentRunService implements RunStarter {
             }
 
             ArrayList<Message> working = new ArrayList<Message>(history.size() + 1);
-            // ContextCompactor 把 index 0 当 system 保留；真实 system 会在下一次请求时重建。
-            working.add(Message.system("Pilot context boundary"));
+            String currentWorkspace = sessions.find(sessionId).map(Session::workspace).orElse(null);
+            SessionPrefixSnapshot prefix = resolveCompactionPrefix(sessionId, currentWorkspace, history);
+            // index 0 放主会话完全一致的 systemPrompt 复用前缀缓存，真实 system 仍由下次运行按需刷新。
+            working.add(Message.system(prefix.systemPrompt()));
             working.addAll(history);
-            int charsBefore = ContextCompactor.totalChars(working);
+            int historyChars = ContextCompactor.totalChars(history);
             int targetChars =
-                Math.max(1_000, Math.min(properties.contextMaxChars() / 2, Math.max(1_000, charsBefore * 2 / 3)));
+                Math.max(1_000, Math.min(properties.contextMaxChars() / 2, Math.max(1_000, historyChars * 2 / 3)));
             int targetTokens =
                 Math.max(1_000, Math.min(properties.contextMaxChars() / 2, Math.max(1_000, tokensBefore * 2 / 3)));
             String compactRun = "compact_" + java.util.UUID.randomUUID();
             RunUsageAccumulator manualUsage = new RunUsageAccumulator();
-            ModelClient measured = new MeteredModelClient(modelClient, sessionId, "compaction", List.of(), report -> {
-                publish(sessionId, compactRun, new ModelRequestCompleted(report));
-                publish(sessionId, compactRun, manualUsage.request(report));
-            });
-            ContextCompactor.Outcome outcome =
-                new ContextCompactor(measured).compact(working, targetChars, targetTokens);
+            ModelClient measured =
+                new MeteredModelClient(modelClient, sessionId, "compaction", prefix.promptSources(), report -> {
+                    publish(sessionId, compactRun, new ModelRequestCompleted(report));
+                    publish(sessionId, compactRun, manualUsage.request(report));
+                }).withRunContext(sessionId, compactRun);
+            ContextCompactor.Outcome outcome = new ContextCompactor(measured).withTools(prefix::tools)
+                .withTokenLimit(this::manualCompactionAdmissionLimit).withCharLimit(properties::contextMaxChars)
+                .withObservedCacheHit(prefix::cacheWarm).compact(working, targetChars, targetTokens, focus);
             if (!outcome.compacted()) {
                 return new CompactionResult(false, 0, tokensBefore, tokensBefore, "没有足够的早期内容可安全折叠，模型记忆保持不变");
             }
@@ -943,6 +957,7 @@ public class AgentRunService implements RunStarter {
         autoContinueSignature.remove(sessionId);
         networkReconnectAttempts.remove(sessionId);
         deferredTools.forget(sessionId);
+        sessionPrefixes.remove(sessionId);
         try {
             queuedMessages.clearHold(sessionId);
         } catch (RuntimeException e) {
@@ -1282,6 +1297,9 @@ public class AgentRunService implements RunStarter {
         AtomicReference<RunCompleted> lastCompleted = runContext.lastCompleted();
         Consumer<SessionEvent> sink = runContext.sink();
         Consumer<RequestReport> reports = report -> {
+            if (isWarmCacheReport(report)) {
+                markPrefixWarm(sessionId);
+            }
             synchronized (runUsage) {
                 publish(sessionId, runId, new ModelRequestCompleted(report));
                 publish(sessionId, runId, runUsage.request(report));
@@ -1306,6 +1324,9 @@ public class AgentRunService implements RunStarter {
         preparation.configureExecutionTools(prepared, goalPolicy, sessionId, runId, workspace, unattended,
             executionTask, measuredChild, executionClient, runContext.sessionGate(), config, cancelled, childUsage,
             profiles, modelClient, sink, sessionApprovals, conversations, modelSettings, multiAgent, worktrees);
+        if (!reviewActive) {
+            recordPrefixSnapshot(sessionId, prepared);
+        }
         return new ExecutionRunContext(runContext, runUsage, lastCompleted, sink, measuredMain, config, goalPolicy,
             executionClient);
     }
@@ -1333,29 +1354,29 @@ public class AgentRunService implements RunStarter {
         JsonlTraceRecorder traceRecorder =
             new JsonlTraceRecorder(dataDir.file("traces", sessionId + ".jsonl"), objectMapper);
         ApprovalBroker sessionApprovals = ApprovalBroker.forSession(approvals, sessionId);
-        AgentLoop loop = new AgentLoop(executionClient, tools, sessionGate, sessionApprovals, config,
-            handle.cancelled::get,
-            () -> null, traceRecorder, delta -> sessions.preview(sessionId, runId, new AssistantPreview(delta)))
-            .withReadOnlySession(
-                prepared.planMode() || review.active() || properties.permissionMode() == PermissionMode.READ_ONLY)
-            .withPendingMessages(() -> pollSteering(sessionId))
-            .withLiveReasoning(
-                delta -> sessions.preview(sessionId, runId, new com.pilot.core.event.AssistantReasoning(delta)))
-            .withTaskContext(runContext.taskContextSource())
-            .withCompletionClaim(() -> claimCompletion(sessionId, handle)).withRestoredPaths(snapshots::restoredPaths)
-            .withQualityWorkspace(resolvedWorkspace)
-            .withQualityTexts(snapshots::originalText, path -> WorkspaceTexts.read(resolvedWorkspace, path))
-            .withLintGate(properties.lintGate())
-            .withScopedRules(paths -> com.pilot.server.agent.ProjectRuleLoader.scoped(resolvedWorkspace, paths,
-                com.pilot.core.prompt.PromptLibrary.standard()))
-            .withIndependentCodeReviewer(review.active() ? null
-                : new IndependentCodeReviewer(measuredMain, resolvedWorkspace, handle.cancelled::get))
-            // 编辑后自动格式化/lint 之类交给 .pilot/settings.json，不再占用模型注意力
-            .withHooks(com.pilot.core.hook.Hooks.load(toolFactory.resolve(workspace)))
-            .withHookExecution(toolFactory.executionSelection())
-            // 重启接管后重复的写文件调用不重复落盘
-            .withToolJournal(runId, journals == null ? com.pilot.core.tool.ToolCallJournal.none()
-                : journals.forWorkspace(sessionId, toolFactory.resolve(workspace)));
+        AgentLoop loop =
+            new AgentLoop(executionClient, tools, sessionGate, sessionApprovals, config, handle.cancelled::get,
+                () -> null, traceRecorder, delta -> sessions.preview(sessionId, runId, new AssistantPreview(delta)))
+                .withReadOnlySession(
+                    prepared.planMode() || review.active() || properties.permissionMode() == PermissionMode.READ_ONLY)
+                .withPendingMessages(() -> pollSteering(sessionId))
+                .withLiveReasoning(
+                    delta -> sessions.preview(sessionId, runId, new com.pilot.core.event.AssistantReasoning(delta)))
+                .withTaskContext(runContext.taskContextSource())
+                .withCompletionClaim(() -> claimCompletion(sessionId, handle))
+                .withRestoredPaths(snapshots::restoredPaths).withQualityWorkspace(resolvedWorkspace)
+                .withQualityTexts(snapshots::originalText, path -> WorkspaceTexts.read(resolvedWorkspace, path))
+                .withLintGate(properties.lintGate())
+                .withScopedRules(paths -> com.pilot.server.agent.ProjectRuleLoader.scoped(resolvedWorkspace, paths,
+                    com.pilot.core.prompt.PromptLibrary.standard()))
+                .withIndependentCodeReviewer(review.active() ? null
+                    : new IndependentCodeReviewer(measuredMain, resolvedWorkspace, handle.cancelled::get))
+                // 编辑后自动格式化/lint 之类交给 .pilot/settings.json，不再占用模型注意力
+                .withHooks(com.pilot.core.hook.Hooks.load(toolFactory.resolve(workspace)))
+                .withHookExecution(toolFactory.executionSelection())
+                // 重启接管后重复的写文件调用不重复落盘
+                .withToolJournal(runId, journals == null ? com.pilot.core.tool.ToolCallJournal.none()
+                    : journals.forWorkspace(sessionId, toolFactory.resolve(workspace)));
 
         com.pilot.core.tool.ReadGuard readGuard = runContext.readGuard();
         if (readGuard != null) {
@@ -1417,6 +1438,7 @@ public class AgentRunService implements RunStarter {
         } finally {
             if (!review.active()) {
                 deferredTools.remember(sessionId, tools.enabledDeferredTools());
+                refreshPrefixTools(sessionId, tools.definitions());
             }
             try {
                 finishSnapshots(runId);
@@ -1712,6 +1734,61 @@ public class AgentRunService implements RunStarter {
     private record ExecutionRunContext(PreparedRunContext prepared, RunUsageAccumulator runUsage,
         AtomicReference<RunCompleted> lastCompleted, Consumer<SessionEvent> sink, ModelClient measuredMain,
         AgentLoop.Config config, GoalExecutionPolicy goalPolicy, ModelClient executionClient) {
+    }
+
+    private record SessionPrefixSnapshot(String workspace, String systemPrompt,
+        List<ContextComposition.Source> promptSources, List<ToolDefinition> tools, boolean cacheWarm) {
+    }
+
+    private SessionPrefixSnapshot resolveCompactionPrefix(String sessionId, String currentWorkspace,
+        List<Message> history) {
+        SessionPrefixSnapshot cached = sessionPrefixes.get(sessionId);
+        if (cached != null && Objects.equals(cached.workspace(), currentWorkspace)) {
+            return cached;
+        }
+        AgentRunPreparation.PreparedRun prepared =
+            preparation.prepare(
+                new AgentRunPreparation.PreparationInput(sessionId, "compact", "", null, true, history, false, null,
+                    false, modelClient.nativeCapabilities(), deferredTools.snapshot(sessionId)),
+                (items, explanation) -> {
+                }, tools -> {
+                }, false);
+        return new SessionPrefixSnapshot(prepared.workspace(), prepared.systemPrompt(), prepared.promptSources(),
+            prepared.tools().definitions(), false);
+    }
+
+    private void recordPrefixSnapshot(String sessionId, AgentRunPreparation.PreparedRun prepared) {
+        sessionPrefixes.compute(sessionId, (ignored, prev) -> {
+            boolean warm = prev != null && Objects.equals(prev.workspace(), prepared.workspace())
+                && Objects.equals(prev.systemPrompt(), prepared.systemPrompt()) && prev.cacheWarm();
+            return new SessionPrefixSnapshot(prepared.workspace(), prepared.systemPrompt(), prepared.promptSources(),
+                prepared.tools().definitions(), warm);
+        });
+    }
+
+    private void markPrefixWarm(String sessionId) {
+        sessionPrefixes.computeIfPresent(sessionId, (ignored, current) -> new SessionPrefixSnapshot(current.workspace(),
+            current.systemPrompt(), current.promptSources(), current.tools(), true));
+    }
+
+    private void refreshPrefixTools(String sessionId, List<ToolDefinition> definitions) {
+        sessionPrefixes.computeIfPresent(sessionId, (ignored, current) -> new SessionPrefixSnapshot(current.workspace(),
+            current.systemPrompt(), current.promptSources(), List.copyOf(definitions), current.cacheWarm()));
+    }
+
+    private static boolean isWarmCacheReport(RequestReport report) {
+        if (report == null || !"main".equals(report.purpose()) || report.usage() == null) {
+            return false;
+        }
+        ModelUsage usage = report.usage();
+        return (usage.cacheReadObserved() && usage.cachedInputTokens() > 0)
+            || (usage.cacheWriteObserved() && usage.cacheWriteTokens() > 0);
+    }
+
+    private int manualCompactionAdmissionLimit() {
+        long wire = ModelCapacity.active().inputBudget();
+        long local = (long)(properties.contextMaxChars() * 0.80);
+        return (int)Math.max(1, Math.min(Integer.MAX_VALUE, Math.min(local, wire)));
     }
 
     static final class RunUsageAccumulator {

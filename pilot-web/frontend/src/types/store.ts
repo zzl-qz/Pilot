@@ -136,7 +136,7 @@ export interface StoreActions {
   steerQueueItem(index: number): Promise<boolean>; saveQueueItem(target: QueueEditTarget, text: string, requirements?: { constraints: string[]; acceptance: string[] }): Promise<boolean>;
   removeQueueItem(index: number): Promise<boolean>; moveQueueItem(from: number, to: number): Promise<boolean>; setQueueHeld(held: boolean): Promise<boolean>; takeBackQueueItem(index: number): Promise<boolean>;
   loadTask(options?: StrictOptions): Promise<void>; saveTask(constraints: string[], acceptance: S.TaskControlServiceAcceptance[]): Promise<void>;
-  refreshContext(options?: StrictOptions): Promise<void>; ensureMirror(): void; compactContext(): Promise<void>;
+  refreshContext(options?: StrictOptions): Promise<void>; ensureMirror(): void; compactContext(focus?: string): Promise<boolean>;
   openCheckpoint(sequence: number): Promise<void>; restoreCheckpoint(sequence: number, mode: string, revision: number): Promise<void>;
   forkCheckpoint(sequence: number, revision: number): Promise<void>; currentProject(): ProjectSummary | null;
   createSideChat(options?: ForceOptions): Promise<SideChatTab | null>; selectSideChat(id: string): void; closeSideChat(id: string): Promise<boolean>;

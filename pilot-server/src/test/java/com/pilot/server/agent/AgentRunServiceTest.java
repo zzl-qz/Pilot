@@ -15,6 +15,7 @@ import static org.mockito.Mockito.withSettings;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
@@ -49,9 +50,11 @@ import com.pilot.core.message.ToolCall;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelClientException;
 import com.pilot.core.model.ModelFailureKind;
+import com.pilot.core.model.ModelProfile;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ModelUsage;
 import com.pilot.core.model.ToolDefinition;
+import com.pilot.core.model.diagnostics.ModelRequestScope;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PolicyPermissionGate;
 import com.pilot.core.plan.PlanItem;
@@ -1627,6 +1630,92 @@ class AgentRunServiceTest {
             assertTrue(statuses.poll(10, TimeUnit.SECONDS).startsWith("FAILED:MODEL_ERROR:"));
             assertEquals(null, statuses.poll(300, TimeUnit.MILLISECONDS), "永久错误（401）不得触发自动重连续跑");
             assertEquals(1, permCalls.get());
+        }
+    }
+
+    @Test
+    void manualCompactionReusesWarmMainPrefixAndToolsWhenWorkspaceMatches() throws Exception {
+        ModelProfile anthropicShort =
+            ModelProfile.resolve(null, "claude-sonnet-4-6", "anthropic", "explicit", "", null, null, "short", null);
+        List<List<Message>> capturedRequests = new CopyOnWriteArrayList<>();
+        List<List<ToolDefinition>> capturedTools = new CopyOnWriteArrayList<>();
+        List<String> capturedPurposes = new CopyOnWriteArrayList<>();
+
+        ModelClient model = new ModelClient() {
+            @Override
+            public ModelProfile profile() {
+                return anthropicShort;
+            }
+
+            @Override
+            public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
+                capturedRequests.add(List.copyOf(messages));
+                capturedTools.add(List.copyOf(tools));
+                capturedPurposes.add(ModelRequestScope.current().purpose());
+                if ("compaction".equals(ModelRequestScope.current().purpose())) {
+                    return new ModelResponse("<analysis>核对上下文</analysis><summary>## 保留结果\n保留事务边界</summary>", List.of(),
+                        new ModelUsage(500, 30, 0, 420, 0, true), ModelResponse.FinishReason.STOP);
+                }
+                return new ModelResponse("首轮完成。", List.of(), new ModelUsage(400, 12, 0, 300, 0, true),
+                    ModelResponse.FinishReason.STOP);
+            }
+        };
+
+        try (Fixture fixture = new Fixture(model, 8)) {
+            String runId = fixture.service.claimRun(fixture.sessionId).orElseThrow();
+            fixture.sessions.publish(fixture.sessionId, runId, new RunStarted("检查项目结构"));
+            fixture.service.start(fixture.sessionId, runId, "检查项目结构");
+            assertEquals("COMPLETED", fixture.finished.poll(10, TimeUnit.SECONDS));
+
+            int mainIdx = capturedPurposes.indexOf("main");
+            assertTrue(mainIdx >= 0);
+
+            List<Message> largeHistory = new ArrayList<>();
+            for (int i = 0; i < 10; i++) {
+                largeHistory.add(Message.assistant("step " + i,
+                    List.of(new ToolCall("call_" + i, "read_file", Map.of("path", "f" + i)))));
+                largeHistory.add(Message.tool("call_" + i, "x".repeat(2_500)));
+            }
+            fixture.conversations.save(fixture.sessionId, largeHistory);
+
+            var compacted = fixture.service.compactContext(fixture.sessionId, "保留事务边界");
+            assertTrue(compacted.compacted());
+
+            int compactIdx = capturedPurposes.lastIndexOf("compaction");
+            assertTrue(compactIdx > mainIdx);
+            List<Message> compactRequest = capturedRequests.get(compactIdx);
+            assertTrue(compactRequest.size() > 2, "预热后手动压缩必须复用主会话前缀而不退化为 2 条短摘录");
+            assertEquals(capturedRequests.get(mainIdx).getFirst().content(), compactRequest.getFirst().content(),
+                "手动压缩 system prompt 必须与主会话字节一致");
+            assertEquals(capturedTools.get(mainIdx), capturedTools.get(compactIdx), "手动压缩 tools 定义必须与主会话完全一致");
+            assertTrue(compactRequest.getLast().content().contains("保留事务边界"));
+        }
+    }
+
+    @Test
+    void coldManualCompactionFallsBackToShortSummaryOnColdShortProfile() throws Exception {
+        List<List<Message>> capturedRequests = new CopyOnWriteArrayList<>();
+        List<List<ToolDefinition>> capturedTools = new CopyOnWriteArrayList<>();
+        ModelClient model = (messages, tools) -> {
+            capturedRequests.add(List.copyOf(messages));
+            capturedTools.add(List.copyOf(tools));
+            return new ModelResponse("<summary>冷启动短摘要</summary>", List.of());
+        };
+
+        try (Fixture fixture = new Fixture(model, 8)) {
+            List<Message> largeHistory = new ArrayList<>();
+            for (int i = 0; i < 10; i++) {
+                largeHistory.add(Message.assistant("step " + i,
+                    List.of(new ToolCall("call_" + i, "read_file", Map.of("path", "f" + i)))));
+                largeHistory.add(Message.tool("call_" + i, "x".repeat(2_500)));
+            }
+            fixture.conversations.save(fixture.sessionId, largeHistory);
+
+            var compacted = fixture.service.compactContext(fixture.sessionId, null);
+            assertTrue(compacted.compacted());
+            assertEquals(1, capturedRequests.size());
+            assertEquals(2, capturedRequests.getFirst().size(), "冷会话或未命中缓存时安全走 2 条短摘录");
+            assertTrue(capturedTools.getFirst().isEmpty());
         }
     }
 }

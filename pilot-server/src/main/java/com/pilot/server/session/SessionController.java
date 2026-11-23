@@ -317,10 +317,11 @@ public class SessionController {
 
     /** 主动压缩只改模型记忆；人可见的聊天与审计事件完整保留。 */
     @PostMapping("/{id}/context/compact")
-    public RunStarter.CompactionResult compactContext(@PathVariable String id) {
+    public RunStarter.CompactionResult compactContext(@PathVariable String id,
+        @RequestBody(required = false) CompactRequest request) {
         requireSession(id);
         try {
-            return runStarter.compactContext(id);
+            return runStarter.compactContext(id, request == null ? null : request.focus());
         } catch (IllegalStateException e) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
         }
@@ -702,6 +703,9 @@ public class SessionController {
     }
 
     public record RenameRequest(String title) {
+    }
+
+    public record CompactRequest(String focus) {
     }
 
     public record MessageRequest(String content, List<AttachmentService.Inbound> attachments,

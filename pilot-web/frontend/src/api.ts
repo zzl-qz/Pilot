@@ -209,7 +209,7 @@ export const api = {
   steerQueueItem: (id: string, index: number, body: { runId?: string | null; revision?: string | null }) => apiJson<ApiResults['steerQueueItem']>(`/api/sessions/${encodeURIComponent(id)}/queue/${index}/steer`, jsonBody('POST', body)),
   plan: (id: string) => apiJson<ApiResults['plan']>(`/api/sessions/${encodeURIComponent(id)}/plan`),
   context: (id: string) => apiJson<ApiResults['context']>(`/api/sessions/${encodeURIComponent(id)}/context`),
-  compactContext: (id: string) => apiJson<ApiResults['compactContext']>(`/api/sessions/${encodeURIComponent(id)}/context/compact`, { method: 'POST' }),
+  compactContext: (id: string, focus?: string) => apiJson<ApiResults['compactContext']>(`/api/sessions/${encodeURIComponent(id)}/context/compact`, focus?.trim() ? jsonBody('POST', { focus: focus.trim() }) : { method: 'POST' }),
   sandboxAction: (id: string, sandboxId: string, action: string) => apiJson<ApiResults['sandboxAction']>(`/api/sessions/${encodeURIComponent(id)}/multi/sandboxes/${encodeURIComponent(sandboxId)}/${action}`, { method: 'POST' }),
   /** 接受前的产物清单与校验结论：近两版差异 + 依赖，避免盲批。 */
   sandboxManifest: (id: string, sandboxId: string) => apiJson<ApiResults['sandboxManifest']>(`/api/sessions/${encodeURIComponent(id)}/multi/sandboxes/${encodeURIComponent(sandboxId)}/manifest`),

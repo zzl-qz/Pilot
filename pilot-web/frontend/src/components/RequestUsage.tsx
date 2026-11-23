@@ -59,11 +59,12 @@ function RequestRows({ reports }: { reports: RequestReport[] }) {
   </ol>;
 }
 
-export function ContextUsagePanel({ status, report, reports, usage, compacting, onCompact, onClose, onSettings }: { status?: ContextStatus | null; report?: RequestReport | null; reports?: RequestReport[]; usage?: RunUsage | null; compacting?: boolean; onCompact: () => void; onClose: () => void; onSettings: () => void }) {
+export function ContextUsagePanel({ status, report, reports, usage, compacting, onCompact, onClose, onSettings }: { status?: ContextStatus | null; report?: RequestReport | null; reports?: RequestReport[]; usage?: RunUsage | null; compacting?: boolean; onCompact: (focus?: string) => Promise<boolean> | void; onClose: () => void; onSettings: () => void }) {
   const [view, setView] = useState<'context' | 'requests'>('context');
   const [attempt, setAttempt] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
+  const [focus, setFocus] = useState('');
   const headingRef = useRef<HTMLHeadingElement>(null);
   const sessionId = useStore(state => state.sessionId);
   const refreshContext = useStore(state => state.refreshContext);
@@ -122,9 +123,18 @@ export function ContextUsagePanel({ status, report, reports, usage, compacting, 
       </dl>
       {details && details.requests > 0 && <p className="request-note">缓存数据 {details.observedCacheRequests}/{details.requests} 次 · 可计价 {details.pricedRequests}/{details.requests} 次{details.pricedRequests < details.requests ? '，费用合计不完整' : ''}</p>}
       {latest?.cost?.total == null && <Button size="sm" variant="ghost" className="request-price-link" label="配置当前模型单价" onClick={onSettings} />}
+      <div className="request-compact-focus">
+        <input type="text" maxLength={500} value={focus} disabled={!sessionId || compacting}
+          aria-label="压缩重点保留提示"
+          placeholder="可选：压缩时重点保留（如接口契约、已排除方案）"
+          onChange={event => setFocus(event.target.value)} />
+      </div>
       <div className="request-panel-foot"><span>{context.fromRequest ? '最近请求快照' : '历史消息'} · token 估算</span>
         <Button size="sm" label={compacting ? '正在压缩…' : '压缩上下文'}
-          isLoading={compacting} isDisabled={!sessionId || status?.canCompact === false} onClick={onCompact} /></div>
+          isLoading={compacting} isDisabled={!sessionId || status?.canCompact === false} onClick={async () => {
+            const ok = await onCompact(focus);
+            if (ok !== false) setFocus('');
+          }} /></div>
     </> : <><p className="request-note">最近 {reports?.length || 0} 次请求，包含压缩与子代理。金额按各次请求使用的单价估算。</p><RequestList reports={reports} /></>}
   </section>;
 }

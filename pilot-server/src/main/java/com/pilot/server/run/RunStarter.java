@@ -228,6 +228,11 @@ public interface RunStarter {
         return new CompactionResult(false, 0, 0, 0, "当前运行器不支持主动压缩");
     }
 
+    /** 带保留重点提示的主动压缩；默认实现兼容无参入口。 */
+    default CompactionResult compactContext(String sessionId, String focus) {
+        return compactContext(sessionId);
+    }
+
     record ContextStatus(int messages, int usedTokens, int limitTokens, boolean estimated, boolean canCompact,
         int percent, List<Segment> segments) {
         public ContextStatus(int messages, int usedTokens, int limitTokens, boolean estimated, boolean canCompact) {

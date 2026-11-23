@@ -383,6 +383,115 @@ class ContextCompactorTest {
         assertEquals(100, ContextCompactor.estimateTokens(chinese));
     }
 
+    @Test
+    void stripsAnalysisScratchpadAndKeepsSummaryAcrossVariants() {
+        assertEquals("正式摘要",
+            ContextCompactor.extractSummary("<analysis>先核对文件</analysis>\n<summary>\n正式摘要\n</summary>"));
+        assertEquals("正文", ContextCompactor.extractSummary("<ANALYSIS>草稿</ANALYSIS><SUMMARY>正文</SUMMARY>"));
+        assertEquals("无标签摘要", ContextCompactor.extractSummary("  无标签摘要  "));
+        assertEquals("只写了正文", ContextCompactor.extractSummary("<analysis>ok</analysis>\n只写了正文"));
+        assertEquals("", ContextCompactor.extractSummary("<analysis>被 max_tokens 截断在思考阶段"),
+            "未闭合 analysis 必须丢弃并判失败，绝不把草稿塞回上下文");
+        assertEquals("半截正文", ContextCompactor.extractSummary("<analysis>ok</analysis><summary>半截正文"));
+    }
+
+    @Test
+    void dualStageCompactionStripsAnalysisFromConversationAndPassesBoundedFocus() {
+        List<Message> messages = history(10, 3_000);
+        ArrayList<String> prompts = new ArrayList<>();
+        ModelClient client = (request, tools) -> {
+            prompts.add(request.getFirst().content());
+            return new ModelResponse("<analysis>草稿泄露检测标记_SECRET</analysis>\n<summary>\n## 原始目标\n保留契约\n</summary>",
+                List.of());
+        };
+
+        String focus = "保留 API 契约 " + "x".repeat(600);
+        ContextCompactor.Outcome outcome = new ContextCompactor(client, 2).compact(messages, 12_000, 12_000, focus);
+
+        assertTrue(outcome.compacted());
+        assertFalse(messages.get(1).content().contains("草稿泄露检测标记_SECRET"));
+        assertTrue(messages.get(1).content().contains("保留契约"));
+        assertTrue(prompts.getFirst().contains("保留 API 契约"));
+        assertFalse(prompts.getFirst().contains("x".repeat(550)), "focus 超出上限必须截断");
+    }
+
+    @Test
+    void prefixCompactionIncludesFocusInstruction() {
+        List<Message> messages = history(10, 3_000);
+        List<ToolDefinition> definitions = List.of(new ToolDefinition("read_file", "read", Map.of("type", "object")));
+        ArrayList<String> tailPrompts = new ArrayList<>();
+        ModelClient client = new ModelClient() {
+            @Override
+            public ModelProfile profile() {
+                return ModelProfile.resolve(null, "m", "generic", "auto", "", null, null, "prefix", null);
+            }
+
+            @Override
+            public ModelResponse chat(List<Message> request, List<ToolDefinition> tools) {
+                tailPrompts.add(request.getLast().content());
+                return new ModelResponse("<analysis>核对</analysis><summary>前缀复用摘要</summary>", List.of());
+            }
+        };
+
+        ContextCompactor.Outcome outcome =
+            new ContextCompactor(client, 2).withTools(() -> definitions).withTokenLimit(() -> 104_000)
+                .withCharLimit(() -> 400_000).compact(messages, 8_000, 8_000, "保留数据库 schema 决策");
+
+        assertTrue(outcome.compacted());
+        assertTrue(tailPrompts.getFirst().contains("保留数据库 schema 决策"));
+        assertTrue(messages.get(1).content().contains("前缀复用摘要"));
+        assertFalse(messages.get(1).content().contains("<analysis>"));
+    }
+
+    @Test
+    void explicitCacheProfileUsesPrefixCompactionOnlyAfterObservedCacheHit() {
+        List<ToolDefinition> definitions = List.of(new ToolDefinition("read_file", "read", Map.of("type", "object")));
+        ModelProfile anthropicShort =
+            ModelProfile.resolve(null, "claude-sonnet-4-6", "anthropic", "explicit", "", null, null, "short", null);
+
+        ArrayList<List<Message>> hitRequests = new ArrayList<>();
+        ModelClient hitClient = new ModelClient() {
+            @Override
+            public ModelProfile profile() {
+                return anthropicShort;
+            }
+
+            @Override
+            public ModelResponse chat(List<Message> request, List<ToolDefinition> tools) {
+                hitRequests.add(List.copyOf(request));
+                return new ModelResponse("<summary>显式缓存前缀摘要</summary>", List.of());
+            }
+        };
+        List<Message> hitMessages = history(10, 3_000);
+        ContextCompactor.Outcome hitOutcome =
+            new ContextCompactor(hitClient, 2).withTools(() -> definitions).withTokenLimit(() -> 104_000)
+                .withCharLimit(() -> 400_000).withObservedCacheHit(() -> true).compact(hitMessages, 8_000);
+        assertTrue(hitOutcome.compacted());
+        assertEquals(1, hitRequests.size());
+        assertTrue(hitRequests.getFirst().size() > 2, "观测到缓存命中后显式缓存端点应走前缀复用压缩");
+
+        ArrayList<List<Message>> coldRequests = new ArrayList<>();
+        ModelClient coldClient = new ModelClient() {
+            @Override
+            public ModelProfile profile() {
+                return anthropicShort;
+            }
+
+            @Override
+            public ModelResponse chat(List<Message> request, List<ToolDefinition> tools) {
+                coldRequests.add(List.copyOf(request));
+                return new ModelResponse("冷启动短摘要", List.of());
+            }
+        };
+        List<Message> coldMessages = history(10, 3_000);
+        ContextCompactor.Outcome coldOutcome =
+            new ContextCompactor(coldClient, 2).withTools(() -> definitions).withTokenLimit(() -> 104_000)
+                .withCharLimit(() -> 400_000).withObservedCacheHit(() -> false).compact(coldMessages, 8_000);
+        assertTrue(coldOutcome.compacted());
+        assertEquals(1, coldRequests.size());
+        assertEquals(2, coldRequests.getFirst().size(), "未命中缓存前仍走短摘录压缩");
+    }
+
     private static List<Message> history(int groups, int charsPerTool) {
         ArrayList<Message> messages = new ArrayList<Message>();
         messages.add(Message.system("sys"));
