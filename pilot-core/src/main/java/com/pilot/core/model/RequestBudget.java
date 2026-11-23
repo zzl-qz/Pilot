@@ -61,12 +61,21 @@ public final class RequestBudget {
      * 中断或续跑时，助手已经说出要调用工具，结果却没落盘。这种记录不能再发给模型。
      */
     public static void closeDanglingToolCalls(List<Message> messages) {
-        if (messages == null || messages.isEmpty()) {
+        List<Message> repaired = repairedDanglingToolCalls(messages);
+        if (repaired == messages) {
             return;
+        }
+        messages.clear();
+        messages.addAll(repaired);
+    }
+
+    private static List<Message> repairedDanglingToolCalls(List<Message> messages) {
+        if (messages == null || messages.isEmpty()) {
+            return messages;
         }
         try {
             validateProtocol(messages);
-            return;
+            return messages;
         } catch (IllegalArgumentException ignored) {
             // 下面按调用把结果重新排好。已经合法的记录不会进到这里。
         }
@@ -89,8 +98,7 @@ public final class RequestBudget {
                 rebuilt.add(existing != null ? existing : Message.tool(call.callId(), INTERRUPTED_TOOL_RESULT));
             }
         }
-        messages.clear();
-        messages.addAll(rebuilt);
+        return rebuilt;
     }
 
     /** 空的、重复的调用编号不能发给模型。保留第一次出现的那个。 */
@@ -112,15 +120,16 @@ public final class RequestBudget {
             message.imagePositions(), message.reasoningContent());
     }
 
-    /** 由所有端点适配器在序列化并发送之前调用，包括摘要、审查、收尾和子代理。 */
-    public static void enforce(List<Message> messages, List<ToolDefinition> tools, ModelCapacity capacity) {
-        closeDanglingToolCalls(messages);
-        validateProtocol(messages);
-        Assessment budget = assess(messages, tools, capacity);
+    /** 由所有端点适配器在序列化并发送之前调用，包括摘要、审查、收尾和子代理；返回协议已对齐的消息列表而不改写不可变入参。 */
+    public static List<Message> enforce(List<Message> messages, List<ToolDefinition> tools, ModelCapacity capacity) {
+        List<Message> safe = repairedDanglingToolCalls(messages);
+        validateProtocol(safe);
+        Assessment budget = assess(safe, tools, capacity);
         if (!budget.fits()) {
             throw new BudgetExceeded("CONTEXT_TOO_LARGE: 完整请求估算 " + budget.estimatedInputTokens() + " token，输入预算 "
                 + budget.inputLimit() + "；未发送请求");
         }
+        return safe;
     }
 
     public static void validateProtocol(List<Message> messages) {

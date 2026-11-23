@@ -125,7 +125,7 @@ public final class OpenAiResponsesModelClient implements ModelClient {
 
     Map<String, Object> requestBody(List<Message> messages, List<ToolDefinition> definitions) {
         ModelCapacity capacity = ModelCapacity.active();
-        RequestBudget.enforce(messages, definitions, capacity);
+        messages = RequestBudget.enforce(messages, definitions, capacity);
         List<Map<String, Object>> input = new ArrayList<>();
         for (Message message : messages) {
             if ("tool".equals(message.role())) {

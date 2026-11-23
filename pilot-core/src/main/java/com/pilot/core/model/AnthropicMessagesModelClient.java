@@ -123,7 +123,7 @@ public final class AnthropicMessagesModelClient implements ModelClient {
 
     Map<String, Object> requestBody(List<Message> messages, List<ToolDefinition> definitions) {
         ModelCapacity capacity = ModelCapacity.active();
-        RequestBudget.enforce(messages, definitions, capacity);
+        messages = RequestBudget.enforce(messages, definitions, capacity);
         String topSystem =
             messages.isEmpty() || !"system".equals(messages.getFirst().role()) ? "" : messages.getFirst().content();
         List<String> tailGuidance = new ArrayList<>();

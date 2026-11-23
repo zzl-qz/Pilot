@@ -143,7 +143,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     private Map<String, Object> requestBody(List<Message> messages, List<ToolDefinition> definitions, boolean streaming,
         ReasoningReplay replay) {
         ModelCapacity capacity = ModelCapacity.active();
-        RequestBudget.enforce(messages, definitions, capacity);
+        messages = RequestBudget.enforce(messages, definitions, capacity);
         List<Map<String, Object>> items = messageItems(messages, replay);
         List<Map<String, Object>> tools = definitions == null ? new ArrayList<>()
             : new ArrayList<>(definitions.stream().map(this::toolPayload).map(LinkedHashMap::new).toList());

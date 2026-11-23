@@ -79,4 +79,15 @@ class RequestBudgetRepairTest {
         RequestBudget.closeDanglingToolCalls(messages);
         assertEquals(before, messages);
     }
+
+    @Test
+    void enforceRepairsImmutableListWithoutMutatingInput() {
+        List<Message> immutable =
+            List.of(Message.system("s"), Message.user("目标"), Message.assistant("中断的调用", List.of(first)));
+        List<Message> repaired = RequestBudget.enforce(immutable, List.of(), ModelCapacity.active());
+        assertEquals(3, immutable.size());
+        assertEquals(4, repaired.size());
+        assertEquals("call_a", repaired.get(3).toolCallId());
+        RequestBudget.validateProtocol(repaired);
+    }
 }
