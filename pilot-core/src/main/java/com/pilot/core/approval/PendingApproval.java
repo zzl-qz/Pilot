@@ -9,8 +9,17 @@ import java.util.Map;
  * @param args 结构化参数（仅短标量值），同 ApprovalRequired 事件的说明
  */
 public record PendingApproval(String callId, String toolName, String argsSummary, Map<String, Object> args,
-    Instant requestedAt) {
+    Instant requestedAt, String sessionId, Instant expiresAt) {
+    public PendingApproval {
+        sessionId = sessionId == null ? "" : sessionId.strip();
+    }
+
     public PendingApproval(String callId, String toolName, String argsSummary, Instant requestedAt) {
-        this(callId, toolName, argsSummary, null, requestedAt);
+        this(callId, toolName, argsSummary, null, requestedAt, "", null);
+    }
+
+    public PendingApproval(String callId, String toolName, String argsSummary, Map<String, Object> args,
+        Instant requestedAt) {
+        this(callId, toolName, argsSummary, args, requestedAt, "", null);
     }
 }

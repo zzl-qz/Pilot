@@ -404,10 +404,15 @@ public final class ToolExecutor {
             approved = false;
         }
 
-        events.accept(
-            new ApprovalResolved(call.callId(), approved ? ApprovalDecision.APPROVED : ApprovalDecision.DENIED));
-        return approved ? runWithCurrentPermission(call, tool, beforeStart, action)
-            : ToolResult.text(ToolResults.USER_DENIED + "执行 " + tool.name() + "，文件未修改。");
+        String reason = approved ? "" : approvals.takeRejectionReason(call.callId());
+        events.accept(new ApprovalResolved(call.callId(), approved ? ApprovalDecision.APPROVED : ApprovalDecision.DENIED,
+            reason.isBlank() ? null : reason));
+        if (approved) {
+            return runWithCurrentPermission(call, tool, beforeStart, action);
+        }
+        String deniedText = ToolResults.USER_DENIED + "执行 " + tool.name() + "，文件未修改。"
+            + (reason.isBlank() ? "" : " 用户说明：" + reason);
+        return ToolResult.text(deniedText);
     }
 
     private ToolResult runWithCurrentPermission(ToolCall call, Tool tool, Supplier<String> guard,

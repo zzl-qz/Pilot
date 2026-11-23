@@ -1,8 +1,10 @@
 package com.pilot.core.tool;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /** 有限选项时停下等用户点选或自行填写，答案回到当前任务。 */
 public final class AskUserTool implements Tool {
@@ -10,9 +12,15 @@ public final class AskUserTool implements Tool {
     private static final long WAIT_MINUTES = 10;
 
     private final QuestionBroker broker;
+    private final String sessionId;
 
     public AskUserTool(QuestionBroker broker) {
+        this(broker, "");
+    }
+
+    public AskUserTool(QuestionBroker broker, String sessionId) {
         this.broker = broker;
+        this.sessionId = sessionId == null ? "" : sessionId.strip();
     }
 
     @Override
@@ -40,6 +48,10 @@ public final class AskUserTool implements Tool {
 
     @Override
     public String execute(Map<String, Object> args) {
+        return execute(args, Duration.ofMinutes(WAIT_MINUTES));
+    }
+
+    String execute(Map<String, Object> args, Duration waitTimeout) {
         String question =
             args == null || args.get("question") == null ? "" : String.valueOf(args.get("question")).strip();
         List<String> options = options(args == null ? null : args.get("options"));
@@ -53,14 +65,22 @@ public final class AskUserTool implements Tool {
         if (callId.isBlank()) {
             return "ERROR: 缺少调用编号，无法等待用户选择";
         }
+        Duration effectiveTimeout = waitTimeout == null || waitTimeout.isNegative() || waitTimeout.isZero()
+            ? Duration.ofMinutes(WAIT_MINUTES) : waitTimeout;
         try {
-            String choice = broker.register(callId).get(WAIT_MINUTES, TimeUnit.MINUTES);
-            return choice == null || choice.isBlank() ? "ERROR: 用户没有回答" : "用户选择：" + choice;
+            String choice = broker.register(callId, sessionId, question, options, effectiveTimeout)
+                .get(effectiveTimeout.toMillis(), TimeUnit.MILLISECONDS);
+            return choice == null || choice.isBlank() ? "ERROR: 等待用户选择已取消" : "用户选择：" + choice;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            broker.cancel(callId);
             return "ERROR: 等待用户选择时被中断";
-        } catch (Exception e) {
+        } catch (TimeoutException e) {
+            broker.cancel(callId);
             return "ERROR: 用户没有在限定时间内回答";
+        } catch (Exception e) {
+            broker.cancel(callId);
+            return "ERROR: 等待用户选择失败";
         }
     }
 

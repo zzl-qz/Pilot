@@ -29,7 +29,7 @@ public class ApprovalController {
         if (request == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "body with approved=true/false is required");
         }
-        boolean accepted = approvals.resolve(callId, request.approved());
+        boolean accepted = approvals.resolve(callId, request.approved(), request.reason());
         if (!accepted) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND,
                 "no pending approval for callId " + callId + "（可能已超时或已处理）");
@@ -42,7 +42,10 @@ public class ApprovalController {
         return approvals.pending();
     }
 
-    public record ApprovalRequest(boolean approved) {
+    public record ApprovalRequest(boolean approved, String reason) {
+        public ApprovalRequest(boolean approved) {
+            this(approved, null);
+        }
     }
 
     public record ApprovalResponse(String callId, boolean approved, boolean resolved) {

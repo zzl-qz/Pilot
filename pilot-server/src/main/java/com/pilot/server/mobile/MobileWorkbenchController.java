@@ -92,15 +92,19 @@ public class MobileWorkbenchController {
             return List.of();
         }
         Map<String, EventEnvelope> owners = new HashMap<>();
-        repository.eventsOfType("approval.required", since.minusSeconds(60)).forEach(event -> {
-            if (event.payload() instanceof ApprovalRequired approval) {
-                owners.put(approval.callId(), event);
-            }
-        });
+        if (pending.stream().anyMatch(item -> item.sessionId().isBlank())) {
+            repository.eventsOfType("approval.required", since.minusSeconds(60)).forEach(event -> {
+                if (event.payload() instanceof ApprovalRequired approval) {
+                    owners.put(approval.callId(), event);
+                }
+            });
+        }
         return pending.stream().map(approval -> {
             EventEnvelope owner = owners.get(approval.callId());
-            String sessionId = owner == null ? "" : owner.sessionId();
-            String title = repository.find(sessionId).map(session -> session.title()).orElse("正在确认任务归属");
+            String sessionId = !approval.sessionId().isBlank() ? approval.sessionId()
+                : owner == null ? "" : owner.sessionId();
+            String title = sessionId.isBlank() ? "正在确认任务归属"
+                : repository.find(sessionId).map(session -> session.title()).orElse("正在确认任务归属");
             return new MobileApproval(approval.callId(), approval.toolName(), approval.argsSummary(),
                 approval.requestedAt(), sessionId, owner == null ? "" : owner.runId(), title);
         }).toList();

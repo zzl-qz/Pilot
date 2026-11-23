@@ -477,11 +477,13 @@ public final class AgentRunPreparation {
         List<Path> extraRoots) {
         ToolRegistry tools = new ToolRegistry();
         toolFactory.usePlan(() -> plans.load(sessionId));
+        toolFactory.useSession(sessionId);
         try {
             toolFactory.registryFor(workspace, extraRoots, planSink).tools().stream()
                 .filter(tool -> !ToolNames.RUN_COMMAND.equals(tool.name()) && !EnableToolsTool.NAME.equals(tool.name()))
                 .forEach(tools::register);
         } finally {
+            toolFactory.useSession(null);
             toolFactory.usePlan(null);
         }
         tools.register(new EnableToolsTool(tools));

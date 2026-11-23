@@ -1,8 +1,10 @@
 package com.pilot.server.session.question;
 
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -20,12 +22,17 @@ public class QuestionController {
         this.questions = questions;
     }
 
+    @GetMapping("/api/questions")
+    public List<QuestionBroker.PendingQuestion> pending() {
+        return questions.pending();
+    }
+
     @PostMapping("/api/sessions/{id}/questions/{callId}")
     public Map<String, String> answer(@PathVariable String id, @PathVariable String callId,
         @RequestBody Map<String, String> body) {
         String choice = body == null ? "" : body.getOrDefault("choice", "");
-        if (!questions.answer(callId, choice)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "这个问题已经不在等待");
+        if (!questions.answer(id, callId, choice)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "这个问题已经不在等待或不属于当前对话");
         }
         return Map.of("choice", choice.strip());
     }

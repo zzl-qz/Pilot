@@ -92,6 +92,8 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
     private QuestionBroker questions;
     /** 建工具表时读取已经落库的计划，避免把完成的步骤退回去。 */
     private final ThreadLocal<Supplier<List<PlanItem>>> plans = ThreadLocal.withInitial(() -> List::of);
+    /** 建工具表时绑定当前会话，让 ask_user 记录等待归属。 */
+    private final ThreadLocal<String> currentSession = ThreadLocal.withInitial(() -> "");
 
     @Autowired(required = false)
     public void setExecution(Selection execution) {
@@ -158,12 +160,17 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
      * 每次运行新建若干无状态对象，开销可以忽略。
      */
     public ToolRegistry registryFor(String workspace, PlanSink planSink) {
-        return create(resolve(workspace), planSink, List.of());
+        return create(resolve(workspace), planSink, List.of(), "");
     }
 
     /** @param extraRoots 项目关联的其他文件夹：绝对路径可读写，相对路径仍按默认工作区 */
     public ToolRegistry registryFor(String workspace, List<Path> extraRoots, PlanSink planSink) {
-        return create(resolve(workspace), planSink, extraRoots);
+        return create(resolve(workspace), planSink, extraRoots, currentSession.get());
+    }
+
+    /** 带会话 ID 的工具集，让 ask_user 等交互等待与具体会话绑定。 */
+    public ToolRegistry registryFor(String workspace, List<Path> extraRoots, PlanSink planSink, String sessionId) {
+        return create(resolve(workspace), planSink, extraRoots, sessionId);
     }
 
     /** 只在构建这一次工具表时有效，用完要清掉。 */
@@ -172,6 +179,15 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
             plans.remove();
         } else {
             plans.set(current);
+        }
+    }
+
+    /** 只在构建这一次工具表时有效，用完要清掉。 */
+    public void useSession(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            currentSession.remove();
+        } else {
+            currentSession.set(sessionId.strip());
         }
     }
 
@@ -264,10 +280,10 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
     }
 
     private ToolRegistry create(Path root, PlanSink planSink) {
-        return create(root, planSink, List.of());
+        return create(root, planSink, List.of(), "");
     }
 
-    private ToolRegistry create(Path root, PlanSink planSink, List<Path> extraRoots) {
+    private ToolRegistry create(Path root, PlanSink planSink, List<Path> extraRoots, String sessionId) {
         PathValidator validator = new PathValidator(root, extraRoots);
         ToolRegistry registry = new ToolRegistry();
         // 每次 run 一份「先读后改」记录：read_file 登记过的文件才允许 edit_file
@@ -295,7 +311,7 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
         registry.register(new CodeDiagnosticsTool(() -> code.available() ? "ready" : "", code::diagnose));
         registry.register(new CodeSymbolTool(validator));
         if (questions != null) {
-            registry.register(new AskUserTool(questions));
+            registry.register(new AskUserTool(questions, sessionId));
         }
         registry.register(new EnableToolsTool(registry));
         return registry;

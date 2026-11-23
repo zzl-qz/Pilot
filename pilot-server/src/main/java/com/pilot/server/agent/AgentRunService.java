@@ -28,6 +28,8 @@ import org.springframework.stereotype.Component;
 import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.event.ApprovalRequired;
 import com.pilot.core.event.ApprovalResolved;
+import com.pilot.core.event.ArbitrationRequired;
+import com.pilot.core.event.ArbitrationResolved;
 import com.pilot.core.event.AssistantPreview;
 import com.pilot.core.event.AssistantReasoning;
 import com.pilot.core.event.ContextCompacted;
@@ -43,6 +45,8 @@ import com.pilot.core.event.RunOutcome;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.event.RunUsageUpdated;
 import com.pilot.core.event.SessionEvent;
+import com.pilot.core.event.ToolCompleted;
+import com.pilot.core.event.ToolStarted;
 import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.loop.ContextCompactor;
 import com.pilot.core.message.Attachment;
@@ -62,6 +66,8 @@ import com.pilot.core.quality.WorkspaceTexts;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.core.tool.AskUserTool;
+import com.pilot.core.tool.QuestionBroker;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.core.trace.JsonlTraceRecorder;
@@ -167,6 +173,19 @@ public class AgentRunService implements RunStarter {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setCoordinationEvents(com.pilot.server.coordination.CoordinationEventRelay coordinationEvents) {
         this.coordinationEvents = coordinationEvents;
+    }
+
+    private volatile QuestionBroker questions;
+    private volatile com.pilot.server.interaction.InteractionHub interactionHub;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setQuestions(QuestionBroker questions) {
+        this.questions = questions;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setInteractionHub(com.pilot.server.interaction.InteractionHub interactionHub) {
+        this.interactionHub = interactionHub;
     }
 
     /** 可恢复调度状态；为空时（测试构造）不做检查点，也不影响执行。 */
@@ -310,6 +329,7 @@ public class AgentRunService implements RunStarter {
             pending.add(text.strip());
             queuedMessages.save("steer:" + sessionId, pending);
             handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
+            handle.pendingQuestions.forEach(this::cancelQuestion);
             return true;
         }
     }
@@ -342,6 +362,7 @@ public class AgentRunService implements RunStarter {
             queue.addAll(remaining);
             taskControls.correct(sessionId, item.content().isBlank() ? "请参考补充的图片" : item.content());
             handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
+            handle.pendingQuestions.forEach(this::cancelQuestion);
             return true;
         }
     }
@@ -382,6 +403,7 @@ public class AgentRunService implements RunStarter {
             handle.accepting = false;
             handle.cancelled.set(true);
             handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
+            handle.pendingQuestions.forEach(this::cancelQuestion);
             return true;
         }
     }
@@ -732,6 +754,8 @@ public class AgentRunService implements RunStarter {
                 });
             } catch (RuntimeException e) {
                 runs.remove(runId, handle);
+                handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
+                handle.pendingQuestions.forEach(this::cancelQuestion);
                 registry.unregister(runId);
                 throw e;
             }
@@ -772,6 +796,8 @@ public class AgentRunService implements RunStarter {
                 handle.accepting = false;
             }
             runs.remove(runId, handle);
+            handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
+            handle.pendingQuestions.forEach(this::cancelQuestion);
             // 部分交付不是失败：runs 表记成 INTERRUPTED，和 checkpoint 的可恢复语义一致。
             String recordedStatus = RunFailureCode.TASK_INCOMPLETE.is(status) ? "INTERRUPTED" : status;
             try {
@@ -1188,6 +1214,7 @@ public class AgentRunService implements RunStarter {
             }
         }
         handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
+        handle.pendingQuestions.forEach(this::cancelQuestion);
         log.info("Run {} cancel requested", runId);
         return true;
     }
@@ -1275,9 +1302,10 @@ public class AgentRunService implements RunStarter {
         ModelClient executionClient = goalPolicy == null ? measuredMain : goalPolicy.budgetedClient();
         SpawnAgentTool.UsageSink childUsage = childUsageSink(goalPolicy, runUsage, sessionId, runId);
         var profiles = preparation.profilesFor(workspace);
+        ApprovalBroker sessionApprovals = ApprovalBroker.forSession(approvals, sessionId);
         preparation.configureExecutionTools(prepared, goalPolicy, sessionId, runId, workspace, unattended,
             executionTask, measuredChild, executionClient, runContext.sessionGate(), config, cancelled, childUsage,
-            profiles, modelClient, sink, approvals, conversations, modelSettings, multiAgent, worktrees);
+            profiles, modelClient, sink, sessionApprovals, conversations, modelSettings, multiAgent, worktrees);
         return new ExecutionRunContext(runContext, runUsage, lastCompleted, sink, measuredMain, config, goalPolicy,
             executionClient);
     }
@@ -1304,7 +1332,9 @@ public class AgentRunService implements RunStarter {
         // 与会话数据库、快照保持一致，统一落在数据目录（默认项目下的 .pilot）
         JsonlTraceRecorder traceRecorder =
             new JsonlTraceRecorder(dataDir.file("traces", sessionId + ".jsonl"), objectMapper);
-        AgentLoop loop = new AgentLoop(executionClient, tools, sessionGate, approvals, config, handle.cancelled::get,
+        ApprovalBroker sessionApprovals = ApprovalBroker.forSession(approvals, sessionId);
+        AgentLoop loop = new AgentLoop(executionClient, tools, sessionGate, sessionApprovals, config,
+            handle.cancelled::get,
             () -> null, traceRecorder, delta -> sessions.preview(sessionId, runId, new AssistantPreview(delta)))
             .withReadOnlySession(
                 prepared.planMode() || review.active() || properties.permissionMode() == PermissionMode.READ_ONLY)
@@ -1455,6 +1485,13 @@ public class AgentRunService implements RunStarter {
                 }
             } else if (event instanceof ApprovalResolved approval) {
                 handle.pendingApprovals.remove(approval.callId());
+            } else if (event instanceof ToolStarted started && AskUserTool.NAME.equals(started.name())) {
+                handle.pendingQuestions.add(started.callId());
+                if (handle.cancelled.get() || !queuedMessages.load("steer:" + sessionId).isEmpty()) {
+                    cancelQuestion(started.callId());
+                }
+            } else if (event instanceof ToolCompleted completed) {
+                handle.pendingQuestions.remove(completed.callId());
             }
             SessionEvent delivered = event instanceof RunUsageUpdated usage ? runUsage.main(usage) : event;
             if (event instanceof RunCancelled) {
@@ -1494,7 +1531,46 @@ public class AgentRunService implements RunStarter {
                 runStates.onEvent(sessionId, runId, delivered);
             }
             publish(sessionId, runId, delivered);
+            notifyInteractionHub(sessionId, runId, delivered);
         };
+    }
+
+    private void cancelQuestion(String callId) {
+        QuestionBroker broker = questions;
+        if (broker != null && callId != null && !callId.isBlank()) {
+            broker.cancel(callId);
+        }
+    }
+
+    private void notifyInteractionHub(String sessionId, String runId, SessionEvent delivered) {
+        com.pilot.server.interaction.InteractionHub hub = interactionHub;
+        if (hub == null) {
+            return;
+        }
+        if (delivered instanceof ApprovalRequired || delivered instanceof ApprovalResolved
+            || delivered instanceof ArbitrationResolved
+            || (delivered instanceof ToolStarted started && AskUserTool.NAME.equals(started.name()))
+            || delivered instanceof ToolCompleted) {
+            hub.broadcastSnapshot();
+        }
+        if (delivered instanceof ArbitrationRequired arbitration) {
+            hub.broadcastSnapshot();
+            hub.publishRunAttention(sessionId, runId, "attention", "ARBITRATION_REQUIRED", null, arbitration.report());
+        } else if (delivered instanceof RunCompleted completed) {
+            hub.broadcastSnapshot();
+            hub.publishRunAttention(sessionId, runId, "done", "COMPLETED", null, completed.summary());
+        } else if (delivered instanceof RunEnded ended) {
+            hub.broadcastSnapshot();
+            String kind = ended.outcome() == RunOutcome.COMPLETED ? "done" : "attention";
+            hub.publishRunAttention(sessionId, runId, kind, ended.outcome().name(), null, ended.summary());
+        } else if (delivered instanceof RunFailed failed) {
+            hub.broadcastSnapshot();
+            if (!RunFailureCode.PAUSED.is(failed.code()) && !RunFailureCode.CANCELLED.is(failed.code())) {
+                hub.publishRunAttention(sessionId, runId, "error", failed.code(), null, failed.message());
+            }
+        } else if (delivered instanceof RunCancelled) {
+            hub.broadcastSnapshot();
+        }
     }
 
     private String failureTaskStatus(String code) {
@@ -1687,6 +1763,7 @@ public class AgentRunService implements RunStarter {
     private static final class RunHandle {
         private final AtomicBoolean cancelled = new AtomicBoolean(false);
         private final Set<String> pendingApprovals = ConcurrentHashMap.newKeySet();
+        private final Set<String> pendingQuestions = ConcurrentHashMap.newKeySet();
         private final String sessionId;
         /** 用户显式点名的技能；仅本次 run 注入，自动继续/排队/重放不继承。 */
         private final String skill;
@@ -1738,6 +1815,8 @@ public class AgentRunService implements RunStarter {
         for (RunHandle handle : runs.values()) {
             handle.interruptedReason = "Pilot 服务正在重启或关闭，本轮已中断；进度已保存，恢复后可继续执行。";
             handle.cancelled.set(true);
+            handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
+            handle.pendingQuestions.forEach(this::cancelQuestion);
         }
         executor.shutdownNow();
     }
