@@ -314,15 +314,43 @@ function ChangedFilesCard({ files, runId, canRollback, onOpen, onRollback }: {
   );
 }
 
-export function ResultCard({ row, duplicate, hasPrecedingReply = false }: { row: ResultRow; duplicate: boolean; hasPrecedingReply?: boolean }) {
+export function ResultCard({ row, duplicate, hasPrecedingReply = false, isLastResult = false }: {
+  row: ResultRow; duplicate: boolean; hasPrecedingReply?: boolean; isLastResult?: boolean;
+}) {
   const rollbackRun = useStore((state) => state.rollbackRun);
+  const running = useStore((state) => state.running);
   const files = row.changedFiles || [];
   const settled = row.tone === 'ok' || row.tone === 'text';
   // 失败时结论收成一行，改动卡不跟着失败原因换样子。
   const compact = !row.detail || duplicate || row.continued || row.resumable || (!settled && files.length > 0);
   // 纯文本问答已经有回复正文时，不再重复一行「执行结束」。改过的文件仍然单独留下。
   const hideStatus = compact && hasPrecedingReply && (row.tone === 'ok' || row.tone === 'text') && !row.continued && !row.resumable;
-  if (hideStatus && !files.length) return null;
+  const fillPrompt = (prompt: string, mode?: 'act' | 'plan') => {
+    const state = useStore.getState();
+    if (mode) state.setUi({ executionMode: mode });
+    state.composerApi?.setText(prompt);
+    state.composerApi?.focus();
+  };
+  const showNextSteps = isLastResult && !running && !row.continued && !row.resumable;
+  const nextSteps = showNextSteps ? (
+    row.tone === 'error' ? (
+      <div className="result-next-steps" aria-label="快捷下一步">
+        <Button size="sm" variant="ghost" label="切到分析模式排查"
+          onClick={() => fillPrompt('请以只读分析模式排查上一轮运行失败的根因，先定位问题再给出修复方案。', 'plan')} />
+        <Button size="sm" variant="ghost" label="带错误上下文重试"
+          onClick={() => fillPrompt('请结合刚才的失败信息继续排查并完成修复。', 'act')} />
+      </div>
+    ) : settled && files.length > 0 ? (
+      <div className="result-next-steps" aria-label="快捷下一步">
+        <Button size="sm" variant="ghost" label="运行验证测试"
+          onClick={() => fillPrompt('请运行本仓库相关测试并核对改动结果，确认没有回归。')} />
+        <Button size="sm" variant="ghost" label="生成中文提交说明"
+          onClick={() => fillPrompt('请基于本次实际修改生成简洁准确的中文 Git 提交标题与正文。', 'plan')} />
+      </div>
+    ) : null
+  ) : null;
+
+  if (hideStatus && !files.length && !nextSteps) return null;
   const filesCard = files.length > 0 && (
     <ChangedFilesCard
       files={files}
@@ -340,7 +368,7 @@ export function ResultCard({ row, duplicate, hasPrecedingReply = false }: { row:
       }}
     />
   );
-  if (hideStatus) return filesCard;
+  if (hideStatus) return <>{filesCard}{nextSteps}</>;
   return (
     <>
       <article className={`turn-card is-${row.tone}${compact ? ' is-compact' : ''}${row.continued ? ' is-continued' : ''}`}>
@@ -373,6 +401,7 @@ export function ResultCard({ row, duplicate, hasPrecedingReply = false }: { row:
         )}
       </article>
       {filesCard}
+      {nextSteps}
     </>
   );
 }
@@ -448,20 +477,36 @@ export function SandboxCard({ row }: { row: SandboxRow }) {
 
 export function ArbitrationCard({ row }: { row: ArbitrationRow }) {
   const resolve = useStore((state) => state.resolveArbitration);
+  const [busy, setBusy] = useState(false);
+  const handlePick = async (choice: string) => {
+    if (busy || row.resolved) return;
+    setBusy(true);
+    try {
+      await resolve(row.arbitrationId, choice);
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <aside className={`arb-card${row.resolved ? ' is-resolved' : ''}`} data-arb-id={row.arbitrationId}>
+    <aside className={`arb-card${row.resolved ? ' is-resolved' : ''}`} data-arb-id={row.arbitrationId} aria-busy={busy}>
       <header className="arb-head">{row.title}{row.resolved ? ' · 已裁决' : ''}</header>
       <p className="arb-summary">{row.detail}</p>
       {!row.resolved && (
         <div className="arb-options">
-          {(row.options || []).map((option) => (
-            <Button
-              key={typeof option === 'string' ? option : option.id}
-              label={typeof option === 'string' ? option : option.label}
-              size="sm"
-              onClick={() => resolve(row.arbitrationId, typeof option === 'string' ? option : option.id)}
-            />
-          ))}
+          {busy && <span role="status">正在提交裁决…</span>}
+          {(row.options || []).map((option) => {
+            const id = typeof option === 'string' ? option : option.id;
+            const label = typeof option === 'string' ? option : option.label;
+            return (
+              <Button
+                key={id}
+                label={label}
+                size="sm"
+                isDisabled={busy}
+                onClick={() => void handlePick(id)}
+              />
+            );
+          })}
         </div>
       )}
     </aside>

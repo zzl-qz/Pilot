@@ -16,6 +16,7 @@ import { downloadSessionExport, exportFailureMessage, saveSessionMarkdown } from
 import { buildTranscript } from '../lib/transcript.js';
 import { SessionActionDialog } from './SessionMenu.jsx';
 import { filterPaletteActions } from '../lib/commands.js';
+import { shortcut } from '../lib/interaction.js';
 import { verificationLabel, verificationHint, verificationTone, verificationNeedsRerun } from '../lib/verification/run.js';
 
 const ProjectEditor = lazy(() => import('./ProjectEditor.jsx').then(m => ({ default: m.ProjectEditor })));
@@ -183,6 +184,7 @@ export function Modals() {
   const checkpoint = useStore((state) => state.ui.checkpointDialog);
   const confirm = useStore((state) => state.ui.confirm);
   const mobileConnectionOpen = useStore((state) => state.ui.mobileConnectionOpen);
+  const shortcutsOpen = useStore((state) => state.ui.shortcutsOpen);
   return (
     <>
       {picker && <WorkspacePicker />}
@@ -193,6 +195,7 @@ export function Modals() {
       {paletteOpen && <Palette />}
       {checkpoint && <CheckpointDialog key={checkpoint.sequence} />}
       {confirm && <ConfirmDialog />}
+      {shortcutsOpen && <ShortcutsModal />}
       {mobileConnectionOpen && <Modal id="mobile-connection" title="连接手机" width={760} onClose={() => useStore.getState().setUi({ mobileConnectionOpen: false })}>
         <Suspense fallback={null}>
           <MobileConnectionContent onDone={() => useStore.getState().setUi({ mobileConnectionOpen: false })} />
@@ -217,6 +220,62 @@ function ConfirmDialog() {
         }} />
     </>}>
       <p className="confirm-message">{dialog.message}</p>
+    </Modal>
+  );
+}
+
+function ShortcutsModal() {
+  const sendKey = useStore((state) => state.alertPrefs.sendKey);
+  const close = () => useStore.getState().setUi({ shortcutsOpen: false });
+  const groups = [
+    {
+      title: '输入与对话控制',
+      items: [
+        ['发送消息', sendKey === 'mod-enter' ? `${shortcut('Enter')}` : 'Enter'],
+        ['换行', sendKey === 'mod-enter' ? 'Enter' : 'Shift+Enter'],
+        ['切换分析 / 执行模式', 'Shift+Tab'],
+        ['引用文件 / 快捷指令', '@ /'],
+        ['翻阅本会话历史输入', '↑ / ↓'],
+        ['中断运行中的任务', 'Esc']
+      ]
+    },
+    {
+      title: '等待审批与用户选择',
+      items: [
+        ['批准第一条待审批操作', 'Alt+Y'],
+        ['拒绝第一条待审批操作', 'Alt+N'],
+        ['快速选择第 1-9 个提问选项', 'Alt+1 .. 9'],
+        ['在选项卡片内移动焦点', '↑ / ↓']
+      ]
+    },
+    {
+      title: '工作台导航',
+      items: [
+        ['新建任务', shortcut('N')],
+        ['命令面板 / 会话跳转', shortcut('K')],
+        ['展开 / 收起左侧栏', shortcut('B')],
+        ['展开 / 收起右侧审阅面板', shortcut('J')],
+        ['打开设置', shortcut(',')],
+        ['打开 / 关闭快捷键速查表', shortcut('/')]
+      ]
+    }
+  ];
+  return (
+    <Modal id="shortcuts-modal" title="键盘快捷键速查" onClose={close} footer={
+      <Button label="关闭" variant="primary" onClick={close} />
+    }>
+      <div className="shortcuts-grid">
+        {groups.map((group) => (
+          <section key={group.title} className="shortcuts-section">
+            <h3>{group.title}</h3>
+            <dl className="shortcut-list">
+              {group.items.map(([label, keys]) => (
+                <div key={label}><dt>{label}</dt><dd><kbd>{keys}</kbd></dd></div>
+              ))}
+            </dl>
+          </section>
+        ))}
+      </div>
     </Modal>
   );
 }
@@ -446,6 +505,18 @@ function runPaletteAction(action: string) {
       break;
     case 'toggle-notify':
       state.toggleNotify();
+      break;
+    case 'open-alerts':
+      state.setUi({ settingsOpen: true, settingsSection: 'alerts' });
+      break;
+    case 'toggle-sound': {
+      const next = !state.alertPrefs.soundEnabled;
+      state.updateAlertPrefs({ soundEnabled: next });
+      state.showNotice(next ? '已开启任务提示音' : '已关闭任务提示音');
+      break;
+    }
+    case 'open-shortcuts':
+      state.setUi({ shortcutsOpen: true });
       break;
     case 'reconnect':
       if (state.sessionId) {

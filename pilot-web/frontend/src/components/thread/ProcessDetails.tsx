@@ -13,9 +13,7 @@ import {
   computeToolSpanSeconds,
   formatLatency,
   formatProcessDuration,
-  parseAsk,
   parseToolDisplay,
-  questionChoice,
   summarizeActiveTool,
   toolLabel,
   type ToolIconKind
@@ -366,7 +364,6 @@ export const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] 
   });
   const needsAttention = attention.length > 0;
   const failed = attention.some(tool => tool.status === 'error');
-  const hasActiveAsk = sessionLive && tools.some(tool => tool.status === 'run' && tool.name === 'ask_user' && Boolean(parseAsk(tool.args)));
   // 操作组一律收起，除非用户自己点开：滚动历史或新建回合时不自动撑开，避免把正在看的位置顶走。
   // 需要留意、等待回答只体现在摘要的提示上，不代替用户展开。
   const [open, setOpen] = useState(false);
@@ -374,10 +371,6 @@ export const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] 
   const [visibleLimit, setVisibleLimit] = useState(INITIAL_TOOL_SEGMENTS);
   const detailsRef = useRef<HTMLDetailsElement>(null);
   useSecondTick(running > 0);
-  // 只有「正在等我回答」这一种情况替他展开一次；其余提示留在摘要上，收起状态不动。
-  useEffect(() => {
-    if (hasActiveAsk) setOpen(true);
-  }, [hasActiveAsk]);
   const filterAttention = attentionOnly && needsAttention;
   const visibleTools = filterAttention ? attention : tools;
   const segments = useMemo(
@@ -406,14 +399,12 @@ export const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] 
   };
   const hiddenSegments = !filterAttention && segments.length > visibleLimit ? segments.length - visibleLimit : 0;
   const renderedSegments = hiddenSegments > 0 ? segments.slice(-visibleLimit) : segments;
-  // 有提问时优先把回答卡片滚进视野，其次才是需留意项。
   let focusSelector: string | undefined;
-  if (hasActiveAsk) focusSelector = '.ask-card';
-  else if (needsAttention) focusSelector = '.tool-row.is-attention';
+  if (needsAttention) focusSelector = '.tool-row.is-attention';
   return (
     <details
       ref={detailsRef}
-      className={`tool-group conversation-tools${running > 0 ? ' is-live' : ''}${hasActiveAsk ? ' is-asking' : ''}`}
+      className={`tool-group conversation-tools${running > 0 ? ' is-live' : ''}`}
       open={open}
       onToggle={event => setOpen(event.currentTarget.open)}
     >
@@ -453,7 +444,7 @@ export const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] 
         <ProcessScrollViewport
           active
           className="tool-group-list"
-          autoFollow={running > 0 && !needsAttention && !hasActiveAsk}
+          autoFollow={running > 0 && !needsAttention}
           followKey={`${visibleTools.length}:${lastTool?.callId ?? ''}:${lastTool?.status ?? ''}:${filterAttention ? 'attn' : 'all'}`}
           focusSelector={focusSelector}
         >
@@ -684,60 +675,28 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
           </>}
         </div>
       )}
-      {running && <AskChoices tool={tool} />}
+      {running && tool.name === 'ask_user' && <p className="tool-output-note" role="status">请在下方选择卡片中回答</p>}
+      {running && tool.name === 'run_command' && seconds >= 10 && (
+        <SlowCommandHint seconds={seconds} />
+      )}
     </div>
   );
 });
 
-function AskChoices({ tool }: { tool: ToolView }) {
-  const ask = tool.name === 'ask_user' ? parseAsk(tool.args) : null;
-  const [custom, setCustom] = useState('');
-  const [sent, setSent] = useState('');
-  if (!ask) return null;
-  const send = (option: string) => {
-    const choice = questionChoice(option, custom);
-    if (!choice || sent) return;
-    const sessionId = useStore.getState().sessionId;
-    if (!sessionId) return;
-    setSent(choice);
-    void api.answerQuestion(sessionId, tool.callId, choice);
-  };
-  // 选项竖排整行可点：ask_user 的选项常是整句，横排胶囊会把文字挤成省略号，看不出选的是什么。
+function SlowCommandHint({ seconds }: { seconds: number }) {
+  const commandLog = useStore((state) => state.commandLog);
+  const lastLine = (commandLog?.text || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean).at(-1) || '';
   return (
-    <section className="ask-card" aria-label="需要你的选择">
-      <header className="ask-card-head">
-        <span className="ask-card-badge"><Icon name="info" /> 需要你的选择</span>
-        {sent && <span className="ask-card-sent">已回答</span>}
-      </header>
-      <p className="ask-card-question">{ask.question}</p>
-      <ul className="ask-card-options">
-        {ask.options.map((option, index) => (
-          <li key={option}>
-            <button
-              type="button"
-              className={`ask-option${sent === option ? ' is-picked' : ''}`}
-              disabled={Boolean(sent)}
-              onClick={() => send(option)}
-            >
-              <span className="ask-option-index" aria-hidden="true">{index + 1}</span>
-              <span className="ask-option-text">{option}</span>
-            </button>
-          </li>
-        ))}
-      </ul>
-      <form className="ask-form" onSubmit={event => { event.preventDefault(); send(''); }}>
-        <input
-          className="ask-custom"
-          value={custom}
-          placeholder="都不是，自己填写"
-          aria-label="自己填写"
-          disabled={Boolean(sent)}
-          onChange={event => setCustom(event.target.value)}
-        />
-        <button type="submit" className="ask-submit" disabled={!custom.trim() || Boolean(sent)}>提交</button>
-      </form>
-      {sent && <p className="ask-card-answer">已提交：{sent}</p>}
-    </section>
+    <div className="tool-slow-hint" role="status">
+      <span>命令已运行 {formatClock(seconds)}{lastLine ? ` · 最新输出：${lastLine.slice(0, 96)}` : ''}</span>
+      <button
+        type="button"
+        className="tool-body-action"
+        onClick={() => useStore.getState().setUi({ inspectorOpen: true, inspectorTab: 'commands' })}
+      >
+        查看命令日志
+      </button>
+    </div>
   );
 }
 

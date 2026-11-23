@@ -16,7 +16,7 @@ import { VoiceInput } from './VoiceInput.jsx';
 import { SubmissionNotice } from './SubmissionNotice.jsx';
 import { MessageQueue } from './MessageQueue.jsx';
 import { VerificationStrip } from './VerificationStrip.jsx';
-import { ResumeBar, ApprovalDock, AgentDock, ComposerChangesStrip } from './composer/ComposerDocks.js';
+import { ResumeBar, ApprovalDock, QuestionDock, AgentDock, ComposerChangesStrip } from './composer/ComposerDocks.js';
 import { createComposerInput } from '../lib/composer-input.js';
 import { resolveComposerAction, resolveSteerEntry } from '../lib/composer-state.js';
 import { rankFileMatches } from '../lib/mention.js';
@@ -58,6 +58,7 @@ export function Composer() {
   const pausing = useStore((state) => state.pausing);
   const cancelling = useStore((state) => state.cancelling);
   const composerEnabled = useStore((state) => state.ui.composerEnabled);
+  const sendKey = useStore((state) => state.alertPrefs.sendKey);
   const executionMode = useStore((state) => (state.ui.executionMode === 'plan' ? 'plan' : 'act'));
   const permissionMode = useStore((state) => normalizePermission(state.permissionMode));
   const modelOptions = useStore((state) => state.modelOptions);
@@ -729,7 +730,20 @@ export function Composer() {
         return;
       }
     }
-    if (event.key === 'Enter' && !event.shiftKey) {
+    if (event.key === 'Tab' && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      event.preventDefault();
+      const nextMode = executionMode === 'plan' ? 'act' : 'plan';
+      const state = useStore.getState();
+      state.setUi({ executionMode: nextMode });
+      state.showNotice(nextMode === 'plan' ? '已切换为只读分析模式（Shift+Tab）' : '已切换为执行模式（Shift+Tab）');
+      return;
+    }
+    if (sendKey === 'mod-enter') {
+      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        submit();
+      }
+    } else if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       submit();
     }
@@ -747,6 +761,7 @@ export function Composer() {
           }} />
         </div>}
         <ApprovalDock />
+        <QuestionDock />
         <ResumeBar />
         <MessageQueue />
         <AgentDock />
@@ -900,10 +915,10 @@ export function Composer() {
                   label={steerAction.label} isDisabled={steerAction.disabled} onClick={() => void steerCurrent()} />
               </span> : null;
             })()}
-            <span title={sendAction.title}>
+            <span title={sendAction.stop ? sendAction.title : (sendKey === 'mod-enter' ? '发送任务 (Ctrl/Cmd+Enter · Shift+Tab 切模式)' : '发送任务 (Enter · Shift+Tab 切模式)')}>
               <IconButton id="send" className="composer-primary" variant="primary"
                 type={sendAction.stop ? 'button' : 'submit'} label={sendAction.ariaLabel}
-                aria-keyshortcuts={sendAction.stop ? 'Escape' : 'Enter'}
+                aria-keyshortcuts={sendAction.stop ? 'Escape' : (sendKey === 'mod-enter' ? 'Control+Enter Meta+Enter' : 'Enter')}
                 isLoading={sendAction.stop ? cancelling : submitting}
                 isDisabled={sendAction.disabled || (!sendAction.stop && (pendingFiles > 0 || submitting || voiceBusy))}
                 onClick={sendAction.stop ? () => useStore.getState().cancelRun() : undefined}

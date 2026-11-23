@@ -213,6 +213,11 @@ export function Thread() {
   }, [bottomSignal, scrollToBottom]);
 
   const display = useMemo(() => buildThreadDisplay(rows), [rows]);
+  const running = useStore((state) => state.running);
+  const hasPendingApprovals = useStore((state) => Object.keys(state.pendingApprovals || {}).length > 0);
+  const hasPendingQuestions = useStore((state) => Object.keys(state.pendingQuestions || {}).length > 0);
+  const bottomHint = hasPendingApprovals ? '等待批准' : hasPendingQuestions ? '等待选择' : running ? '有新输出' : '';
+  const lastResultRow = [...display.rows].reverse().find((row) => row.type === 'result');
 
   if (!rows.length && !eventCount && !history.hasMore) {
     return <EmptyState />;
@@ -237,6 +242,7 @@ export function Thread() {
               duplicate={row.type === 'result' && duplicateResult(display.rows as ThreadRow[], index)}
               hasPrecedingReply={index > 0 && display.rows[index - 1]?.type === 'turn' && Boolean((display.rows[index - 1] as TurnRow).reply?.text)}
               isLast={!display.rows.slice(index + 1).some(item => item.type === 'turn' || item.type === 'user')}
+              isLastResult={Boolean(lastResultRow && row.key === lastResultRow.key)}
             />
           ))}
           {history.hasNewer && history.forwardError && (
@@ -244,7 +250,7 @@ export function Thread() {
           )}
         </div>
       </div>
-      <ThreadBottomButton visible={!isAtBottom} onJump={() => scrollToBottom({ animation: latestAnimation() })} />
+      <ThreadBottomButton visible={!isAtBottom} hint={bottomHint} onJump={() => scrollToBottom({ animation: latestAnimation() })} />
       {display.pinnedPlan && (
         <div className="thread-pinned-plan">
           <PlanCard row={display.pinnedPlan} />
@@ -255,12 +261,13 @@ export function Thread() {
   );
 }
 
-function ThreadBottomButton({ visible, onJump }: { visible: boolean; onJump: () => void }) {
+function ThreadBottomButton({ visible, hint, onJump }: { visible: boolean; hint?: string; onJump: () => void }) {
   if (!visible) {
     return null;
   }
   return (
     <div className="thread-bottom-dock">
+      {hint && <span className="latest-hint" aria-hidden="true">{hint}</span>}
       <IconButton className="conversation-latest" label="回到底部" onClick={onJump}
         icon={<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.5v12M5.5 11l4.5 4.5 4.5-4.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>} />
     </div>
@@ -278,6 +285,12 @@ function RetryRow({ label, onClick, disabled = false }: { label: string; onClick
 function EmptyState() {
   const workspace = useStore(state => state.workspace || state.draftSession?.workspace || '');
   const project = useStore(state => state.projects.find(item => item.id === state.currentProjectId));
+  const settingsData = useStore(state => state.settingsData);
+  const modelReady = useStore(state => state.modelReady());
+  const soundEnabled = useStore(state => state.alertPrefs.soundEnabled);
+  const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
+    try { return localStorage.getItem('pilot.onboarding.dismissed') === '1'; } catch { return false; }
+  });
   const [scope, setScope] = useState<ApiResults['worktreeInfo'] | null>(null);
   const [scopeUnavailable, setScopeUnavailable] = useState(false);
   useEffect(() => {
@@ -294,6 +307,7 @@ function EmptyState() {
     { title: '调研问题', sub: '核对来源，交付可下载的报告', prompt: '请帮我调研以下问题，优先查阅原始来源，说明时间与不确定性，整理为报告并保存到成果面板。调研问题：' },
     { title: '整理资料', sub: '提取要点、核对数据与缺失项', prompt: '请根据我提供的文件整理要点或表格，核对数字和来源，缺失数据不要猜测，并将结果保存到成果面板。具体要求：' }
   ];
+  const showOnboarding = Boolean(settingsData && !onboardingDismissed && (!modelReady || !workspace));
   return (
     <div className="thread-scroll-region conversation-thread">
       <div className="thread is-empty">
@@ -301,6 +315,44 @@ function EmptyState() {
           <section className="conversation-empty" id="empty-state" aria-labelledby="conversation-empty-title">
             <h2 id="conversation-empty-title" className="empty-title">从一个任务开始</h2>
             <p className="empty-sub">描述目标或拖入资料，Pilot 会在工作区执行任务，并留下可核对的改动与验证结论。</p>
+            {showOnboarding && (
+              <div className="onboarding-checklist" role="region" aria-label="首次使用就绪检查">
+                <div className="onboarding-head">
+                  <strong>就绪检查</strong>
+                  <button
+                    type="button"
+                    className="onboarding-dismiss"
+                    onClick={() => {
+                      setOnboardingDismissed(true);
+                      try { localStorage.setItem('pilot.onboarding.dismissed', '1'); } catch { /* 忽略 */ }
+                    }}
+                  >
+                    暂不显示
+                  </button>
+                </div>
+                <ul className="onboarding-steps">
+                  <li className={modelReady ? 'is-done' : ''}>
+                    <span>{modelReady ? '✓ 模型服务与密钥已就绪' : '1. 配置对话模型与 API Key'}</span>
+                    {!modelReady && (
+                      <Button size="sm" variant="primary" label="去配置"
+                        onClick={() => useStore.getState().setUi({ settingsOpen: true, settingsSection: 'model' })} />
+                    )}
+                  </li>
+                  <li className={workspace ? 'is-done' : ''}>
+                    <span>{workspace ? '✓ 已绑定工作区目录' : '2. 选择项目代码目录'}</span>
+                    {!workspace && (
+                      <Button size="sm" variant="ghost" label="选择目录"
+                        onClick={() => useStore.getState().setUi({ picker: { title: '选择任务工作区' } })} />
+                    )}
+                  </li>
+                  <li className={soundEnabled ? 'is-done' : ''}>
+                    <span>{soundEnabled ? '✓ 任务完成提示音与提醒已开启' : '3. 开启完成提示音与后台悬浮提醒'}</span>
+                    <Button size="sm" variant="ghost" label="提醒设置"
+                      onClick={() => useStore.getState().setUi({ settingsOpen: true, settingsSection: 'alerts' })} />
+                  </li>
+                </ul>
+              </div>
+            )}
             <div className="conversation-scope">
               <Icon name="folder" />
               <div>
@@ -332,8 +384,10 @@ function EmptyState() {
             </ul>
             <p className="empty-keys">
               <span><kbd>{modifierKey}</kbd><kbd>N</kbd> 新任务</span>
+              <span><kbd>Shift</kbd><kbd>Tab</kbd> 切模式</span>
               <span><kbd>@</kbd> 引用文件</span>
               <span><kbd>/</kbd> 快捷指令</span>
+              <span><kbd>{modifierKey}</kbd><kbd>/</kbd> 全部快捷键</span>
               <span><kbd>Esc</kbd> 停止</span>
             </p>
           </section>
@@ -343,12 +397,14 @@ function EmptyState() {
   );
 }
 
-const RowView = memo(function RowView({ row, isLast, duplicate, hasPrecedingReply = false }: { row: DisplayThreadRow; isLast: boolean; duplicate: boolean; hasPrecedingReply?: boolean }) {
+const RowView = memo(function RowView({ row, isLast, duplicate, hasPrecedingReply = false, isLastResult = false }: {
+  row: DisplayThreadRow; isLast: boolean; duplicate: boolean; hasPrecedingReply?: boolean; isLastResult?: boolean;
+}) {
   switch (row.type) {
     case 'user': return <UserMessage row={row} />;
     case 'turn': return <Turn row={row} isLast={isLast} />;
     case 'compaction-group': return <CompactionGroupCard row={row} />;
-    case 'result': return <ResultCard row={row} duplicate={duplicate} hasPrecedingReply={hasPrecedingReply} />;
+    case 'result': return <ResultCard row={row} duplicate={duplicate} hasPrecedingReply={hasPrecedingReply} isLastResult={isLastResult} />;
     case 'sandbox': return <SandboxCard row={row} />;
     case 'arb': return <ArbitrationCard row={row} />;
     default: return null;

@@ -54,6 +54,9 @@ const COMMAND_PALETTE_ACTIONS = [
   { label: '清空当前视图', hint: '', keywords: ['清空', '重置', '视图', 'reset'], action: 'reset-view' },
   { label: '导出对话为 Markdown', hint: '', keywords: ['导出', '下载', '保存', '对话', 'export', 'markdown', 'md'], action: 'export-markdown' },
   { label: '开启 / 关闭桌面通知', hint: '', keywords: ['通知', '提醒', '后台', 'notification', 'notify'], action: 'toggle-notify' },
+  { label: '打开提醒与提示音设置', hint: '', keywords: ['提醒', '声音', '提示音', '悬浮窗', 'sound', 'alert'], action: 'open-alerts' },
+  { label: '开启 / 关闭提示音', hint: '', keywords: ['提示音', '声音', '静音', 'sound', 'audio', 'mute'], action: 'toggle-sound' },
+  { label: '查看全部快捷键速查表', hint: shortcut('/'), keywords: ['快捷键', '热键', 'shortcut', 'keymap', 'help'], action: 'open-shortcuts' },
   { label: '重新连接事件流', hint: '', keywords: ['重连', '事件', '连接', 'reconnect'], action: 'reconnect' }
 ];
 
