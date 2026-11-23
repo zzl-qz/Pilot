@@ -262,14 +262,10 @@ public class BackupService {
             BackupManifest.Check check = BackupManifest.verify(latest, manifest);
             failures = check.failures();
             checked = check.files();
-            if (check.valid() && BackupManifest.VERSION.equals(BackupManifest.version(manifest))
-                && "sqlite".equals(manifest.path("storage").asText())) {
+            if (check.valid() && "sqlite".equals(manifest.path("storage").asText())) {
                 BackupDatabase.check(latest.resolve(BackupManifest.DATABASE),
                     latest.resolve(BackupManifest.relative(manifest.path("attachmentEntry").asText())),
                     manifest.path("attachmentSource").asText(), mapper);
-            }
-            if ("2".equals(BackupManifest.version(manifest))) {
-                verified += "（V2 旧版校验算法与备份范围）";
             }
         } catch (IOException | RuntimeException e) {
             failures = List.of("读取备份清单失败: " + e.getMessage());

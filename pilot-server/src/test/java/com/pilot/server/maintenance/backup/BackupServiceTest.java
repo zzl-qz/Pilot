@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
@@ -26,8 +25,8 @@ import org.springframework.beans.factory.ObjectProvider;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.message.Attachment;
 import com.pilot.core.message.Message;
-import com.pilot.core.multi.DiffSandbox;
 import com.pilot.core.session.SessionService;
+import com.pilot.core.util.Sha256;
 import com.pilot.server.attachment.AttachmentLimits;
 import com.pilot.server.attachment.AttachmentService;
 import com.pilot.server.store.EventCodec;
@@ -205,45 +204,37 @@ class BackupServiceTest {
     void purgeRemovesOldBackupsOnly() throws IOException {
         Path root = dataDir.resolve(".pilot");
         Files.createDirectories(root);
-        Files.createDirectories(root.resolve("backups/20200101-000000"));
-        Path legacy = root.resolve("backups/20200101-000000");
-        writeLegacyBackup(legacy);
-        Files.setLastModifiedTime(root.resolve("backups/20200101-000000"), FileTime.fromMillis(0));
+        Path oldBackup = Files.createDirectories(root.resolve("backups/20200101-000000"));
+        writeV4Backup(oldBackup);
+        Files.setLastModifiedTime(oldBackup, FileTime.fromMillis(0));
 
         BackupService backups = service(null);
         assertEquals(1, backups.purgeOlderThan(Instant.now().minusSeconds(60)));
-        assertFalse(Files.exists(root.resolve("backups/20200101-000000")));
+        assertFalse(Files.exists(oldBackup));
     }
 
     @Test
-    void excludesV3WithoutMarkerAndStagingEvenWithMarker() throws IOException {
+    void excludesUnmarkedStagingAndLegacyVersionBackups() throws IOException {
         BackupService backups = service(new SqliteStore(dataDir.resolve("db.sqlite")));
         Path published = Path.of(backups.backup().directory());
         Path marker = published.resolve("COMPLETE");
         String created = Files.readString(marker);
         Files.delete(marker);
-        Path manifest = published.resolve("manifest.json");
-        Files.writeString(manifest,
-            Files.readString(manifest).replace("\"schemaVersion\":\"4\"", "\"schemaVersion\":\"3\""));
-
         assertEquals(0, backups.status().backups());
         assertFalse(backups.verifyLatestBackup().valid());
 
         Files.writeString(marker, created);
+        Path manifest = published.resolve("manifest.json");
+        String v4Json = Files.readString(manifest);
+        Files.writeString(manifest, v4Json.replace("\"schemaVersion\":\"4\"", "\"schemaVersion\":\"2\""));
+        assertEquals(0, backups.status().backups());
+        assertFalse(backups.verifyLatestBackup().valid());
+
+        Files.writeString(manifest, v4Json);
         assertTrue(backups.verifyLatestBackup().valid());
         Files.move(published, published.resolveSibling(".interrupted.tmp"));
         assertEquals(0, backups.status().backups());
         assertFalse(backups.verifyLatestBackup().valid());
-    }
-
-    @Test
-    void verifiesV2BinaryPayloadWithItsOriginalAlgorithm() throws IOException {
-        BackupService backups = service(null);
-        Path legacy = Files.createDirectories(dataDir.resolve(".pilot/backups/20200101-000000"));
-        writeLegacyBackup(legacy);
-        BackupService.VerificationReport result = backups.verifyLatestBackup();
-        assertTrue(result.valid(), result.failures().toString());
-        assertTrue(result.message().contains("V2"));
     }
 
     @Test
@@ -345,12 +336,14 @@ class BackupServiceTest {
         return new BackupService(provider, data, JsonMapper.builder().build(), attachments, storageHealth);
     }
 
-    private static void writeLegacyBackup(Path legacy) throws IOException {
+    private static void writeV4Backup(Path directory) throws IOException {
         byte[] payload = {0, (byte)0xff};
-        Files.write(legacy.resolve("bytes.bin"), payload);
-        String hash = DiffSandbox.fingerprint(new String(payload, StandardCharsets.ISO_8859_1));
-        Files.writeString(legacy.resolve("manifest.json"), """
-            {"schemaVersion":"2","files":[{"path":"bytes.bin","bytes":2,"sha256":"%s"}]}
-            """.formatted(hash));
+        Path file = directory.resolve("bytes.bin");
+        Files.write(file, payload);
+        String hash = Sha256.hex(file);
+        Files.writeString(directory.resolve("manifest.json"), """
+            {"schemaVersion":"4","id":"%s","storage":"files","files":[{"path":"bytes.bin","bytes":2,"sha256":"%s"}]}
+            """.formatted(directory.getFileName().toString(), hash));
+        Files.writeString(directory.resolve("COMPLETE"), Instant.EPOCH.toString());
     }
 }

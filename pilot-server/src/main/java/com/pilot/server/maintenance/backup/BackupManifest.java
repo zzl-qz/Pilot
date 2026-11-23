@@ -1,15 +1,10 @@
 package com.pilot.server.maintenance.backup;
 
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.io.OutputStreamWriter;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
-import java.security.DigestOutputStream;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -59,20 +54,17 @@ final class BackupManifest {
             throw new IOException("备份目录尚未发布");
         }
         JsonNode manifest = read(directory, mapper);
-        if (VERSION.equals(version(manifest))
-            && !directory.getFileName().toString().equals(manifest.path("id").asText())) {
+        if (!directory.getFileName().toString().equals(manifest.path("id").asText())) {
             throw new IOException("备份目录与清单标识不匹配");
         }
-        if (!"2".equals(version(manifest))) {
-            Path marker = directory.resolve(COMPLETE);
-            if (!Files.isRegularFile(marker, LinkOption.NOFOLLOW_LINKS)) {
-                throw new IOException("备份缺少完成标记");
-            }
-            try {
-                Instant.parse(Files.readString(marker));
-            } catch (RuntimeException e) {
-                throw new IOException("备份完成标记无效", e);
-            }
+        Path marker = directory.resolve(COMPLETE);
+        if (!Files.isRegularFile(marker, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("备份缺少完成标记");
+        }
+        try {
+            Instant.parse(Files.readString(marker));
+        } catch (RuntimeException e) {
+            throw new IOException("备份完成标记无效", e);
         }
         return manifest;
     }
@@ -83,8 +75,8 @@ final class BackupManifest {
             throw new IOException("缺少备份清单");
         }
         JsonNode manifest = mapper.readTree(Files.readString(file));
-        if (manifest == null || !Set.of("2", "3", VERSION).contains(version(manifest))
-            || !manifest.path("files").isArray() || manifest.path("files").isEmpty()) {
+        if (manifest == null || !VERSION.equals(version(manifest)) || !manifest.path("files").isArray()
+            || manifest.path("files").isEmpty()) {
             throw new IOException("备份清单版本或文件列表无效");
         }
         return manifest;
@@ -120,7 +112,7 @@ final class BackupManifest {
                 failures.add("文件大小不匹配: " + name);
                 continue;
             }
-            if (!item.path("sha256").asText("").equals(sha256(file, version(manifest)))) {
+            if (!item.path("sha256").asText("").equals(sha256(file))) {
                 failures.add("SHA-256 不匹配: " + name);
             }
         }
@@ -182,21 +174,7 @@ final class BackupManifest {
 
     static boolean matches(Path file, JsonNode entry, String version) throws IOException {
         return Files.size(file) == entry.path("bytes").asLong(-1)
-            && entry.path("sha256").asText("").equals(sha256(file, version));
-    }
-
-    private static String sha256(Path file, String version) throws IOException {
-        return "2".equals(version) ? legacySha256(file) : sha256(file);
-    }
-
-    private static String legacySha256(Path file) throws IOException {
-        var digest = Sha256.newDigest();
-        try (var reader = new InputStreamReader(Files.newInputStream(file), StandardCharsets.ISO_8859_1);
-            var writer = new OutputStreamWriter(new DigestOutputStream(OutputStream.nullOutputStream(), digest),
-                StandardCharsets.UTF_8)) {
-            reader.transferTo(writer);
-        }
-        return Sha256.finishHex(digest);
+            && entry.path("sha256").asText("").equals(sha256(file));
     }
 
     static void deleteTree(Path root) throws IOException {

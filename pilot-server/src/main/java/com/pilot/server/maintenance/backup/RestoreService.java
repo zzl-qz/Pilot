@@ -68,9 +68,6 @@ final class RestoreService {
             keepExternal ? attachments : source.resolve(attachmentEntry), oldAttachments, mapper);
 
         List<String> notices = new ArrayList<>();
-        if (!BackupManifest.VERSION.equals(BackupManifest.version(manifest))) {
-            notices.add("旧版备份的工作区范围和一致性信息有限");
-        }
         if (keepExternal) {
             notices.add("沿用已核验的外置附件：" + attachments);
         }
