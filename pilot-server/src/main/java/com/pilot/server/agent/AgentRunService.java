@@ -1265,13 +1265,13 @@ public class AgentRunService implements RunStarter {
             new MeteredModelClient(modelClient, sessionId + ":subagent", "subagent", List.of(), reports)
                 .withRunContext(sessionId, runId);
         AgentLoop.Config config = preparation.loopConfig(prepared, sessionId);
-        GoalExecutionPolicy goalPolicy = (unattended || (!reviewActive && properties.goalModeEnabledValue()))
-            ? new GoalExecutionPolicy(measuredMain, objectMapper, taskControls, sessionId,
-                toolFactory.resolve(workspace), cancelled, properties.maxSteps(), properties.directMaxRequests(),
-                properties.directMaxInputTokens(), properties.directMaxOutputTokens(),
+        GoalExecutionPolicy goalPolicy =
+            (unattended || (!reviewActive && properties.goalModeEnabledValue())) ? new GoalExecutionPolicy(measuredMain,
+                objectMapper, taskControls, sessionId, toolFactory.resolve(workspace), cancelled, properties.maxSteps(),
+                properties.directMaxRequests(), properties.directMaxInputTokens(), properties.directMaxOutputTokens(),
                 properties.directMaxActiveMillis(), properties.directMaxInvestigationTools(),
                 properties.goalMaxInputTokens(), properties.goalMaxOutputTokens(), properties.goalMaxActiveMillis())
-            : null;
+                .withRestoredPaths(snapshots::restoredPaths) : null;
         ModelClient executionClient = goalPolicy == null ? measuredMain : goalPolicy.budgetedClient();
         SpawnAgentTool.UsageSink childUsage = childUsageSink(goalPolicy, runUsage, sessionId, runId);
         var profiles = preparation.profilesFor(workspace);

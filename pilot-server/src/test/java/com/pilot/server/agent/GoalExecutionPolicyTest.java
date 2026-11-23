@@ -39,6 +39,7 @@ import com.pilot.core.tool.command.CommandTaskManager.Task;
 import com.pilot.server.multi.SpawnAgentTool;
 import com.pilot.server.run.TaskControlService;
 import com.pilot.server.store.PilotDataDir;
+import com.pilot.server.workspace.RunSnapshotService;
 
 import tools.jackson.databind.json.JsonMapper;
 
@@ -1213,6 +1214,117 @@ class GoalExecutionPolicyTest {
                 assertEquals("NO_PROGRESS", stop.code());
                 assertTrue(stop.getMessage().contains("连续 3 次"), stop.getMessage());
             }
+        }
+    }
+
+    @Test
+    void netZeroTempFileCreateAndDeleteAfterPassingCheckKeepsChecksPassed() throws Exception {
+        Path realFile = root.resolve("A.java");
+        Files.writeString(realFile, "v1");
+        RunSnapshotService snapshots =
+            new RunSnapshotService(JsonMapper.builder().build(), new PilotDataDir(root.resolve("snap").toString()));
+        snapshots.bind("run-d028-pass", root);
+        try {
+            var policy = policy((messages, tools) -> fail("no extra model call"), 20)
+                .withRestoredPaths(snapshots::restoredPaths);
+            policy.beforeRequest(history);
+
+            snapshots.beforeWrite(realFile);
+            Files.writeString(realFile, "v2");
+            snapshots.afterWrite(realFile);
+            observe(policy, "edit_file", "A.java", "updated", null);
+            check(policy, "mvn test", ".", 0);
+
+            // 验证通过后创建临时检验文件并删除（工作区净状态与通过测试时完全一致）
+            Path tempFile = root.resolve(".qg-all.txt");
+            snapshots.beforeWrite(tempFile);
+            Files.writeString(tempFile, "temporary check output");
+            snapshots.afterWrite(tempFile);
+            ToolCall createTemp = new ToolCall("c-tmp", "run_command", Map.of("command", "echo tmp > .qg-all.txt"));
+            policy.beforeTool(createTemp);
+            policy.observed(createTemp, new ToolExecutor.Outcome("run_command", "退出码: 0", List.of(".qg-all.txt"),
+                List.of(), ToolExecutor.OutcomeStatus.SUCCESS));
+
+            Files.delete(tempFile);
+            ToolCall removeTemp = new ToolCall("rm-tmp", "run_command", Map.of("command", "rm .qg-all.txt"));
+            policy.beforeTool(removeTemp);
+            policy.observed(removeTemp, new ToolExecutor.Outcome("run_command", "退出码: 0", List.of(".qg-all.txt"),
+                List.of(), ToolExecutor.OutcomeStatus.SUCCESS));
+
+            assertNull(policy.review(history, Set.of(), List.of()));
+            assertEquals("CHECKS_PASSED", tasks.load("s").execution().phase(),
+                "测试通过后新建又删除的临时文件属于净零变更，不应误标 CHECKS_STALE");
+        } finally {
+            snapshots.clear();
+        }
+    }
+
+    @Test
+    void deletingPreExistingFileAfterPassingCheckStillMarksChecksStale() throws Exception {
+        Path realFile = root.resolve("A.java");
+        Path legacyFile = root.resolve("Legacy.java");
+        Files.writeString(realFile, "v1");
+        Files.writeString(legacyFile, "old-content");
+        RunSnapshotService snapshots =
+            new RunSnapshotService(JsonMapper.builder().build(), new PilotDataDir(root.resolve("snap2").toString()));
+        snapshots.bind("run-d028-delete-existing", root);
+        try {
+            var policy = policy((messages, tools) -> fail("no extra model call"), 20)
+                .withRestoredPaths(snapshots::restoredPaths);
+            policy.beforeRequest(history);
+
+            snapshots.beforeWrite(realFile);
+            Files.writeString(realFile, "v2");
+            snapshots.afterWrite(realFile);
+            observe(policy, "edit_file", "A.java", "updated", null);
+            check(policy, "mvn test", ".", 0);
+
+            // 删除本轮前原本就存在的文件是真实改动，必须推进源码指纹并标记 CHECKS_STALE
+            snapshots.beforeWrite(legacyFile);
+            Files.delete(legacyFile);
+            ToolCall deleteOld = new ToolCall("del-old", "run_command", Map.of("command", "rm Legacy.java"));
+            policy.beforeTool(deleteOld);
+            policy.observed(deleteOld, new ToolExecutor.Outcome("run_command", "退出码: 0", List.of("Legacy.java"),
+                List.of(), ToolExecutor.OutcomeStatus.SUCCESS));
+
+            assertNull(policy.review(history, Set.of(), List.of()));
+            assertEquals("CHECKS_STALE", tasks.load("s").execution().phase(), "删除原本存在的文件属于真实变更，必须标记 CHECKS_STALE");
+        } finally {
+            snapshots.clear();
+        }
+    }
+
+    @Test
+    void deletingTempFileThatExistedDuringCheckStillMarksChecksStale() throws Exception {
+        Path realFile = root.resolve("A.java");
+        Path tempFile = root.resolve("TmpEquivalenceTest.java");
+        Files.writeString(realFile, "v1");
+        RunSnapshotService snapshots =
+            new RunSnapshotService(JsonMapper.builder().build(), new PilotDataDir(root.resolve("snap3").toString()));
+        snapshots.bind("run-d028-tested-with-temp", root);
+        try {
+            var policy = policy((messages, tools) -> fail("no extra model call"), 20)
+                .withRestoredPaths(snapshots::restoredPaths);
+            policy.beforeRequest(history);
+
+            snapshots.beforeWrite(realFile);
+            Files.writeString(realFile, "v2");
+            snapshots.afterWrite(realFile);
+            observe(policy, "edit_file", "A.java", "updated", null);
+
+            // 临时文件在跑测试前就已经存在（参与了测试版本），测试后再删除必须重新触发 CHECKS_STALE
+            snapshots.beforeWrite(tempFile);
+            Files.writeString(tempFile, "class TmpEquivalenceTest {}");
+            snapshots.afterWrite(tempFile);
+            observe(policy, "create_file", "TmpEquivalenceTest.java", "created", null);
+            check(policy, "mvn test", ".", 0);
+
+            Files.delete(tempFile);
+            assertNull(policy.review(history, Set.of(), List.of()));
+            assertEquals("CHECKS_STALE", tasks.load("s").execution().phase(),
+                "测试期间存在的文件在测试后被删除，必须视为源码版本变化并标 CHECKS_STALE");
+        } finally {
+            snapshots.clear();
         }
     }
 }

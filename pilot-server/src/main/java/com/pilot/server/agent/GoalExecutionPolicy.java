@@ -95,12 +95,15 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private final long maxActiveMillis;
     private final PromptLibrary prompts = PromptLibrary.standard();
     private final Set<String> changedPaths = new TreeSet<>();
+    /** 续跑开始时继承自上一轮的变更路径：无法由本轮写前快照证明还原，始终参与源码指纹计算。 */
+    private final Set<String> inheritedChangedPaths;
     /** Null in isolated policy tests; production supplies the actual per-run registry. */
     private Set<String> availableTools;
     private final Map<String, String> toolStartVersions = new LinkedHashMap<>();
     private final Map<String, TaskControlService.TaskContract> toolStartRequirements = new LinkedHashMap<>();
     private java.util.function.Function<String, com.pilot.core.tool.command.CommandTaskManager.Task> commandLookup =
         ignored -> null;
+    private java.util.function.Supplier<Set<String>> restoredPaths = Set::of;
     private java.util.function.Consumer<TaskControlService.Execution> updates = ignored -> {
     };
     private List<Attachment> attachments = List.of();
@@ -148,6 +151,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
             task.execution().evidence().stream().filter(e -> ToolNames.FILE_EDITS.contains(e.tool()))
                 .map(TaskControlService.Evidence::target).filter(p -> !p.isBlank()).forEach(changedPaths::add);
         }
+        this.inheritedChangedPaths = Set.copyOf(changedPaths);
     }
 
     GoalExecutionPolicy withUpdates(java.util.function.Consumer<TaskControlService.Execution> updates) {
@@ -164,6 +168,12 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     GoalExecutionPolicy withCommandLookup(
         java.util.function.Function<String, com.pilot.core.tool.command.CommandTaskManager.Task> lookup) {
         this.commandLookup = lookup == null ? ignored -> null : lookup;
+        return this;
+    }
+
+    /** 绑定本轮写前快照的净零还原路径查询，避免新建后又删除的临时检验文件推高源码指纹。 */
+    GoalExecutionPolicy withRestoredPaths(java.util.function.Supplier<Set<String>> restoredPaths) {
+        this.restoredPaths = restoredPaths == null ? Set::of : restoredPaths;
         return this;
     }
 
@@ -1300,11 +1310,15 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         return GoalEvidence.hash(material);
     }
 
-    /** 只哈希本任务实际写过的文件；展示截断和工作区其他脏文件不会改变版本。 */
+    /** 只哈希本任务实际净改动的文件；本轮新建后又删除或按原字节完全还原的路径不推进版本，但删除原有文件仍正常标脏。 */
     private String sourceVersion() {
         try {
+            Set<String> restored = restoredInCurrentRun();
             var digest = Sha256.newDigest();
             for (String name : changedPaths) {
+                if (isRestoredCurrentRunPath(name, restored)) {
+                    continue;
+                }
                 Path file = root.resolve(name).normalize();
                 digest.update(name.getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 if (!file.startsWith(root) || !Files.exists(file)) {
@@ -1321,6 +1335,26 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         } catch (Exception e) {
             return GoalEvidence.hash("unavailable:" + e.getClass().getSimpleName() + ":" + changedPaths);
         }
+    }
+
+    private Set<String> restoredInCurrentRun() {
+        try {
+            Set<String> restored = restoredPaths.get();
+            return restored == null ? Set.of() : restored;
+        } catch (RuntimeException ignored) {
+            return Set.of();
+        }
+    }
+
+    private boolean isRestoredCurrentRunPath(String path, Set<String> restored) {
+        if (restored.isEmpty() || inheritedChangedPaths.contains(path)) {
+            return false;
+        }
+        String normalized = path.replace('\\', '/');
+        if (restored.contains(path) || restored.contains(normalized)) {
+            return true;
+        }
+        return normalized.startsWith("./") && restored.contains(normalized.substring(2));
     }
 
     private static boolean sameRequirements(TaskControlService.TaskContract before,
