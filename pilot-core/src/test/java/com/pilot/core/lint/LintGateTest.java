@@ -59,6 +59,49 @@ class LintGateTest {
         assertEquals("node scripts/quality-gate.mjs {files}", ProjectLint.discover(root).command());
     }
 
+    /**
+     * 根上同时有多种清单时，谁优先是写死在探测表里的约定：改顺序就是改行为。
+     * 这条用例把顺序钉住，避免重构分支时悄悄换掉某类项目的检查命令。
+     */
+    @Test
+    void markerPriorityStaysStableForPolyglotRoots() throws Exception {
+        Files.writeString(root.resolve("deno.json"), "{}\n");
+        Files.writeString(root.resolve("eslint.config.js"), "export default [];\n");
+        assertEquals("eslint {files}", ProjectLint.discover(root).command());
+
+        Files.writeString(root.resolve("biome.json"), "{}\n");
+        assertEquals("biome check {files}", ProjectLint.discover(root).command());
+
+        // 仓库自带的门禁脚本覆盖所有语言标记：它知道怎么把改动文件交给各引擎。
+        Files.createDirectories(root.resolve("scripts"));
+        Files.createDirectories(root.resolve("config/quality"));
+        Files.writeString(root.resolve("scripts/quality-gate.mjs"), "// gate\n");
+        Files.writeString(root.resolve("config/quality/rules.json"), "{}\n");
+        assertEquals("node scripts/quality-gate.mjs {files}", ProjectLint.discover(root).command());
+
+        // 根 package.json 的 lint 脚本比所有清单标记都早：脚本正文在发现时就被展开并固定下来。
+        Files.writeString(root.resolve("package.json"), "{\"scripts\":{\"lint\":\"custom-linter run\"}}");
+        assertEquals("custom-linter run {files}", ProjectLint.discover(root).command());
+
+        // 只剩标记时，deno.json 是兜底项，不会被 eslint 之外的语言抢走。
+        Files.delete(root.resolve("package.json"));
+        Files.delete(root.resolve("scripts/quality-gate.mjs"));
+        Files.delete(root.resolve("config/quality/rules.json"));
+        Files.delete(root.resolve("biome.json"));
+        Files.delete(root.resolve("eslint.config.js"));
+        assertEquals("deno lint {files}", ProjectLint.discover(root).command());
+    }
+
+    @Test
+    void recognizesEveryEslintConfigNameAndProtectsIt() throws Exception {
+        for (String name : List.of("eslint.config.mts", "eslint.config.cts", ".eslintrc.yaml")) {
+            Files.writeString(root.resolve(name), "export default [];\n");
+            assertEquals("eslint {files}", ProjectLint.discover(root).command(), name);
+            assertTrue(ProjectLint.isProtectedConfig(name), name);
+            Files.delete(root.resolve(name));
+        }
+    }
+
     @Test
     void switchOnReportsOnlyChangedFilesAndSwitchOffRunsNothing() throws Exception {
         writeSample();

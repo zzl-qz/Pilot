@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Predicate;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -15,16 +16,39 @@ import tools.jackson.databind.ObjectMapper;
  * 工作区 {@code .pilot/settings.json} 的 quality.command 优先于自动发现。
  */
 public record ProjectLint(Status status, String command, String source, int timeoutSeconds) {
-    private static final List<String> RULE_FILES = List.of(".pilot/settings.json", "biome.json", "biome.jsonc",
-        "eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", "eslint.config.ts", ".eslintrc", ".eslintrc.js",
-        ".eslintrc.cjs", ".eslintrc.json", ".eslintrc.yml", "ruff.toml", ".ruff.toml", "pyproject.toml",
-        ".golangci.yml", ".golangci.yaml", ".golangci.toml", "phpcs.xml", "phpcs.xml.dist", ".rubocop.yml",
-        ".rubocop.yaml", "analysis_options.yaml", "clippy.toml", ".clippy.toml", "deno.json", "deno.jsonc",
-        "config/quality/rules.json", "config/java/checkstyle-strict.xml");
+    private static final List<String> RULE_FILES =
+        List.of(".pilot/settings.json", "biome.json", "biome.jsonc", "eslint.config.js", "eslint.config.mjs",
+            "eslint.config.cjs", "eslint.config.ts", "eslint.config.mts", "eslint.config.cts", ".eslintrc",
+            ".eslintrc.js", ".eslintrc.cjs", ".eslintrc.json", ".eslintrc.yaml", ".eslintrc.yml", "ruff.toml",
+            ".ruff.toml", "pyproject.toml", ".golangci.yml", ".golangci.yaml", ".golangci.toml", "phpcs.xml",
+            "phpcs.xml.dist", ".rubocop.yml", ".rubocop.yaml", "analysis_options.yaml", "clippy.toml", ".clippy.toml",
+            "deno.json", "deno.jsonc", "config/quality/rules.json", "config/java/checkstyle-strict.xml");
     private static final int DEFAULT_TIMEOUT_SECONDS = 60;
     private static final int MAX_TIMEOUT_SECONDS = 180;
     private static final int DIGEST_CHARS = 20_000;
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    /**
+     * 根目录清单的探测顺序：靠前的优先，命中即用。顺序变化会改变发现结果，
+     * 所以表本身是可读的唯一事实源，{@link #fromMarker} 只负责按序取第一条。
+     */
+    private static final List<MarkerProbe> ROOT_MARKERS = List.of(
+        new MarkerProbe(root -> exists(root, "scripts/quality-gate.mjs") && exists(root, "config/quality/rules.json"),
+            "node scripts/quality-gate.mjs {files}", "scripts/quality-gate.mjs"),
+        new MarkerProbe(root -> anyExisting(root, "biome.json", "biome.jsonc"), "biome check {files}", "biome.json"),
+        new MarkerProbe(root -> anyExisting(root, "eslint.config.js", "eslint.config.mjs", "eslint.config.cjs",
+            "eslint.config.ts", "eslint.config.mts", "eslint.config.cts", ".eslintrc", ".eslintrc.js", ".eslintrc.cjs",
+            ".eslintrc.json", ".eslintrc.yaml", ".eslintrc.yml"), "eslint {files}", "eslint 配置"),
+        new MarkerProbe(root -> anyExisting(root, "ruff.toml", ".ruff.toml") || pyprojectHas(root, "[tool.ruff]"),
+            "ruff check {files}", "ruff 配置"),
+        new MarkerProbe(root -> anyExisting(root, ".golangci.yml", ".golangci.yaml", ".golangci.toml"),
+            "golangci-lint run {files}", "golangci-lint 配置"),
+        new MarkerProbe(root -> exists(root, "go.mod"), "go vet ./...", "go.mod"),
+        new MarkerProbe(root -> anyExisting(root, "phpcs.xml", "phpcs.xml.dist"), "phpcs {files}", "phpcs 配置"),
+        new MarkerProbe(root -> anyExisting(root, ".rubocop.yml", ".rubocop.yaml"), "rubocop {files}", "rubocop 配置"),
+        new MarkerProbe(root -> exists(root, "analysis_options.yaml"), "dart analyze {files}", "analysis_options.yaml"),
+        new MarkerProbe(root -> anyExisting(root, "clippy.toml", ".clippy.toml"), "cargo clippy -- -D warnings",
+            "clippy.toml"),
+        new MarkerProbe(root -> anyExisting(root, "deno.json", "deno.jsonc"), "deno lint {files}", "deno.json"));
 
     public enum Status {
         READY, UNCONFIGURED, DISABLED
@@ -188,40 +212,10 @@ public record ProjectLint(Status status, String command, String source, int time
     }
 
     private static ProjectLint fromMarker(Path root, int timeout) {
-        if (exists(root, "scripts/quality-gate.mjs") && exists(root, "config/quality/rules.json")) {
-            return ready("node scripts/quality-gate.mjs {files}", "scripts/quality-gate.mjs", timeout);
-        }
-        if (exists(root, "biome.json") || exists(root, "biome.jsonc")) {
-            return ready("biome check {files}", "biome.json", timeout);
-        }
-        if (exists(root, "eslint.config.js") || exists(root, "eslint.config.mjs") || exists(root, "eslint.config.cjs")
-            || exists(root, "eslint.config.ts") || exists(root, ".eslintrc") || exists(root, ".eslintrc.js")
-            || exists(root, ".eslintrc.cjs") || exists(root, ".eslintrc.json") || exists(root, ".eslintrc.yml")) {
-            return ready("eslint {files}", "eslint 配置", timeout);
-        }
-        if (exists(root, "ruff.toml") || exists(root, ".ruff.toml") || pyprojectHas(root, "[tool.ruff]")) {
-            return ready("ruff check {files}", "ruff 配置", timeout);
-        }
-        if (exists(root, ".golangci.yml") || exists(root, ".golangci.yaml") || exists(root, ".golangci.toml")) {
-            return ready("golangci-lint run {files}", "golangci-lint 配置", timeout);
-        }
-        if (exists(root, "go.mod")) {
-            return ready("go vet ./...", "go.mod", timeout);
-        }
-        if (exists(root, "phpcs.xml") || exists(root, "phpcs.xml.dist")) {
-            return ready("phpcs {files}", "phpcs 配置", timeout);
-        }
-        if (exists(root, ".rubocop.yml") || exists(root, ".rubocop.yaml")) {
-            return ready("rubocop {files}", "rubocop 配置", timeout);
-        }
-        if (exists(root, "analysis_options.yaml")) {
-            return ready("dart analyze {files}", "analysis_options.yaml", timeout);
-        }
-        if (exists(root, "clippy.toml") || exists(root, ".clippy.toml")) {
-            return ready("cargo clippy -- -D warnings", "clippy.toml", timeout);
-        }
-        if (exists(root, "deno.json") || exists(root, "deno.jsonc")) {
-            return ready("deno lint {files}", "deno.json", timeout);
+        for (MarkerProbe probe : ROOT_MARKERS) {
+            if (probe.present().test(root)) {
+                return ready(probe.command(), probe.source(), timeout);
+            }
         }
         return null;
     }
@@ -244,6 +238,15 @@ public record ProjectLint(Status status, String command, String source, int time
 
     private static boolean exists(Path root, String name) {
         return Files.isRegularFile(root.resolve(name), LinkOption.NOFOLLOW_LINKS);
+    }
+
+    private static boolean anyExisting(Path root, String... names) {
+        for (String name : names) {
+            if (exists(root, name)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String scriptBody(Path root, String source) {
@@ -318,5 +321,9 @@ public record ProjectLint(Status status, String command, String source, int time
 
     private record Settings(boolean disabled, String command, int timeoutSeconds) {
         static final Settings ABSENT = new Settings(false, "", DEFAULT_TIMEOUT_SECONDS);
+    }
+
+    /** 根目录清单的命中条件和它对应的 lint 命令；表里的先后顺序就是探测优先级。 */
+    private record MarkerProbe(Predicate<Path> present, String command, String source) {
     }
 }
