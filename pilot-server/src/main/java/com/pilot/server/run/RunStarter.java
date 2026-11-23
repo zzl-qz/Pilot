@@ -50,6 +50,24 @@ public interface RunStarter {
         start(sessionId, runId, input, attachments, imagePositions, task);
     }
 
+    /** 启动选项参数对象，避免长参数列表继续膨胀。 */
+    record StartOptions(List<Attachment> attachments, List<Integer> imagePositions,
+        TaskControlService.Requirements task, String skill, String mode) {
+        public StartOptions {
+            attachments = attachments == null ? List.of() : List.copyOf(attachments);
+            imagePositions = imagePositions == null ? List.of() : List.copyOf(imagePositions);
+        }
+    }
+
+    /**
+     * 带显式执行模式（{@code "plan"} | {@code "act"}，缺省按 {@code "act"}）的完整启动。
+     * 默认转发到无模式重载，测试里的空实现不用改。
+     */
+    default void start(String sessionId, String runId, String input, StartOptions options) {
+        StartOptions opts = options == null ? new StartOptions(List.of(), List.of(), null, null, null) : options;
+        start(sessionId, runId, input, opts.attachments(), opts.imagePositions(), opts.task(), opts.skill());
+    }
+
     /** 排队消息附带的独立约束与验收条件；为空表示这一条沿用默认的空要求。 */
     record QueueRequirements(List<String> constraints, List<String> acceptance) {
         public QueueRequirements {
@@ -69,9 +87,9 @@ public interface RunStarter {
         }
     }
 
-    /** 排队中的一条消息：正文已经内联了文本文件，这里只额外带需要多模态编码的图片。 */
+    /** 排队中的一条消息：正文已经内联了文本文件，这里只额外带需要多模态编码的图片与可选模式。 */
     record QueuedMessage(String content, List<Attachment> attachments, List<Integer> imagePositions,
-        QueueRequirements requirements) {
+        QueueRequirements requirements, String mode) {
         public QueuedMessage {
             content = content == null ? "" : content;
             attachments = attachments == null ? List.of() : List.copyOf(attachments);
@@ -79,7 +97,12 @@ public interface RunStarter {
         }
 
         public QueuedMessage(String content, List<Attachment> attachments, List<Integer> imagePositions) {
-            this(content, attachments, imagePositions, null);
+            this(content, attachments, imagePositions, null, null);
+        }
+
+        public QueuedMessage(String content, List<Attachment> attachments, List<Integer> imagePositions,
+            QueueRequirements requirements) {
+            this(content, attachments, imagePositions, requirements, null);
         }
     }
 
@@ -107,6 +130,12 @@ public interface RunStarter {
     default boolean followup(String sessionId, String text, List<Attachment> attachments, List<Integer> imagePositions,
         QueueRequirements requirements) {
         return followup(sessionId, text, attachments, imagePositions);
+    }
+
+    /** 带显式执行模式（plan/act）的追加；默认忽略模式以兼容已有启动器。 */
+    default boolean followup(String sessionId, String text, List<Attachment> attachments, List<Integer> imagePositions,
+        QueueRequirements requirements, String mode) {
+        return followup(sessionId, text, attachments, imagePositions, requirements);
     }
 
     /** 暂停在当前安全步骤结束后生效，保留任务及排队消息。 */

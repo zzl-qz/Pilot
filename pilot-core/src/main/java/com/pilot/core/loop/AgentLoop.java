@@ -233,6 +233,7 @@ public final class AgentLoop {
     private Consumer<String> liveReasoning;
     /** 收尾门：有了目标之后在 run/resume 里创建，一次运行一个。 */
     private CompletionGate completionGate;
+    private boolean readOnlySession;
     private String projectConstraints = "";
     private final List<String> touchedPaths = new ArrayList<>();
     private int emptyBrowserSnapshots;
@@ -515,12 +516,18 @@ public final class AgentLoop {
         }
         List<Message> messages = seed(history);
         String goal = userInput.strip();
-        this.completionGate = new CompletionGate(config.completionChecks(), goal, lintGate);
+        this.completionGate = new CompletionGate(config.completionChecks(), goal, lintGate, readOnlySession);
         this.completionGate.useProjectConstraints(projectConstraints);
         lintGate.lock(qualityWorkspace);
         messages.add(Message.user(goal, attachments == null ? List.of() : attachments,
             imagePositions == null ? List.of() : imagePositions));
         return loop(messages, events, checkpoint);
+    }
+
+    /** 显式只读会话（如 mode="plan" 或 review）：收尾门直接放行无改动结果，不依赖 GoalIntent 动词推断。 */
+    public AgentLoop withReadOnlySession(boolean readOnlySession) {
+        this.readOnlySession = readOnlySession;
+        return this;
     }
 
     /** 续跑：不追加用户消息，直接用已有记忆继续，服务「跑一半」之后的恢复。 */
@@ -541,7 +548,7 @@ public final class AgentLoop {
         if (messages.size() <= 1) {
             throw new IllegalArgumentException("history is empty, nothing to resume");
         }
-        this.completionGate = new CompletionGate(config.completionChecks(), goal, lintGate);
+        this.completionGate = new CompletionGate(config.completionChecks(), goal, lintGate, readOnlySession);
         this.completionGate.useProjectConstraints(projectConstraints);
         lintGate.lock(qualityWorkspace);
         this.completionGate.restoreFrom(history);

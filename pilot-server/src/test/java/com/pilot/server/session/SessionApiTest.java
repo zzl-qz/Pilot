@@ -71,6 +71,7 @@ class SessionApiTest {
         private final AtomicBoolean running = new AtomicBoolean();
         private final List<String> queue = new ArrayList<>();
         private final List<RunStarter.QueueRequirements> requirements = new ArrayList<>();
+        private final List<String> startedModes = new ArrayList<>();
         private boolean held;
 
         void setRunning(boolean value) {
@@ -79,8 +80,22 @@ class SessionApiTest {
             requirements.clear();
         }
 
+        List<String> startedModes() {
+            return List.copyOf(startedModes);
+        }
+
+        void clearStartedModes() {
+            startedModes.clear();
+        }
+
         @Override
         public void start(String sessionId, String runId, String input) {
+        }
+
+        @Override
+        public void start(String sessionId, String runId, String input, StartOptions options) {
+            startedModes.add(options == null ? null : options.mode());
+            RunStarter.super.start(sessionId, runId, input, options);
         }
 
         @Override
@@ -843,6 +858,25 @@ class SessionApiTest {
         } finally {
             runStarter.setRunning(false);
         }
+    }
+
+    @Test
+    void messageModeAcceptsPlanActDefaultAndRejectsUnknownMode() throws Exception {
+        String id = createSession();
+        runStarter.clearStartedModes();
+
+        mvc.perform(post("/api/sessions/{id}/messages", id).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"content\":\"分析架构\",\"mode\":\"plan\"}")).andExpect(status().isOk());
+        mvc.perform(post("/api/sessions/{id}/messages", id).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"content\":\"分析架构\",\"mode\":\"PLAN\"}")).andExpect(status().isOk());
+        mvc.perform(post("/api/sessions/{id}/messages", id).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"content\":\"实现改动\",\"mode\":\"act\"}")).andExpect(status().isOk());
+        mvc.perform(post("/api/sessions/{id}/messages", id).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"content\":\"默认模式\"}")).andExpect(status().isOk());
+        mvc.perform(post("/api/sessions/{id}/messages", id).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"content\":\"非法模式\",\"mode\":\"yolo\"}")).andExpect(status().isBadRequest());
+
+        assertEquals(List.of("plan", "plan", "act", "act"), runStarter.startedModes());
     }
 
     private String createSession() throws Exception {

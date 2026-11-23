@@ -11,6 +11,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -52,7 +53,22 @@ public final class ToolRegistry {
 
     /** Remove a run-specific tool that is superseded by a provider-native capability. */
     public Optional<Tool> remove(String name) {
-        return name == null ? Optional.empty() : Optional.ofNullable(tools.remove(name));
+        if (name == null) {
+            return Optional.empty();
+        }
+        enabled.remove(name);
+        return Optional.ofNullable(tools.remove(name));
+    }
+
+    /** 按条件批量剥离已注册与已启用的工具（例如只读分析/规划模式移除全部写工具）。 */
+    public void removeIf(Predicate<Tool> predicate) {
+        Objects.requireNonNull(predicate, "predicate must not be null");
+        for (Tool tool : tools()) {
+            if (predicate.test(tool)) {
+                tools.remove(tool.name());
+                enabled.remove(tool.name());
+            }
+        }
     }
 
     /** 全部已注册工具，含暂不可用的。 */

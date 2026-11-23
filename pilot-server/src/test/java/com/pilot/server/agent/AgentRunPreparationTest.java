@@ -1,6 +1,7 @@
 package com.pilot.server.agent;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -31,7 +32,11 @@ import com.pilot.core.session.InMemoryPlanRepository;
 import com.pilot.core.session.InMemorySessionRepository;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.ToolRegistry;
+import com.pilot.core.tool.WritesFiles;
 import com.pilot.core.tool.command.CommandTaskManager;
+import com.pilot.core.tool.file.EditFileTool;
+import com.pilot.core.tool.file.ReadFileTool;
+import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.MultiAgentProperties;
 import com.pilot.server.config.SkillProperties;
@@ -156,6 +161,60 @@ class AgentRunPreparationTest {
             }, ignored -> {
             });
             assertTrue(prepared.availableTools().contains("workspace_overview"));
+        } finally {
+            commandTasks.close();
+        }
+    }
+
+    @Test
+    void planModeStripsAllWriteToolsAndMarksReadOnlySession() {
+        JsonMapper mapper = JsonMapper.builder().build();
+        SessionService sessions = new SessionService();
+        String sessionId = sessions.createSession("plan-mode", workspace.toString()).id();
+        AgentProperties properties = new AgentProperties(workspace.toString(), null, 8, 3, 5, 300, 1, 0, 60_000, false,
+            false, null, null, null, null, null, null, null, null, null, null, null);
+        MultiAgentProperties multiProperties = new MultiAgentProperties(true, 1, 1, 8, 30, List.of());
+        WorkspaceToolFactory toolFactory = mock(WorkspaceToolFactory.class);
+        when(toolFactory.resolve(anyString())).thenReturn(workspace);
+        when(toolFactory.registryFor(anyString(), anyList(), any(PlanSink.class))).thenAnswer(invocation -> {
+            ToolRegistry registry = new ToolRegistry();
+            PathValidator validator = new PathValidator(workspace);
+            registry.register(new ReadFileTool(validator));
+            registry.register(new EditFileTool(validator));
+            return registry;
+        });
+        when(toolFactory.sessionExtras(anyString(), anyString())).thenReturn(List.of());
+        TaskControlService taskControls = new TaskControlService(mapper, new PilotDataDir(workspace.toString()));
+        var commandTasks = new CommandTaskManager(workspace.resolve("commands"), mapper);
+        AgentRunPreparation preparation = new AgentRunPreparation(sessions, toolFactory, properties, multiProperties,
+            taskControls, commandTasks, new RunSnapshotService(mapper, new PilotDataDir(workspace.toString())),
+            new InMemoryPlanRepository(), mapper,
+            new SkillService(new SkillProperties(false, null), properties, new PilotDataDir(workspace.toString())));
+
+        try {
+            AgentRunPreparation.PreparationInput planInput =
+                new AgentRunPreparation.PreparationInput(sessionId, "run_plan", "请修复并重构认证模块", null, false, List.of(),
+                    false, null, false, Set.of(), List.of("browser", "dispatch_agents"));
+            AgentRunPreparation.PreparedRun planPrepared = preparation.prepare(planInput, (items, explanation) -> {
+            }, ignored -> {
+            }, true);
+            assertTrue(planPrepared.planMode());
+            assertTrue(planPrepared.tools().tools().stream().noneMatch(t -> t instanceof WritesFiles),
+                "plan 模式不得保留任何写文件工具");
+            assertFalse(planPrepared.tools().find("edit_file").isPresent());
+            assertFalse(planPrepared.availableTools().contains("dispatch_agents"));
+            assertTrue(planPrepared.tools().find("read_file").isPresent());
+            assertTrue(planPrepared.tools().enable(List.of("edit_file", "dispatch_agents", "browser")).isEmpty(),
+                "被剥离的工具不得通过 enable_tools 重新开启");
+            assertTrue(planPrepared.systemPrompt().contains("只读分析与规划模式（plan）"));
+
+            AgentRunPreparation.PreparationInput actInput = new AgentRunPreparation.PreparationInput(sessionId,
+                "run_act", "请修复并重构认证模块", null, false, List.of(), false, null, false, Set.of(), List.of());
+            AgentRunPreparation.PreparedRun actPrepared = preparation.prepare(actInput, (items, explanation) -> {
+            }, ignored -> {
+            }, false);
+            assertFalse(actPrepared.planMode());
+            assertTrue(actPrepared.tools().find("edit_file").isPresent(), "默认 act 模式应保留写文件工具");
         } finally {
             commandTasks.close();
         }

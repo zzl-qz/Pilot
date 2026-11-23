@@ -53,6 +53,8 @@ import com.pilot.core.model.ModelUsage;
 import com.pilot.core.model.RequestReport;
 import com.pilot.core.model.RequestTotals;
 import com.pilot.core.permission.PermissionGate;
+import com.pilot.core.permission.PermissionMode;
+import com.pilot.core.permission.PolicyPermissionGate;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.plan.PlanSink;
 import com.pilot.core.quality.IndependentCodeReviewer;
@@ -265,8 +267,16 @@ public class AgentRunService implements RunStarter {
     @Override
     public void start(String sessionId, String runId, String input, List<Attachment> attachments,
         List<Integer> imagePositions, TaskControlService.Requirements task, String skill) {
-        launch(sessionId, runId, input, attachments == null ? List.of() : attachments, imagePositions, false, task,
-            false, skill == null || skill.isBlank() ? null : skill.strip());
+        start(sessionId, runId, input, new StartOptions(attachments, imagePositions, task, skill, null));
+    }
+
+    /** 带显式执行模式（plan / act，缺省按 act）的完整启动入口。 */
+    @Override
+    public void start(String sessionId, String runId, String input, StartOptions options) {
+        StartOptions opts = options == null ? new StartOptions(List.of(), List.of(), null, null, null) : options;
+        launch(sessionId, runId, input, opts.attachments(), opts.imagePositions(), false, opts.task(), false,
+            opts.skill() == null || opts.skill().isBlank() ? null : opts.skill().strip(),
+            "plan".equalsIgnoreCase(opts.mode()));
     }
 
     @Override
@@ -472,19 +482,26 @@ public class AgentRunService implements RunStarter {
     @Override
     public boolean followup(String sessionId, String text, List<Attachment> attachments, List<Integer> imagePositions,
         RunStarter.QueueRequirements requirements) {
+        return followup(sessionId, text, attachments, imagePositions, requirements, null);
+    }
+
+    @Override
+    public boolean followup(String sessionId, String text, List<Attachment> attachments, List<Integer> imagePositions,
+        RunStarter.QueueRequirements requirements, String mode) {
         boolean hasAttachments = attachments != null && !attachments.isEmpty();
         if ((text == null || text.isBlank()) && !hasAttachments) {
             return false;
         }
         String content = text == null ? "" : text.strip();
+        String normalizedMode = "plan".equalsIgnoreCase(mode) ? "plan" : null;
         Deque<String> queue = inbox(sessionId);
         synchronized (queue) {
             // 与运行结束后的队列交接共用锁，避免检查完活动运行后才入队，消息无人接走。
             if (registry.activeRun(sessionId).isEmpty()) {
                 return false;
             }
-            queue.offer(QueuedMessageCodec
-                .encode(new QueuedMessageCodec.Stored(content, attachments, imagePositions, requirements)));
+            queue.offer(QueuedMessageCodec.encode(
+                new QueuedMessageCodec.Stored(content, attachments, imagePositions, requirements, normalizedMode)));
             persistQueue(sessionId, queue);
         }
         return true;
@@ -507,9 +524,8 @@ public class AgentRunService implements RunStarter {
     }
 
     private static List<QueuedMessage> queueEntries(Deque<String> queue) {
-        return queue.stream().map(QueuedMessageCodec::decode).map(
-            item -> new QueuedMessage(item.content(), item.attachments(), item.imagePositions(), item.requirements()))
-            .toList();
+        return queue.stream().map(QueuedMessageCodec::decode).map(item -> new QueuedMessage(item.content(),
+            item.attachments(), item.imagePositions(), item.requirements(), item.mode())).toList();
     }
 
     @Override
@@ -646,8 +662,15 @@ public class AgentRunService implements RunStarter {
     private void launch(String sessionId, String runId, String input, List<Attachment> attachments,
         List<Integer> imagePositions, boolean continuation, TaskControlService.Requirements requirements,
         boolean regenerate, String skill) {
+        launch(sessionId, runId, input, attachments, imagePositions, continuation, requirements, regenerate, skill,
+            false);
+    }
+
+    private void launch(String sessionId, String runId, String input, List<Attachment> attachments,
+        List<Integer> imagePositions, boolean continuation, TaskControlService.Requirements requirements,
+        boolean regenerate, String skill, boolean planMode) {
         synchronized (inbox(sessionId)) {
-            RunHandle handle = new RunHandle(sessionId, skill);
+            RunHandle handle = new RunHandle(sessionId, skill, planMode);
             runs.put(runId, handle);
             try {
                 registry.register(runId, sessionId, sessionWorkspace(sessionId));
@@ -943,7 +966,8 @@ public class AgentRunService implements RunStarter {
                 new RunStarted(next.content(), next.attachments(), next.imagePositions()));
             TaskControlService.Requirements requirements =
                 next.requirements() == null ? null : next.requirements().toRequirements();
-            launch(sessionId, runId, next.content(), next.attachments(), next.imagePositions(), false, requirements);
+            launch(sessionId, runId, next.content(), next.attachments(), next.imagePositions(), false, requirements,
+                false, null, "plan".equalsIgnoreCase(next.mode()));
         } catch (RuntimeException e) {
             registry.unregister(runId);
             publish(sessionId, runId, new RunFailed(RunFailureCode.QUEUE_START_FAILED, "排队消息启动失败，消息已保留", false));
@@ -1025,7 +1049,7 @@ public class AgentRunService implements RunStarter {
         String reason = budgetLimited ? "预算分段继续第 " + attempt + "/" + cap + " 段"
             : goalOpen ? "目标尚未核验，同一会话继续第 " + attempt + " 轮" : "步数触顶，按未完成计划继续";
         publish(sessionId, runId, new RunContinued(attempt, cap, reason));
-        launch(sessionId, runId, null, List.of(), true);
+        launch(sessionId, runId, null, List.of(), List.of(), true, null, false, null, handle.planMode);
         return true;
     }
 
@@ -1138,15 +1162,16 @@ public class AgentRunService implements RunStarter {
                 executionTask != null && executionTask.automation() != null && executionTask.automation().fullAccess(),
                 nativeCapabilities, deferredTools.snapshot(sessionId));
         AgentRunPreparation.PreparedRun prepared = preparation.prepare(preparationInput, planSink, tools -> {
-            if (unattended && scheduleService != null) {
+            if (unattended && scheduleService != null && !handle.planMode) {
                 tools.register(scheduleService.getObject().wakeTool(sessionId));
             }
-        });
+        }, handle.planMode);
         resolvedWorkspaceRef.set(prepared.resolvedWorkspace());
         workspaceValidatorRef.set(prepared.workspaceValidator());
-        PermissionGate sessionGate = unattended && executionTask.automation().fullAccess()
-            ? (call, tool) -> com.pilot.core.permission.PermissionResult.allow()
-            : preparation.withWorkspaceRules(permissionGate, toolFactory.resolve(prepared.workspace()));
+        PermissionGate sessionGate = handle.planMode ? new PolicyPermissionGate(PermissionMode.READ_ONLY)
+            : unattended && executionTask.automation().fullAccess()
+                ? (call, tool) -> com.pilot.core.permission.PermissionResult.allow()
+                : preparation.withWorkspaceRules(permissionGate, toolFactory.resolve(prepared.workspace()));
         List<Message> activatedHistory = continuation ? history
             : preparation.activateSkill(repositoryContext.withRepositoryBrief(history, prepared.workspace(), sessionId),
                 prepared.workspace(), handle.skill);
@@ -1225,6 +1250,8 @@ public class AgentRunService implements RunStarter {
             new JsonlTraceRecorder(dataDir.file("traces", sessionId + ".jsonl"), objectMapper);
         AgentLoop loop = new AgentLoop(executionClient, tools, sessionGate, approvals, config, handle.cancelled::get,
             () -> null, traceRecorder, delta -> sessions.preview(sessionId, runId, new AssistantPreview(delta)))
+            .withReadOnlySession(
+                prepared.planMode() || review.active() || properties.permissionMode() == PermissionMode.READ_ONLY)
             .withPendingMessages(() -> pollSteering(sessionId))
             .withLiveReasoning(
                 delta -> sessions.preview(sessionId, runId, new com.pilot.core.event.AssistantReasoning(delta)))
@@ -1599,6 +1626,8 @@ public class AgentRunService implements RunStarter {
         private final String sessionId;
         /** 用户显式点名的技能；仅本次 run 注入，自动继续/排队/重放不继承。 */
         private final String skill;
+        /** 显式只读分析/规划模式（mode="plan"）：剥离写工具并置 readOnlySession=true。 */
+        private final boolean planMode;
         private volatile boolean accepting = true;
         private volatile boolean paused;
         /** 非用户取消的中断原因（如服务重启）；为空表示普通取消/暂停。 */
@@ -1606,9 +1635,10 @@ public class AgentRunService implements RunStarter {
         private volatile Future<?> future;
         volatile Thread workerThread;
 
-        private RunHandle(String sessionId, String skill) {
+        private RunHandle(String sessionId, String skill, boolean planMode) {
             this.sessionId = sessionId;
             this.skill = skill == null || skill.isBlank() ? null : skill.strip();
+            this.planMode = planMode;
         }
     }
 

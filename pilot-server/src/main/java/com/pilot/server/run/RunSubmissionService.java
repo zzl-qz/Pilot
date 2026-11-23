@@ -16,8 +16,16 @@ public final class RunSubmissionService {
     public static void start(SessionService sessions, RunStarter runs, String sessionId, String runId, String input,
         List<Attachment> attachments, List<Integer> imagePositions, TaskControlService.Requirements task,
         String skill) {
-        submit(sessions, runs, sessionId, runId, new RunStarted(input, attachments, imagePositions),
-            () -> runs.start(sessionId, runId, input, attachments, imagePositions, task, skill));
+        start(sessions, runs, sessionId, runId, input,
+            new RunStarter.StartOptions(attachments, imagePositions, task, skill, null));
+    }
+
+    public static void start(SessionService sessions, RunStarter runs, String sessionId, String runId, String input,
+        RunStarter.StartOptions options) {
+        RunStarter.StartOptions opts =
+            options == null ? new RunStarter.StartOptions(List.of(), List.of(), null, null, null) : options;
+        submit(sessions, runs, sessionId, runId, new RunStarted(input, opts.attachments(), opts.imagePositions()),
+            () -> runs.start(sessionId, runId, input, opts));
     }
 
     public static void resume(SessionService sessions, RunStarter runs, String sessionId, String runId) {

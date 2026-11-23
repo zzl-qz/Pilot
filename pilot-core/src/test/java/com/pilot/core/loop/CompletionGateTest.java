@@ -636,4 +636,17 @@ class CompletionGateTest {
         assertEquals(".bak", CompletionGate.scratchToken("src\\main\\App.java.bak"));
         assertNull(CompletionGate.scratchToken("src/main/Template.java"));
     }
+
+    @Test
+    void readOnlySessionSkipsActionNudgeEvenWhenGoalHasActionVerbs() {
+        CompletionGate planGate =
+            new CompletionGate(true, "修复登录模块 bug 并重构 AuthService.java", LintGate.disabled(), true);
+        assertNull(planGate.evaluate(Set.of(), List.of(), List.of(), List.of()), "显式只读/plan 模式下即使目标含修复/重构动词，也不应催促修改文件");
+
+        CompletionGate actGate =
+            new CompletionGate(true, "修复登录模块 bug 并重构 AuthService.java", LintGate.disabled(), false);
+        CompletionGate.Nudge nudge = actGate.evaluate(Set.of(), List.of(), List.of(), List.of());
+        assertNotNull(nudge, "act 模式下实现类目标无改动仍应催促动手");
+        assertTrue(nudge.reason().contains("无任何改动"), nudge.reason());
+    }
 }

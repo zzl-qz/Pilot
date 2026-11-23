@@ -96,6 +96,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public final class AgentRunPreparation {
     private static final PromptLibrary PROMPTS = PromptLibrary.standard();
+    /** 只读分析/规划模式（mode="plan"）下除 WritesFiles 外一并剥离的副作用工具。 */
+    private static final Set<String> PLAN_EXCLUDED_TOOLS = Set.of("publish_artifact", "propose_skill", "install_skill",
+        "prepare_runtime", "stop_command", "command_input", ToolNames.DISPATCH_AGENTS, "office", "browser", "mcp_call");
 
     private final SessionService sessions;
     private final WorkspaceToolFactory toolFactory;
@@ -176,11 +179,17 @@ public final class AgentRunPreparation {
     }
 
     public PreparedRun prepare(PreparationInput input, PlanSink planSink, Consumer<ToolRegistry> toolConfigurer) {
+        return prepare(input, planSink, toolConfigurer, false);
+    }
+
+    public PreparedRun prepare(PreparationInput input, PlanSink planSink, Consumer<ToolRegistry> toolConfigurer,
+        boolean requestedPlanMode) {
         String workspace = sessions.find(input.sessionId()).map(Session::workspace).orElse(null);
         Path resolvedWorkspace = toolFactory.resolve(workspace);
         List<Path> extraRoots = projectFolders(input.sessionId());
         PathValidator workspaceValidator = new PathValidator(resolvedWorkspace, extraRoots);
         ReviewMode review = ReviewMode.parse(input.unattended() ? input.automationGoal() : input.input());
+        boolean planMode = requestedPlanMode && !review.active();
         ToolRegistry tools = review.active() ? reviewTools(workspace, extraRoots)
             : sessionTools(input.sessionId(), input.runId(), workspace, planSink, extraRoots);
         List<String> inheritedDeferred =
@@ -192,15 +201,20 @@ public final class AgentRunPreparation {
             tools.register(new UseSkillTool(() -> skills.catalogFor(workspace)));
         }
         toolConfigurer.accept(tools);
+        if (planMode) {
+            // mode="plan" 从源头剥离全部写文件与外部副作用工具，确保模型与 enable_tools 都无法触及写能力
+            tools.removeIf(tool -> tool instanceof WritesFiles || PLAN_EXCLUDED_TOOLS.contains(tool.name()));
+        }
 
-        Set<String> availableTools = new LinkedHashSet<>(review.active() ? tools.names() : sessionTools(tools));
+        Set<String> availableTools =
+            new LinkedHashSet<>(review.active() ? tools.names() : sessionTools(tools, planMode));
         addNativeToolNames(availableTools, input.nativeCapabilities());
         List<ContextComposition.Source> promptSources =
-            systemPromptParts(input.sessionId(), workspace, availableTools, catalog, review);
+            systemPromptParts(input.sessionId(), workspace, availableTools, catalog, review, planMode);
         String systemPrompt =
             promptSources.stream().map(ContextComposition.Source::text).collect(Collectors.joining("\n\n"));
         return new PreparedRun(workspace, resolvedWorkspace, workspaceValidator, review, tools, availableTools,
-            promptSources, systemPrompt, inheritedDeferred);
+            promptSources, systemPrompt, inheritedDeferred, planMode);
     }
 
     public void configureExecutionTools(PreparedRun prepared, GoalExecutionPolicy goalPolicy, String sessionId,
@@ -213,17 +227,19 @@ public final class AgentRunPreparation {
         ToolRegistry tools = prepared.tools();
         Set<String> availableTools = prepared.availableTools();
         boolean reviewActive = prepared.review().active();
+        boolean planMode = prepared.planMode();
         List<String> inheritedDeferred = prepared.inheritedDeferredTools();
         // 子 Agent 与父会话共用同一组项目目录，否则多目录项目里的子任务看不见兄弟目录
         List<Path> extraRoots = projectFolders(sessionId);
         if (goalPolicy != null) {
-            boolean readOnlySession = reviewActive || properties.permissionMode() == PermissionMode.READ_ONLY
-                || tools.availableTools().stream().noneMatch(t -> t instanceof WritesFiles);
+            boolean readOnlySession =
+                planMode || reviewActive || properties.permissionMode() == PermissionMode.READ_ONLY
+                    || tools.availableTools().stream().noneMatch(t -> t instanceof WritesFiles);
             goalPolicy.withCommandLookup(id -> commandTasks.get(sessionId, id)).withReadOnlySession(readOnlySession);
             goalPolicy.withAvailableTools(availableTools).withUpdates(state -> sink.accept(
                 new ExecutionUpdated(state.mode(), state.phase(), state.requests(), state.reason(), state.gap())));
             tools.register(goalPolicy.promotionTool());
-            if (taskControls.load(sessionId).automation() != null) {
+            if (taskControls.load(sessionId).automation() != null && !planMode) {
                 tools.register(goalPolicy.researchTool());
             }
         }
@@ -233,7 +249,7 @@ public final class AgentRunPreparation {
             if (configuredModel instanceof ModelClientProvider provider) {
                 spawnAgent.withChildRoute(() -> modelSettings.snapshot().childModel(), provider::clientFor);
             }
-            if (worktrees != null) {
+            if (worktrees != null && !planMode) {
                 Path base = toolFactory.resolve(workspace);
                 spawnAgent.withCheckouts(base, new SubagentCheckouts(ignored -> {
                     try {
@@ -251,7 +267,7 @@ public final class AgentRunPreparation {
                 });
             }
             tools.register(spawnAgent);
-            if (multiProperties.enabled()) {
+            if (multiProperties.enabled() && !planMode) {
                 tools.register(new DispatchAgentsTool(multiAgent, sessionId, runId, workspace, sink, cancelled,
                     executionClient, profiles, childUsage).withExtraRoots(extraRoots).withParentPermission(
                         unattended && executionTask.automation().fullAccess() ? PermissionMode.AUTO : null));
@@ -377,7 +393,7 @@ public final class AgentRunPreparation {
     }
 
     private List<ContextComposition.Source> systemPromptParts(String sessionId, String workspace,
-        Set<String> availableTools, SkillCatalog catalog, ReviewMode review) {
+        Set<String> availableTools, SkillCatalog catalog, ReviewMode review, boolean planMode) {
         Map<String, String> variables = new LinkedHashMap<>(PromptLibrary.environment(workspace));
         variables.put("skills", skills.catalogText(catalog));
         List<ContextComposition.Source> parts = new ArrayList<>(PROMPTS.systemParts(variables, availableTools));
@@ -392,6 +408,9 @@ public final class AgentRunPreparation {
         if (review.active()) {
             parts.add(new ContextComposition.Source("system",
                 PROMPTS.render("review/protocol", Map.of("scope", review.scopeText())).strip()));
+        } else if (planMode) {
+            parts.add(new ContextComposition.Source("system",
+                "当前处于只读分析与规划模式（plan）：只读代码、分析问题与制定可执行方案或计划；写工具已剥离，不得修改工作区文件或运行写命令。"));
         }
         return List.copyOf(parts);
     }
@@ -421,10 +440,10 @@ public final class AgentRunPreparation {
         return toolFactory.registryForScope(workspace, scope, SandboxSink.rejectAll(), extraRoots);
     }
 
-    private Set<String> sessionTools(ToolRegistry base) {
+    private Set<String> sessionTools(ToolRegistry base, boolean planMode) {
         Set<String> names = new LinkedHashSet<>(base.names());
         names.add(ToolNames.SPAWN_AGENT);
-        if (multiProperties.enabled()) {
+        if (multiProperties.enabled() && !planMode) {
             names.add(ToolNames.DISPATCH_AGENTS);
         }
         return Set.copyOf(names);
@@ -534,7 +553,8 @@ public final class AgentRunPreparation {
 
     public record PreparedRun(String workspace, Path resolvedWorkspace, PathValidator workspaceValidator,
         ReviewMode review, ToolRegistry tools, Set<String> availableTools,
-        List<ContextComposition.Source> promptSources, String systemPrompt, List<String> inheritedDeferredTools) {
+        List<ContextComposition.Source> promptSources, String systemPrompt, List<String> inheritedDeferredTools,
+        boolean planMode) {
         public PreparedRun {
             availableTools = Set.copyOf(availableTools);
             promptSources = List.copyOf(promptSources);

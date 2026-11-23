@@ -64,6 +64,7 @@ final class CompletionGate {
 
     private final boolean enabled;
     private final String goal;
+    private final boolean readOnlySession;
     private final RefactorEvidenceGate evidenceGate;
     /** 本轮开始前就已经失败、且之后没有变化的检查。 */
     private Set<String> baselineChecks = Set.of();
@@ -90,8 +91,13 @@ final class CompletionGate {
     }
 
     CompletionGate(boolean enabled, String goal, LintGate lintGate) {
+        this(enabled, goal, lintGate, false);
+    }
+
+    CompletionGate(boolean enabled, String goal, LintGate lintGate, boolean readOnlySession) {
         this.enabled = enabled;
         this.goal = goal;
+        this.readOnlySession = readOnlySession;
         this.evidenceGate = new RefactorEvidenceGate(goal);
         this.lintGate = lintGate == null ? LintGate.disabled() : lintGate;
     }
@@ -200,7 +206,7 @@ final class CompletionGate {
         if (!enabled) {
             return null;
         }
-        boolean readOnlyTask = GoalIntent.isExplicitReadOnly(goal);
+        boolean readOnlyTask = readOnlySession || GoalIntent.isExplicitReadOnly(goal);
         if (!readOnlyTask && !openSteps.isEmpty() && planPrompts < 2) {
             planPrompts++;
             return new Nudge("原始用户目标：" + (goal == null ? "见持久任务上下文" : goal) + "\n计划进度："

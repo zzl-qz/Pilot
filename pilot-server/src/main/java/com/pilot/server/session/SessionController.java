@@ -619,6 +619,7 @@ public class SessionController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "content must not be blank");
         }
         String skill = request.skill() == null || request.skill().isBlank() ? null : request.skill().strip();
+        String mode = normalizeMode(request.mode());
         if (skill != null) {
             // 激活是启动期行为，排队消息无法携带；错误信息直接给出可行动的原因
             var catalog = skills.catalogFor(workspaceOf(id));
@@ -646,7 +647,7 @@ public class SessionController {
         }
         if (activeRun != null) {
             if (runStarter.followup(id, prepared.content(), prepared.attachments(), prepared.imagePositions(),
-                queuedRequirements)) {
+                queuedRequirements, mode)) {
                 sessions.touch(id);
                 return ResponseEntity.accepted().body(new MessageResponse(id, activeRun));
             }
@@ -658,15 +659,26 @@ public class SessionController {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "运行状态已变化，请结束当前任务后重试");
             }
             if (runStarter.followup(id, prepared.content(), prepared.attachments(), prepared.imagePositions(),
-                queuedRequirements)) {
+                queuedRequirements, mode)) {
                 sessions.touch(id);
                 return ResponseEntity.accepted().body(new MessageResponse(id, runStarter.activeRun(id).orElse(null)));
             }
             throw new ResponseStatusException(HttpStatus.CONFLICT, "该会话仍有运行在进行");
         }
-        RunSubmissionService.start(sessions, runStarter, id, runId, prepared.content(), prepared.attachments(),
-            prepared.imagePositions(), request.task(), skill);
+        RunSubmissionService.start(sessions, runStarter, id, runId, prepared.content(), new RunStarter.StartOptions(
+            prepared.attachments(), prepared.imagePositions(), request.task(), skill, mode));
         return ResponseEntity.ok().body(new MessageResponse(id, runId));
+    }
+
+    private static String normalizeMode(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "act";
+        }
+        String normalized = raw.strip().toLowerCase(Locale.ROOT);
+        if ("plan".equals(normalized) || "act".equals(normalized)) {
+            return normalized;
+        }
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "不支持的执行模式: " + raw + "，可选: plan / act");
     }
 
     private String workspaceOf(String sessionId) {
@@ -693,10 +705,15 @@ public class SessionController {
     }
 
     public record MessageRequest(String content, List<AttachmentService.Inbound> attachments,
-        TaskControlService.Requirements task, String skill, List<Integer> imagePositions) {
+        TaskControlService.Requirements task, String skill, List<Integer> imagePositions, String mode) {
         public MessageRequest(String content, List<AttachmentService.Inbound> attachments,
             TaskControlService.Requirements task) {
-            this(content, attachments, task, null, List.of());
+            this(content, attachments, task, null, List.of(), null);
+        }
+
+        public MessageRequest(String content, List<AttachmentService.Inbound> attachments,
+            TaskControlService.Requirements task, String skill, List<Integer> imagePositions) {
+            this(content, attachments, task, skill, imagePositions, null);
         }
     }
 

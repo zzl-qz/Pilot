@@ -22,7 +22,7 @@ final class QueuedMessageCodec {
     }
 
     record Stored(String content, List<Attachment> attachments, List<Integer> imagePositions,
-        QueueRequirements requirements) {
+        QueueRequirements requirements, String mode) {
         Stored {
             content = content == null ? "" : content;
             attachments = attachments == null ? List.of() : List.copyOf(attachments);
@@ -30,20 +30,25 @@ final class QueuedMessageCodec {
         }
 
         Stored(String content, List<Attachment> attachments, List<Integer> imagePositions) {
-            this(content, attachments, imagePositions, null);
+            this(content, attachments, imagePositions, null, null);
+        }
+
+        Stored(String content, List<Attachment> attachments, List<Integer> imagePositions,
+            QueueRequirements requirements) {
+            this(content, attachments, imagePositions, requirements, null);
         }
 
         Stored withContent(String text) {
-            return new Stored(text, attachments, imagePositions, requirements);
+            return new Stored(text, attachments, imagePositions, requirements, mode);
         }
 
         Stored withRequirements(QueueRequirements value) {
-            return new Stored(content, attachments, imagePositions, value);
+            return new Stored(content, attachments, imagePositions, value, mode);
         }
     }
 
     static String encode(Stored item) {
-        if (item.attachments().isEmpty() && item.requirements() == null) {
+        if (item.attachments().isEmpty() && item.requirements() == null && !"plan".equalsIgnoreCase(item.mode())) {
             return item.content();
         }
         return PREFIX + MAPPER.writeValueAsString(item);
