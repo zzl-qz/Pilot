@@ -19,6 +19,8 @@ export interface StripView {
   needsRerun: boolean;
   /** 可展开的具体依据；为空表示没有可看的细节。 */
   facts: string[];
+  /** 未通过的检查命令原文：有它就提供「重跑失败的检查」，不靠模型自己猜跑什么。 */
+  failedCommands?: string[];
 }
 
 const HIDDEN: StripView = { visible: false, label: '', tone: 'muted', detail: '', needsRerun: false, facts: [] };
@@ -83,7 +85,8 @@ export function stripView(view: S.DiagnosticsControllerValidationView | null | u
       tone: 'error',
       detail: reason || '最近一次校验没有通过，不能声称已完成。',
       needsRerun: true,
-      facts: factsOf(latest)
+      facts: factsOf(latest),
+      failedCommands: failedCommandsOf(latest)
     };
   }
 
@@ -138,3 +141,19 @@ function factsOf(evidence: S.ValidationEvidence | null): string[] {
 
 /** 「重新验证」发出的话：要求真跑一次，而不是复述上一次的结论。 */
 export const REVERIFY_TEXT = '重新运行验证：针对当前文件内容执行相关测试或构建，说明实际执行的命令、退出码与覆盖范围；不要把之前的结论当作这次的结果。';
+
+/** 从「命令 → exit N」里取非零退出的命令；exit 0 和无法解析的行不算失败。 */
+const FAILED_CHECK = /^(.*?)\s*(?:→|->)\s*exit\s+(?!0\b)\d+/;
+
+function failedCommandsOf(evidence: S.ValidationEvidence | null): string[] {
+  return (evidence?.checks ?? [])
+    .map(check => FAILED_CHECK.exec(String(check ?? '')))
+    .filter((matched): matched is RegExpExecArray => matched !== null)
+    .map(matched => matched[1].trim())
+    .filter(command => command.length > 0);
+}
+
+/** 重跑失败的检查时把命令原文带上，让模型原样执行，别改写参数。 */
+export function rerunFailedText(commands: string[]): string {
+  return `原样重跑这些未通过的检查命令，不要合并或修改参数，说明实际退出码与覆盖范围：${commands.map(command => `\`${command}\``).join('、')}`;
+}

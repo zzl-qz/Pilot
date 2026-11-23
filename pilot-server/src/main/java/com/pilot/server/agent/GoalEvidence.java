@@ -7,6 +7,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -21,6 +22,9 @@ import com.pilot.server.run.TaskControlService;
 /** 归并目标执行记录中的命令与验证证据。 */
 final class GoalEvidence {
     private static final Pattern TASK_ID = Pattern.compile("(?m)^任务ID: ([A-Za-z0-9_-]+)$");
+    /** 真正决定「跑哪些用例」的参数：同一批用例换开关重跑才能算覆盖，换用例不算。 */
+    private static final Pattern TEST_SELECTOR =
+        Pattern.compile("(?i)(?:-dtest[= ]|--tests[= ]|-dgroups[= ])([^\\s,]+(?:,[^\\s,]+)*)");
 
     private GoalEvidence() {
     }
@@ -139,6 +143,48 @@ final class GoalEvidence {
         VerificationCheck.Kind kind =
             VerificationCheck.classifyCommand(commandFromCheck(evidence).toLowerCase(Locale.ROOT));
         return target + "|" + kind.name();
+    }
+
+    /**
+     * 同一验证目标的判定键：覆盖域 + 测试选择器。同一批用例换无关开关重跑仍算同一目标，
+     * 换测试子集则是另一个目标，不能互相掩盖。
+     */
+    static String verificationSubject(TaskControlService.Evidence evidence) {
+        String command = commandFromCheck(evidence);
+        if (command.isEmpty() || command.contains("…") || command.contains("...")) {
+            // 显示层截断过的命令看不出是不是同一批用例，只按这条证据自己算，禁止跨证据覆盖。
+            return "truncated|" + Objects.toString(evidence.id(), "");
+        }
+        String selectors = selectorSignature(command);
+        // 没有测试选择器时无法判断两条命令跑的是不是同一批用例，只能按命令原文算另一个目标。
+        return verificationScope(evidence) + "|" + (selectors.isEmpty() ? command : selectors);
+    }
+
+    /** 同一验证目标之后有更新的合格通过时，先前那条失败不再代表当前结论。 */
+    static boolean recovered(TaskControlService.Evidence failure, Iterable<TaskControlService.Evidence> latest) {
+        String subject = verificationSubject(failure);
+        for (TaskControlService.Evidence candidate : latest) {
+            if (isQualifyingVerification(candidate)
+                && candidate.observedAtEpochMillis() > failure.observedAtEpochMillis()
+                && subject.equals(verificationSubject(candidate))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String selectorSignature(String command) {
+        Set<String> selectors = new TreeSet<>();
+        Matcher matcher = TEST_SELECTOR.matcher(Objects.toString(command, ""));
+        while (matcher.find()) {
+            for (String part : matcher.group(1).split(",")) {
+                String selector = part.replace("\"", "").replace("'", "").strip();
+                if (!selector.isEmpty()) {
+                    selectors.add(selector);
+                }
+            }
+        }
+        return String.join(",", selectors);
     }
 
     static boolean isQualifyingVerification(TaskControlService.Evidence evidence) {

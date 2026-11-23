@@ -788,6 +788,30 @@ class GoalExecutionPolicyTest {
     }
 
     @Test
+    void sameTestSelectionRerunWithEquivalentSwitchesRecoversPriorFailureButAnotherSubsetDoesNot() throws Exception {
+        var policy = policy((messages, tools) -> fail("no extra model call"), 20);
+        policy.beforeRequest(history);
+        check(policy, "mvn -pl pilot-server -Dtest=AlphaTest,BetaTest test -DfailIfNoTests=false", ".", 1);
+        policy.review(history, Set.of(), List.of());
+        assertEquals("CHECKS_FAILED", tasks.load("s").execution().phase());
+
+        // 同一批用例换等价开关重跑通过后，先前那次失败不再代表当前结论，但必须在依据里写清楚被覆盖了什么
+        Thread.sleep(5);
+        check(policy, "mvn -pl pilot-server -Dtest=AlphaTest,BetaTest test -Dsurefire.failIfNoSpecifiedTests=false",
+            ".", 0);
+        policy.review(history, Set.of(), List.of());
+        assertEquals("CHECKS_PASSED", tasks.load("s").execution().phase());
+        assertTrue(tasks.load("s").execution().gap().contains("已被之后的通过覆盖"), tasks.load("s").execution().gap());
+
+        // 换测试子集通过不能掩盖另一批用例的失败
+        check(policy, "mvn -pl pilot-server -Dtest=GammaTest test", ".", 1);
+        Thread.sleep(5);
+        check(policy, "mvn -pl pilot-server -Dtest=DeltaTest test", ".", 0);
+        policy.review(history, Set.of(), List.of());
+        assertEquals("CHECKS_FAILED", tasks.load("s").execution().phase(), "不同测试子集不能相互掩盖失败");
+    }
+
+    @Test
     void nestedSandboxBlockedCheckDoesNotMaskRealFailureOrZeroPassButAllowsTargetedPass() {
         var policy = policy((messages, tools) -> fail("no extra model call"), 20);
         policy.beforeRequest(history);

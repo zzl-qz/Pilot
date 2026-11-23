@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { stripView } from '../src/lib/verification/strip.js';
+import { rerunFailedText, stripView } from '../src/lib/verification/strip.js';
 
 const evidence = (over = {}) => ({
   id: 'val_1', sessionId: 's1', runId: 'r1', candidateHash: 'abc123def456',
@@ -79,6 +79,36 @@ test('没有证据时如实说未验证，并给出依据为空', () => {
   assert.equal(sv.tone, 'muted');
   assert.equal(sv.needsRerun, true);
   assert.deepEqual(sv.facts, []);
+});
+
+test('失败时给出可原样重跑的命令，退出码为 0 的不算失败', () => {
+  const sv = stripView(view({
+    current: false, code: 'failed', reason: '',
+    latest: evidence({
+      status: 'failed',
+      checks: [
+        'mvnw -B -ntp -pl pilot-server -am test -Dtest=A,B -DfailIfNoTests=false → exit 1',
+        'node --test → exit 0',
+        'mvnw spotless:check → exit 1 / 1200ms'
+      ]
+    })
+  }), true);
+  assert.deepEqual(sv.failedCommands, [
+    'mvnw -B -ntp -pl pilot-server -am test -Dtest=A,B -DfailIfNoTests=false',
+    'mvnw spotless:check'
+  ]);
+  const text = rerunFailedText(sv.failedCommands);
+  assert.match(text, /原样重跑/);
+  assert.match(text, /-DfailIfNoTests=false/);
+  assert.doesNotMatch(text, /node --test/);
+});
+
+test('没有可解析的失败命令时不编造重跑命令', () => {
+  const sv = stripView(view({
+    current: false, code: 'failed', reason: '',
+    latest: evidence({ status: 'failed', checks: ['node --test → 通过'] })
+  }), true);
+  assert.deepEqual(sv.failedCommands, []);
 });
 
 test('依据里放可核对的东西：检查命令、覆盖文件数、记录时间', () => {

@@ -846,11 +846,16 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private boolean finishDirect(TaskControlService.Execution state, TaskControlService.TaskContract requirements) {
         Map<String, TaskControlService.Evidence> checks = GoalEvidence.latestChecks(state.evidence());
         String version = sourceVersion();
-        List<TaskControlService.Evidence> currentFailures = checks.values().stream()
+        List<TaskControlService.Evidence> failedChecks = checks.values().stream()
             .filter(e -> version.equals(e.endVersion())
                 && !WireEnum.in(e.status(), EvidenceStatus.STALE, EvidenceStatus.RUNNING)
                 && !GoalEvidence.isQualifyingVerification(e))
             .toList();
+        // 同一批用例换开关重跑已通过时，先前那次失败不再代表当前结论；换测试子集的失败仍然算数。
+        List<TaskControlService.Evidence> recoveredFailures =
+            failedChecks.stream().filter(e -> GoalEvidence.recovered(e, checks.values())).toList();
+        List<TaskControlService.Evidence> currentFailures =
+            failedChecks.stream().filter(e -> !recoveredFailures.contains(e)).toList();
         List<String> realFailed = extractCheckNames(currentFailures, false);
         List<String> sandboxBlocked = extractCheckNames(currentFailures, true);
         Set<String> passedCurrentScopes = checks.values().stream()
@@ -865,7 +870,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         ExecutionPhase phase = failed ? ExecutionPhase.CHECKS_FAILED : running ? ExecutionPhase.UNVERIFIED : stale
             ? ExecutionPhase.CHECKS_STALE : checks.isEmpty() ? ExecutionPhase.UNVERIFIED : ExecutionPhase.CHECKS_PASSED;
         String detail = directVerificationDetail(phase, realFailed.isEmpty() ? sandboxBlocked : realFailed,
-            sandboxBlocked, running, checks.isEmpty());
+            sandboxBlocked, running, checks.isEmpty(), recoveredFailures);
         var finished = copy(state, state.mode(), phase, detail, state.evidence(), state.idleReviews(), state.progress(),
             state.usage());
         if (!tasks.executionForRequirements(session, requirements, finished)) {
@@ -881,7 +886,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     }
 
     private static String directVerificationDetail(ExecutionPhase phase, List<String> displayedFailures,
-        List<String> sandboxBlocked, boolean running, boolean empty) {
+        List<String> sandboxBlocked, boolean running, boolean empty, List<TaskControlService.Evidence> recovered) {
         if (phase == ExecutionPhase.CHECKS_FAILED) {
             return "当前版本仍有未通过的检查（" + String.join("；", displayedFailures) + "）；执行已结束，不能声称验证通过。";
         }
@@ -896,9 +901,18 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         }
         if (!sandboxBlocked.isEmpty()) {
             return "已记录的当前版本检查通过（另有 " + sandboxBlocked.size() + " 项因外层 OS 沙箱嵌套限制未在沙箱内通过："
-                + String.join("；", sandboxBlocked) + "）；结果仅覆盖实际检查范围，不代表全部目标已独立验收。";
+                + String.join("；", sandboxBlocked) + "）；结果仅覆盖实际检查范围，不代表全部目标已独立验收。" + recoveredNote(recovered);
         }
-        return "已记录的当前版本检查通过；结果仅覆盖实际检查范围，不代表全部目标已独立验收。";
+        return "已记录的当前版本检查通过；结果仅覆盖实际检查范围，不代表全部目标已独立验收。" + recoveredNote(recovered);
+    }
+
+    /** 被后续同范围通过覆盖的旧失败要写清楚，不能让「失败消失」变成无声的通过。 */
+    private static String recoveredNote(List<TaskControlService.Evidence> recovered) {
+        if (recovered.isEmpty()) {
+            return "";
+        }
+        return " 先前 " + recovered.size() + " 项同范围失败已被之后的通过覆盖（" + String.join("；", extractCheckNames(recovered, false))
+            + "）。";
     }
 
     /** 不再自动复跑历史检查：是否再跑一次验证由模型自己决定。 */

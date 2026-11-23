@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store.js';
-import { REVERIFY_TEXT, stripView } from '../lib/verification/strip.js';
+import { REVERIFY_TEXT, rerunFailedText, stripView } from '../lib/verification/strip.js';
 import { latestRunResult } from '../lib/events.js';
 import './verification-strip.css';
 
@@ -36,6 +36,7 @@ export function VerificationStrip() {
 
   const view = stripView(validation, hasRun, running);
   if (!view.visible) return null;
+  const failedCommands = view.failedCommands ?? [];
 
   return (
     <section id="verification-strip" className="verification-strip" data-tone={view.tone} aria-label="验证结论">
@@ -47,7 +48,11 @@ export function VerificationStrip() {
             <button type="button" className="verification-strip-link" aria-expanded={open}
               onClick={() => setOpen(value => !value)}>{open ? '收起依据' : '看依据'}</button>
           )}
-          {view.needsRerun && (
+          {failedCommands.length > 0 ? (
+            <button type="button" className="verification-strip-button"
+              title={failedCommands.join('\n')}
+              onClick={() => { void useStore.getState().submitInput(rerunFailedText(failedCommands)); }}>重跑失败的检查</button>
+          ) : view.needsRerun && (
             <button type="button" className="verification-strip-button"
               onClick={() => { void useStore.getState().submitInput(REVERIFY_TEXT); }}>重新验证</button>
           )}
