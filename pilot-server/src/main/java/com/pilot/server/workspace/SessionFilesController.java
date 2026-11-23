@@ -17,12 +17,15 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
 
+import org.springframework.core.io.Resource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -152,10 +155,36 @@ public class SessionFilesController {
         return new FlatResponse(files, truncated[0]);
     }
 
-    /** 只读预览；二进制或超大文件返回标记，不返回内容。 */
+    /** 只读预览；覆盖文本/代码、图片、PDF、音视频、Office(.docx/.xlsx/.pptx)与压缩包(.zip/.jar/.war/.epub)。 */
     @GetMapping("/{id}/file")
     public FileResponse file(@PathVariable String id, @RequestParam("path") String path) {
         return fileWorkspace(paths(id).root(), path);
+    }
+
+    /** 工作区原始文件流，供图片、PDF、音视频原生预览及附件下载（自动支持 HTTP Range）。 */
+    @GetMapping("/{id}/file/raw")
+    public ResponseEntity<Resource> raw(@PathVariable String id, @RequestParam("path") String path,
+        @RequestParam(name = "download", defaultValue = "false") boolean download) {
+        return rawWorkspace(paths(id).root(), path, download);
+    }
+
+    /** 使用本机默认应用打开工作区文件或在系统文件夹中定位（跨 Windows/macOS/Linux）。 */
+    @PostMapping("/{id}/file/open")
+    public UniversalFilePreviewService.OpenResult open(@PathVariable String id, @RequestBody OpenFileRequest request) {
+        if (request == null || request.path() == null || request.path().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少文件路径");
+        }
+        return openWorkspace(paths(id).root(), request.path(), request.mode());
+    }
+
+    static ResponseEntity<Resource> rawWorkspace(Path workspace, String path, boolean download) {
+        PathValidator paths = new PathValidator(workspace);
+        return UniversalFilePreviewService.rawResponse(paths.resolve(path), download);
+    }
+
+    static UniversalFilePreviewService.OpenResult openWorkspace(Path workspace, String path, String mode) {
+        PathValidator paths = new PathValidator(workspace);
+        return UniversalFilePreviewService.openNative(paths.resolve(path), mode);
     }
 
     /** 工作区内图片的只读预览，供会话工具结果内嵌展示。 */
@@ -193,14 +222,27 @@ public class SessionFilesController {
         }
         try {
             long size = Files.size(file);
+            UniversalFilePreviewService.PreviewMeta meta = UniversalFilePreviewService.classify(file);
+            if ("docx".equals(meta.kind()) || "xlsx".equals(meta.kind()) || "pptx".equals(meta.kind())
+                || "archive".equals(meta.kind())) {
+                UniversalFilePreviewService.StructuredPreview structured =
+                    UniversalFilePreviewService.parseStructured(file, meta.kind(), size);
+                return new FileResponse(path, size, false, structured != null && structured.truncated(), null,
+                    meta.kind(), meta.mimeType(), structured);
+            }
+            if ("image".equals(meta.kind()) || "pdf".equals(meta.kind()) || "audio".equals(meta.kind())
+                || "video".equals(meta.kind())) {
+                return new FileResponse(path, size, false, false, null, meta.kind(), meta.mimeType(), null);
+            }
             if (size > MAX_PREVIEW_BYTES) {
-                return new FileResponse(path, size, false, true);
+                return new FileResponse(path, size, false, true, null, "text", "text/plain", null);
             }
             byte[] bytes = Files.readAllBytes(file);
             if (Texts.isBinary(bytes)) {
-                return new FileResponse(path, size, true, false);
+                return new FileResponse(path, size, true, false, null, "binary", "application/octet-stream", null);
             }
-            return new FileResponse(path, size, false, false, new String(bytes, StandardCharsets.UTF_8));
+            return new FileResponse(path, size, false, false, new String(bytes, StandardCharsets.UTF_8), "text",
+                "text/plain", null);
         } catch (IOException e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "无法读取文件: " + path, e);
         }
@@ -253,7 +295,16 @@ public class SessionFilesController {
     public record FlatResponse(List<String> files, boolean truncated) {
     }
 
-    public record FileResponse(String path, long size, boolean binary, boolean truncated, String content) {
+    public record OpenFileRequest(String path, String mode) {
+    }
+
+    public record FileResponse(String path, long size, boolean binary, boolean truncated, String content, String kind,
+        String mimeType, UniversalFilePreviewService.StructuredPreview structured) {
+        public FileResponse(String path, long size, boolean binary, boolean truncated, String content) {
+            this(path, size, binary, truncated, content, binary ? "binary" : "text",
+                binary ? "application/octet-stream" : "text/plain", null);
+        }
+
         public FileResponse(String path, long size, boolean binary, boolean truncated) {
             this(path, size, binary, truncated, null);
         }

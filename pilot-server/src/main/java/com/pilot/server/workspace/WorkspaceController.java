@@ -3,8 +3,12 @@ package com.pilot.server.workspace;
 import java.io.UncheckedIOException;
 import java.util.List;
 
+import org.springframework.core.io.Resource;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -55,6 +59,33 @@ public class WorkspaceController {
         } catch (IllegalArgumentException | WorkspaceViolationException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         }
+    }
+
+    @GetMapping("/file/raw")
+    public ResponseEntity<Resource> raw(@RequestParam("root") String root, @RequestParam("path") String path,
+        @RequestParam(name = "download", defaultValue = "false") boolean download) {
+        try {
+            return SessionFilesController.rawWorkspace(workspaces.requireDirectory(root), path, download);
+        } catch (IllegalArgumentException | WorkspaceViolationException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
+    }
+
+    @PostMapping("/file/open")
+    public UniversalFilePreviewService.OpenResult open(@RequestBody WorkspaceOpenRequest request) {
+        if (request == null || request.root() == null || request.root().isBlank() || request.path() == null
+            || request.path().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少工作区或文件路径");
+        }
+        try {
+            return SessionFilesController.openWorkspace(workspaces.requireDirectory(request.root()), request.path(),
+                request.mode());
+        } catch (IllegalArgumentException | WorkspaceViolationException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
+    }
+
+    public record WorkspaceOpenRequest(String root, String path, String mode) {
     }
 
     @GetMapping("/browse")
