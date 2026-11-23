@@ -1713,13 +1713,6 @@ html[data-theme] .conversation-composer .composer-icon {
 }
 .conversation-composer .composer-choice { min-height: var(--conversation-control); padding-inline: 7px; font-size: 12px; flex: none; }
 .conversation-composer .composer-choice[aria-expanded="true"] { background: var(--ui-selected); color: var(--ink); }
-.conversation-composer .composer-mode { border: 1px solid transparent; transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease; }
-.conversation-composer .composer-mode.is-plan {
-  border-color: color-mix(in srgb, var(--warn) 42%, transparent);
-  background: color-mix(in srgb, var(--warn) 12%, transparent);
-  color: var(--warn);
-  font-weight: 560;
-}
 html[data-theme] .conversation-composer .composer.is-plan-mode {
   border-color: color-mix(in srgb, var(--warn) 42%, var(--line));
 }

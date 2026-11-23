@@ -83,6 +83,12 @@ async function run(page, name) {
   const errors=[]; page.on('pageerror', e=>{errors.push(e.message); console.error(e.message);});
   page.on('console',m=>{if(m.type()==='error') console.error(m.text());}); await page.goto(url);
   const input=page.locator('#input-flow'); await input.waitFor();
+  assert.equal(await page.locator('#mode-chip').count(), 0, '模式不在工具栏提供重复的执行按钮');
+  await input.press('Shift+Tab');
+  assert.equal(await page.evaluate(() => store.getState().ui.executionMode), 'plan', 'Shift+Tab 仍切换到 plan 模式');
+  assert.match(await input.getAttribute('data-placeholder'), /只读分析模式/);
+  await input.press('Shift+Tab');
+  assert.equal(await page.evaluate(() => store.getState().ui.executionMode), 'act', 'Shift+Tab 可切回执行模式');
   const chips=page.locator('[data-chip="attachment"]');
   async function transfer(kind, fileName, content='hello', type='text/plain') {
     await input.evaluate((el, {kind,fileName,content,type})=>{

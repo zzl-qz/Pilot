@@ -831,17 +831,6 @@ export function Composer() {
                   }} />
               </span>
             </div>
-            <span title={executionMode === 'plan'
-              ? '只读分析模式：仅阅读、分析与规划，不修改文件（点击切回执行模式）'
-              : '执行模式：允许修改文件与运行命令（点击切换为只读分析模式）'}>
-              <Button id="mode-chip" className={'composer-choice composer-mode' + (executionMode === 'plan' ? ' is-plan' : '')}
-                size="sm" variant="ghost"
-                label={executionMode === 'plan' ? '只读分析模式，点击切回执行模式' : '执行模式，点击切换为只读分析模式'}
-                aria-pressed={executionMode === 'plan'}
-                onClick={() => useStore.getState().setUi({ executionMode: executionMode === 'plan' ? 'act' : 'plan' })}>
-                {executionMode === 'plan' ? '分析' : '执行'}
-              </Button>
-            </span>
             <div className="perm-picker">
               <Button id="perm-chip" ref={permTriggerRef} className="composer-choice" size="sm" variant="ghost"
                 label={permissionLabel(permissionMode)} icon={<Icon name="shield" />}

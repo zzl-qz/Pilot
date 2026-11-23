@@ -22,6 +22,7 @@ const smoke = process.env.PILOT_DESKTOP_SMOKE === '1';
 const workbenchUrl = configuredWorkbenchUrl();
 const origin = workbenchOrigin(workbenchUrl);
 app.setName('Pilot');
+if (process.platform === 'win32') app.setAppUserModelId('com.pilot.desktop');
 process.on('uncaughtException', (error) => {
   process.stderr.write('uncaught: ' + (error && error.stack || error) + '\n');
 });
