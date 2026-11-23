@@ -128,6 +128,54 @@ class AgentLoopTest {
         assertTrue(result.conversation().getLast().content().contains("未发送请求"));
     }
 
+    /** 本地估算仍判定放得下、服务端却拒绝超长时，必须先真实收缩再重试，不能原样重发同一份请求。 */
+    @Test
+    void serverContextOverflowForcesRealShrinkEvenWhenLocalEstimateFits() {
+        List<Message> history = new ArrayList<>();
+        for (int round = 0; round < 3; round++) {
+            history.add(Message.assistant("", List.of(new ToolCall("call_" + round, "read_file", Map.of("path", "a.txt")))));
+            history.add(Message.tool("call_" + round, "旧的大块工具输出".repeat(600)));
+        }
+        List<List<Message>> requests = new ArrayList<>();
+        AtomicInteger calls = new AtomicInteger();
+        ModelClient client = (messages, tools) -> {
+            requests.add(List.copyOf(messages));
+            if (calls.getAndIncrement() == 0) {
+                throw new ModelClientException(ModelFailureKind.CONTEXT_OVERFLOW, "HTTP 400：context_length_exceeded");
+            }
+            return new ModelResponse("收缩后成功", List.of());
+        };
+        AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(), config(8, 3));
+
+        AgentLoop.Result result = loop.run("继续", history, events::add);
+
+        assertNull(result.failureCode());
+        assertEquals("收缩后成功", result.finalText());
+        assertEquals(2, requests.size(), "服务端拒绝后只应重试一次");
+        assertTrue(ContextCompactor.totalChars(requests.get(1)) < ContextCompactor.totalChars(requests.get(0)),
+            "重试前必须按服务端拒绝值真实收缩历史");
+        long shrunkTools = requests.get(1).stream()
+            .filter(message -> "tool".equals(message.role()) && message.content().length() < 400).count();
+        assertTrue(shrunkTools >= 2, "旧工具输出应被换成占位符");
+    }
+
+    /** 收缩后仍放不下时立刻失败：既不重发同一份超限请求，也不空转重试。 */
+    @Test
+    void serverContextOverflowFailsImmediatelyWhenHistoryCannotShrink() {
+        AtomicInteger calls = new AtomicInteger();
+        ModelClient client = (messages, tools) -> {
+            calls.incrementAndGet();
+            throw new ModelClientException(ModelFailureKind.CONTEXT_OVERFLOW, "HTTP 400：context_length_exceeded");
+        };
+        AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(), config(8, 3));
+
+        AgentLoop.Result result = loop.run("继续", List.of(), events::add);
+
+        assertEquals("CONTEXT_TOO_LARGE", result.failureCode());
+        assertEquals(1, calls.get(), "历史无法再收缩时不能把同一份超限请求原样重发");
+        assertTrue(result.finalText().contains("没有可以再收缩"), result.finalText());
+    }
+
     @Test
     void foldsEarlierHistoryWhenTheWireBudgetIsExceeded() {
         ScriptedModelClient client =

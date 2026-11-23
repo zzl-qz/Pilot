@@ -205,6 +205,8 @@ public final class AgentLoop {
     private static final int MAX_REPEAT_ABORTS = 2;
     /** 同一请求里允许模型因非法工具调用 JSON 纠偏重试的最大次数。 */
     private static final int MAX_MALFORMED_TOOL_RETRIES = 3;
+    /** 服务端已用真实窗口拒绝超长输入时，按当前实际大小的这个比例强制收缩，一次留出重试余量。 */
+    private static final double OVERFLOW_SHRINK_RATIO = 0.70;
     /** 连续多少轮仅调用只读查文件工具且命中重复缓存后提醒模型转向推进。 */
     private static final int MAX_EMPTY_BROWSER_SNAPSHOTS = 3;
     /** 墙钟与单调钟（或预期休眠片）差值达到此阈值时判定发生系统休眠唤醒。 */
@@ -246,6 +248,8 @@ public final class AgentLoop {
     private final List<String> touchedPaths = new ArrayList<>();
     private int emptyBrowserSnapshots;
     private int idleDedupRounds;
+    /** 服务端用真实窗口拒绝超长输入后，本 run 内收紧的字符上限；0 表示尚未收紧。 */
+    private int contextCeiling;
     private Function<List<String>, String> scopedRules = paths -> "";
     private ExecutionPolicy executionPolicy;
     private Hooks hooks = Hooks.none();
@@ -1252,12 +1256,63 @@ public final class AgentLoop {
     }
 
     /**
+     * 服务端已明确拒绝超长输入、而本地估算仍判定「放得下」时的强制收缩。
+     *
+     * <p>真实窗口比 {@link ModelCapacity} 小，或端点 tokenizer 计费比本地估算高时，
+     * 常规四层收缩会因为 {@code requestFits} 为 true 全部跳过。这里按当前实际大小的
+     * {@link #OVERFLOW_SHRINK_RATIO} 目标水位强制压缩，并在本 run 内收紧有效上下文上限，
+     * 避免下一轮继续撞线。
+     *
+     * @return 历史是否真的变小；false 表示已无可收缩的记录，调用方必须直接失败
+     */
+    private boolean forceShrinkForServerOverflow(List<Message> messages, Consumer<SessionEvent> events) {
+        int before = ContextCompactor.totalChars(messages);
+        if (before <= 0) {
+            return false;
+        }
+        // 端点已经用真实窗口否掉了这个大小，本 run 内不能再把它当作「放得下」的标准。
+        int ceiling = Math.min(contextLimit(), before);
+        contextCeiling = contextCeiling <= 0 ? ceiling : Math.min(contextCeiling, ceiling);
+        int targetChars = Math.max(1, (int)(before * OVERFLOW_SHRINK_RATIO));
+        int targetTokens = Math.max(1, (int)(ContextCompactor.estimateTokens(messages) * OVERFLOW_SHRINK_RATIO));
+        ContextCompactor.dropStaleToolImages(messages, MAX_TOOL_IMAGE_MESSAGES, observedThroughIndex);
+        ContextCompactor.pruneToolOutputs(messages, targetTokens, targetChars, observedThroughIndex);
+        ContextCompactor.truncateLongToolOutputs(messages, messages.size());
+        if (overTarget(messages, targetChars, targetTokens)) {
+            // 按新水位当预算，等价于「一定会触发」的压缩轮：正常水位下不会因为够松而跳过摘要。
+            budget.apply(messages, targetTokens, targetChars, fixedOverheadTokens(messages), events, observedThroughIndex);
+            observedThroughIndex = Math.min(observedThroughIndex, messages.size());
+        }
+        if (overTarget(messages, targetChars, targetTokens)) {
+            ContextCompactor.dropOldestGroups(messages, targetChars, targetTokens);
+            observedThroughIndex = Math.min(observedThroughIndex, messages.size());
+        }
+        shaveWhile(messages, () -> overTarget(messages, targetChars, targetTokens));
+        observedThroughIndex = Math.min(observedThroughIndex, messages.size());
+        if (ContextCompactor.totalChars(messages) >= before) {
+            return false;
+        }
+        notifyContextShrink();
+        return true;
+    }
+
+    private static boolean overTarget(List<Message> messages, int targetChars, int targetTokens) {
+        return ContextCompactor.totalChars(messages) > targetChars
+            || ContextCompactor.estimateTokens(messages) > targetTokens;
+    }
+
+    /**
      * 分组丢弃已经到保底、单条又不够长到截断阈值时，把最长的历史正文裁短。
      * 仍放不下就去掉最早的工具图片。系统提示不裁，裁到没处可裁就停。
      */
     private void shaveUntilFits(List<Message> messages, String guidance) {
+        shaveWhile(messages, () -> !requestFits(messages, guidance));
+    }
+
+    /** 反复裁短最长的历史正文或去掉最早的工具图片，直到 {@code unmet} 不再成立；系统提示不裁。 */
+    private void shaveWhile(List<Message> messages, BooleanSupplier unmet) {
         int guard = 24;
-        while (guard-- > 0 && !requestFits(messages, guidance)) {
+        while (guard-- > 0 && unmet.getAsBoolean()) {
             int index = longestShrinkable(messages);
             if (index >= 0) {
                 Message message = messages.get(index);
@@ -1701,12 +1756,21 @@ public final class AgentLoop {
                 ModelFailureKind kind = ModelRetryPolicy.classify(e);
                 if (kind == ModelFailureKind.CONTEXT_OVERFLOW) {
                     overflowRetries++;
-                    int beforeChars = ContextCompactor.totalChars(messages);
                     retainedGuidance = null;
+                    if (overflowRetries > 2) {
+                        return new ModelTurn(null, new Result("模型服务端连续拒绝了超长输入。已多次收缩历史，仍然放不下。请缩小输入或拆分任务后继续。",
+                            RunFailureCode.CONTEXT_TOO_LARGE.name(), conversation(messages)));
+                    }
+                    int beforeChars = ContextCompactor.totalChars(messages);
                     fitHistoryToInputBudget(messages, events, null);
                     boolean shrunk = ContextCompactor.totalChars(messages) < beforeChars;
-                    if (overflowRetries > 2 || !shrunk && !requestFits(messages, null)) {
-                        return new ModelTurn(null, new Result("模型服务端拒绝了超长输入。已尝试收缩历史，仍然放不下。请缩小输入或拆分任务后继续。",
+                    // 本地估算仍判定「放得下」时四层收缩全部被跳过。真实窗口更小或 tokenizer 计费更高，
+                    // 必须按服务端拒绝值强制收缩，绝不把同一份超限请求原样重发。
+                    if (!shrunk) {
+                        shrunk = forceShrinkForServerOverflow(messages, events);
+                    }
+                    if (!shrunk) {
+                        return new ModelTurn(null, new Result("模型服务端拒绝了超长输入，但历史已没有可以再收缩的记录。请缩小输入或拆分任务后继续。",
                             RunFailureCode.CONTEXT_TOO_LARGE.name(), conversation(messages)));
                     }
                     events.accept(new RunContinued(overflowRetries, 2, "模型服务端提示上下文超限，已收缩历史并自动重试"));
@@ -1858,6 +1922,12 @@ public final class AgentLoop {
     }
 
     private int contextLimit() {
+        int configured = configuredContextLimit();
+        // 服务端用真实窗口拒绝过的大小在本 run 内不再算「放得下」，否则下一轮会继续撞线。
+        return contextCeiling > 0 ? Math.min(configured, contextCeiling) : configured;
+    }
+
+    private int configuredContextLimit() {
         String override = System.getProperty("pilot.context.max-chars");
         if (override != null) {
             try {
