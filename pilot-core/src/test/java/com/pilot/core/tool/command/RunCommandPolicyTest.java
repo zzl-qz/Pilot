@@ -246,9 +246,15 @@ class RunCommandPolicyTest {
         Files.writeString(workspace.resolve("a.txt"), "one\ntwo\nthree\n");
         String piped = tool.execute(Map.of("command", "cat a.txt | tail -n 2"));
         assertTrue(piped.contains("退出码: 0"), piped);
-        assertEquals("two\nthree", piped.substring(piped.indexOf("输出:\n") + "输出:\n".length()));
+        assertEquals("two\nthree", chainedOutputBody(piped));
         String sequence = tool.execute(Map.of("command", "echo 'a b' && echo 'c;d'"));
-        assertEquals("a b\nc;d", sequence.substring(sequence.indexOf("输出:\n") + "输出:\n".length()));
+        assertEquals("a b\nc;d", chainedOutputBody(sequence));
+    }
+
+    private static String chainedOutputBody(String text) {
+        String tail = text.substring(text.indexOf("输出:\n") + "输出:\n".length());
+        assertTrue(tail.endsWith("\nShell: /bin/sh"), text);
+        return tail.substring(0, tail.length() - "\nShell: /bin/sh".length());
     }
 
     @Test

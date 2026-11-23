@@ -55,7 +55,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
 
     private static final boolean WINDOWS = HostOs.isWindows();
     /** Windows 上常见的 Unix 文件命令：没有对应的可执行文件，原样重试不会变好。 */
-    private static final List<String> UNIX_FILE_COMMANDS = List.of("ls", "cat", "head", "tail", "find", "dir", "rm");
+    private static final List<String> UNIX_FILE_COMMANDS = List.of("ls", "cat", "head", "tail", "find", "dir");
     /** 各平台都可能有、但未必安装的搜索命令：缺失时改用 search_text 更可靠。 */
     private static final List<String> SEARCH_COMMANDS = List.of("rg", "grep");
     /** 启动失败里代表「可执行文件不存在」的两种写法（Windows 与 POSIX）。 */
@@ -946,7 +946,8 @@ public final class RunCommandTool implements Tool, ProducesCheck {
 
     /** 这次启动失败是不是「Unix 文件命令在当前系统上不存在」。 */
     static boolean missingFileCommand(String executable, String message) {
-        boolean fileCommand = UNIX_FILE_COMMANDS.contains(executable) || SEARCH_COMMANDS.contains(executable);
+        boolean fileCommand = UNIX_FILE_COMMANDS.contains(executable) || SEARCH_COMMANDS.contains(executable)
+            || (WINDOWS && "rm".equals(executable));
         return fileCommand && MISSING_EXECUTABLE.matcher(message).find();
     }
 
@@ -972,7 +973,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             return "Windows 上 ls/cat/head/tail/find/dir 没有对应可执行文件，请改用 list_dir / read_file / search_text，"
                 + "不要再把它们当成可用命令。";
         }
-        return "当前环境找不到 " + executable + "，列目录用 list_dir、读文件用 read_file，比依赖系统命令更可靠。";
+        return "当前环境找不到 " + executable + "，请改用 list_dir / read_file / search_text，比依赖系统命令更可靠。";
     }
 
     /** 连续失败后的升级建议，同样按系统区分 shell 等价命令。 */
