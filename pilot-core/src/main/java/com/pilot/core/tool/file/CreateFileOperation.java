@@ -58,5 +58,10 @@ abstract class CreateFileOperation extends PromptedTool {
         return false;
     }
 
+    @Override
+    public Map<String, Object> approvalBinding(Map<String, Object> args) {
+        return ApprovalDiffPreview.forCreate(args);
+    }
+
     abstract String create(Path file, String rawPath, String content);
 }

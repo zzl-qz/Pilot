@@ -117,6 +117,11 @@ public final class ApplyPatchTool extends PromptedTool implements WritesFiles {
         return null;
     }
 
+    @Override
+    public Map<String, Object> approvalBinding(Map<String, Object> args) {
+        return ApprovalDiffPreview.forPatch(args);
+    }
+
     // ---- 校验与生成新内容（内存中，不落盘） ----
 
     private static final class PatchException extends RuntimeException {

@@ -97,4 +97,9 @@ public final class SandboxEditFileTool extends PromptedTool {
         }
     }
 
+    @Override
+    public Map<String, Object> approvalBinding(Map<String, Object> args) {
+        return ApprovalDiffPreview.forEdit(args);
+    }
+
 }

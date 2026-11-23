@@ -118,4 +118,9 @@ public final class EditFileTool extends PromptedTool implements WritesFiles {
         return ToolSupport.changedWorkspacePath(paths, call);
     }
 
+    @Override
+    public Map<String, Object> approvalBinding(Map<String, Object> args) {
+        return ApprovalDiffPreview.forEdit(args);
+    }
+
 }
