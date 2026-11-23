@@ -1,9 +1,11 @@
 package com.pilot.server.store;
 
+import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -606,9 +608,28 @@ public final class SqliteStore {
                 }
                 migrate(statement);
             }
+            restrictDatabasePermissions(path);
             log.info("SQLite 存储已就绪: {}", path);
         } catch (Exception e) {
             throw new IllegalStateException("初始化 SQLite 存储失败: " + path, e);
+        }
+    }
+
+    /** 数据库保存了模型 API Key 等敏感配置，在 POSIX 文件系统上将权限收紧为仅当前用户可读写。 */
+    private static void restrictDatabasePermissions(Path dbFile) {
+        try {
+            var ownerOnly = PosixFilePermissions.fromString("rw-------");
+            if (Files.isRegularFile(dbFile)) {
+                Files.setPosixFilePermissions(dbFile, ownerOnly);
+            }
+            for (String suffix : List.of("-wal", "-shm")) {
+                Path sidecar = Path.of(dbFile.toString() + suffix);
+                if (Files.isRegularFile(sidecar)) {
+                    Files.setPosixFilePermissions(sidecar, ownerOnly);
+                }
+            }
+        } catch (UnsupportedOperationException | IOException | SecurityException ignored) {
+            // Windows 或不支持 POSIX 权限的文件系统跳过
         }
     }
 }

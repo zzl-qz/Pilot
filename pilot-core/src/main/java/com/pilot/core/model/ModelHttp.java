@@ -10,6 +10,7 @@ import java.util.Map;
 
 import com.pilot.core.http.BoundedHttp;
 import com.pilot.core.model.diagnostics.ModelRequestDumper;
+import com.pilot.core.util.SecretScrubber;
 import com.pilot.core.util.Texts;
 
 import tools.jackson.databind.JsonNode;
@@ -84,6 +85,6 @@ final class ModelHttp {
     }
 
     static String snippet(String body) {
-        return Texts.oneLine(body, 300);
+        return Texts.oneLine(SecretScrubber.scrub(body), 300);
     }
 }

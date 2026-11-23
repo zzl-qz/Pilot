@@ -5,17 +5,24 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import com.pilot.server.store.InMemorySettingsStore;
 import com.pilot.server.store.SettingsStore;
+import com.pilot.server.store.SqliteStore;
 
 class ModelSettingsTest {
 
@@ -168,5 +175,25 @@ class ModelSettingsTest {
 
         assertFalse(settings.snapshot().hasApiKey());
         assertEquals("", settings.snapshot().maskedApiKey());
+    }
+
+    @Test
+    void toStringNeverExposesRawApiKey() {
+        String rawKey = "sk-super-secret-value-9876543210";
+        ModelProperties props = new ModelProperties(rawKey, "https://api.example.com/v1", "m", List.of("m"));
+        assertFalse(props.toString().contains(rawKey), "ModelProperties.toString 不得泄露明文密钥: " + props);
+
+        ModelSettings settings = new ModelSettings(props, store);
+        String snapshotText = settings.snapshot().toString();
+        assertFalse(snapshotText.contains(rawKey), "Snapshot.toString 不得泄露明文密钥: " + snapshotText);
+        assertTrue(snapshotText.contains("sk-sup…3210"), snapshotText);
+    }
+
+    @Test
+    void sqliteStoreRestrictsDatabaseFileToOwnerOnlyOnPosix(@TempDir Path tempDir) throws Exception {
+        Assumptions.assumeFalse(System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win"));
+        Path db = tempDir.resolve("pilot.db");
+        new SqliteStore(db);
+        assertEquals("rw-------", PosixFilePermissions.toString(Files.getPosixFilePermissions(db)));
     }
 }

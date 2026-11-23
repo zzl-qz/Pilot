@@ -16,4 +16,11 @@ public record ModelProperties(String apiKey, String endpoint, String model, List
     public ModelProperties {
         options = options == null || options.isEmpty() ? DEFAULT_OPTIONS : List.copyOf(options);
     }
+
+    /** 覆盖默认 record.toString()，避免 Spring 配置诊断或日志打印明文密钥。 */
+    @Override
+    public String toString() {
+        return "ModelProperties[apiKey=" + (apiKey != null && !apiKey.isBlank() ? "***" : "") + ", endpoint=" + endpoint
+            + ", model=" + model + ", options=" + options + "]";
+    }
 }

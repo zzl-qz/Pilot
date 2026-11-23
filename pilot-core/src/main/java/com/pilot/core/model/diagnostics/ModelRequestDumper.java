@@ -5,6 +5,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -18,6 +19,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.pilot.core.util.SecretScrubber;
+
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -29,8 +32,8 @@ import tools.jackson.databind.ObjectMapper;
 public final class ModelRequestDumper {
     private static final Logger log = LoggerFactory.getLogger(ModelRequestDumper.class);
     private static final Config DISABLED = new Config(false, null);
-    private static final Set<String> SENSITIVE_KEYS =
-        Set.of("authorization", "api_key", "apikey", "x-api-key", "x_api_key", "access_token", "secret", "password");
+    private static final Set<String> SENSITIVE_KEYS = Set.of("authorization", "api_key", "apikey", "x-api-key",
+        "x_api_key", "access_token", "refresh_token", "secret", "client_secret", "private_key", "password");
     private static final int MAX_TRACKED_RUNS = 256;
 
     private record Config(boolean enabled, Path root) {
@@ -82,8 +85,17 @@ public final class ModelRequestDumper {
         try {
             Files.createDirectories(target.getParent());
             Files.writeString(target, mapper.writeValueAsString(record), StandardCharsets.UTF_8);
+            restrictOwnerOnly(target);
         } catch (IOException | RuntimeException e) {
             log.debug("模型请求调试落盘失败（已忽略，不影响主请求）：{}", target, e);
+        }
+    }
+
+    private static void restrictOwnerOnly(Path file) {
+        try {
+            Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-------"));
+        } catch (UnsupportedOperationException | IOException | SecurityException ignored) {
+            // Windows 或非 POSIX 文件系统不抛出异常，保持降级兼容。
         }
     }
 
@@ -121,6 +133,9 @@ public final class ModelRequestDumper {
                 clean.add(sanitizeValue(item));
             }
             return clean;
+        }
+        if (value instanceof String text) {
+            return SecretScrubber.scrub(text);
         }
         return value;
     }

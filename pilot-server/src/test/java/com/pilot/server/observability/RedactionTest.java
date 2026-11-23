@@ -37,4 +37,15 @@ class RedactionTest {
         String longText = "x".repeat(5_000);
         assertTrue(Redaction.text(longText).length() <= 2_001);
     }
+
+    @Test
+    void masksAdditionalSecretFormatsAndPrivateKeys() {
+        String masked =
+            Redaction.text("Basic YWRtaW46cGFzc3dvcmQ= https://dev:mysecret@git.internal/repo AKIAIOSFODNN7EXAMPLE "
+                + "-----BEGIN PRIVATE KEY-----\nSECRET_BODY\n-----END PRIVATE KEY-----");
+        assertFalse(masked.contains("YWRtaW46cGFzc3dvcmQ="), masked);
+        assertFalse(masked.contains("mysecret"), masked);
+        assertFalse(masked.contains("AKIAIOSFODNN7EXAMPLE"), masked);
+        assertFalse(masked.contains("SECRET_BODY"), masked);
+    }
 }

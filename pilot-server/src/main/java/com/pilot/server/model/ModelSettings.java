@@ -65,6 +65,14 @@ public class ModelSettings {
             return key.length() <= 8 ? "••••"
                 : key.substring(0, Math.min(6, key.length())) + "…" + key.substring(key.length() - 4);
         }
+
+        /** 覆盖默认 record.toString()，避免日志或异常堆栈误打印明文 API Key。 */
+        @Override
+        public String toString() {
+            return "Snapshot[endpoint=" + endpoint + ", model=" + model + ", apiKey="
+                + (hasApiKey() ? maskedApiKey() : "") + ", contextTokens=" + contextTokens + ", maxOutputTokens="
+                + maxOutputTokens + ", childModel=" + childModel + "]";
+        }
     }
 
     private final SettingsStore store;
