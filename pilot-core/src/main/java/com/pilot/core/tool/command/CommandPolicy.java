@@ -102,11 +102,20 @@ final class CommandPolicy {
     }
 
     /**
-     * 完全放行也要先问的动作。对照 Codex：普通 git（含 push、reset）直接跑，
-     * 只把发布包和全局安装留下。提权和越界删除在 {@link #blocked} 里先拒绝。
+     * 完全放行也要先问的动作：发布包、全局安装、强推/远端删除受保护分支、敏感凭证外发。
+     * 提权与删根目录/家目录/越界删除在 {@link #blocked} 里直接拒绝。
      */
     static boolean confirms(List<String> tokens) {
-        return forbidden(tokens) != null;
+        return confirmReason(tokens) != null;
+    }
+
+    /** 返回不可绕过二次确认的原因；普通命令返回 null。 */
+    static String confirmReason(List<String> tokens) {
+        String forbidden = forbidden(tokens);
+        if (forbidden != null) {
+            return forbidden;
+        }
+        return CommandRiskGuard.confirmReason(tokens);
     }
 
     /** 参数中的危险选项与路径越界。返回错误文本，通过时返回 null。 */
@@ -212,8 +221,11 @@ final class CommandPolicy {
         return null;
     }
 
-    /** 命令段是否只读：不改文件、不改仓库状态、不触发网络写入。 */
+    /** 命令段是否只读：不改文件、不改仓库状态、不触发网络写入或高危外发。 */
     static boolean readOnly(List<String> tokens) {
+        if (confirms(tokens)) {
+            return false;
+        }
         String executable = leaf(tokens.getFirst());
         if (tokens.size() == 2 && INSPECTION_FLAGS.contains(tokens.get(1))) {
             return true;
@@ -374,26 +386,16 @@ final class CommandPolicy {
         return null;
     }
 
-    /** 提权和越界删除先拒绝，错误原因对着具体动作，不提命令名单。 */
+    /** 提权、删根目录/家目录/工作区根与越界删除先拒绝，错误原因对着具体动作，不提命令名单。 */
     static String blocked(List<String> tokens, Path workdir, PathValidator paths) {
         String executable = leaf(tokens.getFirst());
         if (Set.of("sudo", "su", "doas", "pkexec", "runas").contains(executable)) {
             return "禁止提权，请在工作区内直接运行命令";
         }
-        if (!Set.of("rm", "rmdir", "del", "erase", "unlink").contains(executable)) {
-            return null;
+        String shellBlocked = CommandRiskGuard.blockedShellInline(tokens);
+        if (shellBlocked != null) {
+            return shellBlocked;
         }
-        for (int i = 1; i < tokens.size(); i++) {
-            String token = tokens.get(i);
-            if (token.startsWith("-")) {
-                continue;
-            }
-            try {
-                paths.resolve(workdir.resolve(token).toString());
-            } catch (RuntimeException e) {
-                return "禁止删除工作区外的文件：" + token;
-            }
-        }
-        return null;
+        return CommandRiskGuard.blockedDelete(tokens, workdir, paths);
     }
 }

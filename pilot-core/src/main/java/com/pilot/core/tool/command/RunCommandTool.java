@@ -28,6 +28,7 @@ import com.pilot.core.tool.ToolResults;
 import com.pilot.core.tool.ToolSchemas;
 import com.pilot.core.tool.ToolSupport;
 import com.pilot.core.util.HostOs;
+import com.pilot.core.util.SecretScrubber;
 import com.pilot.core.util.Texts;
 import com.pilot.core.workspace.AgentScope;
 import com.pilot.core.workspace.PathValidator;
@@ -184,24 +185,48 @@ public final class RunCommandTool implements Tool, ProducesCheck {
 
     @Override
     public boolean confirm(Map<String, Object> args) {
+        return confirmReason(args) != null;
+    }
+
+    @Override
+    public String approvalDescription(Map<String, Object> args) {
+        String reason = confirmReason(args);
+        if (reason == null) {
+            return null;
+        }
+        String raw = ToolSupport.stringArg(args, "command");
+        return raw == null || raw.isBlank() ? reason : reason + "（命令：" + redact(raw.strip()) + "）";
+    }
+
+    private String confirmReason(Map<String, Object> args) {
         String raw = ToolSupport.stringArg(args, "command");
         if (raw == null || raw.isBlank()) {
-            return false;
+            return null;
         }
         CommandChain.Parsed parsed = CommandChain.parse(raw);
         if (parsed.error() != null) {
-            return false;
+            return null;
         }
+        List<List<String>> segmentTokens = new ArrayList<>();
+        String firstConfirm = null;
         for (CommandChain.Segment segment : parsed.segments()) {
             CommandPolicy.Prefix prefix = CommandPolicy.prefix(segment.tokens());
             if (prefix.error() != null || prefix.tokens().isEmpty()) {
-                return false;
+                return null;
             }
-            if (CommandPolicy.confirms(prefix.tokens())) {
-                return true;
+            List<String> tokens = prefix.tokens();
+            if (CommandPolicy.blocked(tokens, paths.root(), paths) != null) {
+                return null;
+            }
+            segmentTokens.add(tokens);
+            if (firstConfirm == null) {
+                firstConfirm = CommandPolicy.confirmReason(tokens);
             }
         }
-        return false;
+        if (firstConfirm != null) {
+            return firstConfirm;
+        }
+        return CommandRiskGuard.confirmChainReason(segmentTokens);
     }
 
     /**
@@ -1253,6 +1278,9 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     }
 
     private static String redact(String text) {
+        if (text == null || text.isEmpty()) {
+            return text == null ? "" : text;
+        }
         String result = text;
         for (Map.Entry<String, String> entry : System.getenv().entrySet()) {
             String value = entry.getValue();
@@ -1263,7 +1291,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
                 result = result.replace(value, "***");
             }
         }
-        return result;
+        return SecretScrubber.scrub(result);
     }
 
     private static String truncate(String text) {

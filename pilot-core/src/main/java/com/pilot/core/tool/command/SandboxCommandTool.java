@@ -68,6 +68,11 @@ public final class SandboxCommandTool implements Tool, ProducesCheck {
     }
 
     @Override
+    public String approvalDescription(Map<String, Object> args) {
+        return metadata.approvalDescription(args);
+    }
+
+    @Override
     public String execute(Map<String, Object> args) {
         if (execution == null || !execution.isolated() || execution.degraded() || !execution.backend().available()) {
             return "ERROR: 子任务命令需要可用的容器隔离后端，命令未执行。请配置 pilot.execution.isolation=container 与包含项目工具链的镜像。";
