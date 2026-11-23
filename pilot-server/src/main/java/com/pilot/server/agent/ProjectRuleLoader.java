@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import com.pilot.core.permission.PermissionRules;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.server.workspace.ProjectRulesFile;
 
@@ -98,7 +99,8 @@ final class ProjectRuleLoader {
     }
 
     private static String globs(String content) {
-        for (String line : content.split("\n", 4)) {
+        String normalized = content.replace("\r\n", "\n").replace('\r', '\n');
+        for (String line : normalized.split("\n", 4)) {
             String stripped = line.strip();
             if (stripped.startsWith("globs:")) {
                 return stripped.substring("globs:".length()).strip();
@@ -112,19 +114,31 @@ final class ProjectRuleLoader {
             return false;
         }
         for (String glob : globs.split(",")) {
-            String pattern = glob.strip();
+            String pattern = glob.strip().replace('\\', '/');
             if (pattern.isEmpty()) {
                 continue;
             }
-            String suffix = pattern.startsWith("*.") ? pattern.substring(1) : "";
-            String folder = pattern.replace("/**", "").replace("*", "");
+            while (pattern.startsWith("./")) {
+                pattern = pattern.substring(2);
+            }
+            boolean basenameOnly = !pattern.contains("/");
             for (String path : touched) {
-                String value = path.replace('\\', '/');
-                if (!suffix.isEmpty() && value.endsWith(suffix)) {
+                if (path == null || path.isBlank()) {
+                    continue;
+                }
+                String value = path.strip().replace('\\', '/');
+                while (value.startsWith("./")) {
+                    value = value.substring(2);
+                }
+                if (PermissionRules.globMatches(pattern, value)) {
                     return true;
                 }
-                if (!folder.isEmpty() && value.contains(folder)) {
-                    return true;
+                if (basenameOnly) {
+                    int slash = value.lastIndexOf('/');
+                    String basename = slash >= 0 ? value.substring(slash + 1) : value;
+                    if (PermissionRules.globMatches(pattern, basename)) {
+                        return true;
+                    }
                 }
             }
         }

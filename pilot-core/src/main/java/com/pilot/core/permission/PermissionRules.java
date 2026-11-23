@@ -326,7 +326,7 @@ public final class PermissionRules {
     }
 
     /** 路径规则：{@code *} 不跨目录，{@code **} 跨目录，分隔符统一按 {@code /} 比较。 */
-    private static boolean globMatches(String specifier, String target) {
+    public static boolean globMatches(String specifier, String target) {
         String normalized = target.strip().replace('\\', '/');
         String pattern = specifier.strip().replace('\\', '/');
         while (pattern.startsWith("./")) {
