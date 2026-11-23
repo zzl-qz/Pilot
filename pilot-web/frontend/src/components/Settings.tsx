@@ -14,6 +14,7 @@ import { ModelOptions, useModelDiscovery } from "./model/ModelDiscovery.jsx";
 import { ModelSaveFeedback, useModelForm } from "./model/ModelForm.jsx";
 import { ModelRuntimeSettings } from "./model/ModelRuntimeSettings.jsx";
 import { PermissionSettings } from "./settings/PermissionSettings.js";
+import { AlertSettings } from "./settings/AlertSettings.js";
 import { SkillsSettings } from "./settings/SkillsSettings.js";
 import { McpSettings } from "./settings/McpSettings.js";
 import { UsageSettings } from "./settings/UsageSettings.js";
@@ -24,6 +25,7 @@ const SECTIONS = [
   { id: 'appearance', label: '外观', icon: 'sun', description: '调整工作区主题与强调色，更改即时生效。', Content: AppearanceSettings },
   { id: 'model', label: '模型', icon: 'model', description: '配置聊天模型、语音输入，以及请求计价与缓存。', Content: ModelSettings },
   { id: 'permission', label: '权限', icon: 'shield', description: '决定 Pilot 写入文件和执行命令前何时需要批准。', Content: PermissionSettings },
+  { id: 'alerts', label: '提醒', icon: 'bell', description: '管理完成提示音、窗口外悬浮提醒、系统通知与任务栏提示。', Content: AlertSettings },
   { id: 'skills', label: '技能', icon: 'skill', description: '管理项目级和用户级技能。', Content: SkillsSettings },
   { id: 'mcp', label: 'MCP', icon: 'plug', description: '管理 MCP 服务器与信任关系，接入外部工具。', Content: McpSettings },
   { id: 'usage', label: '用量', icon: 'chart', description: '查看模型请求、Token 和可估算的费用。', Content: UsageSettings },
@@ -246,8 +248,21 @@ function AboutSettings() {
         </dl>
       </section>
       <section className="settings-group">
-        <h3>常用快捷键</h3>
-        <dl className="shortcut-list">{[['新任务','N'],['命令面板','K'],['展开侧栏','B'],['审阅面板','J'],['设置',',']].map(([label,key]) => <div key={key}><dt>{label}</dt><dd><kbd>{shortcut(key)}</kbd></dd></div>)}</dl>
+        <div className="settings-row">
+          <div><h3>常用快捷键</h3><p>完整列表（含审批、选择与模式切换）可在工作台按 {shortcut('/')} 打开。</p></div>
+          <Button size="sm" variant="ghost" label="查看全部快捷键"
+            onClick={() => useStore.getState().setUi({ settingsOpen: false, shortcutsOpen: true })} />
+        </div>
+        <dl className="shortcut-list">
+          {[
+            ['新任务', shortcut('N')],
+            ['命令面板', shortcut('K')],
+            ['展开侧栏', shortcut('B')],
+            ['审阅面板', shortcut('J')],
+            ['切换分析/执行模式', 'Shift+Tab'],
+            ['快捷键速查表', shortcut('/')]
+          ].map(([label, key]) => <div key={label}><dt>{label}</dt><dd><kbd>{key}</kbd></dd></div>)}
+        </dl>
       </section>
     </div>
   );

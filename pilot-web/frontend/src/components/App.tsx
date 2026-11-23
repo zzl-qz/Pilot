@@ -19,6 +19,8 @@ import { SelectionQuote } from './SideChat.jsx';
 import { ErrorBoundary } from './ErrorBoundary.jsx';
 import { resolveFolders, samePath } from '../lib/project/sessions.js';
 import { shortcut, runPhase, runTone, isShortcutModifier } from '../lib/interaction.js';
+import { classifyApprovalRisk } from '../lib/attention.js';
+import { installSoundUnlock, isDndActive } from '../lib/sound.js';
 import { api } from '../api.js';
 import { watchWorkbench } from '../lib/workbench-sync.js';
 import { dragWidth, readLayout, writeLayout } from '../lib/layout.js';
@@ -63,6 +65,20 @@ function Workbench() {
     const state = useStore.getState();
     if (command === 'refresh') state.refreshWorkbench();
     if (command === 'reload') state.reloadWorkbench();
+    if (command === 'focus-composer') state.composerApi?.focus();
+    if (command === 'new-session') {
+      state.startNewSession();
+      requestAnimationFrame(() => useStore.getState().composerApi?.focus());
+    }
+    if (command === 'focus-pending') {
+      const target = state.globalPendingApprovals[0]?.sessionId || state.globalPendingQuestions[0]?.sessionId;
+      if (target && target !== state.sessionId) {
+        void state.activate(target);
+      } else {
+        document.getElementById('approval-dock')?.scrollIntoView({ block: 'nearest' });
+        document.getElementById('question-dock')?.scrollIntoView({ block: 'nearest' });
+      }
+    }
   }), []);
   useEffect(() => ready ? watchWorkbench({ refresh: options => useStore.getState().refreshWorkbench(options) }) : undefined, [ready]);
   const sidebarOpen = useStore((state) => state.ui.sidebarOpen);
@@ -85,6 +101,83 @@ function Workbench() {
   useEffect(() => {
     useStore.getState().init(embedded);
   }, [embedded]);
+
+  useEffect(() => installSoundUnlock(), []);
+
+  useEffect(() => {
+    const syncFocus = () => {
+      const focused = !document.hidden && (typeof document.hasFocus !== 'function' || document.hasFocus());
+      useStore.getState().setDesktopFocused(focused);
+    };
+    const onBlur = () => useStore.getState().setDesktopFocused(false);
+    const onVisibility = () => {
+      if (document.hidden) useStore.getState().setDesktopFocused(false);
+      else syncFocus();
+    };
+    window.addEventListener('focus', syncFocus);
+    window.addEventListener('blur', onBlur);
+    document.addEventListener('visibilitychange', onVisibility);
+    const offFocus = window.pilotDesktop?.onWindowFocusChange?.(({ focused }) => {
+      useStore.getState().setDesktopFocused(Boolean(focused));
+    });
+    const offAlert = window.pilotDesktop?.onAlertAction?.((action) => {
+      const state = useStore.getState();
+      if (action.action === 'approve' && action.callId) {
+        void state.resolveApproval(action.callId, true, action.sessionId);
+      } else if (action.action === 'reject' && action.callId) {
+        void state.resolveApproval(action.callId, false, action.sessionId, action.reason);
+      } else if (action.action === 'answer' && action.callId && action.choice) {
+        void state.answerQuestion(action.callId, action.choice, action.sessionId);
+      } else if (action.action === 'focus-session') {
+        void window.pilotDesktop?.focusMainWindow?.()?.catch?.(() => {});
+        if (action.sessionId && action.sessionId !== state.sessionId) {
+          void state.activate(action.sessionId);
+        }
+      }
+    });
+    const offDesktopPref = window.pilotDesktop?.onDesktopPreferenceAction?.((action) => {
+      const state = useStore.getState();
+      if (action === 'toggle-dnd') {
+        const nextDnd = isDndActive(state.alertPrefs) ? null : -1;
+        state.updateAlertPrefs({ dndUntil: nextDnd });
+        state.showNotice(nextDnd === -1 ? '已开启勿扰模式（声音与浮窗已暂停）' : '已关闭勿扰模式');
+      } else if (action === 'toggle-keep-awake') {
+        const next = !state.alertPrefs.keepAwake;
+        state.updateAlertPrefs({ keepAwake: next });
+        state.showNotice(next ? '已开启任务运行防休眠' : '已关闭防休眠');
+      }
+    });
+    return () => {
+      window.removeEventListener('focus', syncFocus);
+      window.removeEventListener('blur', onBlur);
+      document.removeEventListener('visibilitychange', onVisibility);
+      offFocus?.();
+      offAlert?.();
+      offDesktopPref?.();
+    };
+  }, []);
+
+  const running = useStore((state) => state.running);
+  const localApprovalsCount = useStore((state) => Object.keys(state.pendingApprovals || {}).length);
+  const localQuestionsCount = useStore((state) => Object.keys(state.pendingQuestions || {}).length);
+  const globalApprovalsCount = useStore((state) => (state.globalPendingApprovals || []).length);
+  const globalQuestionsCount = useStore((state) => (state.globalPendingQuestions || []).length);
+  const dndUntil = useStore((state) => state.alertPrefs.dndUntil);
+  const keepAwake = useStore((state) => state.alertPrefs.keepAwake);
+  const minimizeToTray = useStore((state) => state.alertPrefs.minimizeToTray);
+  useEffect(() => {
+    const bridge = window.pilotDesktop;
+    if (!bridge?.syncDesktopRuntime || embedded) return;
+    const pendingCount = Math.max(globalApprovalsCount + globalQuestionsCount, localApprovalsCount + localQuestionsCount);
+    const dndActive = dndUntil === -1 || (typeof dndUntil === 'number' && dndUntil > Date.now());
+    void bridge.syncDesktopRuntime({
+      runningCount: running ? 1 : 0,
+      pendingCount,
+      dndActive,
+      keepAwake,
+      minimizeToTray
+    })?.catch?.(() => {});
+  }, [running, localApprovalsCount, localQuestionsCount, globalApprovalsCount, globalQuestionsCount, dndUntil, keepAwake, minimizeToTray, embedded]);
 
   useEffect(() => {
     const narrow = window.matchMedia('(max-width: 960px)');
@@ -203,6 +296,11 @@ function Workbench() {
         useStore.getState().setUi({ settingsOpen: !useStore.getState().ui.settingsOpen });
         return;
       }
+      if (mod && event.key === '/') {
+        event.preventDefault();
+        useStore.getState().setUi({ shortcutsOpen: !useStore.getState().ui.shortcutsOpen });
+        return;
+      }
       /*
        * Esc：旧版是「先关弹层，再取消运行，最后什么也不做」。
        * 弹层各自有 Esc 监听（Modal 组件），这里只负责「别在关弹层的同时把任务也取消了」，
@@ -215,7 +313,7 @@ function Workbench() {
       const overlayOpen = Boolean(state.ui.picker || state.ui.projectEditor || state.ui.settingsOpen
         || state.ui.searchOpen || state.ui.resultsOpen || state.ui.schedulesOpen || state.ui.recurringOpen || state.ui.ideasOpen
         || state.ui.paletteOpen || state.ui.checkpointDialog || state.ui.skillsInstall || state.ui.confirm
-        || state.ui.mobileConnectionOpen || state.ui.notificationsOpen || document.querySelector('dialog[open], [aria-modal="true"], [data-workbench-menu-open]'));
+        || state.ui.mobileConnectionOpen || state.ui.notificationsOpen || state.ui.shortcutsOpen || document.querySelector('dialog[open], [aria-modal="true"], [data-workbench-menu-open]'));
       if (overlayOpen) {
         return;
       }
@@ -412,9 +510,14 @@ function Workbench() {
         {notice && (
           <div id="notice" className="notice" role="status">
             <span id="notice-text">{notice.text}</span>
+            {notice.actionLabel && (
+              <Button size="sm" variant="ghost" className="notice-action" label={notice.actionLabel}
+                onClick={() => useStore.getState().runNoticeAction()} />
+            )}
             <button type="button" id="notice-close" aria-label="关闭通知" onClick={() => useStore.getState().hideNotice()}>×</button>
           </div>
         )}
+        {!embedded && <BackgroundAttentionBar />}
         <div className="stage">
           <section id="thread-pane" className="thread-pane">
             <ErrorBoundary name="任务契约"><TaskContract /></ErrorBoundary>
@@ -444,6 +547,59 @@ function Workbench() {
   );
 }
 
+function BackgroundAttentionBar() {
+  const activeSessionId = useStore((state) => state.sessionId);
+  const approvals = useStore((state) => state.globalPendingApprovals);
+  const questions = useStore((state) => state.globalPendingQuestions);
+  const resolveApproval = useStore((state) => state.resolveApproval);
+  const activate = useStore((state) => state.activate);
+  const otherApprovals = (approvals || []).filter((item) => item.sessionId && item.sessionId !== activeSessionId);
+  const otherQuestions = (questions || []).filter((item) => item.sessionId && item.sessionId !== activeSessionId);
+  if (!otherApprovals.length && !otherQuestions.length) return null;
+  const items = [
+    ...otherApprovals.map((item) => {
+      const risk = classifyApprovalRisk(item.toolName, item.argsSummary, item.structuredArgs);
+      return {
+        kind: 'approval' as const,
+        callId: item.callId,
+        sessionId: item.sessionId,
+        sessionTitle: item.sessionTitle || '其他会话',
+        summary: risk.summary || item.argsSummary || risk.category,
+        label: `待批准 · ${risk.category}`,
+        highRisk: risk.highRisk
+      };
+    }),
+    ...otherQuestions.map((item) => ({
+      kind: 'question' as const,
+      callId: item.callId,
+      sessionId: item.sessionId,
+      sessionTitle: item.sessionTitle || '其他会话',
+      summary: item.question,
+      label: '等待选择',
+      highRisk: false
+    }))
+  ];
+  const first = items[0];
+  return (
+    <section id="bg-attention-bar" className={`bg-attention-bar${first.highRisk ? ' is-high-risk' : ''}`} role="region" aria-label="其他会话等待处理">
+      <div className="bg-attention-info">
+        <span className="bg-attention-tag">{first.label}{items.length > 1 ? ` · 共 ${items.length} 项` : ''}</span>
+        <span className="bg-attention-title">{first.sessionTitle}：</span>
+        <span className="bg-attention-summary">{first.summary}</span>
+      </div>
+      <div className="bg-attention-actions">
+        {first.kind === 'approval' && (
+          <>
+            <Button size="sm" variant="ghost" label="拒绝" onClick={() => void resolveApproval(first.callId, false, first.sessionId)} />
+            <Button size="sm" variant="primary" label="批准" onClick={() => void resolveApproval(first.callId, true, first.sessionId)} />
+          </>
+        )}
+        <Button size="sm" variant="ghost" label="前往处理" onClick={() => void activate(first.sessionId)} />
+      </div>
+    </section>
+  );
+}
+
 function RunStatus() {
   const running = useStore(state => state.running);
   const runStartedAt = useStore(state => state.runStartedAt);
@@ -458,9 +614,9 @@ function RunStatus() {
 
   const now = Date.now();
   const idleSeconds = running && lastEventAt ? Math.round((now - lastEventAt) / 1000) : 0;
-  const stalled = idleSeconds >= 75;
-  const tone = runTone(phase, running && stalled);
-  const label = running && stalled && runTone(phase) === 'running' ? '暂无新进展' : phase;
+  const stalled = running && runTone(phase) === 'running' && idleSeconds >= 75;
+  const tone = runTone(phase, stalled);
+  const label = stalled ? '暂无新进展' : phase;
   const detail = running && stalled ? `${label} · 已经 ${idleSeconds} 秒没有新事件，请检查执行情况`
     : phase === '就绪' ? '就绪，可以发送新消息' : phase;
   return <span id="run-state" className={`run-state state-${tone}`} data-tone={tone} title={detail}>

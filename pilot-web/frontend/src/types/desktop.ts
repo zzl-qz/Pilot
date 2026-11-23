@@ -13,6 +13,30 @@ export interface DesktopBrowserState {
 export interface DesktopClipboardFile { name: string; mimeType: string; size: number; dataBase64: string }
 export interface DesktopClipboardFilesResult { ok: boolean; files?: DesktopClipboardFile[]; error?: string }
 export interface DesktopFileLimits { maxFiles: number; maxFileBytes: number; maxTotalBytes: number }
+export type DesktopAlertKind = 'approval' | 'question' | 'done' | 'error';
+export interface DesktopFloatingAlert {
+  id: string;
+  kind: DesktopAlertKind;
+  sessionId?: string;
+  sessionTitle?: string;
+  callId?: string;
+  title: string;
+  body?: string;
+  categoryLabel?: string;
+  highRisk?: boolean;
+  options?: string[];
+  expiresAt?: string | number | null;
+  theme?: 'light' | 'dark';
+  autoCloseMs?: number;
+}
+export interface DesktopAlertAction {
+  action: 'approve' | 'reject' | 'answer' | 'focus-session' | 'dismiss' | 'clear-all';
+  id?: string;
+  sessionId?: string;
+  callId?: string;
+  choice?: string;
+  reason?: string;
+}
 export interface DesktopBridge {
   saveSessionMarkdown?(name: string, text: string): Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }>;
   onBrowserOpen(callback: (url: string) => void): () => void;
@@ -24,6 +48,22 @@ export interface DesktopBridge {
   selectDirectories?(): Promise<SelectDirectoriesResult>;
   /** 系统文件管理器 Ctrl+V 只给文件路径时，由主进程读取剪贴板中的文件。 */
   readClipboardFiles?(limits: DesktopFileLimits): Promise<DesktopClipboardFilesResult>;
+  showFloatingAlert?(payload: DesktopFloatingAlert): Promise<{ ok: boolean; id?: string; count?: number; error?: string }>;
+  dismissFloatingAlert?(id: string): Promise<{ ok: boolean; count?: number }>;
+  showNativeNotification?(payload: { title: string; body?: string; sessionId?: string; id?: string }): Promise<{ ok: boolean; unsupported?: boolean; error?: string }>;
+  setWindowAttention?(payload: { urgentCount: number; kind?: string; bounce?: boolean }): Promise<{ ok: boolean; count?: number }>;
+  focusMainWindow?(): Promise<{ ok: boolean }>;
+  onAlertAction?(callback: (action: DesktopAlertAction) => void): () => void;
+  onWindowFocusChange?(callback: (state: { focused: boolean }) => void): () => void;
+  syncDesktopRuntime?(payload: {
+    runningCount: number;
+    pendingCount: number;
+    dndActive: boolean;
+    keepAwake: boolean;
+    minimizeToTray: boolean;
+  }): Promise<{ ok: boolean }>;
+  setGlobalShortcut?(accelerator: string): Promise<{ ok: boolean; accelerator?: string; error?: string }>;
+  onDesktopPreferenceAction?(callback: (action: string) => void): () => void;
   onMobileConnection(callback: () => void): () => void;
   openMobileConnection(): Promise<DesktopAction>;
   ensureTab(sessionId: string | null): Promise<DesktopBrowserState>;

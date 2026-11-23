@@ -33,6 +33,8 @@ test('失败、暂停和等待状态不能显示为就绪或沿用运行颜色',
     [{lastOutcome:'BLOCKED'}, '遇到阻塞', 'attention'],
     [{lastOutcome:'UNVERIFIED'}, '结果待核验', 'attention'],
     [{running:true,pendingApprovals:{a:{}}}, '等待批准', 'attention'],
+    [{running:true,pendingQuestions:{q:{}}}, '等待选择', 'attention'],
+    [{running:true,pendingArbitrations:{x:{}}}, '等待裁决', 'attention'],
     [{running:true,cancelling:true}, '正在停止', 'paused']
   ]) {
     assert.equal(runPhase(state), label);

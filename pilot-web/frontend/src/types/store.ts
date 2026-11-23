@@ -1,8 +1,29 @@
 import type { ApiClient } from '../api.js';
-import type { ApiResults, BrowserStatus, ExecutionMode, UniversalFileResponse } from './api.js';
+import type { ApiResults, BrowserStatus, ExecutionMode, GlobalPendingApproval, GlobalPendingQuestion, PendingInteractionsSnapshot, UniversalFileResponse } from './api.js';
 import type * as S from './server.js';
 import type { ProjectSummary, SessionSummary, ChangeFile } from './core.js';
-import type { ReducerState, PlanItem, RunUsage } from './thread.js';
+import type { ReducerState, PlanItem, RunUsage, Notice } from './thread.js';
+
+export type SoundVolumeLevel = 'gentle' | 'standard' | 'crisp';
+export type FloatingAlertMode = 'background' | 'always' | 'off';
+export type ComposerSendKey = 'enter' | 'mod-enter';
+export interface AlertPreferences {
+  soundEnabled: boolean;
+  soundVolume: SoundVolumeLevel;
+  soundBackgroundOnly: boolean;
+  soundOnDone: boolean;
+  soundOnApproval: boolean;
+  soundOnQuestion: boolean;
+  soundOnError: boolean;
+  floatingMode: FloatingAlertMode;
+  taskbarAttention: boolean;
+  desktopNotifyOnBackground: boolean;
+  dndUntil: number | null;
+  keepAwake: boolean;
+  minimizeToTray: boolean;
+  globalShortcut: string;
+  sendKey: ComposerSendKey;
+}
 import type { CommandLog, QueueEntry, RequestReport, ContextStatus } from './runtime.js';
 import type { DraftAttachment, BuiltinCommand, SkillCommand, NoteSeed } from './input.js';
 import type { SideChatTab, SideChatsState } from './content.js';
@@ -23,7 +44,7 @@ export interface ConfirmDialog { title: string; message: string; confirmText?: s
 export interface CheckpointDialog { sequence?: number; loading?: boolean; applying?: boolean; error?: string; info?: S.CheckpointControllerPreview | null }
 export interface UiState {
   exportCopy?: string | null;
-  notice: { text: string; at: number } | null; noticeTimer: number | null;
+  notice: Notice | null; noticeTimer: number | null;
   refreshing: boolean; syncError: string; lastSyncedAt: number; filesRevision: number;
   themeMode: string; accent: string; sidebarOpen: boolean; inspectorOpen: boolean; inspectorTab: string;
   ideasOpen?: boolean;
@@ -36,7 +57,7 @@ export interface UiState {
   connection: { status: string; text: string }; bottomSignal: number; attentionKind: string; browserDot: boolean;
   mirror: MirrorState; changeView: string | null; reviewRunId: string | null; previewPath: string; browserStatus: BrowserStatus | null; usageDays: number;
   mobileConnectionOpen?: boolean; notificationsOpen?: boolean; recurringOpen?: boolean; resultsOpen?: boolean;
-  schedulesOpen?: boolean; searchOpen?: boolean; composerEnabled?: boolean; resultUnread?: number;
+  schedulesOpen?: boolean; searchOpen?: boolean; shortcutsOpen?: boolean; composerEnabled?: boolean; resultUnread?: number;
   resultTarget?: string | null; scheduleTarget?: string | null; scheduleDraft?: string | null; scheduleRepeat?: boolean;
   navigationTarget?: { sessionId: string; sequence: number } | null; changeCount?: number;
   /** 执行模式：act 允许修改文件与运行命令，plan 为只读分析/规划模式。 */
@@ -63,7 +84,9 @@ export interface StoreData extends Omit<ReducerState, 'ui'> {
   skills: (S.SkillsControllerSkillPayload & { id?: string })[]; skillsMeta: { projectRoot: string; userRoot: string; invalid: S.SkillProblem[] };
   quickCommands: (BuiltinCommand | SkillCommand)[]; modelOptions: string[]; remoteModels: string[];
   settingsData: S.SettingsControllerSettingsResponse | null; modelSave: { busy: boolean; message: string; error: boolean };
-  notifyEnabled: boolean; permissionMode: string; usageData: S.UsageServiceUsageReport | null;
+  notifyEnabled: boolean; alertPrefs: AlertPreferences; desktopFocused: boolean | null;
+  globalPendingApprovals: GlobalPendingApproval[]; globalPendingQuestions: GlobalPendingQuestion[];
+  permissionMode: string; usageData: S.UsageServiceUsageReport | null;
   fileIndex: { key?: string; items: string[]; sessionId: string | null; loading: boolean };
   commandTasks: CommandTask[]; commandDetail: CommandTask | null; commandLog: CommandLog | null; commandLogTaskId: string | null;
   capabilities: S.CapabilitiesControllerCapabilitiesResponse | null; capabilitiesState: string;
@@ -82,7 +105,8 @@ type ForceOptions = { force?: boolean };
 export interface StoreActions {
   refreshWorkbench(options?: RefreshOptions): Promise<boolean>;
   reloadWorkbench(): Promise<boolean>;
-  showNotice(text: string): void; hideNotice(): void; setTheme(mode: string): void; setAccent(accent: string): void;
+  showNotice(text: string, action?: { label: string; onAction: () => unknown; durationMs?: number }): void;
+  hideNotice(): void; runNoticeAction(): void; setTheme(mode: string): void; setAccent(accent: string): void;
   toggleNotify(): Promise<void>; setUi(patch: Partial<UiState> | ((ui: UiState) => Partial<UiState>)): void; setFilters(value: string): void;
   init(embeddedSessionId?: string | null): Promise<void>;
   loadProjects(options?: StrictOptions): Promise<void>; loadSessions(options?: StrictOptions): Promise<SessionSummary[]>;
@@ -98,7 +122,15 @@ export interface StoreActions {
   submitInput(text: string, attachments?: DraftAttachment[], imagePositions?: number[]): Promise<boolean>;
   steer(text: string, attachments?: DraftAttachment[]): Promise<boolean>; pauseRun(): Promise<void>; cancelRun(): Promise<void>;
   continueRun(): Promise<false | void>; resendMessage(sequence: number, text: string, attachments?: DraftAttachment[]): Promise<boolean>;
-  resolveApproval(id: string, approved: boolean): Promise<void>; resolveApprovalWithTrust(id: string, approved: boolean, trust: { action: string; server: string; tool?: string; configHash?: string; toolHash?: string }): Promise<void>; resolveArbitration(id: string, choice: string): Promise<void>;
+  resolveApproval(id: string, approved: boolean, sessionId?: string, reason?: string): Promise<void>;
+  resolveApprovalWithTrust(id: string, approved: boolean, trust: { action: string; server: string; tool?: string; configHash?: string; toolHash?: string }): Promise<void>;
+  resolveApprovalWithRule(callId: string, rule: string): Promise<void>;
+  answerQuestion(callId: string, choice: string, sessionId?: string): Promise<boolean>;
+  resolveArbitration(id: string, choice: string): Promise<void>;
+  updateAlertPrefs(patch: Partial<AlertPreferences>): void;
+  setDesktopFocused(focused: boolean): void;
+  syncPendingInteractions(snapshot?: PendingInteractionsSnapshot | null): void;
+  connectGlobalInteractions(): void;
   loadPlan(options?: StrictOptions): Promise<void>; loadQueue(options?: StrictOptions): Promise<void>;
   mutateQueue(operation: (id: string, revision: string | null) => Promise<unknown>, failure: string): Promise<boolean>;
   steerQueueItem(index: number): Promise<boolean>; saveQueueItem(target: QueueEditTarget, text: string, requirements?: { constraints: string[]; acceptance: string[] }): Promise<boolean>;

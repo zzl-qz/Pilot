@@ -1,8 +1,9 @@
 import type { Draft } from 'immer';
 import type { StoreContext, StoreSlice } from './context.js';
 import type { CommandTask } from '../types/store.js';
+import type { PendingInteractionsSnapshot, RunAttentionPayload } from '../types/api.js';
 import type { EventEnvelope } from '../types/events.js';
-import type { ResultRow } from '../types/thread.js';
+import type { PendingQuestion, ResultRow } from '../types/thread.js';
 import { api, apiJson } from '../api.js';
 import { applyEvent, restoreLiveOutput } from '../thread-reducer.js';
 import { EVENT_TYPES } from '../event-types.js';
@@ -19,8 +20,17 @@ const RECONNECT_MAX_MS = 15000;
 const CONNECTION_STABLE_MS = 10000;
 
 /** 统一拥有连接、帧批处理、重连退避和面板轮询，关闭时一起清理。 */
-export function createSessionStreams({ get, set }: StoreContext, resetHistory: () => void,
-  applyAttention: (kind: string, title: string) => void) {
+export function createSessionStreams(
+  { get, set }: StoreContext,
+  resetHistory: () => void,
+  applyAttention: (
+    kind: string,
+    title: string,
+    events?: EventEnvelope[],
+    beforeQuestions?: Record<string, PendingQuestion>
+  ) => void,
+  onRunAttention?: (payload: RunAttentionPayload) => void
+) {
   let eventSource: EventSource | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   let stableConnectionTimer: ReturnType<typeof setTimeout> | undefined;
@@ -29,6 +39,9 @@ export function createSessionStreams({ get, set }: StoreContext, resetHistory: (
   let streamGeneration = 0;
   let mirrorSource: EventSource | null = null;
   let commandTimer: ReturnType<typeof setTimeout> | undefined;
+  let globalSource: EventSource | null = null;
+  let globalReconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  let globalAttempt = 0;
 
   /*
    * SSE 事件按帧合并。
@@ -140,6 +153,15 @@ export function createSessionStreams({ get, set }: StoreContext, resetHistory: (
     reconnectTimer = undefined;
   }
 
+  function closeAllStreams() {
+    closeStreams();
+    globalSource?.close();
+    globalSource = null;
+    globalAttempt = 0;
+    clearTimeout(globalReconnectTimer);
+    globalReconnectTimer = undefined;
+  }
+
   function connectMirror() {
     const { sessionId, sessionEpoch } = get();
     if (!sessionId) return;
@@ -203,7 +225,7 @@ export function createSessionStreams({ get, set }: StoreContext, resetHistory: (
     unrefTimer(commandTimer);
   }
 
-  const actions: StoreSlice<'connectSse' | 'scheduleReconnect' | 'handleEvent' | 'flushEvents' | 'settleEvent' | 'ensureMirror'> = {
+  const actions: StoreSlice<'connectSse' | 'scheduleReconnect' | 'handleEvent' | 'flushEvents' | 'settleEvent' | 'ensureMirror' | 'connectGlobalInteractions'> = {
     /* ---------- SSE ---------- */
     connectSse(sessionId, cursor) {
       if (get().sessionId !== sessionId) return;
@@ -377,6 +399,7 @@ export function createSessionStreams({ get, set }: StoreContext, resetHistory: (
       const applied: EventEnvelope[] = [];
       const beforeKind = get().ui.attentionKind;
       const beforeCursor = get().thread.cursor;
+      const beforeQuestions = get().pendingQuestions || {};
       try { set((draft) => {
         for (const queued of batch) {
           if (draft.sessionId !== queued.sessionId || draft.sessionEpoch !== queued.sessionEpoch) continue;
@@ -394,8 +417,18 @@ export function createSessionStreams({ get, set }: StoreContext, resetHistory: (
       }
       const after = get();
       if (after.thread.cursor > beforeCursor) streamFailures = 0;
-      if (after.ui.attentionKind !== beforeKind) {
-        applyAttention(after.ui.attentionKind, after.sessionTitle);
+      const hasInteractiveChange = applied.some((item) =>
+        item.type === 'approval.required'
+        || item.type === 'approval.resolved'
+        || item.type === 'arbitration.required'
+        || (item.type === 'tool.started' && item.payload?.name === 'ask_user')
+        || (item.type === 'tool.completed' && Boolean(item.payload?.callId && beforeQuestions[item.payload.callId]))
+        || item.type === 'run.completed'
+        || item.type === 'run.failed'
+        || item.type === 'run.ended'
+      );
+      if (after.ui.attentionKind !== beforeKind || hasInteractiveChange) {
+        applyAttention(after.ui.attentionKind, after.sessionTitle, applied, beforeQuestions);
       }
       for (const item of applied) {
         try { get().settleEvent(item, after); }
@@ -454,7 +487,10 @@ export function createSessionStreams({ get, set }: StoreContext, resetHistory: (
       if (event.type === 'run.failed' && String(event.payload?.code || '') === 'MODEL_ERROR') {
         const modelError = classifyModelError(event.payload?.message || '');
         if (modelError?.hint) {
-          get().showNotice(modelError.hint);
+          get().showNotice(modelError.hint, {
+            label: '模型设置',
+            onAction: () => get().setUi({ settingsOpen: true, settingsSection: 'model' })
+          });
         }
       }
       // 上下文状态跟手刷新
@@ -480,6 +516,51 @@ export function createSessionStreams({ get, set }: StoreContext, resetHistory: (
       connectMirror();
     },
 
+    connectGlobalInteractions() {
+      if (typeof EventSource !== 'function') return;
+      if (globalSource && globalSource.readyState !== 2) return;
+      clearTimeout(globalReconnectTimer);
+      globalReconnectTimer = undefined;
+      const source = new EventSource('/api/interactions/events');
+      globalSource = source;
+      const active = () => globalSource === source;
+      source.addEventListener('interactions.snapshot', (message: MessageEvent<string>) => {
+        if (!active()) return;
+        try {
+          const snapshot = JSON.parse(message.data) as PendingInteractionsSnapshot;
+          if (snapshot && typeof snapshot === 'object') {
+            get().syncPendingInteractions(snapshot);
+          }
+        } catch { /* 忽略格式异常的全局交互快照 */ }
+      });
+      source.addEventListener('run.attention', (message: MessageEvent<string>) => {
+        if (!active()) return;
+        try {
+          const payload = JSON.parse(message.data) as RunAttentionPayload;
+          if (payload && typeof payload === 'object') {
+            onRunAttention?.(payload);
+          }
+        } catch { /* 忽略格式异常的运行提醒事件 */ }
+      });
+      source.onopen = () => {
+        if (active()) globalAttempt = 0;
+      };
+      source.onerror = () => {
+        if (!active()) return;
+        source.close();
+        if (globalSource === source) globalSource = null;
+        if (globalReconnectTimer != null) return;
+        const attempt = ++globalAttempt;
+        const base = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** Math.min(attempt - 1, 5));
+        const delay = base + Math.round(base * 0.2 * Math.random());
+        globalReconnectTimer = setTimeout(() => {
+          globalReconnectTimer = undefined;
+          get().connectGlobalInteractions();
+        }, delay);
+        unrefTimer(globalReconnectTimer);
+      };
+    },
+
   };
-  return { actions, close: closeStreams, connectMirror, connectCommandTasks, rebuildHistory: rebuildStreamHistory };
+  return { actions, close: closeStreams, closeAll: closeAllStreams, connectMirror, connectCommandTasks, rebuildHistory: rebuildStreamHistory };
 }

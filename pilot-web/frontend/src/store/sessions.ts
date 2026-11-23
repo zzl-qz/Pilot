@@ -52,6 +52,7 @@ function resetSessionState(draft: StoreState) {
   draft.queue = [];
   draft.queueEntries = [];
   draft.pendingApprovals = {};
+  draft.pendingQuestions = {};
   draft.pendingArbitrations = {};
   draft.agents = {};
   draft.running = false;
@@ -586,6 +587,12 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
           const next = get().sessions.find((session) => !session.archived);
           if (next) await get().activate(next.id);
           else get().startNewSession();
+        }
+        if (archived) {
+          get().showNotice('已归档对话', {
+            label: '撤销',
+            onAction: () => { void get().archiveSession(id, false); }
+          });
         }
         return true;
       } catch (error) {

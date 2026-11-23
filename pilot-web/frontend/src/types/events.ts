@@ -4,7 +4,7 @@ import type { MessageAttachment } from './runtime.js';
 /** 与 EventType 的线上名称、SessionEvent 的 record 载荷一一对应；额外字段兼容旧记录。 */
 export interface EventPayloads {
   'approval.required': S.ApprovalRequired & { agentId?: string };
-  'approval.resolved': S.ApprovalResolved;
+  'approval.resolved': S.ApprovalResolved & { reason?: string | null };
   'arbitration.required': S.ArbitrationRequired & { title?: string; summary?: string };
   'arbitration.resolved': S.ArbitrationResolved & { decision?: string };
   'assistant.delta': S.AssistantDelta;

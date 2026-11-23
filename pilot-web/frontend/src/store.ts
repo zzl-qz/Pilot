@@ -9,15 +9,21 @@ import { createPanelActions } from './store/panels.js';
 import { createSideChatActions } from './store/side-chats.js';
 import { createInputActions } from './store/input.js';
 import { requireData } from './store/shared.js';
-import type { StoreState, UiState } from './types/store.js';
+import type { StoreState, UiState, AlertPreferences } from './types/store.js';
 import type * as S from './types/server.js';
+import type { EventEnvelope } from './types/events.js';
+import type { PendingQuestion } from './types/thread.js';
+import type { GlobalPendingApproval, GlobalPendingQuestion, PendingInteractionsSnapshot, RunAttentionPayload } from './types/api.js';
 import { errorInfo } from './lib/errors.js';
 import { resolveTheme } from './lib/theme.js';
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { api, apiFetch } from './api.js';
 import { initialThread } from './thread-reducer.js';
-import { faviconHref, shouldNotify, tabTitle } from './lib/attention.js';
+import { classifyApprovalRisk, faviconHref, isWindowBackgrounded, tabTitleWithCount } from './lib/attention.js';
+import { readAlertPreferences, writeAlertPreferences } from './lib/sound.js';
+import { buildApprovalFloatingAlert, buildQuestionFloatingAlert, buildRunFloatingAlert, dispatchAttentionAlert, resetAlertDedup } from './lib/alert-dispatcher.js';
+import { parseAsk } from './lib/tool-meta.js';
 import { mergeCommands, toSkillCommands } from './lib/skills.js';
 import { QUICK_COMMANDS } from './lib/commands.js';
 import { readSideChats, readEmbeddedSession } from './lib/side-chat.js';
@@ -32,7 +38,10 @@ import { createWorkbenchRefresher, saveWorkbenchView, takeWorkbenchView } from '
 
 let stopStreams: () => void = () => {};
 let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+let noticeCallback: (() => unknown) | null = null;
 let skillLoadSequence = 0;
+let interactionsInitialized = false;
+let cachedUrgentCount = 0;
 /** 桌面通知开关（与旧版同名键）。 */
 const NOTIFY_KEY = 'pilot.notify';
 
@@ -50,6 +59,7 @@ export const initialUi = (): UiState => ({
   inspectorTab: 'changes',
   executionMode: 'act',
   workbenchFileId: null,
+  shortcutsOpen: false,
   reviewExpanded: false,
   filters: 'all',
   settingsSection: 'appearance',
@@ -81,8 +91,18 @@ export const initialUi = (): UiState => ({
 
 export const useStore = create<StoreState>()(immer((set, get) => {
   const history = createHistoryController({ set, get }, id => streams.rebuildHistory(id));
-  const streams = createSessionStreams({ set, get }, history.reset, applyAttention);
-  stopStreams = streams.close;
+  const streams = createSessionStreams(
+    { set, get },
+    history.reset,
+    (kind, title, applied, beforeQuestions) => applyAttention(kind, title, applied, beforeQuestions),
+    (payload) => handleRunAttention(payload)
+  );
+  stopStreams = () => {
+    interactionsInitialized = false;
+    cachedUrgentCount = 0;
+    resetAlertDedup();
+    streams.closeAll();
+  };
   return {
   /* ---------- 会话 / 项目 ---------- */
   sessionId: null,
@@ -166,6 +186,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   queue: [],
   queueEntries: [],
   pendingApprovals: {},
+  pendingQuestions: {},
   pendingArbitrations: {},
   agents: {},
   task: null,
@@ -184,6 +205,10 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   modelSave: { busy: false, message: '', error: false },
   /** 桌面通知开关（默认关，用户主动开才打扰）。 */
   notifyEnabled: readNotifyEnabled(),
+  alertPrefs: readAlertPreferences(),
+  desktopFocused: null,
+  globalPendingApprovals: [],
+  globalPendingQuestions: [],
   permissionMode: 'default',
   usageData: null,
   fileIndex: { items: [], sessionId: null, loading: false },
@@ -208,16 +233,32 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   ui: initialUi(),
 
   /* ---------- 通用 UI ---------- */
-  showNotice(text) {
+  showNotice(text, action) {
+    noticeCallback = typeof action?.onAction === 'function' ? action.onAction : null;
     set((draft) => {
-      draft.ui.notice = { text, at: Date.now() };
+      draft.ui.notice = {
+        text,
+        at: Date.now(),
+        ...(action?.label ? { actionLabel: action.label } : {})
+      };
     });
     clearTimeout(noticeTimer);
-    noticeTimer = setTimeout(() => get().hideNotice(), 7000);
+    const duration = action?.durationMs ?? (action?.label ? 10_000 : 7000);
+    noticeTimer = setTimeout(() => get().hideNotice(), duration);
     unrefTimer(noticeTimer);
   },
   hideNotice() {
+    noticeCallback = null;
+    clearTimeout(noticeTimer);
+    noticeTimer = undefined;
     set((draft) => { draft.ui.notice = null; });
+  },
+  runNoticeAction() {
+    const cb = noticeCallback;
+    get().hideNotice();
+    if (cb) {
+      try { void cb(); } catch { /* 回调异常不阻塞界面 */ }
+    }
   },
   setTheme(mode) {
     localStorage.setItem('pilot.theme', mode);
@@ -245,6 +286,122 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       get().showNotice(next ? '已开启可靠桌面通知，可在收件箱查看投递状态。' : '已关闭桌面通知');
     } catch (e) { get().showNotice(errorInfo(e).message || '操作失败'); }
   },
+  updateAlertPrefs(patch: Partial<AlertPreferences>) {
+    set((draft) => {
+      draft.alertPrefs = { ...draft.alertPrefs, ...patch };
+    });
+    const next = get().alertPrefs;
+    writeAlertPreferences(next);
+    if (!next.taskbarAttention) {
+      void globalThis.window?.pilotDesktop?.setWindowAttention?.({ urgentCount: 0, kind: 'idle', bounce: false })?.catch?.(() => {});
+    } else {
+      const urgentCount = computeUrgentCount(get());
+      void globalThis.window?.pilotDesktop?.setWindowAttention?.({
+        urgentCount,
+        kind: urgentCount > 0 ? 'attention' : get().ui.attentionKind,
+        bounce: false
+      })?.catch?.(() => {});
+    }
+  },
+  setDesktopFocused(focused: boolean) {
+    set((draft) => {
+      draft.desktopFocused = focused;
+    });
+    if (focused) {
+      const state = get();
+      const urgentCount = computeUrgentCount(state);
+      if (state.alertPrefs.taskbarAttention) {
+        void globalThis.window?.pilotDesktop?.setWindowAttention?.({
+          urgentCount,
+          kind: urgentCount > 0 ? 'attention' : 'idle',
+          bounce: false
+        })?.catch?.(() => {});
+      }
+    }
+  },
+  syncPendingInteractions(snapshot?: PendingInteractionsSnapshot | null) {
+    const approvals = Array.isArray(snapshot?.approvals) ? snapshot.approvals : [];
+    const questions = Array.isArray(snapshot?.questions) ? snapshot.questions : [];
+    const prevState = get();
+    const prevApprovalIds = new Set((prevState.globalPendingApprovals || []).map((item) => item.callId));
+    const prevQuestionIds = new Set((prevState.globalPendingQuestions || []).map((item) => item.callId));
+    const nextApprovalIds = new Set(approvals.map((item) => item.callId));
+    const nextQuestionIds = new Set(questions.map((item) => item.callId));
+
+    const desktop = globalThis.window?.pilotDesktop;
+    for (const id of prevApprovalIds) {
+      if (!nextApprovalIds.has(id)) void desktop?.dismissFloatingAlert?.(`approval:${id}`)?.catch?.(() => {});
+    }
+    for (const id of prevQuestionIds) {
+      if (!nextQuestionIds.has(id)) void desktop?.dismissFloatingAlert?.(`question:${id}`)?.catch?.(() => {});
+    }
+
+    set((draft) => {
+      draft.globalPendingApprovals = approvals;
+      draft.globalPendingQuestions = questions;
+    });
+
+    const after = get();
+    const urgentCount = syncTabSignal(after, after.ui.attentionKind, after.sessionTitle);
+    const prevCount = cachedUrgentCount;
+    cachedUrgentCount = urgentCount;
+
+    const wasInitialized = interactionsInitialized;
+    interactionsInitialized = true;
+
+    if (wasInitialized) {
+      const { desktop: bridge, backgrounded, theme, onSelectSession, focusWindow } = alertEnv(after);
+      for (const item of approvals) {
+        if (!prevApprovalIds.has(item.callId)) {
+          const risk = classifyApprovalRisk(item.toolName, item.argsSummary, item.structuredArgs);
+          void dispatchAttentionAlert({
+            eventKey: `approval:${item.callId}`,
+            kind: 'approval',
+            sessionId: item.sessionId,
+            title: `${item.sessionTitle || '对话'} · 等待批准`,
+            body: risk.summary || item.argsSummary || item.toolName,
+            prefs: after.alertPrefs,
+            backgrounded,
+            notifyEnabled: after.notifyEnabled,
+            theme,
+            floatingAlert: buildApprovalFloatingAlert(item, theme),
+            urgentCount,
+            desktop: bridge,
+            onSelectSession,
+            focusWindow
+          });
+        }
+      }
+      for (const item of questions) {
+        if (!prevQuestionIds.has(item.callId)) {
+          void dispatchAttentionAlert({
+            eventKey: `question:${item.callId}`,
+            kind: 'question',
+            sessionId: item.sessionId,
+            title: `${item.sessionTitle || '对话'} · 需要选择`,
+            body: item.question,
+            prefs: after.alertPrefs,
+            backgrounded,
+            notifyEnabled: after.notifyEnabled,
+            theme,
+            floatingAlert: buildQuestionFloatingAlert(item, theme),
+            urgentCount,
+            desktop: bridge,
+            onSelectSession,
+            focusWindow
+          });
+        }
+      }
+    }
+
+    if (urgentCount !== prevCount && after.alertPrefs.taskbarAttention && desktop?.setWindowAttention) {
+      void desktop.setWindowAttention({
+        urgentCount,
+        kind: urgentCount > 0 ? 'attention' : 'idle',
+        bounce: false
+      })?.catch?.(() => {});
+    }
+  },
   setUi(patch) {
     set((draft) => { Object.assign(draft.ui, typeof patch === 'function' ? patch(draft.ui) : patch); });
   },
@@ -271,6 +428,20 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     const sessions = await get().loadSessions();
     if (get().ui.syncError) {
       get().showNotice(`无法读取工作区数据：${get().ui.syncError}。请检查访问来源或点击右上角刷新重试。`);
+    }
+    if (!embeddedSessionId) {
+      get().connectGlobalInteractions();
+      const shortcut = get().alertPrefs.globalShortcut;
+      if (shortcut && globalThis.window?.pilotDesktop?.setGlobalShortcut) {
+        void globalThis.window.pilotDesktop.setGlobalShortcut(shortcut).then((res) => {
+          if (res && !res.ok && res.error) get().showNotice(res.error);
+        }).catch(() => {});
+      }
+      try {
+        api.pendingInteractions?.().then((snap) => {
+          if (snap) get().syncPendingInteractions(snap);
+        }).catch(() => {});
+      } catch { /* 测试替身未提供全局交互接口时跳过 */ }
     }
     // Side chat 内嵌页：只认 URL 里指定的那个会话，不按「第一个历史对话」恢复
     if (embeddedSessionId) {
@@ -705,24 +876,230 @@ function readNotifyEnabled() {
   }
 }
 
-function applyAttention(kind: string, title: string) {
-  // tabTitle(base, kind)：参数顺序反了标题会变成「● 需要你」这种状态词
-  document.title = tabTitle(title || '新任务', kind);
+function computeUrgentCount(state: StoreState): number {
+  const ids = new Set<string>();
+  for (const id of Object.keys(state.pendingApprovals || {})) ids.add(`a:${id}`);
+  for (const id of Object.keys(state.pendingQuestions || {})) ids.add(`q:${id}`);
+  for (const id of Object.keys(state.pendingArbitrations || {})) ids.add(`r:${id}`);
+  for (const item of state.globalPendingApprovals || []) ids.add(`a:${item.callId}`);
+  for (const item of state.globalPendingQuestions || []) ids.add(`q:${item.callId}`);
+  return ids.size;
+}
+
+function resolvedThemeFor(state: StoreState): 'light' | 'dark' {
+  return resolveTheme(state.ui.themeMode) === 'dark' ? 'dark' : 'light';
+}
+
+function syncTabSignal(state: StoreState, kind: string, title: string): number {
+  const urgentCount = computeUrgentCount(state);
+  const effectiveKind = urgentCount > 0 ? 'attention' : kind;
+  document.title = tabTitleWithCount(title || state.sessionTitle || '新任务', effectiveKind, urgentCount);
   const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
   if (link) {
-    link.href = faviconHref(kind);
+    link.href = faviconHref(effectiveKind);
   }
-  // 只有页面在后台、用户开了通知、浏览器已授权、且这类信号值得打扰时才弹
-  const permission = typeof Notification === 'undefined' ? 'denied' : Notification.permission;
-  const enabled = useStore.getState().notifyEnabled;
-  if (kind !== 'attention' || !shouldNotify({ kind, hidden: document.hidden, enabled, permission })) {
-    return;
+  return urgentCount;
+}
+
+function alertEnv(state: StoreState) {
+  const desktop = globalThis.window?.pilotDesktop;
+  const backgrounded = isWindowBackgrounded(globalThis.document, state.desktopFocused);
+  const theme = resolvedThemeFor(state);
+  const onSelectSession = (targetSessionId: string) => {
+    if (targetSessionId && useStore.getState().sessionId !== targetSessionId) {
+      void useStore.getState().activate(targetSessionId);
+    }
+  };
+  const focusWindow = () => {
+    void desktop?.focusMainWindow?.()?.catch?.(() => {});
+    try { globalThis.window?.focus?.(); } catch { /* 浏览器标签聚焦受策略限制 */ }
+  };
+  return { desktop, backgrounded, theme, onSelectSession, focusWindow };
+}
+
+function handleRunAttention(payload: RunAttentionPayload) {
+  const state = useStore.getState();
+  const kind = payload.kind === 'error' ? 'error' : payload.kind === 'done' ? 'done' : 'attention';
+  const sid = String(payload.sessionId || '');
+  const title = payload.title || (sid === state.sessionId ? state.sessionTitle : '') || '对话';
+  const urgentCount = computeUrgentCount(state);
+  const { desktop, backgrounded, theme, onSelectSession, focusWindow } = alertEnv(state);
+  const floatingAlert = kind === 'done' || kind === 'error'
+    ? buildRunFloatingAlert(kind, sid, title, payload.summary || '', theme)
+    : null;
+  void dispatchAttentionAlert({
+    eventKey: `run:${payload.runId || sid || 'global'}:${kind}`,
+    kind,
+    sessionId: sid,
+    title,
+    body: payload.summary || ({ done: '本轮任务已完成', error: '本轮运行失败', attention: '需要你确认' }[kind]),
+    prefs: state.alertPrefs,
+    backgrounded,
+    notifyEnabled: state.notifyEnabled,
+    theme,
+    floatingAlert,
+    urgentCount,
+    desktop,
+    onSelectSession,
+    focusWindow
+  });
+  if (sid && sid !== state.sessionId) {
+    if (kind === 'done' && !backgrounded) {
+      state.showNotice(`「${title}」已完成`, {
+        label: '查看结果',
+        onAction: () => { void useStore.getState().activate(sid); }
+      });
+    }
+    void state.loadSessions();
   }
-  try {
-    const body = ({ attention: '任务需要确认', done: '本轮已完成', error: '本轮运行失败' } as Record<string, string>)[kind];
-    new Notification(`Pilot · ${title || '新任务'}`, { body: body || '' });
-  } catch {
-    // 通知失败不影响主流程
+}
+
+function applyAttention(
+  kind: string,
+  title: string,
+  applied: EventEnvelope[] = [],
+  beforeQuestions: Record<string, PendingQuestion> = {}
+) {
+  const state = useStore.getState();
+  const urgentCount = syncTabSignal(state, kind, title);
+  const { desktop, backgrounded, theme, onSelectSession, focusWindow } = alertEnv(state);
+
+  let dispatchedFromEvents = false;
+  for (const item of applied) {
+    if (item.type === 'approval.resolved' && item.payload?.callId) {
+      void desktop?.dismissFloatingAlert?.(`approval:${item.payload.callId}`)?.catch?.(() => {});
+    } else if (item.type === 'tool.completed' && item.payload?.callId && beforeQuestions[item.payload.callId]) {
+      void desktop?.dismissFloatingAlert?.(`question:${item.payload.callId}`)?.catch?.(() => {});
+    } else if (item.type === 'approval.required' && item.payload?.callId) {
+      dispatchedFromEvents = true;
+      const callId = item.payload.callId;
+      const entry = state.pendingApprovals[callId];
+      const toolName = String(item.payload.name || entry?.name || '');
+      const argsSummary = String(item.payload.argsSummary || entry?.args || '');
+      const structuredArgs = (item.payload.args || entry?.structuredArgs || null) as Record<string, unknown> | null;
+      const risk = classifyApprovalRisk(toolName, argsSummary, structuredArgs);
+      const floating: GlobalPendingApproval = {
+        callId,
+        sessionId: item.sessionId || state.sessionId || '',
+        sessionTitle: title || state.sessionTitle || '对话',
+        toolName,
+        argsSummary,
+        structuredArgs,
+        requestedAt: new Date(entry?.requestedAt || Date.now()).toISOString(),
+        expiresAt: entry?.expiresAt ? new Date(entry.expiresAt).toISOString() : null
+      };
+      void dispatchAttentionAlert({
+        eventKey: `approval:${callId}`,
+        kind: 'approval',
+        sessionId: floating.sessionId,
+        title: `${floating.sessionTitle} · 等待批准`,
+        body: risk.summary || argsSummary || toolName,
+        prefs: state.alertPrefs,
+        backgrounded,
+        notifyEnabled: state.notifyEnabled,
+        theme,
+        floatingAlert: buildApprovalFloatingAlert(floating, theme),
+        urgentCount,
+        desktop,
+        onSelectSession,
+        focusWindow
+      });
+    } else if (item.type === 'tool.started' && item.payload?.name === 'ask_user' && item.payload?.callId) {
+      dispatchedFromEvents = true;
+      const callId = item.payload.callId;
+      const entry = state.pendingQuestions?.[callId];
+      const ask = parseAsk(item.payload.summary);
+      if (entry || ask) {
+        const floating: GlobalPendingQuestion = {
+          callId,
+          sessionId: item.sessionId || state.sessionId || '',
+          sessionTitle: title || state.sessionTitle || '对话',
+          question: entry?.question || ask?.question || '请做出选择',
+          options: entry?.options || ask?.options || [],
+          requestedAt: new Date(entry?.requestedAt || Date.now()).toISOString(),
+          expiresAt: entry?.expiresAt ? new Date(entry.expiresAt).toISOString() : null
+        };
+        void dispatchAttentionAlert({
+          eventKey: `question:${callId}`,
+          kind: 'question',
+          sessionId: floating.sessionId,
+          title: `${floating.sessionTitle} · 需要选择`,
+          body: floating.question,
+          prefs: state.alertPrefs,
+          backgrounded,
+          notifyEnabled: state.notifyEnabled,
+          theme,
+          floatingAlert: buildQuestionFloatingAlert(floating, theme),
+          urgentCount,
+          desktop,
+          onSelectSession,
+          focusWindow
+        });
+      }
+    } else if (item.type === 'arbitration.required') {
+      dispatchedFromEvents = true;
+      const arbId = String(item.payload?.arbitrationId || item.sequence || 'arb');
+      void dispatchAttentionAlert({
+        eventKey: `arb:${arbId}`,
+        kind: 'attention',
+        sessionId: item.sessionId || state.sessionId || '',
+        title: `${title || state.sessionTitle || '对话'} · 等待裁决`,
+        body: String(item.payload?.title || item.payload?.summary || '多代理产出需要裁决'),
+        prefs: state.alertPrefs,
+        backgrounded,
+        notifyEnabled: state.notifyEnabled,
+        theme,
+        urgentCount,
+        desktop,
+        onSelectSession,
+        focusWindow
+      });
+    }
+  }
+
+  if (kind === 'done' || kind === 'error') {
+    const runEnd = applied.find((item) => item.type === 'run.completed' || item.type === 'run.failed' || item.type === 'run.ended');
+    const latestResult = [...state.thread.rows].reverse().find((row) => row.type === 'result');
+    const sid = runEnd?.sessionId || state.sessionId || '';
+    const sessionName = title || state.sessionTitle || '对话';
+    const summary = (latestResult?.type === 'result' ? latestResult.detail || latestResult.title : '')
+      || (kind === 'done' ? '本轮任务已完成' : '本轮运行失败');
+    void dispatchAttentionAlert({
+      eventKey: `run:${runEnd?.runId || sid || 'active'}:${kind}`,
+      kind,
+      sessionId: sid,
+      title: sessionName,
+      body: summary,
+      prefs: state.alertPrefs,
+      backgrounded,
+      notifyEnabled: state.notifyEnabled,
+      theme,
+      floatingAlert: buildRunFloatingAlert(kind, sid, sessionName, summary, theme),
+      urgentCount,
+      desktop,
+      onSelectSession,
+      focusWindow
+    });
+  } else if (kind === 'attention' && !dispatchedFromEvents) {
+    const sid = state.sessionId || 'active';
+    void dispatchAttentionAlert({
+      eventKey: `attention:${sid}:${title || ''}`,
+      kind: 'attention',
+      sessionId: state.sessionId || '',
+      title: title || '新任务',
+      body: '任务需要确认',
+      prefs: state.alertPrefs,
+      backgrounded,
+      notifyEnabled: state.notifyEnabled,
+      theme,
+      urgentCount,
+      desktop,
+      onSelectSession,
+      focusWindow
+    });
+  } else if ((kind === 'idle' || kind === 'running') && urgentCount === 0
+    && state.alertPrefs.taskbarAttention && desktop?.setWindowAttention) {
+    void desktop.setWindowAttention({ urgentCount: 0, kind, bounce: false })?.catch?.(() => {});
   }
 }
 

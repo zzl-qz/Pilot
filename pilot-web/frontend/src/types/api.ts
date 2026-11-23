@@ -8,6 +8,38 @@ export type { EventEnvelope } from './events.js';
 export interface HistoryPage { events: EventEnvelope[]; hasMore: boolean; total?: number; historyRevision?: number }
 export interface ActionResponse { ok?: boolean; message?: string; error?: string }
 export interface BrowserStatus { enabled: boolean; capable: boolean; available: boolean; reason?: string; paused?: boolean; headless?: boolean }
+export interface GlobalPendingApproval {
+  callId: string;
+  sessionId: string;
+  sessionTitle: string;
+  toolName: string;
+  argsSummary: string;
+  structuredArgs?: Record<string, unknown> | null;
+  requestedAt: string;
+  expiresAt?: string | null;
+}
+export interface GlobalPendingQuestion {
+  callId: string;
+  sessionId: string;
+  sessionTitle: string;
+  question: string;
+  options: string[];
+  requestedAt: string;
+  expiresAt?: string | null;
+}
+export interface PendingInteractionsSnapshot {
+  approvals: GlobalPendingApproval[];
+  questions: GlobalPendingQuestion[];
+}
+export interface RunAttentionPayload {
+  sessionId: string;
+  runId?: string;
+  kind: 'done' | 'error' | 'attention';
+  outcome?: string;
+  title?: string;
+  summary?: string;
+  at?: string;
+}
 export type ExecutionMode = 'act' | 'plan';
 export interface InputMessage { content: string; attachments?: Pick<DraftAttachment, 'name' | 'mimeType' | 'dataBase64'>[]; imagePositions?: number[]; skill?: string; mode?: ExecutionMode }
 export interface SubmissionResult { state: 'accepted' | 'rejected' | 'unknown'; status?: number; response?: { message?: string; sessionId?: string; runId?: string } }
@@ -102,6 +134,7 @@ export interface ApiResults {
   activeRun: S.SessionControllerActiveRunResponse;
   approval: ActionResponse;
   answerQuestion: { choice: string };
+  pendingInteractions: PendingInteractionsSnapshot;
   history: HistoryPage;
   checkpoints: S.CheckpointControllerPreview;
   restoreCheckpoint: S.CheckpointControllerRestoreResponse;

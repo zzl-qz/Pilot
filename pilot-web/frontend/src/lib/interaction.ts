@@ -23,9 +23,14 @@ export function isShortcutModifier(event: Partial<Pick<KeyboardEvent, 'isComposi
     && !event.getModifierState?.('AltGraph') && (event.ctrlKey || event.metaKey));
 }
 
-export function runPhase({running, cancelling, pausing, queueHeld, pendingApprovals = {}, thread, lastOutcome}: RunPhaseInput) {
+export function runPhase({running, cancelling, pausing, queueHeld, pendingApprovals = {}, pendingQuestions = {}, pendingArbitrations = {}, thread, lastOutcome}: RunPhaseInput) {
   if (cancelling) return '正在停止';
   if (Object.keys(pendingApprovals).length) return '等待批准';
+  const activeAsk = Boolean(running && (thread?.rows || []).some((row) =>
+    row.type === 'turn' && (row.tools || []).some((tool) => tool.status === 'run' && tool.name === 'ask_user')
+  ));
+  if (Object.keys(pendingQuestions).length || activeAsk) return '等待选择';
+  if (Object.keys(pendingArbitrations).length) return '等待裁决';
   if (pausing) return '正在暂停';
   if (!running) {
     if (lastOutcome === 'NEED_INPUT') return '等待补充';

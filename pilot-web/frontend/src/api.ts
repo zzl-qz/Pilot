@@ -179,8 +179,12 @@ export const api = {
   pauseRun: (runId: string) => apiJson<ApiResults['pauseRun']>(`/api/runs/${encodeURIComponent(runId)}/pause`, { method: 'POST' }),
   cancelRun: (runId: string) => apiJson<ApiResults['cancelRun']>(`/api/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' }),
   activeRun: (id: string) => apiJson<ApiResults['activeRun']>(`/api/sessions/${encodeURIComponent(id)}/runs/active`),
-  approval: (callId: string, approved: boolean) => apiJson<ApiResults['approval']>(`/api/approvals/${encodeURIComponent(callId)}`, jsonBody('POST', { approved })),
+  approval: (callId: string, approved: boolean, reason?: string) => apiJson<ApiResults['approval']>(
+    `/api/approvals/${encodeURIComponent(callId)}`,
+    jsonBody('POST', reason && reason.trim() ? { approved, reason: reason.trim() } : { approved })
+  ),
   answerQuestion: (id: string, callId: string, choice: string) => apiJson<ApiResults['answerQuestion']>(`/api/sessions/${encodeURIComponent(id)}/questions/${encodeURIComponent(callId)}`, jsonBody('POST', { choice })),
+  pendingInteractions: () => apiJson<ApiResults['pendingInteractions']>('/api/interactions/pending'),
   history: (id: string, { limit, before, after, compactTools }: { limit?: number; before?: number; after?: number; compactTools?: boolean } = {}) => {
     const params = new URLSearchParams();
     if (limit) params.set('limit', String(limit));

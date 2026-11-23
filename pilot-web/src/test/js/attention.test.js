@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { faviconHref, shouldNotify, tabTitle } from '../../../frontend/src/lib/attention.js';
+import { faviconHref, shouldNotify, suggestAllowRule, tabTitle } from '../../../frontend/src/lib/attention.js';
 
 test('tab title carries the run state', () => {
   assert.equal(tabTitle('修复登录', 'idle'), '修复登录');
@@ -23,4 +23,18 @@ test('notifications need a hidden page, opt-in, permission and a meaningful even
   assert.equal(shouldNotify({ ...base, kind: 'done', hidden: false }), false);
   assert.equal(shouldNotify({ ...base, kind: 'done', enabled: false }), false);
   assert.equal(shouldNotify({ ...base, kind: 'done', permission: 'denied' }), false);
+});
+
+test('suggestAllowRule generates safe prefix/directory rules and blocks high-risk or compound commands', () => {
+  assert.deepEqual(
+    suggestAllowRule('run_command', 'npm test -- --run', { command: 'npm test -- --run' }),
+    { rule: 'run_command(npm test:*)', label: '记住 npm test 命令' }
+  );
+  assert.deepEqual(
+    suggestAllowRule('edit_file', 'src/components/App.tsx', { path: 'src/components/App.tsx' }),
+    { rule: 'edit_file(src/**)', label: '允许修改 src/' }
+  );
+  assert.equal(suggestAllowRule('run_command', 'rm -rf ./dist', { command: 'rm -rf ./dist' }), null);
+  assert.equal(suggestAllowRule('run_command', 'npm test && rm -rf ./dist', { command: 'npm test && rm -rf ./dist' }), null);
+  assert.equal(suggestAllowRule('run_command', 'echo hi | sh', { command: 'echo hi | sh' }), null);
 });

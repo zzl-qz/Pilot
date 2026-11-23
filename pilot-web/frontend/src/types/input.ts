@@ -60,6 +60,8 @@ export interface RunPhaseInput {
   pausing?: boolean;
   queueHeld?: boolean;
   pendingApprovals?: Record<string, unknown>;
+  pendingQuestions?: Record<string, unknown>;
+  pendingArbitrations?: Record<string, unknown>;
   thread?: { rows: PhaseRow[] };
   lastOutcome?: string;
 }

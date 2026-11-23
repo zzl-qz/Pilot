@@ -19,13 +19,24 @@ import {
   trimHistoryWindowAtRows
 } from './lib/history.js';
 import { classifyRunFailure, isEphemeral, isRunEnd, planProgressLabel, type RUN_END_EVENTS } from './lib/events.js';
-import { eventTimestamp, parseTimestamp, toolArgsText, toolLabel } from './lib/tool-meta.js';
+import { eventTimestamp, parseAsk, parseTimestamp, toolArgsText, toolLabel } from './lib/tool-meta.js';
 import { shortAgentId } from './lib/agents.js';
 import { preview, estimateTokens, sameUserInput } from './thread-utils.js';
 import { splitAttachmentMarkers } from './lib/attachments/attachments.js';
 
 /** 活动流保留上限，与旧版 MAX_TIMELINE_EVENTS 一致。 */
 const MAX_TIMELINE_EVENTS = 300;
+const DEFAULT_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_QUESTION_TIMEOUT_MS = 10 * 60 * 1000;
+
+function activeAttentionKind(draft: ReducerState): string {
+  if (Object.keys(draft.pendingApprovals || {}).length > 0
+    || Object.keys(draft.pendingQuestions || {}).length > 0
+    || Object.keys(draft.pendingArbitrations || {}).length > 0) {
+    return 'attention';
+  }
+  return draft.running ? 'running' : 'idle';
+}
 
 export const initialThread = (): ThreadState => ({
   /** 行注册表：[{ key, type, start, end, ... }]，显示顺序 = 数组顺序（旧→新）。 */
@@ -163,6 +174,8 @@ export function settleStoppedWork(draft: ReducerState, finishedAt = Date.now()) 
   if (draft.runUsage && !draft.runUsage.finishedAt) {
     draft.runUsage.finishedAt = finishedAt;
   }
+  draft.pendingApprovals = {};
+  draft.pendingQuestions = {};
 }
 
 /** Immer 会分离数组与索引里的对象引用，更新工具后显式同步两个视图。 */
@@ -216,6 +229,9 @@ function settleRun(draft: ReducerState, event: EventMetadata) {
   draft.running = false;
   draft.cancelling = false;
   draft.runStartedAt = 0;
+  draft.pendingApprovals = {};
+  draft.pendingQuestions = {};
+  draft.pendingArbitrations = {};
   finishTurnClock(draft, turn, event);
   if (turn) {
     turn.reply.live = false;
@@ -251,6 +267,7 @@ function appendRunResult(draft: ReducerState, event: Extract<EventEnvelope, { ty
     result.detail = event.payload?.summary || null;
     if (turn?.runIds?.length) result.runIds = turn.runIds;
     status = '结束';
+    attention = 'done';
   } else if (event.type === 'run.cancelled') {
     Object.assign(result, { tone: 'warn', title: '运行已取消', detail: event.payload?.reason || null, outcome: 'CANCELLED', resumable: true });
     status = '取消';
@@ -278,7 +295,9 @@ function appendRunResult(draft: ReducerState, event: Extract<EventEnvelope, { ty
     });
     status = result.resumable ? '可继续' : '结束';
     draft.lastOutcome = outcome;
-    if (result.resumable) attention = 'attention';
+    if (outcome === 'COMPLETED') attention = 'done';
+    else if (result.resumable) attention = 'attention';
+    else attention = 'error';
   } else {
     const code = String(event.payload?.code || '');
     const failure = classifyRunFailure(code);
@@ -300,7 +319,9 @@ function appendRunResult(draft: ReducerState, event: Extract<EventEnvelope, { ty
     result.resumable = failure.resumable && code !== 'NEED_INPUT';
     result.errorCode = code || null;
     draft.lastOutcome = failure.outcome || code;
-    if (failure.resumable) attention = 'attention';
+    if (failure.cancelled || failure.paused) attention = 'idle';
+    else if (failure.resumable || code === 'NEED_INPUT') attention = 'attention';
+    else attention = 'error';
   }
   pushRow(draft, result);
   if (live) {
@@ -654,6 +675,22 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
       if (event.payload?.name === 'browser') {
         draft.ui.browserDot = true;
       }
+      if (event.payload?.name === 'ask_user') {
+        const parsedAsk = parseAsk(event.payload?.summary || '');
+        if (parsedAsk && event.payload?.callId) {
+          const requestedAt = eventTimestamp(event);
+          (draft.pendingQuestions ??= {})[event.payload.callId] = {
+            callId: event.payload.callId,
+            question: parsedAsk.question,
+            options: parsedAsk.options,
+            requestedAt,
+            expiresAt: requestedAt + DEFAULT_QUESTION_TIMEOUT_MS
+          };
+          if (live) {
+            draft.ui.attentionKind = 'attention';
+          }
+        }
+      }
       const owner = event.payload?.agentId ? draft.agents[event.payload.agentId] : null;
       const row = {
         callId: event.payload.callId,
@@ -693,6 +730,12 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
         row.detailSequence = event.detailAvailable ? event.sequence : undefined;
         syncToolRow(turn!, row);
       }
+      if (event.payload?.callId && draft.pendingQuestions?.[event.payload.callId]) {
+        delete draft.pendingQuestions[event.payload.callId];
+        if (!live || draft.running) {
+          draft.ui.attentionKind = activeAttentionKind(draft);
+        }
+      }
       record(draft, event, {
         kind: 'tool', tone: failed ? 'error' : 'ok', status: failed ? '失败' : '完成',
         title: event.payload?.callId, detail: event.payload?.resultSummary, foot: `${event.payload?.latencyMs} ms`
@@ -703,6 +746,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
     case 'approval.required': {
       const turn = ensureTurn(draft);
       draft.ui.attentionKind = 'attention';
+      const requestedAt = eventTimestamp(event);
       const row = {
         callId: event.payload.callId,
         name: event.payload.name,
@@ -719,6 +763,8 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
         agent: event.payload.agentId || null,
         name: event.payload.name,
         args: event.payload.argsSummary,
+        requestedAt,
+        expiresAt: requestedAt + DEFAULT_APPROVAL_TIMEOUT_MS,
         structuredArgs: event.payload.args || null
       };
       syncToolRow(turn, row);
@@ -736,7 +782,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
       if (pending) {
         delete draft.pendingApprovals[event.payload.callId];
         if (!live || Object.keys(draft.pendingApprovals).length === 0) {
-          draft.ui.attentionKind = Object.keys(draft.pendingApprovals).length ? 'attention' : 'running';
+          draft.ui.attentionKind = activeAttentionKind(draft);
         }
       }
       const turn = turnOwning(draft, event.payload?.callId);
@@ -746,9 +792,10 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
         row.meta = approved ? '已批准' : '已拒绝';
         syncToolRow(turn!, row);
       }
+      const reason = typeof event.payload?.reason === 'string' ? event.payload.reason.trim() : '';
       record(draft, event, {
         kind: 'approval', tone: approved ? 'ok' : 'error',
-        status: approved ? '已批准' : '已拒绝', title: event.payload?.callId, detail: null
+        status: approved ? '已批准' : '已拒绝', title: event.payload?.callId, detail: reason || null
       });
       break;
     }
@@ -924,6 +971,9 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
     case 'arbitration.required': {
       const payload = event.payload || {};
       draft.pendingArbitrations[payload.arbitrationId || event.sequence] = payload;
+      if (live) {
+        draft.ui.attentionKind = 'attention';
+      }
       pushRow(draft, {
         key: `arb:${payload.arbitrationId || event.sequence}`,
         type: 'arb', arbitrationId: payload.arbitrationId,
@@ -938,6 +988,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
     case 'arbitration.resolved': {
       const id = event.payload?.arbitrationId;
       delete draft.pendingArbitrations[id];
+      draft.ui.attentionKind = activeAttentionKind(draft);
       const row = draft.thread.rows.find((item): item is ArbitrationRow => item.type === 'arb' && item.arbitrationId === id);
       if (row) {
         row.resolved = true;
@@ -1081,6 +1132,7 @@ function applyEventInto(root: ReducerState, event: EventEnvelope, bucket: Thread
     pendingInputs: [...(root.pendingInputs || [])],
     queue: [...(root.queue || [])],
     pendingApprovals: { ...(root.pendingApprovals || {}) },
+    pendingQuestions: { ...(root.pendingQuestions || {}) },
     pendingArbitrations: { ...(root.pendingArbitrations || {}) },
     agents: { ...(root.agents || {}) },
     task: root.task,

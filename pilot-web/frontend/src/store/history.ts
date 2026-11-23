@@ -96,6 +96,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
           draft.runId = null;
           draft.lastRunId = null;
           draft.pendingApprovals = {};
+          draft.pendingQuestions = {};
           draft.pendingArbitrations = {};
           draft.agents = {};
           draft.thread.replaying = true;
