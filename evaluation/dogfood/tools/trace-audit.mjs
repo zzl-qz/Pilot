@@ -17,6 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { DatabaseSync } from 'node:sqlite';
+import { fileURLToPath } from 'node:url';
 
 const DEFAULT_MAIN_REPO = path.resolve(
   process.env.PILOT_MAIN_REPO || path.join(os.homedir(), 'Desktop', 'pilot')
@@ -247,7 +248,81 @@ function isOutsideWorkspacePath(rawPath, workspace) {
   return false;
 }
 
-function analyze({ session, runs, events, messages, trace, diagnostics, gitInfo, debugRequestsDir }) {
+function extractItemText(item) {
+  if (!item || typeof item !== 'object') return '';
+  if (typeof item.content === 'string') return item.content;
+  if (Array.isArray(item.content)) {
+    return item.content.map((part) => (typeof part?.text === 'string' ? part.text : '')).join('\n');
+  }
+  return '';
+}
+
+/** 识别尾部一次性运行时提示：这些提示只附在单次请求末尾，下一轮移除不会破坏 [0..n-2] 前缀缓存。 */
+export function isTailEphemeralItem(item) {
+  const text = extractItemText(item).trim();
+  if (!text) return false;
+  return (
+    text.startsWith('<candidate-targets') ||
+    text.startsWith('[Runtime guidance;') ||
+    text.startsWith('[运行时检查点]') ||
+    text.startsWith('[调查收敛提醒]') ||
+    text.includes('[收尾前自查]')
+  );
+}
+
+/**
+ * 对比 debug-requests 中的真实线上传输载荷，识别「仅移除末尾最后一条临时提示、[0..n-2] 与 tools 100% 字节一致」的请求。
+ * 返回 Set<`${runId}#${mainOrder}`>（runId 内按 main 请求 1-based 排序）。
+ */
+export function classifyWirePrefixTransitions(debugRequestsDir) {
+  const tailDrops = new Set();
+  if (!debugRequestsDir || !fs.existsSync(debugRequestsDir)) return tailDrops;
+  const runDirs = fs.readdirSync(debugRequestsDir, { withFileTypes: true }).filter((d) => d.isDirectory());
+  for (const rd of runDirs) {
+    const fullRunDir = path.join(debugRequestsDir, rd.name);
+    const reqFiles = fs
+      .readdirSync(fullRunDir)
+      .filter((f) => /^req-\d+\.json$/.test(f))
+      .sort((a, b) => Number(a.slice(4, -5)) - Number(b.slice(4, -5)));
+    const mainWire = [];
+    for (const file of reqFiles) {
+      const parsed = safeJsonParse(fs.readFileSync(path.join(fullRunDir, file), 'utf8'));
+      if (parsed && (!parsed.purpose || parsed.purpose === 'main')) {
+        mainWire.push(parsed);
+      }
+    }
+    for (let i = 1; i < mainWire.length; i++) {
+      const prev = mainWire[i - 1];
+      const curr = mainWire[i];
+      const prevSeq = prev?.body?.messages || prev?.body?.input;
+      const currSeq = curr?.body?.messages || curr?.body?.input;
+      if (!Array.isArray(prevSeq) || !Array.isArray(currSeq) || prevSeq.length < 2 || currSeq.length < prevSeq.length) {
+        continue;
+      }
+      if (JSON.stringify(prev.body?.tools ?? null) !== JSON.stringify(curr.body?.tools ?? null)) continue;
+      if (JSON.stringify(prev.body?.instructions ?? null) !== JSON.stringify(curr.body?.instructions ?? null)) continue;
+      if (JSON.stringify(prev.body?.system ?? null) !== JSON.stringify(curr.body?.system ?? null)) continue;
+
+      let prefixIdentical = true;
+      for (let j = 0; j < prevSeq.length - 1; j++) {
+        if (JSON.stringify(prevSeq[j]) !== JSON.stringify(currSeq[j])) {
+          prefixIdentical = false;
+          break;
+        }
+      }
+      if (!prefixIdentical) continue;
+      const prevTail = prevSeq[prevSeq.length - 1];
+      const currAtTail = currSeq[prevSeq.length - 1];
+      if (JSON.stringify(prevTail) !== JSON.stringify(currAtTail) && isTailEphemeralItem(prevTail)) {
+        const runKey = curr.runId || rd.name;
+        tailDrops.add(`${runKey}#${i + 1}`);
+      }
+    }
+  }
+  return tailDrops;
+}
+
+export function analyze({ session, runs, events, messages, trace, diagnostics, gitInfo, debugRequestsDir }) {
   const workspace = gitInfo?.workspace || session.workspace || '';
   const traceByCallId = new Map();
   for (const t of trace.entries) {
@@ -320,6 +395,7 @@ function analyze({ session, runs, events, messages, trace, diagnostics, gitInfo,
         modelRequests.push({
           index: modelRequests.length + 1,
           sequence: ev.sequence,
+          runId: ev.runId || '',
           purpose: rep.purpose || 'unknown',
           model: rep.model || '',
           status: rep.status || 'unknown',
@@ -564,9 +640,12 @@ function analyze({ session, runs, events, messages, trace, diagnostics, gitInfo,
 
   // H: Prompt cache stability (focus on main requests + all observed)
   const mainRequests = modelRequests.filter((r) => r.purpose === 'main');
+  const tailEphemeralDropKeys = classifyWirePrefixTransitions(debugRequestsDir);
+  const mainOrderByRun = new Map();
   const cacheRatesMain = [];
   const prefixChangeCounts = {};
   const nonAppendOnlyMain = [];
+  const tailEphemeralDrops = [];
   let totalInputTokens = 0;
   let totalCachedInputTokens = 0;
   let totalOutputTokens = 0;
@@ -588,9 +667,16 @@ function analyze({ session, runs, events, messages, trace, diagnostics, gitInfo,
     if (r.status !== 'completed') failedModelRequests++;
 
     if (r.purpose === 'main') {
-      const change = r.prefix?.change || 'unknown';
+      const runKey = r.runId || '';
+      const orderInRun = (mainOrderByRun.get(runKey) || 0) + 1;
+      mainOrderByRun.set(runKey, orderInRun);
+      const rawChange = r.prefix?.change || 'unknown';
+      const isTailDrop = rawChange === 'history_changed' && tailEphemeralDropKeys.has(`${runKey}#${orderInRun}`);
+      const change = isTailDrop ? 'tail_ephemeral_drop' : rawChange;
       prefixChangeCounts[change] = (prefixChangeCounts[change] || 0) + 1;
-      if (change !== 'append_only' && change !== 'initial') {
+      if (isTailDrop) {
+        tailEphemeralDrops.push({ index: r.index, sequence: r.sequence, change });
+      } else if (change !== 'append_only' && change !== 'initial') {
         nonAppendOnlyMain.push({ index: r.index, sequence: r.sequence, change });
       }
       // Exclude very first main request (cold start) from steady-state cache hit rate if more than 1 request
@@ -746,6 +832,8 @@ function analyze({ session, runs, events, messages, trace, diagnostics, gitInfo,
         prefixChangeCounts,
         nonAppendOnlyMainCount: nonAppendOnlyMain.length,
         nonAppendOnlyMainSamples: nonAppendOnlyMain.slice(0, 10),
+        tailEphemeralDropCount: tailEphemeralDrops.length,
+        tailEphemeralDropSamples: tailEphemeralDrops.slice(0, 10),
       },
       I_contextAndCompaction: {
         compactions: compactions.length,
@@ -807,7 +895,8 @@ function printSummary(report) {
   );
   console.log(
     `[H 缓存] mainReqs=${signals.H_cacheStability.mainRequests}, medianHit=${pct(signals.H_cacheStability.medianCacheHitRate)}, ` +
-      `overallHit=${pct(signals.H_cacheStability.overallCacheHitRate)}, nonAppendOnly=${signals.H_cacheStability.nonAppendOnlyMainCount}`
+      `overallHit=${pct(signals.H_cacheStability.overallCacheHitRate)}, nonAppendOnly=${signals.H_cacheStability.nonAppendOnlyMainCount}, ` +
+      `tailDrops=${signals.H_cacheStability.tailEphemeralDropCount}`
   );
   console.log(
     `[I 压缩] compactions=${signals.I_contextAndCompaction.compactions}, prunedMsgs=${signals.I_contextAndCompaction.prunedToolMessages}, ` +
@@ -849,7 +938,9 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(`[trace-audit] 错误: ${err.message || err}`);
-  process.exit(1);
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    console.error(`[trace-audit] 错误: ${err.message || err}`);
+    process.exit(1);
+  });
+}
