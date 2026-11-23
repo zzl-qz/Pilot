@@ -24,11 +24,10 @@ public final class EnvironmentSanitizer {
         // Windows 标准目录与架构变量：Playwright 用 %ProgramFiles% 定位已安装的 Chrome，
         // 缺了它会拼出 undefined\Program Files\... 并误报「未安装」。
         "SYSTEMDRIVE", "HOMEDRIVE", "HOMEPATH", "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432", "PROGRAMDATA",
-        "LOCALAPPDATA", "APPDATA", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS", "OS",
-        "JAVA_HOME", "MAVEN_HOME", "GRADLE_HOME", "CI", "GITHUB_ACTIONS", "GITHUB_WORKSPACE", "BUILD_NUMBER",
-        "NODE_ENV", "NODE_HOME", "NPM_CONFIG_CACHE", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy",
-        "https_proxy", "no_proxy", "PYTHONIOENCODING", "PILOT_SAFE_ENV", "PILOT_TEST_BROWSER_CHANNEL",
-        "PILOT_TEST_CHROMIUM_EXECUTABLE");
+        "LOCALAPPDATA", "APPDATA", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS", "OS", "JAVA_HOME", "MAVEN_HOME",
+        "GRADLE_HOME", "CI", "GITHUB_ACTIONS", "GITHUB_WORKSPACE", "BUILD_NUMBER", "NODE_ENV", "NODE_HOME",
+        "NPM_CONFIG_CACHE", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
+        "PYTHONIOENCODING", "PILOT_SAFE_ENV", "PILOT_TEST_BROWSER_CHANNEL", "PILOT_TEST_CHROMIUM_EXECUTABLE");
 
     private final Set<String> extraAllowed;
 

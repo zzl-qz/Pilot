@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -95,10 +96,10 @@ class RunChangesApiTest {
             .andExpect(jsonPath("$.files[2].status").value("D"))
             .andExpect(jsonPath("$.files[2].diff", containsString("+++ /dev/null\n@@ -1,1 +0,0 @@\n-removed\n")));
 
-        mvc.perform(get("/api/runs/{runId}/changes", runId).param("summary", "true"))
-            .andExpect(status().isOk()).andExpect(jsonPath("$.files.length()").value(3))
-            .andExpect(jsonPath("$.files[0].added").value(1)).andExpect(jsonPath("$.files[0].removed").value(1))
-            .andExpect(jsonPath("$.files[0].diff").value(org.hamcrest.Matchers.nullValue()));
+        mvc.perform(get("/api/runs/{runId}/changes", runId).param("summary", "true")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.files.length()").value(3)).andExpect(jsonPath("$.files[0].added").value(1))
+            .andExpect(jsonPath("$.files[0].removed").value(1))
+            .andExpect(jsonPath("$.files[0].diff").value(Matchers.nullValue()));
     }
 
     @Test

@@ -61,8 +61,7 @@ public final class OsSandbox {
         return wrap(command, workspace, family, network, List.of());
     }
 
-    static Launch wrap(List<String> command, Path workspace, Family family, boolean network,
-        List<Path> extraWritable) {
+    static Launch wrap(List<String> command, Path workspace, Family family, boolean network, List<Path> extraWritable) {
         if (!enabled()) {
             return new Launch(List.copyOf(command), "隔离：未启用（pilot.os.sandbox=false，命令在本机执行）", false);
         }

@@ -73,8 +73,9 @@ class SandboxStoreTest {
         List<SandboxStore.Holder> holders = store.holders(workspace.toString());
 
         assertEquals(2, holders.size(), holders.toString());
-        assertTrue(holders.stream()
-            .anyMatch(holder -> holder.sessionId().equals("ses_2") && holder.taskId().equals("T2")), holders.toString());
+        assertTrue(
+            holders.stream().anyMatch(holder -> holder.sessionId().equals("ses_2") && holder.taskId().equals("T2")),
+            holders.toString());
         assertTrue(holders.stream().noneMatch(holder -> holder.sessionId().equals("ses_3")), holders.toString());
     }
 

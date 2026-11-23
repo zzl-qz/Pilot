@@ -69,8 +69,8 @@ public class CoordinationEventRelay implements SessionActivityListener {
         if (session.isEmpty()) {
             return;
         }
-        emit(type, session.get(), subjectOf(event), detailsOf(event).isEmpty() ? Map.of("runId", runId)
-            : withRunId(detailsOf(event), runId));
+        emit(type, session.get(), subjectOf(event),
+            detailsOf(event).isEmpty() ? Map.of("runId", runId) : withRunId(detailsOf(event), runId));
     }
 
     private void emit(WorkspaceEventType type, Session session, String subject) {
@@ -116,10 +116,10 @@ public class CoordinationEventRelay implements SessionActivityListener {
             case RunCancelled cancelled -> Map.of("reason", cancelled.reason());
             case RunCompleted completed -> Map.of("changedFiles", Integer.toString(completed.changedFiles().size()));
             case SandboxDiffReady diff -> Map.of("sandboxId", diff.sandboxId(), "path", diff.path());
-            case ArbitrationRequired required -> Map.of("arbitrationId", required.arbitrationId(), "kind",
-                required.kind());
-            case ArbitrationResolved resolved -> Map.of("arbitrationId", resolved.arbitrationId(), "choice",
-                resolved.choice());
+            case ArbitrationRequired required ->
+                Map.of("arbitrationId", required.arbitrationId(), "kind", required.kind());
+            case ArbitrationResolved resolved ->
+                Map.of("arbitrationId", resolved.arbitrationId(), "choice", resolved.choice());
             default -> Map.of();
         };
     }

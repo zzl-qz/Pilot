@@ -2,11 +2,12 @@ package com.pilot.server.workspace;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -165,14 +166,13 @@ class SessionFilesApiTest {
 
     @Test
     void previewsOnlySupportedWorkspaceImages() throws Exception {
-        byte[] png = new byte[] {(byte) 0x89, 'P', 'N', 'G'};
+        byte[] png = new byte[] {(byte)0x89, 'P', 'N', 'G'};
         Files.write(workspace.resolve("截图.png"), png);
-        Files.write(workspace.resolve("image.svg"), "<svg/>".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Files.write(workspace.resolve("image.svg"), "<svg/>".getBytes(StandardCharsets.UTF_8));
         String sessionId = createSession();
 
-        mvc.perform(get("/api/sessions/{id}/file/image", sessionId).param("path", "截图.png"))
-            .andExpect(status().isOk()).andExpect(header().string("Content-Type", "image/png"))
-            .andExpect(content().bytes(png));
+        mvc.perform(get("/api/sessions/{id}/file/image", sessionId).param("path", "截图.png")).andExpect(status().isOk())
+            .andExpect(header().string("Content-Type", "image/png")).andExpect(content().bytes(png));
         mvc.perform(get("/api/sessions/{id}/file/image", sessionId).param("path", "image.svg"))
             .andExpect(status().isBadRequest());
         mvc.perform(get("/api/sessions/{id}/file/image", sessionId).param("path", "../outside.png"))

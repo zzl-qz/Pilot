@@ -23,8 +23,7 @@ public class CoordinationProtocolConfiguration {
     @Bean
     public SessionCoordinationService sessionCoordinationService(SessionRepository sessions,
         CoordinationScopeResolver scopes, WorkspaceEventPublisher events, CoordinationSnapshotStore store,
-        SessionPresenceRegistry presence,
-        @Value("${pilot.coordination.claim-ttl-minutes:30}") long claimTtlMinutes,
+        SessionPresenceRegistry presence, @Value("${pilot.coordination.claim-ttl-minutes:30}") long claimTtlMinutes,
         @Value("${pilot.coordination.handoff-ttl-hours:12}") long handoffTtlHours) {
         CoordinationSettings settings = new CoordinationSettings(presence, Clock.systemUTC(),
             Duration.ofMinutes(Math.max(1, claimTtlMinutes)), Duration.ofHours(Math.max(1, handoffTtlHours)));

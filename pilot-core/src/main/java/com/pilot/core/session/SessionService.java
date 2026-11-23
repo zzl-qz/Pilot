@@ -30,7 +30,8 @@ public final class SessionService implements AutoCloseable {
     private final Clock clock;
     private final SessionRepository repository;
     private final SessionEventTransport transport;
-    private final java.util.concurrent.ConcurrentMap<String, Object> locks = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.ConcurrentMap<String, Object> locks =
+        new java.util.concurrent.ConcurrentHashMap<>();
     /** 会话开停通知；默认空实现，装配方按需注册一个实例。 */
     private volatile SessionActivityListener activityListener = SessionActivityListener.NONE;
 
@@ -377,8 +378,9 @@ public final class SessionService implements AutoCloseable {
             var latest = repository.latestEvent(sessionId);
             long highWater = latest.map(SessionRepository.EventPosition::sequence).orElse(0L);
             LiveOutput snapshot = snapshots == null ? null
-                : transport.snapshot(sessionId, latest.map(SessionRepository.EventPosition::runId).orElse(""), highWater,
-                    revision, highWater > 0 && !repository.find(sessionId).orElseThrow().status().terminal());
+                : transport.snapshot(sessionId, latest.map(SessionRepository.EventPosition::runId).orElse(""),
+                    highWater, revision,
+                    highWater > 0 && !repository.find(sessionId).orElseThrow().status().terminal());
             registration = transport.register(sessionId, listener, references, onClosed, Math.max(0, afterSequence),
                 highWater, revision, snapshots, snapshot);
         }

@@ -85,8 +85,8 @@ public class CoordinationStateStore implements CoordinationSnapshotStore {
     private record ClaimPayload(String id, String projectId, String sessionId, String path, String kind,
         String claimedAt, String expiresAt) {
         static ClaimPayload of(CoordinationClaim claim) {
-            return new ClaimPayload(claim.id(), claim.projectId(), claim.sessionId(), claim.path(),
-                claim.kind().name(), claim.claimedAt().toString(), claim.expiresAt().toString());
+            return new ClaimPayload(claim.id(), claim.projectId(), claim.sessionId(), claim.path(), claim.kind().name(),
+                claim.claimedAt().toString(), claim.expiresAt().toString());
         }
 
         CoordinationClaim toClaim() {
@@ -95,12 +95,12 @@ public class CoordinationStateStore implements CoordinationSnapshotStore {
         }
     }
 
-    private record RequestPayload(String id, String projectId, String fromSessionId, String toSessionId,
-        String reason, String taskId, String status, String createdAt, String updatedAt) {
+    private record RequestPayload(String id, String projectId, String fromSessionId, String toSessionId, String reason,
+        String taskId, String status, String createdAt, String updatedAt) {
         static RequestPayload of(CoordinationRequest request) {
-            return new RequestPayload(request.id(), request.projectId(), request.fromSessionId(),
-                request.toSessionId(), request.reason(), request.taskId(), request.status().name(),
-                request.createdAt().toString(), request.updatedAt().toString());
+            return new RequestPayload(request.id(), request.projectId(), request.fromSessionId(), request.toSessionId(),
+                request.reason(), request.taskId(), request.status().name(), request.createdAt().toString(),
+                request.updatedAt().toString());
         }
 
         CoordinationRequest toRequest() {
@@ -109,12 +109,12 @@ public class CoordinationStateStore implements CoordinationSnapshotStore {
         }
     }
 
-    private record HandoffPayload(String id, String projectId, String fromSessionId, String toSessionId,
-        String taskId, String summary, String status, String createdAt, String updatedAt, String expiresAt) {
+    private record HandoffPayload(String id, String projectId, String fromSessionId, String toSessionId, String taskId,
+        String summary, String status, String createdAt, String updatedAt, String expiresAt) {
         static HandoffPayload of(CoordinationHandoff handoff) {
-            return new HandoffPayload(handoff.id(), handoff.projectId(), handoff.fromSessionId(),
-                handoff.toSessionId(), handoff.taskId(), handoff.summary(), handoff.status().name(),
-                handoff.createdAt().toString(), handoff.updatedAt().toString(), handoff.expiresAt().toString());
+            return new HandoffPayload(handoff.id(), handoff.projectId(), handoff.fromSessionId(), handoff.toSessionId(),
+                handoff.taskId(), handoff.summary(), handoff.status().name(), handoff.createdAt().toString(),
+                handoff.updatedAt().toString(), handoff.expiresAt().toString());
         }
 
         CoordinationHandoff toHandoff() {

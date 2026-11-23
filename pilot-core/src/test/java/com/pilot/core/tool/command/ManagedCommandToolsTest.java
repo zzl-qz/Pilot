@@ -375,8 +375,7 @@ class ManagedCommandToolsTest {
     void listsAndTakesOverTasksFromAnotherSessionByOwner() throws Exception {
         try (CommandTaskManager manager = manager()) {
             RunCommandTool ownerRun = new RunCommandTool(new PathValidator(workspace), manager, "session_owner");
-            String launched =
-                ownerRun.execute(Map.of("command", command("wait"), "background", true));
+            String launched = ownerRun.execute(Map.of("command", command("wait"), "background", true));
             CommandTaskManager.Task task = manager.list("session_owner").getFirst();
             assertTrue(launched.contains("任务ID: " + task.taskId()), launched);
 
@@ -398,7 +397,8 @@ class ManagedCommandToolsTest {
             assertTrue(logs.contains("READY"), logs);
 
             // 带上归属会话也能停掉
-            new StopCommandTool(manager, SESSION).execute(Map.of("taskId", task.taskId(), "ownerSessionId", "session_owner"));
+            new StopCommandTool(manager, SESSION)
+                .execute(Map.of("taskId", task.taskId(), "ownerSessionId", "session_owner"));
             await(() -> manager.get("session_owner", task.taskId()).status().equals("CANCELLED"));
             String running = new CommandTasksTool(manager).execute(Map.of("includeFinished", false));
             assertTrue(running.contains("共 0 条") || !running.contains(task.taskId()), running);

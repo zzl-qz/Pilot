@@ -30,10 +30,10 @@ import com.pilot.core.tool.Availability;
 import com.pilot.core.tool.SnapshotSink;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolRegistry;
-import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.WebSearchProperties;
 import com.pilot.server.runtime.RuntimeMirrors;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.tool.WorkspaceToolFactory;
 
 import tools.jackson.databind.ObjectMapper;
@@ -110,8 +110,8 @@ class BrowserRuntimeTest {
      */
     @Test
     void sidecarEnvironmentPassesOnlyTheBrowserPolicyValuesThatWereSet() {
-        BrowserRuntime plain = new BrowserRuntime(browserHome(""), new ObjectMapper(), RuntimeMirrors.defaults(),
-            true, false, true, true, true, "", -1, "", "", "");
+        BrowserRuntime plain = new BrowserRuntime(browserHome(""), new ObjectMapper(), RuntimeMirrors.defaults(), true,
+            false, true, true, true, "", -1, "", "", "");
         Map<String, String> defaults = plain.sidecarEnvironment(data, true);
         assertEquals(Set.of("PLAYWRIGHT_BROWSERS_PATH", "PILOT_BROWSER_HEADLESS"), defaults.keySet());
         assertEquals("true", defaults.get("PILOT_BROWSER_HEADLESS"));

@@ -25,12 +25,13 @@ import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.session.EventSubscription;
 import com.pilot.core.session.SessionService;
-import com.pilot.server.session.lookup.SessionLookup;
 import com.pilot.server.session.events.AsyncEventStream;
 import com.pilot.server.session.events.SessionEventTransport;
+import com.pilot.server.session.lookup.SessionLookup;
+
+import tools.jackson.databind.ObjectMapper;
 
 import lombok.RequiredArgsConstructor;
-import tools.jackson.databind.ObjectMapper;
 
 @RestController
 @RequestMapping("/api/sessions")
@@ -70,14 +71,18 @@ public class SessionHistoryController {
                 : !page.isEmpty() && page.get(0).sequence() > 1;
         int total = (int)Math.min(sessions.eventCount(id), Integer.MAX_VALUE);
         List<?> responseEvents = compactTools ? page.stream().map(event -> {
-            if (!(event.payload() instanceof ToolCompleted completed)) return event;
+            if (!(event.payload() instanceof ToolCompleted completed)) {
+                return event;
+            }
             String summary = completed.resultSummary();
-            if (summary == null || summary.isEmpty()) return event;
+            if (summary == null || summary.isEmpty()) {
+                return event;
+            }
             int end = summary.offsetByCodePoints(0, Math.min(80, summary.codePointCount(0, summary.length())));
             String preview = summary.substring(0, end).lines().findFirst().orElse("");
             var compact = new EventEnvelope(event.sequence(), event.timestamp(), event.type(), event.sessionId(),
-                event.runId(), new ToolCompleted(completed.callId(), preview, completed.latencyMs()),
-                event.version(), event.previewId(), event.previewOffset());
+                event.runId(), new ToolCompleted(completed.callId(), preview, completed.latencyMs()), event.version(),
+                event.previewId(), event.previewOffset());
             return objectMapper.valueToTree(compact).asObject().put("detailAvailable", true);
         }).toList() : page;
         if (revision != sessions.historyRevision(id)) {
@@ -138,15 +143,15 @@ public class SessionHistoryController {
         Runnable finish = () -> finishStream(transport.get(), id, revision, subscription.get());
         var stream = new AsyncEventStream(eventTransport, request, response, streamBytes,
             Duration.ofMillis(streamTimeout), () -> {
-            var current = subscription.get();
-            if (current != null) {
-                current.close();
-            }
-        }, () -> {
-            if (sessions.historyRevision(id) != revision) {
-                finish.run();
-            }
-        });
+                var current = subscription.get();
+                if (current != null) {
+                    current.close();
+                }
+            }, () -> {
+                if (sessions.historyRevision(id) != revision) {
+                    finish.run();
+                }
+            });
         transport.set(stream);
         if (expectedRevision != null && expectedRevision != revision) {
             sendControl(stream, "stream.reset", id, Map.of("historyRevision", revision));
@@ -189,7 +194,9 @@ public class SessionHistoryController {
     }
 
     private void finishStream(AsyncEventStream stream, String id, long revision, EventSubscription subscription) {
-        if (stream == null || stream.isClosed()) return;
+        if (stream == null || stream.isClosed()) {
+            return;
+        }
         try {
             if (sessions.find(id).isPresent() && sessions.historyRevision(id) != revision) {
                 sendControl(stream, "stream.reset", id, Map.of("historyRevision", sessions.historyRevision(id)));

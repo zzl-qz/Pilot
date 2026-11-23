@@ -20,7 +20,7 @@ public final class JdbcRunRepository implements RunRepository {
 
     @Override
     public void started(String runId, String sessionId, Instant at) {
-        store.update( "INSERT OR REPLACE INTO runs (id, session_id, status, started_at, finished_at) "
+        store.update("INSERT OR REPLACE INTO runs (id, session_id, status, started_at, finished_at) "
             + "VALUES (?, ?, 'RUNNING', ?, NULL)", statement -> {
                 statement.setString(1, runId);
                 statement.setString(2, sessionId);
@@ -30,7 +30,7 @@ public final class JdbcRunRepository implements RunRepository {
 
     @Override
     public void finished(String runId, String status, Instant at) {
-        store.update( "UPDATE runs SET status = ?, finished_at = ? WHERE id = ?", statement -> {
+        store.update("UPDATE runs SET status = ?, finished_at = ? WHERE id = ?", statement -> {
             statement.setString(1, status);
             statement.setString(2, at.toString());
             statement.setString(3, runId);
@@ -39,8 +39,8 @@ public final class JdbcRunRepository implements RunRepository {
 
     @Override
     public int deleteBySession(String sessionId) {
-        return store.update( "DELETE FROM runs WHERE session_id = ?",
-            statement -> statement.setString(1, sessionId), "删除运行记录失败: " + sessionId);
+        return store.update("DELETE FROM runs WHERE session_id = ?", statement -> statement.setString(1, sessionId),
+            "删除运行记录失败: " + sessionId);
     }
 
     @Override

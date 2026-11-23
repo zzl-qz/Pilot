@@ -38,7 +38,8 @@ public final class JdbcSessionRepository implements SessionRepository {
 
     @Override
     public long historyRevision(String sessionId) {
-        return store.queryOne("SELECT history_revision FROM sessions WHERE id = ?",
+        return store
+            .queryOne("SELECT history_revision FROM sessions WHERE id = ?",
                 statement -> statement.setString(1, sessionId), rows -> rows.getLong(1), "读取历史版本失败")
             .orElseThrow(() -> new NoSuchSessionException(sessionId));
     }
@@ -103,8 +104,8 @@ public final class JdbcSessionRepository implements SessionRepository {
     public List<Session> listByProject(String projectId) {
         if (projectId == null) {
             // 未分组的历史会话：project_id 为空
-            return store.query(
-                "SELECT " + COLUMNS + " FROM sessions WHERE project_id IS NULL" + ACTIVITY_ORDER, statement -> {
+            return store.query("SELECT " + COLUMNS + " FROM sessions WHERE project_id IS NULL" + ACTIVITY_ORDER,
+                statement -> {
                 }, JdbcSessionRepository::map, "读取未分组会话失败");
         }
         return store.query("SELECT " + COLUMNS + " FROM sessions WHERE project_id = ?" + ACTIVITY_ORDER,
@@ -137,11 +138,10 @@ public final class JdbcSessionRepository implements SessionRepository {
 
     @Override
     public boolean autoRename(String sessionId, String title) {
-        return store.update("UPDATE sessions SET title = ? WHERE id = ? AND title_manual = 0",
-            statement -> {
-                statement.setString(1, title);
-                statement.setString(2, sessionId);
-            }, "自动命名失败: " + sessionId) > 0;
+        return store.update("UPDATE sessions SET title = ? WHERE id = ? AND title_manual = 0", statement -> {
+            statement.setString(1, title);
+            statement.setString(2, sessionId);
+        }, "自动命名失败: " + sessionId) > 0;
     }
 
     @Override
@@ -190,8 +190,8 @@ public final class JdbcSessionRepository implements SessionRepository {
     @Override
     public long eventCount(String sessionId) {
         return store.query("SELECT COUNT(*) FROM events WHERE session_id = ?",
-                statement -> statement.setString(1, sessionId), rows -> rows.getLong(1), "统计事件失败: " + sessionId)
-            .stream().findFirst().orElse(0L);
+            statement -> statement.setString(1, sessionId), rows -> rows.getLong(1), "统计事件失败: " + sessionId).stream()
+            .findFirst().orElse(0L);
     }
 
     /**
@@ -244,8 +244,7 @@ public final class JdbcSessionRepository implements SessionRepository {
 
     @Override
     public Optional<EventPosition> latestEvent(String sessionId) {
-        return store.queryOne(
-            "SELECT sequence, run_id FROM events WHERE session_id = ? ORDER BY sequence DESC LIMIT 1",
+        return store.queryOne("SELECT sequence, run_id FROM events WHERE session_id = ? ORDER BY sequence DESC LIMIT 1",
             statement -> statement.setString(1, sessionId),
             rows -> new EventPosition(rows.getLong(1), rows.getString(2)), "读取会话事件边界失败: " + sessionId);
     }

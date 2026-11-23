@@ -145,18 +145,19 @@ class SessionEventHttpTest {
         sessions.publish(id, run.runId(), new ToolCompleted("call-1", output, 12));
         try (HttpClient client = HttpClient.newHttpClient()) {
             String base = "http://127.0.0.1:" + port + "/api/sessions/" + id;
-            var compact = client.send(HttpRequest.newBuilder(URI.create(base + "/history?compactTools=true&limit=20"))
-                .build(), HttpResponse.BodyHandlers.ofString());
+            var compact =
+                client.send(HttpRequest.newBuilder(URI.create(base + "/history?compactTools=true&limit=20")).build(),
+                    HttpResponse.BodyHandlers.ofString());
             assertEquals(200, compact.statusCode());
             assertTrue(compact.body().contains("\"detailAvailable\":true"));
             assertFalse(compact.body().contains("正文".repeat(100)));
 
-            var full = client.send(HttpRequest.newBuilder(URI.create(base + "/history?limit=20"))
-                .build(), HttpResponse.BodyHandlers.ofString());
+            var full = client.send(HttpRequest.newBuilder(URI.create(base + "/history?limit=20")).build(),
+                HttpResponse.BodyHandlers.ofString());
             assertTrue(full.body().contains("正文".repeat(100)), "默认历史接口保留兼容性");
 
-            var detail = client.send(HttpRequest.newBuilder(URI.create(base + "/events/2?revision=0"))
-                .build(), HttpResponse.BodyHandlers.ofString());
+            var detail = client.send(HttpRequest.newBuilder(URI.create(base + "/events/2?revision=0")).build(),
+                HttpResponse.BodyHandlers.ofString());
             assertEquals(200, detail.statusCode());
             assertTrue(detail.body().contains("正文".repeat(100)));
         } finally {

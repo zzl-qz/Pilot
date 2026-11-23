@@ -44,8 +44,8 @@ public final class JdbcProjectRepository implements ProjectRepository {
         if (id == null) {
             return Optional.empty();
         }
-        return store.queryOne(
-                "SELECT id, name, created_at, updated_at, base_commit, constraints FROM projects WHERE id = ?",
+        return store
+            .queryOne("SELECT id, name, created_at, updated_at, base_commit, constraints FROM projects WHERE id = ?",
                 statement -> statement.setString(1, id), JdbcProjectRepository::mapHead, "读取项目失败: " + id)
             .map(project -> new Project(project.id(), project.name(), foldersOf(id), project.baseCommit(),
                 project.createdAt(), project.updatedAt(), project.constraints()));
@@ -54,18 +54,17 @@ public final class JdbcProjectRepository implements ProjectRepository {
     @Override
     public List<Project> list() {
         String updatedAt = SqliteStore.normalizedInstantSql("updated_at");
-        List<Project> heads = store.query(
-            "SELECT id, name, created_at, updated_at, base_commit, constraints FROM projects ORDER BY " + updatedAt
-                + " DESC",
-            statement -> {
-            }, JdbcProjectRepository::mapHead, "读取项目列表失败");
+        List<Project> heads =
+            store.query("SELECT id, name, created_at, updated_at, base_commit, constraints FROM projects ORDER BY "
+                + updatedAt + " DESC", statement -> {
+                }, JdbcProjectRepository::mapHead, "读取项目列表失败");
         if (heads.isEmpty()) {
             return List.of();
         }
         // 一次读完全部文件夹再分组，避免每个项目各查一次（N+1）
         Map<String, List<String>> folders = new HashMap<>();
-        for (Map.Entry<String, String> row : store.query(
-            "SELECT project_id, path FROM project_folders ORDER BY project_id, position", statement -> {
+        for (Map.Entry<String, String> row : store
+            .query("SELECT project_id, path FROM project_folders ORDER BY project_id, position", statement -> {
             }, rows -> Map.entry(rows.getString("project_id"), rows.getString("path")), "读取项目文件夹失败")) {
             folders.computeIfAbsent(row.getKey(), key -> new ArrayList<>()).add(row.getValue());
         }
@@ -103,12 +102,11 @@ public final class JdbcProjectRepository implements ProjectRepository {
     @Override
     public boolean updateConstraints(String id, String constraints, Instant now) {
         Project normalized = new Project(id, "placeholder", List.of(), now, now).withConstraints(constraints, now);
-        return store.update("UPDATE projects SET constraints = ?, updated_at = ? WHERE id = ?",
-            statement -> {
-                statement.setString(1, normalized.constraints());
-                statement.setString(2, now.toString());
-                statement.setString(3, id);
-            }, "更新项目约束失败: " + id) > 0;
+        return store.update("UPDATE projects SET constraints = ?, updated_at = ? WHERE id = ?", statement -> {
+            statement.setString(1, normalized.constraints());
+            statement.setString(2, now.toString());
+            statement.setString(3, id);
+        }, "更新项目约束失败: " + id) > 0;
     }
 
     @Override

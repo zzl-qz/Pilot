@@ -141,7 +141,8 @@ public final class AsyncEventStream implements AutoCloseable {
             if (closed.get() || ending) {
                 return false;
             }
-            overflow = pendingBytes + data.length > byteLimit || queue.size() >= 4096 || !transport.reserve(data.length);
+            overflow =
+                pendingBytes + data.length > byteLimit || queue.size() >= 4096 || !transport.reserve(data.length);
             if (!overflow) {
                 queue.add(new Frame(data));
                 pendingBytes += data.length;

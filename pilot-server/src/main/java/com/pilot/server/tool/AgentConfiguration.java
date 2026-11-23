@@ -6,8 +6,8 @@ import org.springframework.context.annotation.Configuration;
 
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.command.CommandTaskManager;
-import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.config.WebSearchProperties;
+import com.pilot.server.store.PilotDataDir;
 
 import tools.jackson.databind.ObjectMapper;
 

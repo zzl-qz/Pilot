@@ -33,10 +33,10 @@ public final class CommandTasksTool implements Tool.ParallelReadOnly {
 
     @Override
     public Map<String, Object> parameters() {
-        return ToolSchemas.object(Map.of(
-            "includeFinished", ToolSchemas.bool("是否连已结束的任务一起列出，默认 true"),
-            "limit", Map.of("type", "integer", "minimum", 1, "maximum", MAX_LIMIT,
-                "description", "最多列出多少条，默认 " + DEFAULT_LIMIT + "，最大 " + MAX_LIMIT)), List.of());
+        return ToolSchemas.object(
+            Map.of("includeFinished", ToolSchemas.bool("是否连已结束的任务一起列出，默认 true"), "limit", Map.of("type", "integer",
+                "minimum", 1, "maximum", MAX_LIMIT, "description", "最多列出多少条，默认 " + DEFAULT_LIMIT + "，最大 " + MAX_LIMIT)),
+            List.of());
     }
 
     @Override
@@ -72,8 +72,9 @@ public final class CommandTasksTool implements Tool.ParallelReadOnly {
             return DEFAULT_LIMIT;
         }
         try {
-            long parsed = value instanceof Number number ? number.longValue() : Long.parseLong(value.toString().strip());
-            return (int) Math.min(MAX_LIMIT, Math.max(1, parsed));
+            long parsed =
+                value instanceof Number number ? number.longValue() : Long.parseLong(value.toString().strip());
+            return (int)Math.min(MAX_LIMIT, Math.max(1, parsed));
         } catch (NumberFormatException e) {
             return DEFAULT_LIMIT;
         }

@@ -81,8 +81,8 @@ public record WorkspaceCoordinationEvent(long sequence, Instant timestamp, Works
             return this;
         }
         String shortSubject = truncate(subject, Math.max(0, maxBytes / 8));
-        WorkspaceCoordinationEvent withoutDetails = new WorkspaceCoordinationEvent(sequence, timestamp, type,
-            projectId, sessionId, directory, shortSubject, Map.of());
+        WorkspaceCoordinationEvent withoutDetails = new WorkspaceCoordinationEvent(sequence, timestamp, type, projectId,
+            sessionId, directory, shortSubject, Map.of());
         if (withoutDetails.estimatedBytes() <= maxBytes) {
             return withoutDetails;
         }

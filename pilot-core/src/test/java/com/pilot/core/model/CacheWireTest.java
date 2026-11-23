@@ -20,9 +20,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import com.pilot.core.WindowsJdkLoopbackSensitive;
 
+import com.pilot.core.WindowsJdkLoopbackSensitive;
 import com.pilot.core.message.Attachment;
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
@@ -239,9 +240,9 @@ class CacheWireTest {
         try {
             URI endpoint = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
             var raw = client(endpoint);
-            List<Message> history = List.of(Message.system("rules"), Message.user("第一问"),
-                Message.assistant("先看 A.java", List.of()), Message.user("第二问"),
-                Message.assistant("", List.of(new ToolCall("c2", "read_file", Map.of())), ""));
+            List<Message> history =
+                List.of(Message.system("rules"), Message.user("第一问"), Message.assistant("先看 A.java", List.of()),
+                    Message.user("第二问"), Message.assistant("", List.of(new ToolCall("c2", "read_file", Map.of())), ""));
 
             assertEquals("ok", raw.chat(history, List.of()).content());
 
@@ -266,8 +267,8 @@ class CacheWireTest {
             URI endpoint = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
             var raw = client(endpoint);
 
-            ModelClientException failure = org.junit.jupiter.api.Assertions
-                .assertThrows(ModelClientException.class, () -> raw.chat(thinkingHistory(), List.of()));
+            ModelClientException failure =
+                Assertions.assertThrows(ModelClientException.class, () -> raw.chat(thinkingHistory(), List.of()));
 
             assertEquals(ModelFailureKind.PERMANENT, failure.kind());
             assertTrue(failure.getMessage().contains("回传历史思考内容"), "失败消息要说明端点要求回传思考：" + failure.getMessage());
@@ -475,8 +476,7 @@ class CacheWireTest {
                 }
             }
             boolean accepted = acceptsCompleteReplay && complete;
-            String payload = accepted
-                ? "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":\"ok\"}}]}"
+            String payload = accepted ? "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":\"ok\"}}]}"
                 : "{\"error\":{\"message\":\"The `reasoning_content` in the thinking mode must be passed back to the API.\"}}";
             byte[] bytes = payload.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "application/json");

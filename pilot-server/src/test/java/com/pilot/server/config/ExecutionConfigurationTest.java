@@ -74,7 +74,8 @@ class ExecutionConfigurationTest {
         assertEquals(MultiAgentProperties.CROSS_SESSION_WARN, multi("bogus").crossSessionConflict());
         assertEquals(MultiAgentProperties.CROSS_SESSION_BLOCK, multi(" BLOCK ").crossSessionConflict());
         assertEquals(MultiAgentProperties.CROSS_SESSION_OFF, multi("off").crossSessionConflict());
-        assertEquals(MultiAgentProperties.DEFAULT_CROSS_SESSION_WINDOW_MINUTES, multi(null).crossSessionWindowMinutes());
+        assertEquals(MultiAgentProperties.DEFAULT_CROSS_SESSION_WINDOW_MINUTES,
+            multi(null).crossSessionWindowMinutes());
     }
 
     private static MultiAgentProperties multi(String crossSession) {

@@ -22,8 +22,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import com.pilot.server.store.PilotDataDir;
-import com.pilot.server.store.StorageHealthService;
 import com.pilot.server.store.SqliteStore;
+import com.pilot.server.store.StorageHealthService;
 
 import tools.jackson.databind.ObjectMapper;
 

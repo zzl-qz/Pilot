@@ -11,6 +11,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.UUID;
@@ -123,13 +125,15 @@ class CommandTaskApiTest {
                 .andExpect(status().isNotFound());
             mvc.perform(post("/api/sessions/{id}/commands/{task}/input", owner, task.taskId()))
                 .andExpect(status().isBadRequest());
-            mvc.perform(post("/api/sessions/{id}/commands/{task}/input", owner, task.taskId())
-                .param("text", "x".repeat(8193))).andExpect(status().isBadRequest());
+            mvc.perform(
+                post("/api/sessions/{id}/commands/{task}/input", owner, task.taskId()).param("text", "x".repeat(8193)))
+                .andExpect(status().isBadRequest());
             mvc.perform(post("/api/sessions/{id}/commands/{task}/input", owner, task.taskId()).param("text", "hi\n"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("RUNNING"));
             await().atMost(Duration.ofSeconds(8))
                 .until(() -> commands.logs(owner, task.taskId(), 0, 1024).text().contains("got:hi"));
-            mvc.perform(post("/api/sessions/{id}/commands/{task}/input", owner, task.taskId()).param("endInput", "true"))
+            mvc.perform(
+                post("/api/sessions/{id}/commands/{task}/input", owner, task.taskId()).param("endInput", "true"))
                 .andExpect(status().isOk());
             await().atMost(Duration.ofSeconds(8))
                 .until(() -> "COMPLETED".equals(commands.get(owner, task.taskId()).status()));
@@ -165,7 +169,7 @@ class CommandTaskApiTest {
             System.out.print("ready 中文😀");
             System.out.flush();
             if ("listen".equals(args[0])) {
-                var reader = new java.io.BufferedReader(new java.io.InputStreamReader(System.in));
+                var reader = new BufferedReader(new InputStreamReader(System.in));
                 String line;
                 while ((line = reader.readLine()) != null) {
                     System.out.print("got:" + line + "\n");

@@ -10,8 +10,8 @@ package com.pilot.core.coordination;
  * @param queueItems      每个订阅的待投递队列长度，满了即判定跟不上
  * @param replayPageSize  回放时每次从历史取多少条
  */
-public record WorkspaceEventLimits(int maxEvents, long maxBytes, int maxEventBytes, int maxSubscribers,
-    int queueItems, int replayPageSize) {
+public record WorkspaceEventLimits(int maxEvents, long maxBytes, int maxEventBytes, int maxSubscribers, int queueItems,
+    int replayPageSize) {
 
     public WorkspaceEventLimits {
         if (maxEvents < 1 || maxBytes < 1 || maxEventBytes < 128 || maxSubscribers < 1 || queueItems < 1

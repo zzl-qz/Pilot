@@ -1729,8 +1729,8 @@ class AgentLoopTest {
 
         assertNull(result.failureCode());
         Message priorAnswer = client.requests.get(1).stream()
-            .filter(message -> "assistant".equals(message.role()) && "候选结果".equals(message.content()))
-            .findFirst().orElseThrow();
+            .filter(message -> "assistant".equals(message.role()) && "候选结果".equals(message.content())).findFirst()
+            .orElseThrow();
         assertEquals("本轮思考", priorAnswer.reasoningContent());
     }
 

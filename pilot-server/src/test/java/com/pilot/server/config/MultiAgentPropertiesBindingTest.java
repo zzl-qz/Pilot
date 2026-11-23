@@ -9,8 +9,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Configuration;
 
 class MultiAgentPropertiesBindingTest {
-    private final ApplicationContextRunner runner =
-        new ApplicationContextRunner().withUserConfiguration(Binding.class);
+    private final ApplicationContextRunner runner = new ApplicationContextRunner().withUserConfiguration(Binding.class);
 
     @Test
     void bindsCanonicalRecordConstructorAndCrossSessionSettings() {

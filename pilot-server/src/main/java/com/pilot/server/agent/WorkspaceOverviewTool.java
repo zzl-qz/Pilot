@@ -34,8 +34,7 @@ public final class WorkspaceOverviewTool implements Tool {
 
     @Override
     public String description() {
-        return "汇总当前工作区里所有会话在跑什么、卡在哪：谁占着运行、哪些文件还没被接受、谁在等人工仲裁、哪些后台命令还在跑。"
-            + "只读，不返回文件正文，不改任何文件；只给建议，由用户决定怎么处理。";
+        return "汇总当前工作区里所有会话在跑什么、卡在哪：谁占着运行、哪些文件还没被接受、谁在等人工仲裁、哪些后台命令还在跑。" + "只读，不返回文件正文，不改任何文件；只给建议，由用户决定怎么处理。";
     }
 
     @Override
@@ -62,8 +61,7 @@ public final class WorkspaceOverviewTool implements Tool {
     private String render(WorkspaceOverviewService.Overview overview) {
         StringBuilder text = new StringBuilder();
         text.append("工作区：").append(overview.workspace()).append('\n');
-        text.append("生成时刻：")
-            .append(TIME.format(overview.generatedAt().atZone(ZoneId.systemDefault()))).append('\n');
+        text.append("生成时刻：").append(TIME.format(overview.generatedAt().atZone(ZoneId.systemDefault()))).append('\n');
         text.append("\n## 会话\n");
         if (overview.sessions().isEmpty()) {
             text.append("（这个工作区里还没有会话）\n");
@@ -72,18 +70,23 @@ public final class WorkspaceOverviewTool implements Tool {
             text.append("\n### ").append(session.title()).append("（").append(session.sessionId()).append("）\n");
             text.append("- 运行中：").append(session.running() ? "是" : "否").append('\n');
             text.append("- 未接受的文件：").append(joinOrNone(session.pendingFiles())).append('\n');
-            text.append("- 后台命令：").append(session.runningCommands().isEmpty() ? "无"
-                : session.runningCommands().stream().map(command -> command.taskId() + " → " + command.command())
-                    .collect(Collectors.joining("、"))).append('\n');
-            text.append("- 未解决仲裁：").append(session.arbitrations().isEmpty() ? "无"
-                : session.arbitrations().stream()
-                    .map(arbitration -> arbitration.kind() + "（" + arbitration.arbitrationId() + "，任务 "
-                        + arbitration.taskId() + "）")
-                    .collect(Collectors.joining("、"))).append('\n');
+            text.append("- 后台命令：")
+                .append(session.runningCommands().isEmpty() ? "无" : session.runningCommands().stream()
+                    .map(command -> command.taskId() + " → " + command.command()).collect(Collectors.joining("、")))
+                .append('\n');
+            text.append("- 未解决仲裁：")
+                .append(session.arbitrations().isEmpty() ? "无"
+                    : session
+                        .arbitrations().stream().map(arbitration -> arbitration.kind() + "（"
+                            + arbitration.arbitrationId() + "，任务 " + arbitration.taskId() + "）")
+                        .collect(Collectors.joining("、")))
+                .append('\n');
             if (!session.tasks().isEmpty()) {
-                text.append("- 任务：").append(session.tasks().stream()
-                    .map(task -> task.taskId() + " " + task.title() + " [" + task.status() + "]")
-                    .collect(Collectors.joining("、"))).append('\n');
+                text.append("- 任务：")
+                    .append(session.tasks().stream()
+                        .map(task -> task.taskId() + " " + task.title() + " [" + task.status() + "]")
+                        .collect(Collectors.joining("、")))
+                    .append('\n');
             }
         }
         text.append("\n## 多个会话同时改的文件\n");

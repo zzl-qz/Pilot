@@ -93,9 +93,9 @@ public final class SessionPreviewAggregator {
                 current = new Pending(input, sequence);
                 pending.put(input.sessionId(), current);
                 Pending expected = current;
-                current.timer = scheduler.schedule(() -> timerDispatch.accept(
-                    () -> finishIfCurrent(input.sessionId(), expected, output)), limits.mergeMillis(),
-                    TimeUnit.MILLISECONDS);
+                current.timer = scheduler.schedule(
+                    () -> timerDispatch.accept(() -> finishIfCurrent(input.sessionId(), expected, output)),
+                    limits.mergeMillis(), TimeUnit.MILLISECONDS);
             }
             current.text.appendCodePoint(point);
             current.bytes += size;

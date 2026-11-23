@@ -21,8 +21,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
-import com.pilot.core.WindowsJdkLoopbackSensitive;
 
+import com.pilot.core.WindowsJdkLoopbackSensitive;
 import com.pilot.core.http.BoundedHttp;
 import com.pilot.core.message.Attachment;
 import com.pilot.core.message.Message;

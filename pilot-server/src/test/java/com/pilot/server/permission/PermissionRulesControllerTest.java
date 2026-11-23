@@ -29,9 +29,9 @@ class PermissionRulesControllerTest {
     void updateWritesRulesAndReturnsThemOnGet() throws IOException {
         PermissionRulesController controller = controller();
 
-        PermissionRulesController.RulesResponse saved = controller.update(new PermissionRulesController.RulesRequest(
-            workspace.toString(), List.of("run_command(mvn test:*)"), List.of("run_command(rm -rf:*)"),
-            List.of("edit_file(docs/*.md)")));
+        PermissionRulesController.RulesResponse saved =
+            controller.update(new PermissionRulesController.RulesRequest(workspace.toString(),
+                List.of("run_command(mvn test:*)"), List.of("run_command(rm -rf:*)"), List.of("edit_file(docs/*.md)")));
 
         assertEquals(List.of("run_command(mvn test:*)"), saved.allow());
         assertEquals(List.of("run_command(rm -rf:*)"), saved.deny());
@@ -61,12 +61,11 @@ class PermissionRulesControllerTest {
         controller.update(new PermissionRulesController.RulesRequest(workspace.toString(), List.of(),
             List.of("read_file(.env)"), List.of()));
 
-        PermissionRulesController.RulesResponse cleared = controller.update(new PermissionRulesController.RulesRequest(
-            workspace.toString(), List.of(), List.of(), List.of()));
+        PermissionRulesController.RulesResponse cleared = controller
+            .update(new PermissionRulesController.RulesRequest(workspace.toString(), List.of(), List.of(), List.of()));
 
         assertTrue(cleared.deny().isEmpty());
-        assertFalse(Files.readString(Path.of(cleared.file())).contains("\"permissions\""),
-            "清空后不应留下空 permissions 段");
+        assertFalse(Files.readString(Path.of(cleared.file())).contains("\"permissions\""), "清空后不应留下空 permissions 段");
     }
 
     @Test

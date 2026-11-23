@@ -120,13 +120,12 @@ class CoordinationEventRelayTest {
 
     @Test
     void sessionWithoutProjectStillPublishesDirectoryScopedEvent(@TempDir Path root) {
-        Session session = repository.create("ses_personal", "个人会话", root.toString(), Instant.now(), null, false,
-            null);
+        Session session = repository.create("ses_personal", "个人会话", root.toString(), Instant.now(), null, false, null);
 
         relay.started(session);
 
-        WorkspaceCoordinationEvent event = bus.replay(0, ProjectCoordinationScope.of(null, List.of(root), true), 10)
-            .getFirst();
+        WorkspaceCoordinationEvent event =
+            bus.replay(0, ProjectCoordinationScope.of(null, List.of(root), true), 10).getFirst();
         assertNull(event.projectId());
         assertEquals("session.started", event.wireType());
     }

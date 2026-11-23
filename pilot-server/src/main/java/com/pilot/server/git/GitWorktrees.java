@@ -22,8 +22,8 @@ import org.springframework.stereotype.Component;
 
 import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.core.util.Sha256;
-import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.run.RunRegistry;
+import com.pilot.server.store.PilotDataDir;
 
 /**
  * 按 Codex / Cursor 的方式开一个平行检出：从选定分支的当前提交建立 detached worktree，

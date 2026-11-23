@@ -24,8 +24,7 @@ public record WorkspaceEventDraft(WorkspaceEventType type, String projectId, Str
         details = details == null || details.isEmpty() ? Map.of() : Map.copyOf(details);
     }
 
-    public static WorkspaceEventDraft of(WorkspaceEventType type, String sessionId, String directory,
-        String subject) {
+    public static WorkspaceEventDraft of(WorkspaceEventType type, String sessionId, String directory, String subject) {
         return new WorkspaceEventDraft(type, null, sessionId, directory, subject, Map.of());
     }
 

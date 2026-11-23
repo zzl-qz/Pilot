@@ -182,8 +182,8 @@ class SessionEventLoadTest {
                     return new Result(first, replay, (System.nanoTime() - began) / 1e6, count, bytes);
                 }
             }
-            throw new AssertionError("回放提前断开，已收到 " + count + "，core=" + sessions.streamMetrics() + "，transport="
-                + eventTransport.metrics());
+            throw new AssertionError(
+                "回放提前断开，已收到 " + count + "，core=" + sessions.streamMetrics() + "，transport=" + eventTransport.metrics());
         } finally {
             connection.disconnect();
         }

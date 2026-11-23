@@ -233,8 +233,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             return false;
         }
         ReasoningReplay next = attempted == ReasoningReplay.STORED || !hasEarlierReasoning(messages)
-            ? ReasoningReplay.PATCHED
-            : ReasoningReplay.STORED;
+            ? ReasoningReplay.PATCHED : ReasoningReplay.STORED;
         reasoningReplay = next;
         return true;
     }
@@ -308,10 +307,9 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
         ReasoningReplay replay = reasoningReplay;
-        HttpRequest request = ModelHttp
-            .jsonPost(endpoint, requestTimeout, objectMapper,
-                requestBody(messages, tools, false, replay))
-            .header("Authorization", "Bearer " + apiKey).build();
+        HttpRequest request =
+            ModelHttp.jsonPost(endpoint, requestTimeout, objectMapper, requestBody(messages, tools, false, replay))
+                .header("Authorization", "Bearer " + apiKey).build();
 
         long startedAt = System.nanoTime();
         BoundedHttp.TextResponse response;
@@ -333,8 +331,8 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             }
             if (requiresEarlierReasoningReplay(response.statusCode(), errorBody)) {
                 throw new ModelClientException(ModelFailureKind.PERMANENT,
-                    "该端点要求回传历史思考内容（reasoning_content），已回放并补齐可用历史仍被拒绝（"
-                        + elapsedMs(startedAt) + " ms, model=" + model + "）：" + errorBody);
+                    "该端点要求回传历史思考内容（reasoning_content），已回放并补齐可用历史仍被拒绝（" + elapsedMs(startedAt) + " ms, model=" + model
+                        + "）：" + errorBody);
             }
             if ((response.statusCode() == 404 || response.statusCode() == 405)
                 && NativeToolRejectedException.rejected(response.statusCode(), errorBody)) {
@@ -372,10 +370,9 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> textDelta,
         Consumer<String> reasoningDelta) {
         ReasoningReplay replay = reasoningReplay;
-        HttpRequest request = ModelHttp
-            .jsonPost(endpoint, requestTimeout, objectMapper,
-                requestBody(messages, tools, true, replay))
-            .header("Authorization", "Bearer " + apiKey).header("Accept", "text/event-stream").build();
+        HttpRequest request =
+            ModelHttp.jsonPost(endpoint, requestTimeout, objectMapper, requestBody(messages, tools, true, replay))
+                .header("Authorization", "Bearer " + apiKey).header("Accept", "text/event-stream").build();
 
         long startedAt = System.nanoTime();
         try (var response = BoundedHttp.open(httpClient, request, idleTimeout, BoundedHttp.STREAM_BYTES)) {
@@ -389,8 +386,8 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                     }
                     if (requiresEarlierReasoningReplay(response.statusCode(), errorBody)) {
                         throw new ModelClientException(ModelFailureKind.PERMANENT,
-                            "该端点要求回传历史思考内容（reasoning_content），已回放并补齐可用历史仍被拒绝（" + elapsedMs(
-                                startedAt) + " ms, model=" + model + "）：" + errorBody);
+                            "该端点要求回传历史思考内容（reasoning_content），已回放并补齐可用历史仍被拒绝（" + elapsedMs(startedAt) + " ms, model="
+                                + model + "）：" + errorBody);
                     }
                     if ((response.statusCode() == 404 || response.statusCode() == 405)
                         && NativeToolRejectedException.rejected(response.statusCode(), errorBody)) {

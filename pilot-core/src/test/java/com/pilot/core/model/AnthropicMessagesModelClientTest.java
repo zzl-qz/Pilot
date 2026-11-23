@@ -16,8 +16,8 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
-import com.pilot.core.WindowsJdkLoopbackSensitive;
 
+import com.pilot.core.WindowsJdkLoopbackSensitive;
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
 import com.sun.net.httpserver.HttpServer;

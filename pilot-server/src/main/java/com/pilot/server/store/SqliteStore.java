@@ -426,8 +426,7 @@ public final class SqliteStore {
                     }
                 }
                 for (String session : changed) {
-                    exec(connection,
-                        "UPDATE sessions SET history_revision = history_revision + 1 WHERE id = ?",
+                    exec(connection, "UPDATE sessions SET history_revision = history_revision + 1 WHERE id = ?",
                         update -> update.setString(1, session));
                 }
                 return removed;

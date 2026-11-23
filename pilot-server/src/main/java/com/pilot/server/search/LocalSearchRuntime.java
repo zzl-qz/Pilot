@@ -20,9 +20,9 @@ import org.springframework.stereotype.Component;
 import com.pilot.core.runtime.ExecutablePath;
 import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
 import com.pilot.core.util.HostOs;
-import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.config.WebSearchProperties;
 import com.pilot.server.runtime.SourceLayout;
+import com.pilot.server.store.PilotDataDir;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

@@ -11,8 +11,8 @@ import java.util.Objects;
  * @param projectId 双方共同的项目；个人会话为 {@code null}
  * @param taskId    关联任务标识，可为空串
  */
-public record CoordinationRequest(String id, String projectId, String fromSessionId, String toSessionId,
-    String reason, String taskId, CoordinationRequestStatus status, Instant createdAt, Instant updatedAt) {
+public record CoordinationRequest(String id, String projectId, String fromSessionId, String toSessionId, String reason,
+    String taskId, CoordinationRequestStatus status, Instant createdAt, Instant updatedAt) {
 
     public CoordinationRequest {
         id = requireText(id, "id");

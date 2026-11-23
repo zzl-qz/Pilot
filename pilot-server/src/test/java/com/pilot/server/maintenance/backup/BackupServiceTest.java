@@ -30,12 +30,12 @@ import com.pilot.core.multi.DiffSandbox;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.attachment.AttachmentLimits;
 import com.pilot.server.attachment.AttachmentService;
-import com.pilot.server.store.PilotDataDir;
-import com.pilot.server.store.StorageHealthService;
 import com.pilot.server.store.EventCodec;
 import com.pilot.server.store.JdbcConversationRepository;
 import com.pilot.server.store.JdbcSessionRepository;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.store.SqliteStore;
+import com.pilot.server.store.StorageHealthService;
 
 import tools.jackson.databind.json.JsonMapper;
 
@@ -128,9 +128,8 @@ class BackupServiceTest {
         Mockito.when(provider.getIfAvailable()).thenReturn(store);
         AttachmentService attachments = Mockito.mock(AttachmentService.class);
         Mockito.when(attachments.root()).thenReturn(nested);
-        BackupService backups =
-            new BackupService(provider, new PilotDataDir(root.toString()), JsonMapper.builder().build(), attachments,
-                storageHealth);
+        BackupService backups = new BackupService(provider, new PilotDataDir(root.toString()),
+            JsonMapper.builder().build(), attachments, storageHealth);
 
         BackupService.BackupReport report = backups.backup();
 

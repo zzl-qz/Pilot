@@ -120,7 +120,8 @@ public class MessageLibrary {
         require(session);
         String fingerprint = UUID.nameUUIDFromBytes(sequences.stream().filter(Objects::nonNull).distinct().sorted()
             .toList().toString().getBytes(StandardCharsets.UTF_8)).toString();
-        boolean imported = store == null ? imports.contains(session + fingerprint) : store.queryOne("SELECT fingerprint FROM bookmark_imports WHERE session_id=? AND fingerprint=?", q -> {
+        boolean imported = store == null ? imports.contains(session + fingerprint)
+            : store.queryOne("SELECT fingerprint FROM bookmark_imports WHERE session_id=? AND fingerprint=?", q -> {
                 q.setString(1, session);
                 q.setString(2, fingerprint);
             }, r -> r.getString(1), "读取书签迁移状态失败").isPresent();
@@ -144,11 +145,10 @@ public class MessageLibrary {
         if (store == null) {
             imports.add(session + fingerprint);
         } else {
-            store.update("INSERT OR IGNORE INTO bookmark_imports(session_id,fingerprint) VALUES(?,?)",
-                q -> {
-                    q.setString(1, session);
-                    q.setString(2, fingerprint);
-                }, "保存书签迁移状态失败");
+            store.update("INSERT OR IGNORE INTO bookmark_imports(session_id,fingerprint) VALUES(?,?)", q -> {
+                q.setString(1, session);
+                q.setString(2, fingerprint);
+            }, "保存书签迁移状态失败");
         }
         return new ImportResult(bookmarks(session), List.copyOf(skipped));
     }

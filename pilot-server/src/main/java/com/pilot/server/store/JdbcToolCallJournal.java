@@ -15,7 +15,6 @@ import com.pilot.core.message.ToolCall;
 import com.pilot.core.multi.DiffSandbox;
 import com.pilot.core.tool.ToolCallJournal;
 import com.pilot.core.util.Sha256;
-import com.pilot.server.store.StorageHealthService;
 
 import tools.jackson.databind.ObjectMapper;
 

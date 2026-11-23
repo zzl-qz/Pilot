@@ -16,7 +16,6 @@ import org.junit.jupiter.api.io.TempDir;
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.tool.ReadToolOutputTool;
 import com.pilot.core.tool.ToolCallJournal;
-import com.pilot.server.store.StorageHealthService;
 
 import tools.jackson.databind.json.JsonMapper;
 

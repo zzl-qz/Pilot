@@ -19,7 +19,7 @@ public final class JdbcPlanRepository implements PlanRepository {
 
     @Override
     public List<PlanItem> load(String sessionId) {
-        return store.query( "SELECT step, status, note FROM plan_items WHERE session_id = ? ORDER BY ord",
+        return store.query("SELECT step, status, note FROM plan_items WHERE session_id = ? ORDER BY ord",
             statement -> statement.setString(1, sessionId),
             rows -> new PlanItem(rows.getString(1), rows.getString(2), rows.getString(3)), "读取计划失败: " + sessionId);
     }
@@ -38,7 +38,7 @@ public final class JdbcPlanRepository implements PlanRepository {
                 statement.setString(5, item.note());
             });
         }
-        store.inTransaction( connection -> {
+        store.inTransaction(connection -> {
             store.exec(connection, DELETE, statement -> statement.setString(1, sessionId));
             store.batch(connection, INSERT, rows);
         }, "保存计划失败: " + sessionId);
@@ -46,6 +46,6 @@ public final class JdbcPlanRepository implements PlanRepository {
 
     @Override
     public void delete(String sessionId) {
-        store.update( DELETE, statement -> statement.setString(1, sessionId), "删除计划失败: " + sessionId);
+        store.update(DELETE, statement -> statement.setString(1, sessionId), "删除计划失败: " + sessionId);
     }
 }

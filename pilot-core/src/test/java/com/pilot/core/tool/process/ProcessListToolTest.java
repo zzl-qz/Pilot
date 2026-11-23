@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -55,8 +56,8 @@ class ProcessListToolTest {
     void schemaAcceptsOnlyFilterAndLimit() {
         Map<String, Object> parameters = new ProcessListTool().parameters();
         assertEquals("object", parameters.get("type"));
-        assertEquals(java.util.List.of(), parameters.get("required"), "两个参数都可选");
-        assertTrue(((Map<?, ?>) parameters.get("properties")).keySet().containsAll(java.util.List.of("filter", "limit")));
+        assertEquals(List.of(), parameters.get("required"), "两个参数都可选");
+        assertTrue(((Map<?, ?>)parameters.get("properties")).keySet().containsAll(List.of("filter", "limit")));
         assertTrue(new ProcessListTool().readOnly(), "进程查看是只读");
     }
 }

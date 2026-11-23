@@ -156,7 +156,8 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
                 String completedHash =
                     context.writtenHashes.containsKey(entry.path()) ? context.writtenHashes.get(entry.path())
                         : file.startsWith(context.workspace) ? hashIfRegularFile(file) : null;
-                context.entries.set(i, new SnapshotEntry(entry.path(), entry.existed(), entry.originalHash(), completedHash));
+                context.entries.set(i,
+                    new SnapshotEntry(entry.path(), entry.existed(), entry.originalHash(), completedHash));
                 keepCompletedContent(context, entry.path(), completedHash, false);
             } catch (IOException e) {
                 unavailable.add(entry.path());

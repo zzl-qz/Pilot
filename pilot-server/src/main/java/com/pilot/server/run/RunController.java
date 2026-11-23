@@ -59,12 +59,15 @@ public class RunController {
                 report = changes.inspectRun(runId, Path.of(meta.workspace()),
                     meta.files().stream().map(RunSnapshotService.SnapshotEntry::path).toList());
             }
-            if (!summary) return report;
-            var files = report.files().stream().map(file -> file.diff() == null || file.diff().isEmpty() ? file
-                : new ChangeService.RunFileChange(file.path(), file.status(), file.added(), file.removed(), null,
-                    file.note(), file.countsKnown())).toList();
-            return new ChangeService.RunChangeReport(report.runId(), report.workspace(), report.gitRepository(),
-                files, report.added(), report.removed(), report.truncated(), report.error(), report.snapshot());
+            if (!summary) {
+                return report;
+            }
+            var files = report.files().stream()
+                .map(file -> file.diff() == null || file.diff().isEmpty() ? file : new ChangeService.RunFileChange(
+                    file.path(), file.status(), file.added(), file.removed(), null, file.note(), file.countsKnown()))
+                .toList();
+            return new ChangeService.RunChangeReport(report.runId(), report.workspace(), report.gitRepository(), files,
+                report.added(), report.removed(), report.truncated(), report.error(), report.snapshot());
         } catch (RuntimeException e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage());
         }

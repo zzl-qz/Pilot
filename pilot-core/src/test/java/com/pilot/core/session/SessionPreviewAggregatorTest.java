@@ -30,8 +30,9 @@ class SessionPreviewAggregatorTest {
             var sequenceReads = new AtomicInteger();
             var first = aggregator.accept(input("run", EventType.ASSISTANT_PREVIEW, "ab", false, ARRIVED),
                 sequenceReads::incrementAndGet, outputs::add, Runnable::run);
-            var second = aggregator.accept(input("run", EventType.ASSISTANT_PREVIEW, "cd", false,
-                ARRIVED.plusSeconds(1)), sequenceReads::incrementAndGet, outputs::add, Runnable::run);
+            var second =
+                aggregator.accept(input("run", EventType.ASSISTANT_PREVIEW, "cd", false, ARRIVED.plusSeconds(1)),
+                    sequenceReads::incrementAndGet, outputs::add, Runnable::run);
 
             assertTrue(first.accepted());
             assertEquals(1, first.pendingSessions());
@@ -56,14 +57,13 @@ class SessionPreviewAggregatorTest {
             var outputs = new ArrayList<SessionPreviewAggregator.PreviewOutput>();
             aggregator.accept(input("run-current", EventType.ASSISTANT_PREVIEW, "body", false, ARRIVED), () -> 5,
                 outputs::add, Runnable::run);
-            var stale = aggregator.accept(input("run-old", EventType.ASSISTANT_PREVIEW, "late", false, ARRIVED),
-                () -> {
-                    throw new AssertionError("stale callback must not query current sequence");
-                }, outputs::add, Runnable::run);
+            var stale = aggregator.accept(input("run-old", EventType.ASSISTANT_PREVIEW, "late", false, ARRIVED), () -> {
+                throw new AssertionError("stale callback must not query current sequence");
+            }, outputs::add, Runnable::run);
             assertFalse(stale.accepted());
 
-            aggregator.accept(input("run-current", EventType.ASSISTANT_REASONING, "reason", false, ARRIVED),
-                () -> 6, outputs::add, Runnable::run);
+            aggregator.accept(input("run-current", EventType.ASSISTANT_REASONING, "reason", false, ARRIVED), () -> 6,
+                outputs::add, Runnable::run);
             aggregator.accept(input("run-current", EventType.ASSISTANT_REASONING, "", true, ARRIVED), () -> 7,
                 outputs::add, Runnable::run);
 
@@ -89,13 +89,12 @@ class SessionPreviewAggregatorTest {
                 outputs::add, Runnable::run);
             aggregator.accept(inputFor("other", "run-b", "overflow"), () -> 2, outputs::add, Runnable::run);
 
-            assertEquals(List.of("🙂中", "overflow"), outputs.stream()
-                .map(SessionPreviewAggregator.PreviewOutput::text).toList());
+            assertEquals(List.of("🙂中", "overflow"),
+                outputs.stream().map(SessionPreviewAggregator.PreviewOutput::text).toList());
             aggregator.finish("session", outputs::add, false);
-            assertEquals(List.of("🙂中", "overflow", "🙂"), outputs.stream()
-                .map(SessionPreviewAggregator.PreviewOutput::text).toList());
-            assertTrue(outputs.stream().allMatch(output ->
-                output.text().getBytes(StandardCharsets.UTF_8).length <= 8));
+            assertEquals(List.of("🙂中", "overflow", "🙂"),
+                outputs.stream().map(SessionPreviewAggregator.PreviewOutput::text).toList());
+            assertTrue(outputs.stream().allMatch(output -> output.text().getBytes(StandardCharsets.UTF_8).length <= 8));
         } finally {
             scheduler.shutdownNow();
         }
@@ -108,8 +107,8 @@ class SessionPreviewAggregatorTest {
             var aggregator = new SessionPreviewAggregator(new PreviewLimits(20, 8, 128, 256, 4), scheduler);
             var outputs = new ArrayList<SessionPreviewAggregator.PreviewOutput>();
             var flushed = new CountDownLatch(1);
-            aggregator.accept(input("run", EventType.ASSISTANT_PREVIEW, "timer", false, ARRIVED), () -> 1,
-                outputs::add, task -> {
+            aggregator.accept(input("run", EventType.ASSISTANT_PREVIEW, "timer", false, ARRIVED), () -> 1, outputs::add,
+                task -> {
                     task.run();
                     flushed.countDown();
                 });
@@ -130,23 +129,22 @@ class SessionPreviewAggregatorTest {
             var outputs = new ArrayList<SessionPreviewAggregator.PreviewOutput>();
             var scheduled = new CountDownLatch(1);
             var timerTasks = new CopyOnWriteArrayList<Runnable>();
-            aggregator.accept(input("run", EventType.ASSISTANT_PREVIEW, "first", false, ARRIVED), () -> 1,
-                outputs::add, task -> {
+            aggregator.accept(input("run", EventType.ASSISTANT_PREVIEW, "first", false, ARRIVED), () -> 1, outputs::add,
+                task -> {
                     timerTasks.add(task);
                     scheduled.countDown();
                 });
 
             assertTrue(scheduled.await(2, TimeUnit.SECONDS));
-            aggregator.accept(input("run", EventType.ASSISTANT_REASONING, "new", false, ARRIVED), () -> 2,
-                outputs::add, timerTasks::add);
+            aggregator.accept(input("run", EventType.ASSISTANT_REASONING, "new", false, ARRIVED), () -> 2, outputs::add,
+                timerTasks::add);
             timerTasks.getFirst().run();
 
-            assertEquals(List.of("first"), outputs.stream()
-                .map(SessionPreviewAggregator.PreviewOutput::text).toList());
+            assertEquals(List.of("first"), outputs.stream().map(SessionPreviewAggregator.PreviewOutput::text).toList());
             assertEquals(1, aggregator.pendingSessions());
             aggregator.finish("session", outputs::add, false);
-            assertEquals(List.of("first", "new"), outputs.stream()
-                .map(SessionPreviewAggregator.PreviewOutput::text).toList());
+            assertEquals(List.of("first", "new"),
+                outputs.stream().map(SessionPreviewAggregator.PreviewOutput::text).toList());
         } finally {
             scheduler.shutdownNow();
         }

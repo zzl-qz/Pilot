@@ -3,6 +3,7 @@ package com.pilot.core.coordination;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Locale;
 import java.util.Objects;
 
 /**
@@ -11,8 +12,8 @@ import java.util.Objects;
  * <p>占用只影响协作判断——真正写盘仍由拥有工作区的会话自己执行；这里保存的是规范化的绝对路径，
  * 父子目录之间的重叠也算冲突。
  */
-public record CoordinationClaim(String id, String projectId, String sessionId, String path,
-    CoordinationClaimKind kind, Instant claimedAt, Instant expiresAt) {
+public record CoordinationClaim(String id, String projectId, String sessionId, String path, CoordinationClaimKind kind,
+    Instant claimedAt, Instant expiresAt) {
 
     private static final String SEPARATOR = "/";
 
@@ -72,7 +73,7 @@ public record CoordinationClaim(String id, String projectId, String sessionId, S
             return ProjectCoordinationScope.directoryKey(ProjectCoordinationScope.canonical(Path.of(path)),
                 caseInsensitive);
         } catch (InvalidPathException invalid) {
-            return caseInsensitive ? path.toLowerCase(java.util.Locale.ROOT) : path;
+            return caseInsensitive ? path.toLowerCase(Locale.ROOT) : path;
         }
     }
 }

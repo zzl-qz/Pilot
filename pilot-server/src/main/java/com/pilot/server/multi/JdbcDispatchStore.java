@@ -172,9 +172,8 @@ public final class JdbcDispatchStore {
         boolean present = store.query("PRAGMA table_info(" + table + ")", statement -> {
         }, rows -> rows.getString("name"), "检查派发表结构失败").contains(column);
         if (!present) {
-            store.update("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition,
-                statement -> {
-                }, "补充派发表列失败");
+            store.update("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition, statement -> {
+            }, "补充派发表列失败");
         }
     }
 
@@ -377,8 +376,8 @@ public final class JdbcDispatchStore {
         if (!available()) {
             return;
         }
-        for (String session : store.query(
-            "SELECT DISTINCT session_id FROM dispatches WHERE status = 'running'", statement -> {
+        for (String session : store.query("SELECT DISTINCT session_id FROM dispatches WHERE status = 'running'",
+            statement -> {
             }, rows -> rows.getString("session_id"), "查询待收敛派发失败")) {
             interruptStale(session);
         }
@@ -419,7 +418,8 @@ public final class JdbcDispatchStore {
         if (!available()) {
             return List.of();
         }
-        return store.query("""
+        return store
+            .query("""
                 SELECT attempt_id, dispatch_id, task_id, agent_id, sandbox_id, generation, status, failure,
                        started_at, finished_at, input_tokens, output_tokens, requests, exact
                 FROM task_attempts WHERE dispatch_id = ? ORDER BY task_id, generation

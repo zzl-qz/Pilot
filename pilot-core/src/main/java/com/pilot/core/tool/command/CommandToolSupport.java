@@ -36,8 +36,8 @@ final class CommandToolSupport {
     private static final Pattern CONSOLE_TEST_FAILURE = Pattern.compile(
         "(?i)(?:surefire-reports|failsafe-reports|\\[ERROR\\]\\s+(?:Failures|Errors):|Failures:\\s*[1-9]|Errors:\\s*[1-9])");
     /** command_status / command_logs / stop_command 共用的跨会话归属参数。 */
-    static final Map<String, Object> OWNER_SESSION_PARAMETER = Map.of("type", "string", "description",
-        "可选：该任务所属会话 ID（command_tasks 输出里的会话列）。只在操作不属于当前会话的任务时传；不传就只找当前会话。");
+    static final Map<String, Object> OWNER_SESSION_PARAMETER =
+        Map.of("type", "string", "description", "可选：该任务所属会话 ID（command_tasks 输出里的会话列）。只在操作不属于当前会话的任务时传；不传就只找当前会话。");
     static final String NESTED_SANDBOX_HINT =
         ToolResults.NESTED_SANDBOX_HINT_PREFIX + "（当前命令已在系统沙箱内运行，macOS Seatbelt / Linux bwrap 禁止在沙箱内再次创建子沙箱），"
             + "这属于外层沙箱环境限制而非业务代码缺陷。请优先运行与本次改动直接相关的定向单测并明确区分环境限制，不要反复排查无关的沙箱隔离测试。";

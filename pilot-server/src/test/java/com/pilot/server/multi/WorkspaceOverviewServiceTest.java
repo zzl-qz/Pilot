@@ -150,8 +150,9 @@ class WorkspaceOverviewServiceTest {
     private WorkspaceOverviewService service(SessionRepository sessions, SandboxStore sandboxes, String runningSession,
         InMemoryProjectRepository projects) {
         RunRegistry runs = new RunRegistry();
-        if (runningSession != null)
+        if (runningSession != null) {
             runs.register("run-" + runningSession, runningSession);
+        }
         return new WorkspaceOverviewService(sessions, sandboxes, runs, commands(), projects);
     }
 

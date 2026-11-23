@@ -64,7 +64,7 @@ import com.pilot.core.tool.UpdatePlanTool;
 import com.pilot.core.tool.code.CodeSymbolTool;
 import com.pilot.core.tool.file.ReadFileTool;
 import com.pilot.core.workspace.PathValidator;
-import com.pilot.server.store.PilotDataDir;
+import com.pilot.server.WindowsJdkLoopbackCondition;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.MultiAgentProperties;
 import com.pilot.server.config.SkillProperties;
@@ -78,6 +78,7 @@ import com.pilot.server.run.TaskControlService;
 import com.pilot.server.skill.SkillInstallService;
 import com.pilot.server.skill.SkillService;
 import com.pilot.server.store.InMemorySettingsStore;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.store.QueuedMessageRepository;
 import com.pilot.server.tool.WorkspaceToolFactory;
 import com.pilot.server.workspace.RunSnapshotService;
@@ -609,8 +610,8 @@ class AgentRunServiceTest {
 
     /** 首条请求里的仓库快照正文；没有快照时返回 null。 */
     private static String snapshotOf(List<Message> messages) {
-        return messages.stream().filter(message -> "user".equals(message.role()))
-            .map(Message::content).filter(content -> content.startsWith("## 仓库现状")).findFirst().orElse(null);
+        return messages.stream().filter(message -> "user".equals(message.role())).map(Message::content)
+            .filter(content -> content.startsWith("## 仓库现状")).findFirst().orElse(null);
     }
 
     @Test
@@ -674,8 +675,9 @@ class AgentRunServiceTest {
             List<String> snapshots = second.stream().filter(message -> "user".equals(message.role()))
                 .map(Message::content).filter(content -> content.startsWith("## 仓库现状")).toList();
             assertTrue(snapshots.getLast().contains("构建："), "新快照仍要带构建方式：" + snapshots.getLast());
-            assertTrue(second.stream().anyMatch(
-                message -> "user".equals(message.role()) && "第二个任务".equals(message.content())), "本步输入仍在快照之后");
+            assertTrue(
+                second.stream().anyMatch(message -> "user".equals(message.role()) && "第二个任务".equals(message.content())),
+                "本步输入仍在快照之后");
         }
     }
 
@@ -1332,10 +1334,9 @@ class AgentRunServiceTest {
                 ApprovalBroker.denyAll(), properties,
                 new ModelSettings(new ModelProperties("", "http://localhost", "test", List.of()),
                     new InMemorySettingsStore()),
-                snapshots, new RunRegistry(), RunRepository.noop(), conversations, plans,
-                mapper, dataDir, new QueuedMessageRepository(), null,
-                multiProperties, metrics, taskControls, commandTasks, preparation, new DeferredToolRegistry(), null,
-                null, null);
+                snapshots, new RunRegistry(), RunRepository.noop(), conversations, plans, mapper, dataDir,
+                new QueuedMessageRepository(), null, multiProperties, metrics, taskControls, commandTasks, preparation,
+                new DeferredToolRegistry(), null, null, null);
         }
 
         void start() {
@@ -1495,10 +1496,9 @@ class AgentRunServiceTest {
             new PolicyPermissionGate(PermissionMode.AUTO), ApprovalBroker.denyAll(), props,
             new ModelSettings(new ModelProperties("", "http://localhost", "test", List.of()),
                 new InMemorySettingsStore()),
-            snapshots, new RunRegistry(), RunRepository.noop(), fixture.conversations,
-            fixture.plans, mapper, dir, new QueuedMessageRepository(), null,
-            multiProperties, metrics, taskControls, fixture.commandTasks, preparation, new DeferredToolRegistry(),
-            null, null, null);
+            snapshots, new RunRegistry(), RunRepository.noop(), fixture.conversations, fixture.plans, mapper, dir,
+            new QueuedMessageRepository(), null, multiProperties, metrics, taskControls, fixture.commandTasks,
+            preparation, new DeferredToolRegistry(), null, null, null);
     }
 
     private static void runAndWait(AgentRunService runService, Fixture fixture, BlockingQueue<String> doneStatuses,
@@ -1510,7 +1510,7 @@ class AgentRunServiceTest {
     }
 
     @Test
-    @ExtendWith(com.pilot.server.WindowsJdkLoopbackCondition.class)
+    @ExtendWith(WindowsJdkLoopbackCondition.class)
     void preflightLocalizationRespectsDisableFlagAndWorkspaceToolsExposeParallelCodeSymbol() throws Exception {
         Files.writeString(workspace.resolve("PaymentGateway.java"), """
             public class PaymentGateway {
@@ -1555,10 +1555,9 @@ class AgentRunServiceTest {
                 new PolicyPermissionGate(PermissionMode.AUTO), ApprovalBroker.denyAll(), disabled,
                 new ModelSettings(new ModelProperties("", "http://localhost", "test", List.of()),
                     new InMemorySettingsStore()),
-                snapshots, new RunRegistry(), RunRepository.noop(), fixture.conversations,
-                fixture.plans, mapper, dir, new QueuedMessageRepository(), null,
-                multiProperties, metrics, taskControls, fixture.commandTasks, preparation, new DeferredToolRegistry(),
-                null, null, null);
+                snapshots, new RunRegistry(), RunRepository.noop(), fixture.conversations, fixture.plans, mapper, dir,
+                new QueuedMessageRepository(), null, multiProperties, metrics, taskControls, fixture.commandTasks,
+                preparation, new DeferredToolRegistry(), null, null, null);
             try {
                 String runId = runService.claimRun(fixture.sessionId).orElseThrow();
                 String prompt = "排查 PaymentGateway 的 charge 逻辑";

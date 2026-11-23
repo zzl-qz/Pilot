@@ -412,8 +412,8 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                 try {
                     response =
                         com.pilot.core.model.diagnostics.ModelRequestScope.within(
-                            com.pilot.core.model.diagnostics.ModelRequestScope.current().purpose().isBlank() && finalizing
-                                ? "finalization" : null,
+                            com.pilot.core.model.diagnostics.ModelRequestScope.current().purpose().isBlank()
+                                && finalizing ? "finalization" : null,
                             null, false, () -> model.chat(messages, tools, delta, reasoning));
                     return response;
                 } finally {
@@ -1030,9 +1030,9 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                 reviewing = true;
                 ModelResponse response;
                 try {
-                    response =
-                        com.pilot.core.model.diagnostics.ModelRequestScope.within("review", null, false, () -> budgetedClient()
-                            .chat(messages, List.of(new ToolDefinition(toolName, "提交结构化核验，不执行其他操作", reviewSchema()))));
+                    response = com.pilot.core.model.diagnostics.ModelRequestScope.within("review", null, false,
+                        () -> budgetedClient().chat(messages,
+                            List.of(new ToolDefinition(toolName, "提交结构化核验，不执行其他操作", reviewSchema()))));
                 } finally {
                     reviewing = false;
                 }

@@ -65,7 +65,7 @@ public final class JdbcConversationRepository implements ConversationRepository 
                 statement.setString(10, now);
             });
         }
-        store.inTransaction( connection -> {
+        store.inTransaction(connection -> {
             store.exec(connection, "DELETE FROM conversation_messages WHERE session_id = ?",
                 statement -> statement.setString(1, sessionId));
             store.batch(connection, "INSERT INTO conversation_messages "
@@ -76,7 +76,7 @@ public final class JdbcConversationRepository implements ConversationRepository 
 
     @Override
     public void delete(String sessionId) {
-        store.update( "DELETE FROM conversation_messages WHERE session_id = ?",
+        store.update("DELETE FROM conversation_messages WHERE session_id = ?",
             statement -> statement.setString(1, sessionId), "删除对话记忆失败: " + sessionId);
     }
 

@@ -79,9 +79,8 @@ class SessionCoordinationServiceTest {
             return new WorkspaceCoordinationEvent(drafts.size(), clock.instant(), draft.type(), draft.projectId(),
                 draft.sessionId(), draft.directory(), draft.subject(), draft.details());
         };
-        private final SessionCoordinationService service = new SessionCoordinationService(sessions, resolver,
-            publisher, store,
-            new CoordinationSettings(online::contains, clock, Duration.ofMinutes(10), Duration.ofHours(2)));
+        private final SessionCoordinationService service = new SessionCoordinationService(sessions, resolver, publisher,
+            store, new CoordinationSettings(online::contains, clock, Duration.ofMinutes(10), Duration.ofHours(2)));
 
         SessionCoordinationService reopen() {
             return new SessionCoordinationService(sessions, resolver, publisher, store,
@@ -148,9 +147,8 @@ class SessionCoordinationServiceTest {
 
         env.service.claim("s1", shared.toString(), CoordinationClaimKind.DIRECTORY, null);
 
-        CoordinationRefusedException blocked = assertThrows(CoordinationRefusedException.class,
-            () -> env.service.claim("s2", shared.resolve("sub/File.java").toString(), CoordinationClaimKind.FILE,
-                null));
+        CoordinationRefusedException blocked = assertThrows(CoordinationRefusedException.class, () -> env.service
+            .claim("s2", shared.resolve("sub/File.java").toString(), CoordinationClaimKind.FILE, null));
         assertEquals(CoordinationRefusedException.CLAIMED, blocked.code());
         assertEquals("s1", blocked.ownerSessionId());
         assertNotNull(blocked.resource());
@@ -170,21 +168,20 @@ class SessionCoordinationServiceTest {
         env.session("s1", shared, PROJECT);
         env.session("s2", shared, PROJECT);
 
-        CoordinationClaim claim = env.service.claim("s1", shared.resolve("a.txt").toString(),
-            CoordinationClaimKind.FILE, null);
+        CoordinationClaim claim =
+            env.service.claim("s1", shared.resolve("a.txt").toString(), CoordinationClaimKind.FILE, null);
         assertEquals(CoordinationRefusedException.DENIED,
-            assertThrows(CoordinationRefusedException.class,
-                () -> env.service.release("s2", claim.id())).code());
+            assertThrows(CoordinationRefusedException.class, () -> env.service.release("s2", claim.id())).code());
         CoordinationClaim released = env.service.release("s1", claim.id());
         assertEquals(claim.id(), released.id());
         assertEquals(CoordinationRefusedException.NOT_FOUND,
-            assertThrows(CoordinationRefusedException.class,
-                () -> env.service.release("s1", claim.id())).code());
+            assertThrows(CoordinationRefusedException.class, () -> env.service.release("s1", claim.id())).code());
         env.service.claim("s2", shared.resolve("a.txt").toString(), CoordinationClaimKind.FILE, null);
 
         List<WorkspaceEventType> types = env.drafts.stream().map(WorkspaceEventDraft::type).toList();
-        assertEquals(List.of(WorkspaceEventType.FILE_CLAIMED, WorkspaceEventType.FILE_RELEASED,
-            WorkspaceEventType.FILE_CLAIMED), types);
+        assertEquals(
+            List.of(WorkspaceEventType.FILE_CLAIMED, WorkspaceEventType.FILE_RELEASED, WorkspaceEventType.FILE_CLAIMED),
+            types);
     }
 
     @Test
@@ -224,27 +221,26 @@ class SessionCoordinationServiceTest {
         assertEquals(1, env.service.snapshot("s1").requests().size());
 
         assertEquals(CoordinationRefusedException.DENIED,
-            assertThrows(CoordinationRefusedException.class,
-                () -> env.service.acceptRequest("s1", first.id())).code());
+            assertThrows(CoordinationRefusedException.class, () -> env.service.acceptRequest("s1", first.id())).code());
 
         CoordinationRequest accepted = env.service.acceptRequest("s2", first.id());
         assertEquals(CoordinationRequestStatus.ACCEPTED, accepted.status());
         assertEquals(CoordinationRefusedException.CLOSED,
-            assertThrows(CoordinationRefusedException.class,
-                () -> env.service.declineRequest("s2", first.id())).code());
+            assertThrows(CoordinationRefusedException.class, () -> env.service.declineRequest("s2", first.id()))
+                .code());
 
         CoordinationRequest next = env.service.request("s1", "s2", "第二轮", "task-1");
         assertFalse(next.id().equals(first.id()), "上一轮已结束，再次提交要新建请求");
         CoordinationRequest withdrawn = env.service.withdrawRequest("s1", next.id());
         assertEquals(CoordinationRequestStatus.WITHDRAWN, withdrawn.status());
         assertEquals(CoordinationRefusedException.CLOSED,
-            assertThrows(CoordinationRefusedException.class,
-                () -> env.service.withdrawRequest("s2", next.id())).code());
+            assertThrows(CoordinationRefusedException.class, () -> env.service.withdrawRequest("s2", next.id()))
+                .code());
 
         CoordinationRequest third = env.service.request("s1", "s2", "第三轮", "task-2");
         assertEquals(CoordinationRefusedException.DENIED,
-            assertThrows(CoordinationRefusedException.class,
-                () -> env.service.withdrawRequest("s2", third.id())).code());
+            assertThrows(CoordinationRefusedException.class, () -> env.service.withdrawRequest("s2", third.id()))
+                .code());
         assertEquals(CoordinationRequestStatus.PENDING, env.service.request("s1", "s2", "第三轮", "task-2").status());
     }
 
@@ -258,8 +254,8 @@ class SessionCoordinationServiceTest {
 
         CoordinationHandoff handoff = env.service.handoff("s1", "s2", "task-9", "把迁移脚本做完");
         assertEquals(CoordinationRefusedException.DENIED,
-            assertThrows(CoordinationRefusedException.class,
-                () -> env.service.acceptHandoff("s1", handoff.id())).code());
+            assertThrows(CoordinationRefusedException.class, () -> env.service.acceptHandoff("s1", handoff.id()))
+                .code());
         assertEquals(CoordinationHandoffStatus.ACCEPTED, env.service.acceptHandoff("s2", handoff.id()).status());
 
         CoordinationHandoff slow = env.service.handoff("s1", "s2", "task-10", "慢慢来");
@@ -268,11 +264,9 @@ class SessionCoordinationServiceTest {
             .filter(entry -> entry.id().equals(slow.id())).findFirst().orElseThrow();
         assertEquals(CoordinationHandoffStatus.EXPIRED, expired.status());
         assertEquals(CoordinationRefusedException.CLOSED,
-            assertThrows(CoordinationRefusedException.class,
-                () -> env.service.acceptHandoff("s2", slow.id())).code());
-        assertTrue(env.drafts.stream()
-            .anyMatch(draft -> draft.type() == WorkspaceEventType.HANDOFF_RESOLVED
-                && "EXPIRED".equals(draft.details().get("status"))));
+            assertThrows(CoordinationRefusedException.class, () -> env.service.acceptHandoff("s2", slow.id())).code());
+        assertTrue(env.drafts.stream().anyMatch(draft -> draft.type() == WorkspaceEventType.HANDOFF_RESOLVED
+            && "EXPIRED".equals(draft.details().get("status"))));
     }
 
     @Test
@@ -286,15 +280,15 @@ class SessionCoordinationServiceTest {
         env.session("s2", two, "p2");
 
         assertEquals(CoordinationRefusedException.OUT_OF_SCOPE,
-            assertThrows(CoordinationRefusedException.class,
-                () -> env.service.request("s1", "s2", "跨项目", "task-x")).code());
+            assertThrows(CoordinationRefusedException.class, () -> env.service.request("s1", "s2", "跨项目", "task-x"))
+                .code());
+        assertEquals(CoordinationRefusedException.OUT_OF_SCOPE,
+            assertThrows(CoordinationRefusedException.class, () -> env.service.handoff("s1", "s2", "task-x", "跨项目"))
+                .code());
         assertEquals(CoordinationRefusedException.OUT_OF_SCOPE,
             assertThrows(CoordinationRefusedException.class,
-                () -> env.service.handoff("s1", "s2", "task-x", "跨项目")).code());
-        assertEquals(CoordinationRefusedException.OUT_OF_SCOPE,
-            assertThrows(CoordinationRefusedException.class,
-                () -> env.service.claim("s1", two.resolve("x.txt").toString(), CoordinationClaimKind.FILE,
-                    null)).code());
+                () -> env.service.claim("s1", two.resolve("x.txt").toString(), CoordinationClaimKind.FILE, null))
+                .code());
 
         env.service.claim("s2", two.resolve("x.txt").toString(), CoordinationClaimKind.FILE, null);
         CoordinationSnapshot fromP1 = env.service.snapshot("s1");
@@ -318,17 +312,15 @@ class SessionCoordinationServiceTest {
         env.online.clear();
         SessionCoordinationService restarted = env.reopen();
         CoordinationSnapshot snapshot = restarted.snapshot("s1");
-        assertTrue(snapshot.requests().stream().anyMatch(entry -> entry.id().equals(request.id())),
-            "请求属于持久状态，重启后仍在");
-        assertTrue(snapshot.sessions().stream().noneMatch(CoordinationSessionView::online),
-            "重启后不能伪造在线会话");
+        assertTrue(snapshot.requests().stream().anyMatch(entry -> entry.id().equals(request.id())), "请求属于持久状态，重启后仍在");
+        assertTrue(snapshot.sessions().stream().noneMatch(CoordinationSessionView::online), "重启后不能伪造在线会话");
     }
 
     @Test
     void sandboxOwnerGuardBlocksProxyOperations() {
         Env env = new Env();
-        CoordinationRefusedException refused = assertThrows(CoordinationRefusedException.class,
-            () -> env.service.requireSandboxOwner("s2", "s1"));
+        CoordinationRefusedException refused =
+            assertThrows(CoordinationRefusedException.class, () -> env.service.requireSandboxOwner("s2", "s1"));
         assertEquals(CoordinationRefusedException.DENIED, refused.code());
         assertEquals("s1", refused.ownerSessionId());
         env.service.requireSandboxOwner("s1", "s1");
@@ -346,13 +338,13 @@ class SessionCoordinationServiceTest {
             env.service.claim("s1", mine.resolve("a.txt").toString(), CoordinationClaimKind.FILE, null);
         assertEquals(CoordinationRefusedException.OUT_OF_SCOPE,
             assertThrows(CoordinationRefusedException.class,
-                () -> env.service.claim("s1", other.resolve("a.txt").toString(), CoordinationClaimKind.FILE,
-                    null)).code());
+                () -> env.service.claim("s1", other.resolve("a.txt").toString(), CoordinationClaimKind.FILE, null))
+                .code());
         CoordinationSnapshot own = env.service.snapshot("s1");
         assertSame(1, own.claims().size());
         assertEquals(claim.id(), own.claims().getFirst().id());
         assertEquals(CoordinationRefusedException.OUT_OF_SCOPE,
-            assertThrows(CoordinationRefusedException.class,
-                () -> env.service.request("s1", "s2", "无项目互不可见", "")).code());
+            assertThrows(CoordinationRefusedException.class, () -> env.service.request("s1", "s2", "无项目互不可见", ""))
+                .code());
     }
 }

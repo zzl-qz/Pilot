@@ -7,7 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -331,8 +333,8 @@ class CommandTaskManagerTest {
             assertEquals("RUNNING", manager.get("session_a", task.taskId()).status());
             manager.stop("session_a", task.taskId());
             awaitDone(manager, "session_a", task.taskId());
-            assertThrows(IllegalStateException.class,
-                () -> manager.input("session_a", task.taskId(), "x", false, null), "结束后拒绝写入");
+            assertThrows(IllegalStateException.class, () -> manager.input("session_a", task.taskId(), "x", false, null),
+                "结束后拒绝写入");
         }
     }
 
@@ -421,7 +423,7 @@ class CommandTaskManagerTest {
                 case "hold" -> Thread.sleep(30_000);
                 case "listen" -> {
                     // 读到一行就回显，读到 EOF 就输出 eof 并退出：非交互启动时应立刻收到 EOF。
-                    var reader = new java.io.BufferedReader(new java.io.InputStreamReader(System.in));
+                    var reader = new BufferedReader(new InputStreamReader(System.in));
                     String line;
                     while ((line = reader.readLine()) != null) {
                         System.out.print("got:" + line + "\n");

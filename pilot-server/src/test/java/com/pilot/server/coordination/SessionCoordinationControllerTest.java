@@ -68,7 +68,8 @@ class SessionCoordinationControllerTest {
         attached = Files.createDirectories(root.resolve("attached"));
         sessions = new InMemorySessionRepository();
         projects = new InMemoryProjectRepository();
-        projects.create("p1", "项目", List.of(primary.toString(), attached.toString()), Instant.parse("2026-01-01T00:00:00Z"));
+        projects.create("p1", "项目", List.of(primary.toString(), attached.toString()),
+            Instant.parse("2026-01-01T00:00:00Z"));
         presence = new SessionPresenceRegistry(60_000);
         List<WorkspaceEventDraft> drafts = new ArrayList<>();
         WorkspaceEventPublisher publisher = draft -> {
@@ -76,11 +77,11 @@ class SessionCoordinationControllerTest {
             return new WorkspaceCoordinationEvent(drafts.size(), Instant.now(), draft.type(), draft.projectId(),
                 draft.sessionId(), draft.directory(), draft.subject(), draft.details());
         };
-        CoordinationSnapshotStore store = new CoordinationStateStore(JsonMapper.builder().build(),
-            new PilotDataDir(root.resolve("data").toString()));
-        SessionCoordinationService coordination = new SessionCoordinationService(sessions,
-            new CoordinationScopeResolver(projects, false), publisher, store,
-            new CoordinationSettings(presence, Clock.systemUTC(), Duration.ofMinutes(10), Duration.ofHours(2)));
+        CoordinationSnapshotStore store =
+            new CoordinationStateStore(JsonMapper.builder().build(), new PilotDataDir(root.resolve("data").toString()));
+        SessionCoordinationService coordination =
+            new SessionCoordinationService(sessions, new CoordinationScopeResolver(projects, false), publisher, store,
+                new CoordinationSettings(presence, Clock.systemUTC(), Duration.ofMinutes(10), Duration.ofHours(2)));
         WorkspaceOverviewService overview = new WorkspaceOverviewService(sessions,
             new SandboxStore(JsonMapper.builder().build(), new PilotDataDir(root.resolve("data").toString())),
             new RunRegistry(), new CommandTaskManager(commandStorage, JsonMapper.builder().build()), projects);
@@ -114,8 +115,9 @@ class SessionCoordinationControllerTest {
         controller.touch("s2");
         SessionCoordinationController.CoordinationBoard board = controller.board("s2");
 
-        assertTrue(board.snapshot().sessions().stream()
-            .anyMatch(view -> view.sessionId().equals("s1") && view.online()), "打开看板即在线");
+        assertTrue(
+            board.snapshot().sessions().stream().anyMatch(view -> view.sessionId().equals("s1") && view.online()),
+            "打开看板即在线");
         assertEquals(2, presence.metrics().get("online"));
     }
 
@@ -139,8 +141,8 @@ class SessionCoordinationControllerTest {
         assertEquals(HttpStatus.NOT_FOUND,
             refusalOf(() -> controller.resolveRequest("s2", "req-missing", "accept")).getStatusCode());
         assertEquals(HttpStatus.NOT_FOUND,
-            assertThrows(ResponseStatusException.class,
-                () -> controller.resolveRequest("s2", request.id(), "explode")).getStatusCode());
+            assertThrows(ResponseStatusException.class, () -> controller.resolveRequest("s2", request.id(), "explode"))
+                .getStatusCode());
     }
 
     @Test
@@ -209,19 +211,18 @@ class SessionCoordinationControllerTest {
     void unclaimedCheckAndUnknownKind() {
         session("s1", primary);
         session("s2", attached);
-        controller.claim("s1", new SessionCoordinationController.ClaimCommand(primary.resolve("a.txt").toString(),
-            "file", null));
+        controller.claim("s1",
+            new SessionCoordinationController.ClaimCommand(primary.resolve("a.txt").toString(), "file", null));
 
-        assertEquals(HttpStatus.CONFLICT,
-            refusalOf(() -> controller.requireUnclaimed("s2",
-                new SessionCoordinationController.PathCheck(primary.resolve("a.txt").toString()))).getStatusCode());
+        assertEquals(HttpStatus.CONFLICT, refusalOf(() -> controller.requireUnclaimed("s2",
+            new SessionCoordinationController.PathCheck(primary.resolve("a.txt").toString()))).getStatusCode());
         assertEquals(false, controller
             .requireUnclaimed("s2", new SessionCoordinationController.PathCheck(attached.resolve("b.txt").toString()))
             .get("claimed"));
         assertEquals(HttpStatus.BAD_REQUEST,
-            assertThrows(ResponseStatusException.class,
-                () -> controller.claim("s2", new SessionCoordinationController.ClaimCommand(
-                    attached.resolve("c.txt").toString(), "galaxy", null))).getStatusCode());
+            assertThrows(ResponseStatusException.class, () -> controller.claim("s2",
+                new SessionCoordinationController.ClaimCommand(attached.resolve("c.txt").toString(), "galaxy", null)))
+                .getStatusCode());
     }
 
     private ResponseEntity<SessionCoordinationController.Refusal> refusalOf(Runnable call) {

@@ -77,8 +77,9 @@ public final class PermissionRules {
     }
 
     private static List<String> render(List<Rule> rules) {
-        return rules.stream().map(rule -> rule.specifier().isEmpty() ? rule.tool()
-            : rule.tool() + "(" + rule.specifier() + ")").toList();
+        return rules.stream()
+            .map(rule -> rule.specifier().isEmpty() ? rule.tool() : rule.tool() + "(" + rule.specifier() + ")")
+            .toList();
     }
 
     /**
@@ -118,8 +119,8 @@ public final class PermissionRules {
         if (rules == null) {
             return;
         }
-        List<String> cleaned = rules.stream().filter(rule -> rule != null && !rule.isBlank()).map(String::strip)
-            .toList();
+        List<String> cleaned =
+            rules.stream().filter(rule -> rule != null && !rule.isBlank()).map(String::strip).toList();
         if (!cleaned.isEmpty()) {
             permissions.put(key, cleaned);
         }

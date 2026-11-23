@@ -16,8 +16,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.junit.jupiter.api.Test;
-import com.pilot.core.WindowsJdkLoopbackSensitive;
 
+import com.pilot.core.WindowsJdkLoopbackSensitive;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 

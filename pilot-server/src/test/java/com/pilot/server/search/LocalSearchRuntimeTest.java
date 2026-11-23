@@ -13,8 +13,8 @@ import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.config.WebSearchProperties;
+import com.pilot.server.store.PilotDataDir;
 
 class LocalSearchRuntimeTest {
     @TempDir

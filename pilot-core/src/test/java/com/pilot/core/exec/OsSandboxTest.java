@@ -200,8 +200,8 @@ class OsSandboxTest {
         Files.writeString(root.resolve(".git/config"), "seed\n");
         String previous = System.setProperty("pilot.windows.sandbox.runner", runner.toString());
         try {
-            OsSandbox.Launch launch = OsSandbox.wrap(List.of("cmd", "/c",
-                "echo ok>inside.txt&echo hacked>.git\\config&echo no>\"" + escape + "\""), root);
+            OsSandbox.Launch launch = OsSandbox.wrap(
+                List.of("cmd", "/c", "echo ok>inside.txt&echo hacked>.git\\config&echo no>\"" + escape + "\""), root);
             assertTrue(launch.enforced(), launch.label());
             assertTrue(launch.label().contains("写入已限制"), launch.label());
 

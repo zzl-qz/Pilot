@@ -40,8 +40,8 @@ public class CoordinationEventsConfiguration {
      * 会话开停与会话内事件的工作区投影；构造时直接注册到会话服务，保证「建会话 / 归档会话」也能被感知。
      */
     @Bean
-    public CoordinationEventRelay coordinationEventRelay(WorkspaceCoordinationEventBus events,
-        SessionService sessions, SessionRepository repository) {
+    public CoordinationEventRelay coordinationEventRelay(WorkspaceCoordinationEventBus events, SessionService sessions,
+        SessionRepository repository) {
         CoordinationEventRelay relay = new CoordinationEventRelay(events, repository);
         sessions.setActivityListener(relay);
         return relay;

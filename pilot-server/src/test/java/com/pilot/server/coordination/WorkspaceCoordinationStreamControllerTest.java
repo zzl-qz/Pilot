@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -122,8 +123,8 @@ class WorkspaceCoordinationStreamControllerTest {
             workspace.toString(), "claim-marker", Map.of())).sequence();
         long released = events.publish(new WorkspaceEventDraft(WorkspaceEventType.FILE_RELEASED, null, "s-resume",
             workspace.toString(), "release-marker", Map.of())).sequence();
-        try (Socket socket = open("/api/workspace/events?workspace=" + encode(workspace),
-            "Last-Event-ID: " + claimed); BufferedReader reader = reader(socket)) {
+        try (Socket socket = open("/api/workspace/events?workspace=" + encode(workspace), "Last-Event-ID: " + claimed);
+            BufferedReader reader = reader(socket)) {
             String frames = readUntil(reader, "release-marker");
 
             assertFalse(frames.contains("event:file.claimed"), frames);
@@ -200,10 +201,8 @@ class WorkspaceCoordinationStreamControllerTest {
         socket.setReceiveBufferSize(1024);
         socket.connect(new InetSocketAddress("127.0.0.1", port));
         socket.setSoTimeout(5000);
-        StringBuilder request = new StringBuilder()
-            .append("GET ").append(path).append(" HTTP/1.1\r\n")
-            .append("Host: localhost:").append(port).append("\r\n")
-            .append("Connection: close\r\n");
+        StringBuilder request = new StringBuilder().append("GET ").append(path).append(" HTTP/1.1\r\n")
+            .append("Host: localhost:").append(port).append("\r\n").append("Connection: close\r\n");
         for (String header : headers) {
             request.append(header).append("\r\n");
         }
@@ -241,7 +240,7 @@ class WorkspaceCoordinationStreamControllerTest {
         await(condition, () -> "条件在 6 秒内没有成立");
     }
 
-    private static void await(BooleanSupplier condition, java.util.function.Supplier<String> message) throws Exception {
+    private static void await(BooleanSupplier condition, Supplier<String> message) throws Exception {
         long deadline = System.nanoTime() + Duration.ofSeconds(6).toNanos();
         while (!condition.getAsBoolean() && System.nanoTime() < deadline) {
             Thread.sleep(20);

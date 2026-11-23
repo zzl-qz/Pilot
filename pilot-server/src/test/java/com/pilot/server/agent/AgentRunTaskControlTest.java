@@ -58,7 +58,6 @@ import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.file.ReadFileTool;
 import com.pilot.core.workspace.PathValidator;
-import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.MultiAgentProperties;
 import com.pilot.server.model.ModelProperties;
@@ -69,6 +68,7 @@ import com.pilot.server.run.RunStarter;
 import com.pilot.server.run.TaskControlService;
 import com.pilot.server.skill.SkillService;
 import com.pilot.server.store.InMemorySettingsStore;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.store.QueuedMessageRepository;
 import com.pilot.server.tool.WorkspaceToolFactory;
 import com.pilot.server.workspace.RunSnapshotService;
@@ -739,10 +739,9 @@ class AgentRunTaskControlTest {
                 ApprovalBroker.denyAll(), properties,
                 new ModelSettings(new ModelProperties("", "http://localhost", "test", List.of()),
                     new InMemorySettingsStore()),
-                snapshots, new RunRegistry(), RunRepository.noop(), conversations, plans,
-                mapper, data, new QueuedMessageRepository(), null,
-                multiProperties, metrics, tasks, commandTasks, preparation, new DeferredToolRegistry(), null, null,
-                null);
+                snapshots, new RunRegistry(), RunRepository.noop(), conversations, plans, mapper, data,
+                new QueuedMessageRepository(), null, multiProperties, metrics, tasks, commandTasks, preparation,
+                new DeferredToolRegistry(), null, null, null);
         }
 
         void start(TaskControlService.Requirements requirements) {

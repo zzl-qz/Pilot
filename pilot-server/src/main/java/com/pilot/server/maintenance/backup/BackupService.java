@@ -32,11 +32,11 @@ import org.springframework.stereotype.Component;
 
 import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.server.attachment.AttachmentService;
+import com.pilot.server.git.GitWorktrees;
 import com.pilot.server.store.DataMaintenance;
 import com.pilot.server.store.PilotDataDir;
-import com.pilot.server.store.StorageHealthService;
-import com.pilot.server.git.GitWorktrees;
 import com.pilot.server.store.SqliteStore;
+import com.pilot.server.store.StorageHealthService;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;

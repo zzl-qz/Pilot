@@ -78,8 +78,9 @@ final class SessionEventTransport implements AutoCloseable {
         } else {
             throw new IllegalArgumentException("preview 只接收正文或推理增量");
         }
-        var update = previews.accept(new SessionPreviewAggregator.PreviewInput(sessionId, runId, event.type(), text,
-            reset, timestamp), sequenceWithoutPending, this::deliverPreview,
+        var update = previews.accept(
+            new SessionPreviewAggregator.PreviewInput(sessionId, runId, event.type(), text, reset, timestamp),
+            sequenceWithoutPending, this::deliverPreview,
             task -> Thread.ofVirtual().name("pilot-preview-flush").start(() -> sessionLock.accept(task)));
         if (update.accepted()) {
             previewInputs.incrementAndGet();
@@ -143,18 +144,18 @@ final class SessionEventTransport implements AutoCloseable {
     Metrics metrics() {
         Map<String, Long> reasons = new TreeMap<>();
         closedReasons.forEach((key, value) -> reasons.put(key, value.get()));
-        return new Metrics(subscriberCount(), workers.get(), queuedBytes.get(), peakBytes.get(),
-            delivered.get(), replayNanos.get(), previewInputs.get(), previewOutputs.get(), previews.pendingSessions(),
+        return new Metrics(subscriberCount(), workers.get(), queuedBytes.get(), peakBytes.get(), delivered.get(),
+            replayNanos.get(), previewInputs.get(), previewOutputs.get(), previews.pendingSessions(),
             liveOutputs.bytes(), liveOutputs.size(), replayPages.get(), peakReplayPages.get(), Map.copyOf(reasons));
     }
 
     private void deliverPreview(SessionPreviewAggregator.PreviewOutput preview) {
-        SessionEvent event = preview.type() == EventType.ASSISTANT_PREVIEW
-            ? new AssistantPreview(preview.text(), preview.reset())
-            : new AssistantReasoning(preview.text(), preview.reset());
+        SessionEvent event =
+            preview.type() == EventType.ASSISTANT_PREVIEW ? new AssistantPreview(preview.text(), preview.reset())
+                : new AssistantReasoning(preview.text(), preview.reset());
         previewOutputs.incrementAndGet();
-        EventEnvelope envelope = liveOutputs.update(EventEnvelope.of(preview.sequence(), preview.timestamp(),
-            preview.sessionId(), preview.runId(), event));
+        EventEnvelope envelope = liveOutputs.update(
+            EventEnvelope.of(preview.sequence(), preview.timestamp(), preview.sessionId(), preview.runId(), event));
         deliver(preview.sessionId(), envelope, EventSize.estimate(event) + 1024);
     }
 
@@ -358,7 +359,8 @@ final class SessionEventTransport implements AutoCloseable {
                     replaySlots.acquire();
                     peakReplayPages.accumulateAndGet(replayPages.incrementAndGet(), Math::max);
                     try {
-                        List<EventEnvelope> page = repository.replayPage(sessionId, cursor, highWater, limits.pageSize());
+                        List<EventEnvelope> page =
+                            repository.replayPage(sessionId, cursor, highWater, limits.pageSize());
                         if (page.isEmpty()) {
                             break;
                         }

@@ -13,9 +13,9 @@ import org.springframework.stereotype.Service;
 
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
-import com.pilot.server.session.lookup.SessionLookup;
 import com.pilot.server.run.TaskControlService;
 import com.pilot.server.run.TaskControlStatus;
+import com.pilot.server.session.lookup.SessionLookup;
 import com.pilot.server.validation.ValidationEvidence;
 import com.pilot.server.validation.ValidationLedger;
 import com.pilot.server.validation.ValidationReason;
@@ -206,9 +206,12 @@ public class CompletionBundleService {
             text.append("| 文件 | 状态 | + | - |\n| --- | --- | --- | --- |\n");
             bundle.changes()
                 .forEach(change -> text.append("| `").append(change.path()).append("` | ").append(change.status())
-                    .append(" | ").append(lines(change, true)).append(" | ").append(lines(change, false)).append(" |\n"));
-            text.append("\n合计：").append(bundle.changes().stream().anyMatch(change -> Boolean.FALSE.equals(change.countsKnown()))
-                ? "部分文件行数未知" : "+" + bundle.added() + " / -" + bundle.removed()).append("\n\n");
+                    .append(" | ").append(lines(change, true)).append(" | ").append(lines(change, false))
+                    .append(" |\n"));
+            text.append("\n合计：")
+                .append(bundle.changes().stream().anyMatch(change -> Boolean.FALSE.equals(change.countsKnown()))
+                    ? "部分文件行数未知" : "+" + bundle.added() + " / -" + bundle.removed())
+                .append("\n\n");
             String diff = bundle.changes().stream().map(ChangeService.RunFileChange::diff).filter(Objects::nonNull)
                 .reduce("", (left, right) -> left + right);
             if (!diff.isBlank()) {

@@ -42,11 +42,12 @@ class JdbcConversationRepositoryTest {
         Path image = tempDir.resolve("attachments").resolve("shot.png").toAbsolutePath();
         Files.createDirectories(image.getParent());
         Files.write(image, new byte[] {1, 2, 3});
-        List<Message> messages =
-            List.of(Message.user("把 P0-1 实现掉", List.of(new Attachment("shot.png", "image/png", image.toString()))),
-                Message.assistant("先读代码", List.of(new ToolCall("c1", "read_file", Map.of("path", "AgentLoop.java"))),
-                    "先检查持久化与恢复路径。"),
-                Message.tool("c1", "class AgentLoop { ... }"));
+        List<
+            Message> messages =
+                List.of(Message.user("把 P0-1 实现掉", List.of(new Attachment("shot.png", "image/png", image.toString()))),
+                    Message.assistant("先读代码",
+                        List.of(new ToolCall("c1", "read_file", Map.of("path", "AgentLoop.java"))), "先检查持久化与恢复路径。"),
+                    Message.tool("c1", "class AgentLoop { ... }"));
 
         conversations.save("ses_1", messages);
 
@@ -88,9 +89,10 @@ class JdbcConversationRepositoryTest {
         Path legacyDatabase = tempDir.resolve("legacy.db");
         try (var connection = DriverManager.getConnection("jdbc:sqlite:" + legacyDatabase);
             var statement = connection.createStatement()) {
-            statement.executeUpdate("CREATE TABLE conversation_messages (session_id TEXT NOT NULL, seq INTEGER NOT NULL, "
-                + "role TEXT NOT NULL, content TEXT NOT NULL, tool_calls TEXT, tool_call_id TEXT, created_at TEXT NOT NULL, "
-                + "PRIMARY KEY (session_id, seq))");
+            statement
+                .executeUpdate("CREATE TABLE conversation_messages (session_id TEXT NOT NULL, seq INTEGER NOT NULL, "
+                    + "role TEXT NOT NULL, content TEXT NOT NULL, tool_calls TEXT, tool_call_id TEXT, created_at TEXT NOT NULL, "
+                    + "PRIMARY KEY (session_id, seq))");
             statement.executeUpdate("INSERT INTO conversation_messages VALUES "
                 + "('legacy', 1, 'assistant', '旧答复', NULL, NULL, '2026-01-01T00:00:00Z')");
         }

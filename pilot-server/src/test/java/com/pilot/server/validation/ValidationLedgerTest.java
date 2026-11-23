@@ -19,8 +19,8 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 
 import com.pilot.server.store.PilotDataDir;
-import com.pilot.server.store.StorageHealthService;
 import com.pilot.server.store.SqliteStore;
+import com.pilot.server.store.StorageHealthService;
 
 import tools.jackson.databind.json.JsonMapper;
 
@@ -104,9 +104,9 @@ class ValidationLedgerTest {
     void failedPersistenceCannotBeReportedAsReliableEvidence() throws IOException {
         Path blockedRoot = dataDir.resolve("not-a-directory");
         Files.writeString(blockedRoot, "file");
-        ValidationLedger ledger = new ValidationLedger(new PilotDataDir(blockedRoot.toString()),
-            JsonMapper.builder().build(), new DefaultListableBeanFactory().getBeanProvider(SqliteStore.class),
-            storageHealth);
+        ValidationLedger ledger =
+            new ValidationLedger(new PilotDataDir(blockedRoot.toString()), JsonMapper.builder().build(),
+                new DefaultListableBeanFactory().getBeanProvider(SqliteStore.class), storageHealth);
         ledger.record(evidence("hash-a", "passed"));
 
         ValidationLedger.Report report = ledger.report("ses_1", "hash-a");
@@ -182,7 +182,8 @@ class ValidationLedgerTest {
         try {
             new ValidationLedger(blockedMarker, mapper, provider, storageHealth).record(evidence("hash", "failed"));
             assertTrue(sqlite.validationPending("ses_1"));
-            assertFalse(new ValidationLedger(normal, mapper, provider, storageHealth).report("ses_1", "hash").current());
+            assertFalse(
+                new ValidationLedger(normal, mapper, provider, storageHealth).report("ses_1", "hash").current());
         } finally {
             Files.deleteIfExists(blocked);
         }

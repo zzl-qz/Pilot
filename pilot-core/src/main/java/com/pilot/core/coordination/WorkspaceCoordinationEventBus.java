@@ -24,8 +24,8 @@ import java.util.function.Consumer;
  * 发布在历史锁内完成「分配序号 + 写入缓存」，因此回放顺序与发布顺序一致；
  * 每个订阅有自己的有界队列与投递线程，跟不上的订阅被关闭而不是拖慢发布。
  */
-public final class WorkspaceCoordinationEventBus implements WorkspaceEventPublisher, WorkspaceEventReplay,
-    WorkspaceEventFeed, AutoCloseable {
+public final class WorkspaceCoordinationEventBus
+    implements WorkspaceEventPublisher, WorkspaceEventReplay, WorkspaceEventFeed, AutoCloseable {
 
     private static final String REASON_CLOSED = "closed";
     private static final String REASON_QUEUE_OVERFLOW = "queue_overflow";
@@ -72,8 +72,7 @@ public final class WorkspaceCoordinationEventBus implements WorkspaceEventPublis
                 draft.directory(), draft.subject(), draft.details()).compacted(limits.maxEventBytes());
             history.addLast(event);
             historyBytes += event.estimatedBytes();
-            while (history.size() > 1
-                && (history.size() > limits.maxEvents() || historyBytes > limits.maxBytes())) {
+            while (history.size() > 1 && (history.size() > limits.maxEvents() || historyBytes > limits.maxBytes())) {
                 WorkspaceCoordinationEvent oldest = history.pollFirst();
                 if (oldest == null) {
                     break;
@@ -163,8 +162,7 @@ public final class WorkspaceCoordinationEventBus implements WorkspaceEventPublis
         private final long id;
         private final ProjectCoordinationScope scope;
         private final Consumer<WorkspaceCoordinationEvent> listener;
-        private final BlockingQueue<WorkspaceCoordinationEvent> queue =
-            new ArrayBlockingQueue<>(limits.queueItems());
+        private final BlockingQueue<WorkspaceCoordinationEvent> queue = new ArrayBlockingQueue<>(limits.queueItems());
         private final AtomicBoolean closed = new AtomicBoolean();
         private final AtomicLong cursor;
         private final AtomicLong deliveredCount = new AtomicLong();

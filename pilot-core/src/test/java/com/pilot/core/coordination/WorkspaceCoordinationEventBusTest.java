@@ -69,10 +69,10 @@ class WorkspaceCoordinationEventBusTest {
     @Test
     void differentProjectsDoNotSeeEachOtherEvents(@TempDir Path root) {
         var bus = new WorkspaceCoordinationEventBus();
-        bus.publish(new WorkspaceEventDraft(WorkspaceEventType.SANDBOX_CHANGED, "p1", "s1", root.toString(), "改动",
-            Map.of()));
-        bus.publish(new WorkspaceEventDraft(WorkspaceEventType.SANDBOX_CHANGED, "p2", "s2", root.toString(), "改动",
-            Map.of()));
+        bus.publish(
+            new WorkspaceEventDraft(WorkspaceEventType.SANDBOX_CHANGED, "p1", "s1", root.toString(), "改动", Map.of()));
+        bus.publish(
+            new WorkspaceEventDraft(WorkspaceEventType.SANDBOX_CHANGED, "p2", "s2", root.toString(), "改动", Map.of()));
 
         var first = bus.replay(0, scope("p1", root), 10);
         var second = bus.replay(0, scope("p2", root), 10);
@@ -176,8 +176,8 @@ class WorkspaceCoordinationEventBusTest {
     @Test
     void eventWithHugeDirectoryDegradesToProjectLevel(@TempDir Path root) {
         String hugeDirectory = root + "/" + "dir".repeat(200);
-        var event = new WorkspaceCoordinationEvent(1, Instant.EPOCH, WorkspaceEventType.FILE_CLAIMED, "p1",
-            "s1", hugeDirectory, "claim", Map.of());
+        var event = new WorkspaceCoordinationEvent(1, Instant.EPOCH, WorkspaceEventType.FILE_CLAIMED, "p1", "s1",
+            hugeDirectory, "claim", Map.of());
 
         var compacted = event.compacted(200);
 
@@ -196,8 +196,8 @@ class WorkspaceCoordinationEventBusTest {
 
         assertEquals(5, bus.latestSequence());
         assertEquals(4, bus.earliestRetainedSequence());
-        assertEquals(List.of(4L, 5L), bus.replay(0, scope("p1", root), 10).stream()
-            .map(WorkspaceCoordinationEvent::sequence).toList());
+        assertEquals(List.of(4L, 5L),
+            bus.replay(0, scope("p1", root), 10).stream().map(WorkspaceCoordinationEvent::sequence).toList());
         assertEquals(3, bus.metrics().droppedEvents());
     }
 

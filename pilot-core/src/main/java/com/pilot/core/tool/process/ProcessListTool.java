@@ -34,10 +34,10 @@ public final class ProcessListTool implements Tool.ParallelReadOnly {
 
     @Override
     public Map<String, Object> parameters() {
-        return ToolSchemas.object(Map.of(
-            "filter", ToolSchemas.string("可选：按命令行或 PID 的子串过滤，不区分大小写"),
-            "limit", Map.of("type", "integer", "minimum", 1, "maximum", MAX_LIMIT,
-                "description", "最多列出多少条，默认 " + DEFAULT_LIMIT + "，最大 " + MAX_LIMIT)), List.of());
+        return ToolSchemas.object(
+            Map.of("filter", ToolSchemas.string("可选：按命令行或 PID 的子串过滤，不区分大小写"), "limit", Map.of("type", "integer",
+                "minimum", 1, "maximum", MAX_LIMIT, "description", "最多列出多少条，默认 " + DEFAULT_LIMIT + "，最大 " + MAX_LIMIT)),
+            List.of());
     }
 
     @Override
@@ -51,7 +51,7 @@ public final class ProcessListTool implements Tool.ParallelReadOnly {
             if (!filter.isEmpty() && !pid.contains(filter) && !command.toLowerCase(Locale.ROOT).contains(filter)) {
                 return;
             }
-            rows.add(new String[] { pid, parentOf(handle), startOf(handle), userOf(handle), truncate(command) });
+            rows.add(new String[] {pid, parentOf(handle), startOf(handle), userOf(handle), truncate(command)});
         });
         rows.sort(Comparator.comparingLong(row -> parsePid(row[0])));
         StringBuilder result = new StringBuilder();
@@ -76,8 +76,9 @@ public final class ProcessListTool implements Tool.ParallelReadOnly {
             return DEFAULT_LIMIT;
         }
         try {
-            long parsed = value instanceof Number number ? number.longValue() : Long.parseLong(value.toString().strip());
-            return (int) Math.min(MAX_LIMIT, Math.max(1, parsed));
+            long parsed =
+                value instanceof Number number ? number.longValue() : Long.parseLong(value.toString().strip());
+            return (int)Math.min(MAX_LIMIT, Math.max(1, parsed));
         } catch (NumberFormatException e) {
             return DEFAULT_LIMIT;
         }

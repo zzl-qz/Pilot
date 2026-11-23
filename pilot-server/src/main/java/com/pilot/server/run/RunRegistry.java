@@ -102,10 +102,8 @@ public class RunRegistry {
     /** 与给定工作区重叠的一次活跃运行；用于把 409 的占用方告诉用户。 */
     public synchronized Optional<Occupant> occupier(Path workspace) {
         String key = workspaceKey(workspace);
-        return runWorkspaces.entrySet().stream()
-            .filter(entry -> overlaps(key, entry.getValue()))
-            .map(entry -> new Occupant(entry.getKey(), runToSession.getOrDefault(entry.getKey(), "")))
-            .findFirst();
+        return runWorkspaces.entrySet().stream().filter(entry -> overlaps(key, entry.getValue()))
+            .map(entry -> new Occupant(entry.getKey(), runToSession.getOrDefault(entry.getKey(), ""))).findFirst();
     }
 
     /** 正在使用某个工作区的一次运行。 */

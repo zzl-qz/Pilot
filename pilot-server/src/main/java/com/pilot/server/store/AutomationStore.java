@@ -35,8 +35,7 @@ public class AutomationStore {
         if (store == null) {
             return List.copyOf(memory.getOrDefault(kind, Map.of()).values());
         }
-        return store.query( "SELECT * FROM automation_documents WHERE kind=? ORDER BY id",
-            q -> q.setString(1, kind),
+        return store.query("SELECT * FROM automation_documents WHERE kind=? ORDER BY id", q -> q.setString(1, kind),
             r -> new Document(r.getString("id"), r.getLong("version"), r.getString("payload")), "读取自动化记录失败");
     }
 
@@ -50,11 +49,10 @@ public class AutomationStore {
         }
         // GLOB 区分大小写；转义元字符，让它与 String.startsWith 的字面匹配一致。
         String pattern = prefix.replace("[", "[[]").replace("*", "[*]").replace("?", "[?]") + "*";
-        return store.query( "SELECT * FROM automation_documents WHERE kind=? AND id GLOB ? ORDER BY id",
-            q -> {
-                q.setString(1, kind);
-                q.setString(2, pattern);
-            }, r -> new Document(r.getString("id"), r.getLong("version"), r.getString("payload")), "读取自动化记录失败");
+        return store.query("SELECT * FROM automation_documents WHERE kind=? AND id GLOB ? ORDER BY id", q -> {
+            q.setString(1, kind);
+            q.setString(2, pattern);
+        }, r -> new Document(r.getString("id"), r.getLong("version"), r.getString("payload")), "读取自动化记录失败");
     }
 
     /** SQL 里的状态条件只是预筛；哪些状态算待投递以 DeliveryState.open 为准，服务层会再过滤一次。 */
@@ -74,18 +72,17 @@ public class AutomationStore {
             Collections.reverse(rows);
             return rows.stream().limit(limit).toList();
         }
-        return store.query( "SELECT * FROM automation_documents WHERE kind=? ORDER BY rowid DESC LIMIT ?",
-            q -> {
-                q.setString(1, kind);
-                q.setInt(2, limit);
-            }, r -> new Document(r.getString("id"), r.getLong("version"), r.getString("payload")), "读取最新记录失败");
+        return store.query("SELECT * FROM automation_documents WHERE kind=? ORDER BY rowid DESC LIMIT ?", q -> {
+            q.setString(1, kind);
+            q.setInt(2, limit);
+        }, r -> new Document(r.getString("id"), r.getLong("version"), r.getString("payload")), "读取最新记录失败");
     }
 
     public synchronized Optional<Document> get(String kind, String id) {
         if (store == null) {
             return Optional.ofNullable(memory.getOrDefault(kind, Map.of()).get(id));
         }
-        return store.queryOne( "SELECT * FROM automation_documents WHERE kind=? AND id=?", q -> {
+        return store.queryOne("SELECT * FROM automation_documents WHERE kind=? AND id=?", q -> {
             q.setString(1, kind);
             q.setString(2, id);
         }, r -> new Document(r.getString("id"), r.getLong("version"), r.getString("payload")), "读取自动化记录失败");
@@ -103,15 +100,15 @@ public class AutomationStore {
             return true;
         }
         if (expected == 0) {
-            return store.update(
-                "INSERT OR IGNORE INTO automation_documents(kind,id,version,payload) VALUES (?,?,1,?)", q -> {
+            return store.update("INSERT OR IGNORE INTO automation_documents(kind,id,version,payload) VALUES (?,?,1,?)",
+                q -> {
                     q.setString(1, kind);
                     q.setString(2, id);
                     q.setString(3, payload);
                 }, "保存自动化记录失败") == 1;
         }
-        return store.update(
-            "UPDATE automation_documents SET version=?,payload=? WHERE kind=? AND id=? AND version=?", q -> {
+        return store.update("UPDATE automation_documents SET version=?,payload=? WHERE kind=? AND id=? AND version=?",
+            q -> {
                 q.setLong(1, expected + 1);
                 q.setString(2, payload);
                 q.setString(3, kind);
@@ -125,7 +122,7 @@ public class AutomationStore {
             var old = get(kind, id).orElse(null);
             return old != null && old.version == version && memory.get(kind).remove(id, old);
         }
-        return store.update( "DELETE FROM automation_documents WHERE kind=? AND id=? AND version=?", q -> {
+        return store.update("DELETE FROM automation_documents WHERE kind=? AND id=? AND version=?", q -> {
             q.setString(1, kind);
             q.setString(2, id);
             q.setLong(3, version);

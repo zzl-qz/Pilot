@@ -21,8 +21,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
-import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.git.GitWorktrees;
+import com.pilot.server.store.PilotDataDir;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -170,8 +170,11 @@ final class WorkspaceArchive {
                 && Files.getFileStore(scratch).supportsFileAttributeView(DosFileAttributeView.class)) {
                 try (var files = Files.find(objects, Integer.MAX_VALUE, (path, attrs) -> attrs.isRegularFile())) {
                     for (var paths = files.iterator(); paths.hasNext();) {
-                        var dos = Files.getFileAttributeView(paths.next(), DosFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
-                        if (dos.readAttributes().isReadOnly()) dos.setReadOnly(false);
+                        var dos = Files.getFileAttributeView(paths.next(), DosFileAttributeView.class,
+                            LinkOption.NOFOLLOW_LINKS);
+                        if (dos.readAttributes().isReadOnly()) {
+                            dos.setReadOnly(false);
+                        }
                     }
                 }
             }

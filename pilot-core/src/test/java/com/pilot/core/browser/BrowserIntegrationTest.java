@@ -35,8 +35,8 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import com.pilot.core.message.ToolCall;
 import com.pilot.core.WindowsJdkLoopbackSensitive;
+import com.pilot.core.message.ToolCall;
 import com.pilot.core.permission.PermissionDecision;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PolicyPermissionGate;

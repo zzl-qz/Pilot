@@ -285,9 +285,8 @@ public final class CommandTaskManager implements AutoCloseable {
      * 要接着查日志或停止，把它的 {@code sessionId} 作为 ownerSessionId 传回来即可。
      */
     public List<Task> listAll() {
-        return entries.values().stream().map(entry -> entry.task)
-            .sorted(Comparator.comparing((Task task) -> !running(task))
-                .thenComparing(Task::startedAt, Comparator.reverseOrder()))
+        return entries.values().stream().map(entry -> entry.task).sorted(Comparator
+            .comparing((Task task) -> !running(task)).thenComparing(Task::startedAt, Comparator.reverseOrder()))
             .toList();
     }
 

@@ -162,7 +162,9 @@ public class SessionFilesController {
     @GetMapping("/{id}/file/image")
     public ResponseEntity<byte[]> image(@PathVariable String id, @RequestParam("path") String path) throws IOException {
         Path file = paths(id).resolve(path);
-        if (!Files.isRegularFile(file)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "不是文件: " + path);
+        if (!Files.isRegularFile(file)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "不是文件: " + path);
+        }
         if (Files.size(file) > 5L * 1024 * 1024) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "图片超过 5 MB，无法预览");
         }

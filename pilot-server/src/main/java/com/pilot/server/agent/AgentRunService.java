@@ -65,7 +65,6 @@ import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.core.trace.JsonlTraceRecorder;
 import com.pilot.core.util.WireEnum;
 import com.pilot.core.workspace.PathValidator;
-import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.MultiAgentProperties;
 import com.pilot.server.model.ModelSettings;
@@ -80,6 +79,7 @@ import com.pilot.server.run.RunStarter;
 import com.pilot.server.run.RunStateTracker;
 import com.pilot.server.run.TaskControlService;
 import com.pilot.server.run.TaskControlStatus;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.tool.WorkspaceToolFactory;
 import com.pilot.server.validation.ValidationEvidence;
 import com.pilot.server.workspace.RunSnapshotService;
@@ -191,8 +191,8 @@ public class AgentRunService implements RunStarter {
         com.pilot.server.store.QueuedMessageRepository queuedMessages, MultiAgentService multiAgent,
         MultiAgentProperties multiProperties, com.pilot.server.observability.RunMetrics metrics,
         TaskControlService taskControls, CommandTaskManager commandTasks, AgentRunPreparation preparation,
-        DeferredToolRegistry deferredTools,
-        RunStateTracker runStates, com.pilot.server.store.ToolCallJournalFactory journals,
+        DeferredToolRegistry deferredTools, RunStateTracker runStates,
+        com.pilot.server.store.ToolCallJournalFactory journals,
         com.pilot.server.validation.ValidationLedger validations) {
         this.sessions = sessions;
         this.runStates = runStates;
@@ -721,8 +721,8 @@ public class AgentRunService implements RunStarter {
         try {
             BudgetProgress before = BudgetProgress.from(plans.load(sessionId), taskControls.load(sessionId));
             PreparedRunContext runContext = prepareExecutionContext(sessionId, runId, input, handle, continuation);
-            ExecutionRunContext execution = configureExecutionContext(sessionId, runId, runContext,
-                handle.cancelled::get);
+            ExecutionRunContext execution =
+                configureExecutionContext(sessionId, runId, runContext, handle.cancelled::get);
             status = execute(sessionId, runId, input, attachments, imagePositions, handle, continuation, execution);
             captureResult(sessionId, runId);
             resultCaptured = true;
@@ -812,13 +812,11 @@ public class AgentRunService implements RunStarter {
     public Optional<String> workspaceOccupant(Path workspace) {
         List<CommandTaskManager.Task> commands = commandTasks.runningInWorkspace(workspace);
         if (!commands.isEmpty()) {
-            String owners = commands.stream()
-                .map(task -> task.taskId() + "（会话 " + task.sessionId() + "）")
+            String owners = commands.stream().map(task -> task.taskId() + "（会话 " + task.sessionId() + "）")
                 .collect(Collectors.joining("、"));
             return Optional.of("后台命令 " + owners);
         }
-        return registry.occupier(workspace)
-            .map(occupant -> "会话 " + occupant.sessionId() + " 的运行 " + occupant.runId());
+        return registry.occupier(workspace).map(occupant -> "会话 " + occupant.sessionId() + " 的运行 " + occupant.runId());
     }
 
     @Override
@@ -1114,8 +1112,8 @@ public class AgentRunService implements RunStarter {
         return true;
     }
 
-    private PreparedRunContext prepareExecutionContext(String sessionId, String runId, String input,
-        RunHandle handle, boolean continuation) {
+    private PreparedRunContext prepareExecutionContext(String sessionId, String runId, String input, RunHandle handle,
+        boolean continuation) {
         List<Message> history = conversations.load(sessionId);
         Set<com.pilot.core.model.NativeCapability> nativeCapabilities = modelClient.nativeCapabilities();
         TaskControlService.TaskContract executionTask = taskControls.load(sessionId);
@@ -1131,14 +1129,14 @@ public class AgentRunService implements RunStarter {
                 new PlanUpdated(items.stream()
                     .map(item -> new PlanUpdated.PlanItemPayload(item.step(), item.status(), item.note())).toList(),
                     explanation));
-            preparation.refreshPlanPhaseHint(activeLoopRef.get(), resolvedWorkspaceRef.get(), workspaceValidatorRef.get(),
-                beforePlan, items);
+            preparation.refreshPlanPhaseHint(activeLoopRef.get(), resolvedWorkspaceRef.get(),
+                workspaceValidatorRef.get(), beforePlan, items);
         };
-        AgentRunPreparation.PreparationInput preparationInput = new AgentRunPreparation.PreparationInput(sessionId,
-            runId, input, handle.skill, continuation, history, unattended,
-            executionTask == null ? null : executionTask.originalGoal(),
-            executionTask != null && executionTask.automation() != null && executionTask.automation().fullAccess(),
-            nativeCapabilities, deferredTools.snapshot(sessionId));
+        AgentRunPreparation.PreparationInput preparationInput =
+            new AgentRunPreparation.PreparationInput(sessionId, runId, input, handle.skill, continuation, history,
+                unattended, executionTask == null ? null : executionTask.originalGoal(),
+                executionTask != null && executionTask.automation() != null && executionTask.automation().fullAccess(),
+                nativeCapabilities, deferredTools.snapshot(sessionId));
         AgentRunPreparation.PreparedRun prepared = preparation.prepare(preparationInput, planSink, tools -> {
             if (unattended && scheduleService != null) {
                 tools.register(scheduleService.getObject().wakeTool(sessionId));
@@ -1153,8 +1151,8 @@ public class AgentRunService implements RunStarter {
             : preparation.activateSkill(repositoryContext.withRepositoryBrief(history, prepared.workspace(), sessionId),
                 prepared.workspace(), handle.skill);
         AtomicReference<PreFlightLocator.Result> preflight = new AtomicReference<>();
-        Consumer<AgentLoop> configurePreflight = loop -> preflight.set(
-            preparation.configurePreflight(loop, prepared, input, continuation));
+        Consumer<AgentLoop> configurePreflight =
+            loop -> preflight.set(preparation.configurePreflight(loop, prepared, input, continuation));
         Consumer<AgentLoop.Result> logPreflightTelemetry = result -> preparation.logPreflightTelemetry(runId,
             preflight.get(), activeLoopRef.get().observedPathsSnapshot(), result.changedFiles());
         RunUsageAccumulator runUsage = new RunUsageAccumulator();
@@ -1165,8 +1163,8 @@ public class AgentRunService implements RunStarter {
             logPreflightTelemetry, preparation.taskContextSource(sessionId), runUsage, lastCompleted, sink);
     }
 
-    private ExecutionRunContext configureExecutionContext(String sessionId, String runId,
-        PreparedRunContext runContext, java.util.function.BooleanSupplier cancelled) {
+    private ExecutionRunContext configureExecutionContext(String sessionId, String runId, PreparedRunContext runContext,
+        java.util.function.BooleanSupplier cancelled) {
         var prepared = runContext.prepared();
         boolean unattended = runContext.unattended();
         TaskControlService.TaskContract executionTask = runContext.executionTask();
@@ -1182,8 +1180,9 @@ public class AgentRunService implements RunStarter {
             }
         };
         ModelClient measuredMain = preparation.meteredMainClient(prepared, modelClient, sessionId, runId, reports);
-        ModelClient measuredChild = new MeteredModelClient(modelClient, sessionId + ":subagent", "subagent", List.of(),
-            reports).withRunContext(sessionId, runId);
+        ModelClient measuredChild =
+            new MeteredModelClient(modelClient, sessionId + ":subagent", "subagent", List.of(), reports)
+                .withRunContext(sessionId, runId);
         AgentLoop.Config config = preparation.loopConfig(prepared, sessionId);
         GoalExecutionPolicy goalPolicy = (unattended || (!reviewActive && properties.goalModeEnabledValue()))
             ? new GoalExecutionPolicy(measuredMain, objectMapper, taskControls, sessionId,
@@ -1197,8 +1196,7 @@ public class AgentRunService implements RunStarter {
         var profiles = preparation.profilesFor(workspace);
         preparation.configureExecutionTools(prepared, goalPolicy, sessionId, runId, workspace, unattended,
             executionTask, measuredChild, executionClient, runContext.sessionGate(), config, cancelled, childUsage,
-            profiles, modelClient, sink, approvals, conversations, modelSettings,
-            multiAgent, worktrees);
+            profiles, modelClient, sink, approvals, conversations, modelSettings, multiAgent, worktrees);
         return new ExecutionRunContext(runContext, runUsage, lastCompleted, sink, measuredMain, config, goalPolicy,
             executionClient);
     }

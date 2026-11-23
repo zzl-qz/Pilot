@@ -38,7 +38,8 @@ public final class QueuedMessageRepository {
         if (store == null) {
             return held.contains(sessionId);
         }
-        return store.queryOne("SELECT held FROM queue_holds WHERE session_id = ?",
+        return store
+            .queryOne("SELECT held FROM queue_holds WHERE session_id = ?",
                 statement -> statement.setString(1, sessionId), rows -> rows.getInt(1) != 0, "读取队列暂停状态失败")
             .orElse(false);
     }
@@ -58,8 +59,8 @@ public final class QueuedMessageRepository {
                     + "ON CONFLICT(session_id) DO UPDATE SET held = 1",
                 statement -> statement.setString(1, sessionId), "保存队列暂停状态失败");
         } else {
-            store.update("DELETE FROM queue_holds WHERE session_id = ?",
-                statement -> statement.setString(1, sessionId), "清理队列暂停状态失败");
+            store.update("DELETE FROM queue_holds WHERE session_id = ?", statement -> statement.setString(1, sessionId),
+                "清理队列暂停状态失败");
         }
     }
 
@@ -91,8 +92,8 @@ public final class QueuedMessageRepository {
                 }
                 store.exec(connection, "DELETE FROM queued_messages WHERE session_id = ?",
                     statement -> statement.setString(1, sessionId));
-                store.batch(connection,
-                    "INSERT INTO queued_messages(session_id, position, content) VALUES (?, ?, ?)", rows);
+                store.batch(connection, "INSERT INTO queued_messages(session_id, position, content) VALUES (?, ?, ?)",
+                    rows);
             }
         }, "保存排队消息失败");
     }

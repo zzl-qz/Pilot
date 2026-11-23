@@ -20,12 +20,12 @@ import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.attachment.AttachmentLimits;
 import com.pilot.server.attachment.AttachmentService;
-import com.pilot.server.store.PilotDataDir;
-import com.pilot.server.store.StorageHealthService;
 import com.pilot.server.git.GitWorktrees;
 import com.pilot.server.store.EventCodec;
 import com.pilot.server.store.JdbcSessionRepository;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.store.SqliteStore;
+import com.pilot.server.store.StorageHealthService;
 
 import tools.jackson.databind.json.JsonMapper;
 

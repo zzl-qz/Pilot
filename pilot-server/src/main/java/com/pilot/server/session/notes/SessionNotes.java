@@ -203,13 +203,12 @@ public class SessionNotes {
             }, "保存想法失败");
         if (source != null && source.sequence() != null) {
             String excerpt = source.excerpt() == null ? "" : source.excerpt();
-            store.update("INSERT INTO session_note_sources(note_id,sequence,excerpt,role) VALUES(?,?,?,?)",
-                query -> {
-                    query.setString(1, stored.id());
-                    query.setInt(2, source.sequence());
-                    query.setString(3, excerpt);
-                    query.setString(4, source.role());
-                }, "保存想法来源失败");
+            store.update("INSERT INTO session_note_sources(note_id,sequence,excerpt,role) VALUES(?,?,?,?)", query -> {
+                query.setString(1, stored.id());
+                query.setInt(2, source.sequence());
+                query.setString(3, excerpt);
+                query.setString(4, source.role());
+            }, "保存想法来源失败");
             sources.put(stored.id(), source);
             return new Note(stored.id(), stored.content(), stored.createdAt(), stored.updatedAt(),
                 sourceOf(stored.id(), session), stored.status(), stored.link());
@@ -231,19 +230,20 @@ public class SessionNotes {
             return next;
         }
         // 允许编辑正文：状态与关联目标必须一起读回来，否则改一次字就把「已转任务」变回收件箱。
-        Object[] state = store.queryOne(
-            "SELECT created_at,status,link_kind,link_id FROM session_notes WHERE session_id=? AND id=?", query -> {
-                query.setString(1, session);
-                query.setString(2, noteId);
-            }, rows -> new Object[] {Instant.parse(rows.getString(1)), rows.getString(2), rows.getString(3),
-                rows.getString(4)},
-            "读取想法失败").orElseThrow(() -> new IllegalArgumentException("想法不存在或已删除"));
+        Object[] state =
+            store.queryOne("SELECT created_at,status,link_kind,link_id FROM session_notes WHERE session_id=? AND id=?",
+                query -> {
+                    query.setString(1, session);
+                    query.setString(2, noteId);
+                }, rows -> new Object[] {Instant.parse(rows.getString(1)), rows.getString(2), rows.getString(3),
+                    rows.getString(4)},
+                "读取想法失败").orElseThrow(() -> new IllegalArgumentException("想法不存在或已删除"));
         Instant created = (Instant)state[0];
         String status = (String)state[1];
         String linkKind = (String)state[2];
         String linkId = (String)state[3];
-        int changed = store.update(
-            "UPDATE session_notes SET content=?,updated_at=? WHERE session_id=? AND id=?", query -> {
+        int changed =
+            store.update("UPDATE session_notes SET content=?,updated_at=? WHERE session_id=? AND id=?", query -> {
                 query.setString(1, text);
                 query.setString(2, now.toString());
                 query.setString(3, session);
@@ -253,7 +253,8 @@ public class SessionNotes {
             throw new IllegalArgumentException("想法不存在或已删除");
         }
         Source source = sources.containsKey(noteId) ? sourceOf(noteId, session)
-            : store.queryOne("SELECT sequence,excerpt,role FROM session_note_sources WHERE note_id=?",
+            : store
+                .queryOne("SELECT sequence,excerpt,role FROM session_note_sources WHERE note_id=?",
                     query -> query.setString(1, noteId),
                     rows -> new Source((Integer)rows.getObject("sequence"), rows.getString("excerpt"),
                         rows.getString("role"), eventExists(session, (Integer)rows.getObject("sequence"))),
@@ -280,8 +281,7 @@ public class SessionNotes {
             memory.getOrDefault(session, new LinkedHashMap<>()).put(noteId, updated);
             return updated;
         }
-        store.update(
-            "UPDATE session_notes SET status=?,link_kind=?,link_id=?,updated_at=? WHERE session_id=? AND id=?",
+        store.update("UPDATE session_notes SET status=?,link_kind=?,link_id=?,updated_at=? WHERE session_id=? AND id=?",
             query -> {
                 query.setString(1, updated.status());
                 query.setString(2, updated.link() == null ? null : updated.link().kind());
@@ -331,8 +331,8 @@ public class SessionNotes {
             }
             return;
         }
-        store.update("DELETE FROM session_note_sources WHERE note_id=?",
-            query -> query.setString(1, noteId), "删除想法来源失败");
+        store.update("DELETE FROM session_note_sources WHERE note_id=?", query -> query.setString(1, noteId),
+            "删除想法来源失败");
         store.update("DELETE FROM session_notes WHERE session_id=? AND id=?", query -> {
             query.setString(1, session);
             query.setString(2, noteId);
@@ -351,8 +351,7 @@ public class SessionNotes {
         store.update(
             "DELETE FROM session_note_sources WHERE note_id IN (SELECT id FROM session_notes WHERE session_id=?)",
             query -> query.setString(1, session), "清理想法来源失败");
-        store.update("DELETE FROM session_notes WHERE session_id=?", query -> query.setString(1, session),
-            "清理想法失败");
+        store.update("DELETE FROM session_notes WHERE session_id=?", query -> query.setString(1, session), "清理想法失败");
     }
 
     private Source sourceOf(String noteId, String session) {

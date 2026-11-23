@@ -51,15 +51,16 @@ class AgentPropertiesTest {
         assertFalse(off.repositoryBriefEnabled(), "off 时首条 run 也不注入");
         assertFalse(off.repositoryBriefDetailed());
 
-        var brief = new AgentProperties(".", null, 0, null, null, 0, 0, null, null, null, null, null, null, null,
-            null, null, null, null, null, null, null, "brief");
+        var brief = new AgentProperties(".", null, 0, null, null, 0, 0, null, null, null, null, null, null, null, null,
+            null, null, null, null, null, null, "brief");
         assertTrue(brief.repositoryBriefEnabled());
         assertFalse(brief.repositoryBriefDetailed(), "brief 不带目录树");
 
-        var error = assertThrows(IllegalArgumentException.class,
-            () -> new AgentProperties(".", null, 0, null, null, 0, 0, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, "false"),
-            "写错的档位要启动失败，不能静默退回 full");
+        var error =
+            assertThrows(
+                IllegalArgumentException.class, () -> new AgentProperties(".", null, 0, null, null, 0, 0, null, null,
+                    null, null, null, null, null, null, null, null, null, null, null, null, "false"),
+                "写错的档位要启动失败，不能静默退回 full");
         assertTrue(error.getMessage().contains("pilot.agent.repository-brief"));
     }
 

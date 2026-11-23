@@ -166,9 +166,9 @@ class MergePrecheckTest {
         left.add("src/A.java", base, replaceLine(base, 10, "X"), true, RiskLevel.LOW);
         right.add("src/A.java", base, replaceLine(base, 10, "Y"), true, RiskLevel.LOW);
 
-        MergePrecheck.Report report = MergePrecheck.check(List.of(mine), List.of(
-            new MergePrecheck.Held("其他会话 ses_x 的 T8", left.changes()),
-            new MergePrecheck.Held("其他会话 ses_y 的 T9", right.changes())));
+        MergePrecheck.Report report =
+            MergePrecheck.check(List.of(mine), List.of(new MergePrecheck.Held("其他会话 ses_x 的 T8", left.changes()),
+                new MergePrecheck.Held("其他会话 ses_y 的 T9", right.changes())));
 
         assertFalse(report.hasConflict(), "与本批无关的外部会话冲突不应进入报告");
     }

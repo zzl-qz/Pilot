@@ -40,13 +40,13 @@ import com.pilot.core.multi.TaskSpec;
 import com.pilot.core.multi.TaskStatus;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.tool.SnapshotSink;
-import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.MultiAgentBudget;
 import com.pilot.server.config.MultiAgentProperties;
 import com.pilot.server.config.WebSearchProperties;
 import com.pilot.server.multi.JdbcDispatchStore.Lease;
 import com.pilot.server.permission.PermissionSettings;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.store.SettingsStore;
 import com.pilot.server.store.SqliteStore;
 import com.pilot.server.tool.WorkspaceToolFactory;
@@ -426,8 +426,9 @@ class MultiAgentServiceTest {
     private static ModelClient creatingSharedThenReport() {
         AtomicInteger requests = new AtomicInteger();
         return (messages, tools) -> requests.getAndIncrement() == 0
-            ? new ModelResponse("", List.of(
-                new ToolCall("create", "create_file", Map.of("path", "src/Shared.java", "content", "class Shared {}\n"))))
+            ? new ModelResponse("",
+                List.of(new ToolCall("create", "create_file",
+                    Map.of("path", "src/Shared.java", "content", "class Shared {}\n"))))
             : new ModelResponse(REPORT, List.of());
     }
 

@@ -62,12 +62,11 @@ public class ScheduleRepository {
         if (store == null) {
             return memory.replace(old.id(), old, next);
         }
-        return store.update(
-            "UPDATE scheduled_tasks SET version = ?, payload = ? WHERE id = ? AND version = ?", s -> {
-                s.setLong(1, next.version());
-                s.setString(2, mapper.writeValueAsString(next));
-                s.setString(3, old.id());
-                s.setLong(4, old.version());
-            }, "更新定时任务失败") == 1;
+        return store.update("UPDATE scheduled_tasks SET version = ?, payload = ? WHERE id = ? AND version = ?", s -> {
+            s.setLong(1, next.version());
+            s.setString(2, mapper.writeValueAsString(next));
+            s.setString(3, old.id());
+            s.setLong(4, old.version());
+        }, "更新定时任务失败") == 1;
     }
 }

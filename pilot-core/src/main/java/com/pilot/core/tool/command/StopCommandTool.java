@@ -27,8 +27,8 @@ public final class StopCommandTool implements Tool {
     }
 
     public Map<String, Object> parameters() {
-        return ToolSchemas.object(Map.of("taskId", ToolSchemas.string("需要停止的命令任务 ID"),
-            "ownerSessionId", CommandToolSupport.OWNER_SESSION_PARAMETER), List.of("taskId"));
+        return ToolSchemas.object(Map.of("taskId", ToolSchemas.string("需要停止的命令任务 ID"), "ownerSessionId",
+            CommandToolSupport.OWNER_SESSION_PARAMETER), List.of("taskId"));
     }
 
     public String execute(Map<String, Object> args) {

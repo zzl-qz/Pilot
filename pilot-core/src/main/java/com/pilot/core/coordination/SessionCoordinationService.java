@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -103,10 +104,9 @@ public final class SessionCoordinationService {
             }
             requireSharedScope(from, to);
             String task = taskId == null ? "" : taskId.strip();
-            Optional<CoordinationRequest> existing = requests.stream()
-                .filter(entry -> entry.status().open() && entry.fromSessionId().equals(from.id())
-                    && entry.toSessionId().equals(to.id()) && entry.taskId().equals(task))
-                .findFirst();
+            Optional<CoordinationRequest> existing =
+                requests.stream().filter(entry -> entry.status().open() && entry.fromSessionId().equals(from.id())
+                    && entry.toSessionId().equals(to.id()) && entry.taskId().equals(task)).findFirst();
             if (existing.isPresent()) {
                 result = existing.get();
             } else {
@@ -114,13 +114,10 @@ public final class SessionCoordinationService {
                 result = new CoordinationRequest(newId(), from.projectId(), from.id(), to.id(), reason, task,
                     CoordinationRequestStatus.PENDING, now, now);
                 requests.add(result);
-                out.add(WorkspaceEventDraft.of(WorkspaceEventType.COORDINATION_REQUESTED, from.id(),
-                    directoryOf(from), "协作请求 → " + to.id())
-                    .withProject(from.projectId())
-                    .withDetail("requestId", result.id())
-                    .withDetail("from", from.id())
-                    .withDetail("to", to.id())
-                    .withDetail("taskId", task));
+                out.add(WorkspaceEventDraft
+                    .of(WorkspaceEventType.COORDINATION_REQUESTED, from.id(), directoryOf(from), "协作请求 → " + to.id())
+                    .withProject(from.projectId()).withDetail("requestId", result.id()).withDetail("from", from.id())
+                    .withDetail("to", to.id()).withDetail("taskId", task));
                 persist();
             }
         }
@@ -171,14 +168,13 @@ public final class SessionCoordinationService {
                         existing.path(), "已被会话 " + existing.sessionId() + " 占用：" + existing.path());
                 }
             }
-            claims.removeIf(existing -> existing.ownedBy(caller.id())
-                && existing.overlaps(result, scope.caseInsensitive()));
+            claims.removeIf(
+                existing -> existing.ownedBy(caller.id()) && existing.overlaps(result, scope.caseInsensitive()));
             claims.add(result);
-            out.add(WorkspaceEventDraft.of(WorkspaceEventType.FILE_CLAIMED, caller.id(), result.path(),
-                "占用 " + result.path()).withProject(caller.projectId())
-                .withDetail("claimId", result.id())
-                .withDetail("kind", result.kind().name())
-                .withDetail("expiresAt", result.expiresAt().toString()));
+            out.add(WorkspaceEventDraft
+                .of(WorkspaceEventType.FILE_CLAIMED, caller.id(), result.path(), "占用 " + result.path())
+                .withProject(caller.projectId()).withDetail("claimId", result.id())
+                .withDetail("kind", result.kind().name()).withDetail("expiresAt", result.expiresAt().toString()));
             persist();
         }
         flush(out);
@@ -290,8 +286,7 @@ public final class SessionCoordinationService {
         synchronized (lock) {
             before = claims.size() + (int)handoffs.stream().filter(CoordinationHandoffStatus.PENDING::equals).count();
             sweep(out);
-            before -= claims.size()
-                + (int)handoffs.stream().filter(CoordinationHandoffStatus.PENDING::equals).count();
+            before -= claims.size() + (int)handoffs.stream().filter(CoordinationHandoffStatus.PENDING::equals).count();
         }
         flush(out);
         return before;
@@ -315,17 +310,15 @@ public final class SessionCoordinationService {
             if (next == CoordinationRequestStatus.WITHDRAWN ? !requester : !target) {
                 throw new CoordinationRefusedException(CoordinationRefusedException.DENIED,
                     next == CoordinationRequestStatus.WITHDRAWN ? request.fromSessionId() : request.toSessionId(), null,
-                    next == CoordinationRequestStatus.WITHDRAWN ? "只有发起会话可以撤销请求"
-                        : "只有目标会话可以处理请求");
+                    next == CoordinationRequestStatus.WITHDRAWN ? "只有发起会话可以撤销请求" : "只有目标会话可以处理请求");
             }
             result = request.withStatus(next, clock.instant());
             requests.set(requests.indexOf(request), result);
-            out.add(WorkspaceEventDraft.of(WorkspaceEventType.COORDINATION_UPDATED, callerSessionId, null,
-                "协作请求 " + next.name().toLowerCase(java.util.Locale.ROOT))
-                .withProject(request.projectId())
-                .withDetail("requestId", request.id())
-                .withDetail("status", next.name())
-                .withDetail("from", request.fromSessionId())
+            out.add(WorkspaceEventDraft
+                .of(WorkspaceEventType.COORDINATION_UPDATED, callerSessionId, null,
+                    "协作请求 " + next.name().toLowerCase(Locale.ROOT))
+                .withProject(request.projectId()).withDetail("requestId", request.id())
+                .withDetail("status", next.name()).withDetail("from", request.fromSessionId())
                 .withDetail("to", request.toSessionId()));
             persist();
         }
@@ -352,7 +345,7 @@ public final class SessionCoordinationService {
             }
             result = handoff.withStatus(next, clock.instant());
             handoffs.set(handoffs.indexOf(handoff), result);
-            out.add(handoffEvent(result, next.name().toLowerCase(java.util.Locale.ROOT), null));
+            out.add(handoffEvent(result, next.name().toLowerCase(Locale.ROOT), null));
             persist();
         }
         flush(out);
@@ -398,18 +391,16 @@ public final class SessionCoordinationService {
             if (!shares(callerScope, candidate)) {
                 continue;
             }
-            visibleSessions.add(new CoordinationSessionView(candidate.id(), candidate.title(),
-                candidate.status().name(), candidate.workspace(), presence.isOnline(candidate.id()),
-                candidate.archived()));
+            visibleSessions
+                .add(new CoordinationSessionView(candidate.id(), candidate.title(), candidate.status().name(),
+                    candidate.workspace(), presence.isOnline(candidate.id()), candidate.archived()));
         }
-        List<CoordinationClaim> visibleClaims = claims.stream().filter(claim -> claimVisible(caller, callerScope, claim))
-            .toList();
-        List<CoordinationRequest> visibleRequests =
-            requests.stream().filter(entry -> partiesVisible(caller, callerScope, entry.fromSessionId(),
-                entry.toSessionId())).toList();
-        List<CoordinationHandoff> visibleHandoffs =
-            handoffs.stream().filter(entry -> partiesVisible(caller, callerScope, entry.fromSessionId(),
-                entry.toSessionId())).toList();
+        List<CoordinationClaim> visibleClaims =
+            claims.stream().filter(claim -> claimVisible(caller, callerScope, claim)).toList();
+        List<CoordinationRequest> visibleRequests = requests.stream()
+            .filter(entry -> partiesVisible(caller, callerScope, entry.fromSessionId(), entry.toSessionId())).toList();
+        List<CoordinationHandoff> visibleHandoffs = handoffs.stream()
+            .filter(entry -> partiesVisible(caller, callerScope, entry.fromSessionId(), entry.toSessionId())).toList();
         return new CoordinationSnapshot(callerScope.projectId(), visibleSessions, visibleClaims, visibleRequests,
             visibleHandoffs);
     }
@@ -444,8 +435,9 @@ public final class SessionCoordinationService {
     }
 
     private Session requireSession(String sessionId) {
-        return sessions.find(sessionId).orElseThrow(() -> new CoordinationRefusedException(
-            CoordinationRefusedException.NOT_FOUND, null, null, "没有这个会话：" + sessionId));
+        return sessions.find(sessionId)
+            .orElseThrow(() -> new CoordinationRefusedException(CoordinationRefusedException.NOT_FOUND, null, null,
+                "没有这个会话：" + sessionId));
     }
 
     private CoordinationClaim findClaim(String claimId) {
@@ -453,25 +445,24 @@ public final class SessionCoordinationService {
     }
 
     private WorkspaceEventDraft releaseEvent(CoordinationClaim claim, String reason) {
-        return WorkspaceEventDraft.of(WorkspaceEventType.FILE_RELEASED, claim.sessionId(), claim.path(),
-            "释放 " + claim.path()).withProject(claim.projectId())
-            .withDetail("claimId", claim.id())
-            .withDetail("reason", reason);
+        return WorkspaceEventDraft
+            .of(WorkspaceEventType.FILE_RELEASED, claim.sessionId(), claim.path(), "释放 " + claim.path())
+            .withProject(claim.projectId()).withDetail("claimId", claim.id()).withDetail("reason", reason);
     }
 
     private WorkspaceEventDraft claimEvent(CoordinationClaim claim) {
-        return WorkspaceEventDraft.of(WorkspaceEventType.FILE_CLAIMED, claim.sessionId(), claim.path(),
-            "占用 " + claim.path()).withProject(claim.projectId()).withDetail("claimId", claim.id());
+        return WorkspaceEventDraft
+            .of(WorkspaceEventType.FILE_CLAIMED, claim.sessionId(), claim.path(), "占用 " + claim.path())
+            .withProject(claim.projectId()).withDetail("claimId", claim.id());
     }
 
     private WorkspaceEventDraft handoffEvent(CoordinationHandoff handoff, String decision, Session actor) {
         String sessionId = actor == null ? handoff.toSessionId() : actor.id();
-        return WorkspaceEventDraft.of(decision.equals("created") ? WorkspaceEventType.HANDOFF_CREATED
-            : WorkspaceEventType.HANDOFF_RESOLVED, sessionId, null, "交接 " + decision)
-            .withProject(handoff.projectId())
-            .withDetail("handoffId", handoff.id())
-            .withDetail("status", handoff.status().name())
-            .withDetail("from", handoff.fromSessionId())
+        return WorkspaceEventDraft
+            .of(decision.equals("created") ? WorkspaceEventType.HANDOFF_CREATED : WorkspaceEventType.HANDOFF_RESOLVED,
+                sessionId, null, "交接 " + decision)
+            .withProject(handoff.projectId()).withDetail("handoffId", handoff.id())
+            .withDetail("status", handoff.status().name()).withDetail("from", handoff.fromSessionId())
             .withDetail("to", handoff.toSessionId());
     }
 

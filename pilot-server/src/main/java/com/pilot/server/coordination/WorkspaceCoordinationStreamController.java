@@ -28,8 +28,9 @@ import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.session.events.AsyncEventStream;
 import com.pilot.server.session.events.SessionEventTransport;
 
-import lombok.RequiredArgsConstructor;
 import tools.jackson.databind.ObjectMapper;
+
+import lombok.RequiredArgsConstructor;
 
 /**
  * 工作区协调事件流（服务端 → 客户端单向推送）。
@@ -59,8 +60,8 @@ public class WorkspaceCoordinationStreamController {
     private long streamTimeout = 30_000;
 
     /** 事件流的线上格式：序号用于去重与续传，字段与 {@link WorkspaceCoordinationEvent} 一致。 */
-    public record WorkspaceEventFrame(String type, long sequence, String timestamp, String projectId,
-        String sessionId, String directory, String subject, Map<String, String> details) {
+    public record WorkspaceEventFrame(String type, long sequence, String timestamp, String projectId, String sessionId,
+        String directory, String subject, Map<String, String> details) {
 
         static WorkspaceEventFrame of(WorkspaceCoordinationEvent event) {
             return new WorkspaceEventFrame(event.wireType(), event.sequence(), event.timestamp().toString(),
@@ -79,8 +80,8 @@ public class WorkspaceCoordinationStreamController {
         presence.markOnline(watcher);
         long cursor = Math.max(0, after != null ? after : lastEventId != null ? lastEventId : 0L);
         AtomicReference<WorkspaceEventSubscription> subscription = new AtomicReference<>();
-        var stream = new AsyncEventStream(streams, request, response, streamBytes,
-            Duration.ofMillis(streamTimeout), () -> {
+        var stream =
+            new AsyncEventStream(streams, request, response, streamBytes, Duration.ofMillis(streamTimeout), () -> {
                 WorkspaceEventSubscription current = subscription.get();
                 if (current != null) {
                     current.close();
@@ -91,8 +92,8 @@ public class WorkspaceCoordinationStreamController {
         long earliest = events.earliestRetainedSequence();
         long latest = events.latestSequence();
         if (cursor > 0 && cursor + 1 < earliest) {
-            sendControl(stream, "workspace.reset", Map.of("earliestSequence", earliest, "latestSequence", latest,
-                "reason", "cursor_expired"));
+            sendControl(stream, "workspace.reset",
+                Map.of("earliestSequence", earliest, "latestSequence", latest, "reason", "cursor_expired"));
             stream.finish();
             return;
         }
@@ -124,12 +125,10 @@ public class WorkspaceCoordinationStreamController {
         if (session == null || session.isBlank()) {
             return null;
         }
-        return sessions.find(session)
-            .map(found -> scopes.scopeForWorkspace(found.workspace(), sessions.list()))
+        return sessions.find(session).map(found -> scopes.scopeForWorkspace(found.workspace(), sessions.list()))
             .filter(candidate -> scope.projectId() == null || candidate.projectId() == null
                 || scope.projectId().equals(candidate.projectId()))
-            .map(candidate -> session)
-            .orElse(null);
+            .map(candidate -> session).orElse(null);
     }
 
     /** 订阅与传输的实时指标，供看板排查连接与丢弃情况。 */

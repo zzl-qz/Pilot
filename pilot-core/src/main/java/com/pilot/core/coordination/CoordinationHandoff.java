@@ -9,9 +9,8 @@ import java.util.Objects;
  * <p>交接只转移责任，不转移写权限：接手方仍在自己工作区的权限边界内操作，
  * 原会话的工作区不会被别人直接改动。
  */
-public record CoordinationHandoff(String id, String projectId, String fromSessionId, String toSessionId,
-    String taskId, String summary, CoordinationHandoffStatus status, Instant createdAt, Instant updatedAt,
-    Instant expiresAt) {
+public record CoordinationHandoff(String id, String projectId, String fromSessionId, String toSessionId, String taskId,
+    String summary, CoordinationHandoffStatus status, Instant createdAt, Instant updatedAt, Instant expiresAt) {
 
     public CoordinationHandoff {
         if (id == null || id.isBlank()) {

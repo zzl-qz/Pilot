@@ -36,10 +36,10 @@ public final class CommandInputTool implements Tool {
 
     @Override
     public Map<String, Object> parameters() {
-        return ToolSchemas.object(Map.of("taskId", ToolSchemas.string("run_command 返回的任务 ID"),
-            "text", ToolSchemas.string("要写入标准输入的内容；不自动补换行，该回车就自己写 \\n"),
-            "endInput", ToolSchemas.bool("写完关闭标准输入（发送 EOF），之后不能再写；默认 false"),
-            "ownerSessionId", CommandToolSupport.OWNER_SESSION_PARAMETER), List.of("taskId"));
+        return ToolSchemas.object(Map.of("taskId", ToolSchemas.string("run_command 返回的任务 ID"), "text",
+            ToolSchemas.string("要写入标准输入的内容；不自动补换行，该回车就自己写 \\n"), "endInput",
+            ToolSchemas.bool("写完关闭标准输入（发送 EOF），之后不能再写；默认 false"), "ownerSessionId",
+            CommandToolSupport.OWNER_SESSION_PARAMETER), List.of("taskId"));
     }
 
     @Override

@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -16,37 +17,46 @@ import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import com.pilot.core.approval.ApprovalBroker;
+import com.pilot.core.event.ExecutionUpdated;
+import com.pilot.core.event.SessionEvent;
+import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.message.ToolNames;
-import com.pilot.core.multi.profile.AgentProfileCatalog;
 import com.pilot.core.model.ContextComposition;
 import com.pilot.core.model.MeteredModelClient;
+import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.NativeCapability;
 import com.pilot.core.model.RequestReport;
-import com.pilot.core.loop.AgentLoop;
+import com.pilot.core.multi.profile.AgentProfileCatalog;
 import com.pilot.core.permission.PermissionDecision;
 import com.pilot.core.permission.PermissionGate;
+import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PermissionRules;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.plan.PlanSink;
 import com.pilot.core.project.Project;
 import com.pilot.core.project.ProjectRepository;
 import com.pilot.core.prompt.PromptLibrary;
+import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.PlanRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.skill.SkillCatalog;
 import com.pilot.core.tool.EnableToolsTool;
+import com.pilot.core.tool.ReadGuard;
 import com.pilot.core.tool.SandboxSink;
+import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.UseSkillTool;
+import com.pilot.core.tool.WritesFiles;
 import com.pilot.core.tool.code.CodeSymbolTool;
 import com.pilot.core.tool.command.CommandInputTool;
 import com.pilot.core.tool.command.CommandLogsTool;
 import com.pilot.core.tool.command.CommandStatusTool;
-import com.pilot.core.tool.command.CommandTasksTool;
 import com.pilot.core.tool.command.CommandTaskManager;
+import com.pilot.core.tool.command.CommandTasksTool;
 import com.pilot.core.tool.command.RunCommandTool;
 import com.pilot.core.tool.command.StopCommandTool;
 import com.pilot.core.tool.file.ReadFileTool;
@@ -54,9 +64,16 @@ import com.pilot.core.workspace.AgentScope;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.MultiAgentProperties;
+import com.pilot.server.git.GitWorktrees;
+import com.pilot.server.git.GitWorktrees.Created;
+import com.pilot.server.git.GitWorktrees.Handoff;
+import com.pilot.server.model.ModelClientProvider;
 import com.pilot.server.model.ModelSettings;
 import com.pilot.server.multi.DispatchAgentsTool;
+import com.pilot.server.multi.MultiAgentService;
 import com.pilot.server.multi.SpawnAgentTool;
+import com.pilot.server.multi.SubagentCheckouts;
+import com.pilot.server.multi.SubagentCheckouts.Opened;
 import com.pilot.server.multi.WorkspaceOverviewService;
 import com.pilot.server.run.ReviewMode;
 import com.pilot.server.run.TaskControlService;
@@ -101,9 +118,8 @@ public final class AgentRunPreparation {
     private ProjectRepository projects;
 
     public AgentRunPreparation(SessionService sessions, WorkspaceToolFactory toolFactory, AgentProperties properties,
-        MultiAgentProperties multiProperties, TaskControlService taskControls,
-        CommandTaskManager commandTasks, RunSnapshotService snapshots, PlanRepository plans, ObjectMapper objectMapper,
-        SkillService skills) {
+        MultiAgentProperties multiProperties, TaskControlService taskControls, CommandTaskManager commandTasks,
+        RunSnapshotService snapshots, PlanRepository plans, ObjectMapper objectMapper, SkillService skills) {
         this.sessions = sessions;
         this.toolFactory = toolFactory;
         this.properties = properties;
@@ -149,8 +165,7 @@ public final class AgentRunPreparation {
             properties.contextMaxChars(), properties.completionChecksEnabled());
     }
 
-    public com.pilot.core.model.ModelClient meteredMainClient(PreparedRun prepared,
-        com.pilot.core.model.ModelClient delegate, String sessionId, String runId,
+    public ModelClient meteredMainClient(PreparedRun prepared, ModelClient delegate, String sessionId, String runId,
         Consumer<RequestReport> reports) {
         return new MeteredModelClient(delegate, sessionId, "main", prepared.promptSources(), reports)
             .withRunContext(sessionId, runId);
@@ -160,8 +175,7 @@ public final class AgentRunPreparation {
         return agentProfiles == null ? AgentProfileCatalog.EMPTY : agentProfiles.catalogFor(workspace);
     }
 
-    public PreparedRun prepare(PreparationInput input, PlanSink planSink,
-        Consumer<ToolRegistry> toolConfigurer) {
+    public PreparedRun prepare(PreparationInput input, PlanSink planSink, Consumer<ToolRegistry> toolConfigurer) {
         String workspace = sessions.find(input.sessionId()).map(Session::workspace).orElse(null);
         Path resolvedWorkspace = toolFactory.resolve(workspace);
         List<Path> extraRoots = projectFolders(input.sessionId());
@@ -169,8 +183,8 @@ public final class AgentRunPreparation {
         ReviewMode review = ReviewMode.parse(input.unattended() ? input.automationGoal() : input.input());
         ToolRegistry tools = review.active() ? reviewTools(workspace, extraRoots)
             : sessionTools(input.sessionId(), input.runId(), workspace, planSink, extraRoots);
-        List<String> inheritedDeferred = review.active() ? List.of()
-            : inheritedDeferredTools(input.deferredToolSnapshot(), input.history());
+        List<String> inheritedDeferred =
+            review.active() ? List.of() : inheritedDeferredTools(input.deferredToolSnapshot(), input.history());
         tools.enable(inheritedDeferred);
 
         SkillCatalog catalog = skills.catalogFor(workspace);
@@ -183,21 +197,19 @@ public final class AgentRunPreparation {
         addNativeToolNames(availableTools, input.nativeCapabilities());
         List<ContextComposition.Source> promptSources =
             systemPromptParts(input.sessionId(), workspace, availableTools, catalog, review);
-        String systemPrompt = promptSources.stream().map(ContextComposition.Source::text)
-            .collect(Collectors.joining("\n\n"));
+        String systemPrompt =
+            promptSources.stream().map(ContextComposition.Source::text).collect(Collectors.joining("\n\n"));
         return new PreparedRun(workspace, resolvedWorkspace, workspaceValidator, review, tools, availableTools,
             promptSources, systemPrompt, inheritedDeferred);
     }
 
-    public void configureExecutionTools(PreparedRun prepared, GoalExecutionPolicy goalPolicy,
-        String sessionId, String runId, String workspace, boolean unattended,
-        TaskControlService.TaskContract executionTask, com.pilot.core.model.ModelClient measuredChild,
-        com.pilot.core.model.ModelClient executionClient, PermissionGate sessionGate, AgentLoop.Config config,
-        java.util.function.BooleanSupplier cancelled, SpawnAgentTool.UsageSink childUsage,
-        AgentProfileCatalog profiles, com.pilot.core.model.ModelClient configuredModel,
-        Consumer<com.pilot.core.event.SessionEvent> sink, com.pilot.core.approval.ApprovalBroker approvals,
-        com.pilot.core.session.ConversationRepository conversations, ModelSettings modelSettings,
-        com.pilot.server.multi.MultiAgentService multiAgent, com.pilot.server.git.GitWorktrees worktrees) {
+    public void configureExecutionTools(PreparedRun prepared, GoalExecutionPolicy goalPolicy, String sessionId,
+        String runId, String workspace, boolean unattended, TaskControlService.TaskContract executionTask,
+        ModelClient measuredChild, ModelClient executionClient, PermissionGate sessionGate, AgentLoop.Config config,
+        BooleanSupplier cancelled, SpawnAgentTool.UsageSink childUsage, AgentProfileCatalog profiles,
+        ModelClient configuredModel, Consumer<SessionEvent> sink, ApprovalBroker approvals,
+        ConversationRepository conversations, ModelSettings modelSettings, MultiAgentService multiAgent,
+        GitWorktrees worktrees) {
         ToolRegistry tools = prepared.tools();
         Set<String> availableTools = prepared.availableTools();
         boolean reviewActive = prepared.review().active();
@@ -205,13 +217,11 @@ public final class AgentRunPreparation {
         // 子 Agent 与父会话共用同一组项目目录，否则多目录项目里的子任务看不见兄弟目录
         List<Path> extraRoots = projectFolders(sessionId);
         if (goalPolicy != null) {
-            boolean readOnlySession = reviewActive
-                || properties.permissionMode() == com.pilot.core.permission.PermissionMode.READ_ONLY
-                || tools.availableTools().stream().noneMatch(t -> t instanceof com.pilot.core.tool.WritesFiles);
+            boolean readOnlySession = reviewActive || properties.permissionMode() == PermissionMode.READ_ONLY
+                || tools.availableTools().stream().noneMatch(t -> t instanceof WritesFiles);
             goalPolicy.withCommandLookup(id -> commandTasks.get(sessionId, id)).withReadOnlySession(readOnlySession);
-            goalPolicy.withAvailableTools(availableTools)
-                .withUpdates(state -> sink.accept(new com.pilot.core.event.ExecutionUpdated(state.mode(), state.phase(),
-                    state.requests(), state.reason(), state.gap())));
+            goalPolicy.withAvailableTools(availableTools).withUpdates(state -> sink.accept(
+                new ExecutionUpdated(state.mode(), state.phase(), state.requests(), state.reason(), state.gap())));
             tools.register(goalPolicy.promotionTool());
             if (taskControls.load(sessionId).automation() != null) {
                 tools.register(goalPolicy.researchTool());
@@ -220,44 +230,40 @@ public final class AgentRunPreparation {
         if (!reviewActive) {
             SpawnAgentTool spawnAgent = new SpawnAgentTool(measuredChild, tools, sessionGate, approvals, config,
                 () -> conversations.load(sessionId), sink, cancelled, childUsage, profiles);
-            if (configuredModel instanceof com.pilot.server.model.ModelClientProvider provider) {
+            if (configuredModel instanceof ModelClientProvider provider) {
                 spawnAgent.withChildRoute(() -> modelSettings.snapshot().childModel(), provider::clientFor);
             }
             if (worktrees != null) {
                 Path base = toolFactory.resolve(workspace);
-                spawnAgent.withCheckouts(base, new com.pilot.server.multi.SubagentCheckouts(ignored -> {
+                spawnAgent.withCheckouts(base, new SubagentCheckouts(ignored -> {
                     try {
-                        com.pilot.server.git.GitWorktrees.Created created = worktrees.create(base, "");
+                        Created created = worktrees.create(base, "");
                         Path checkout = Path.of(created.path());
                         String diff = String.join("\n", worktrees.preview(checkout).files());
-                        return new com.pilot.server.multi.SubagentCheckouts.Opened(checkout, diff, "");
+                        return new Opened(checkout, diff, "");
                     } catch (RuntimeException failure) {
-                        return new com.pilot.server.multi.SubagentCheckouts.Opened(null, "",
-                            failure.getMessage() == null ? "无法创建独立检出" : failure.getMessage());
+                        return new Opened(null, "", failure.getMessage() == null ? "无法创建独立检出" : failure.getMessage());
                     }
                 }));
                 spawnAgent.withWorkspaceTools(path -> toolFactory.registryFor(path.toString()), path -> {
-                    com.pilot.server.git.GitWorktrees.Handoff handed = worktrees.handoff(path);
+                    Handoff handed = worktrees.handoff(path);
                     return handed.note();
                 });
             }
             tools.register(spawnAgent);
             if (multiProperties.enabled()) {
-                tools.register(new DispatchAgentsTool(multiAgent, sessionId, runId, workspace,
-                    sink, cancelled, executionClient, profiles, childUsage)
-                .withExtraRoots(extraRoots)
-                    .withParentPermission(unattended && executionTask.automation().fullAccess()
-                        ? com.pilot.core.permission.PermissionMode.AUTO : null));
+                tools.register(new DispatchAgentsTool(multiAgent, sessionId, runId, workspace, sink, cancelled,
+                    executionClient, profiles, childUsage).withExtraRoots(extraRoots).withParentPermission(
+                        unattended && executionTask.automation().fullAccess() ? PermissionMode.AUTO : null));
             }
         }
         tools.enable(inheritedDeferred);
     }
 
     public String currentTaskContext(String sessionId) {
-        return taskControls.stablePrompt(sessionId)
-            + "\n历史目标或验收范围不明时，先 read_task_history 恢复用户原文，不能按摘要自行缩小范围。"
-            + "\n\n" + PROMPTS.render("system/today", Map.of("today", LocalDate.now().toString())).strip()
-            + "\n\n" + planBrief(sessionId);
+        return taskControls.stablePrompt(sessionId) + "\n历史目标或验收范围不明时，先 read_task_history 恢复用户原文，不能按摘要自行缩小范围。" + "\n\n"
+            + PROMPTS.render("system/today", Map.of("today", LocalDate.now().toString())).strip() + "\n\n"
+            + planBrief(sessionId);
     }
 
     public Supplier<String> taskContextSource(String sessionId) {
@@ -292,8 +298,8 @@ public final class AgentRunPreparation {
         };
     }
 
-    public com.pilot.core.tool.ReadGuard readGuardOf(ToolRegistry tools) {
-        for (com.pilot.core.tool.Tool tool : tools.tools()) {
+    public ReadGuard readGuardOf(ToolRegistry tools) {
+        for (Tool tool : tools.tools()) {
             if (tool instanceof ReadFileTool read) {
                 return read.guard();
             }
@@ -306,13 +312,14 @@ public final class AgentRunPreparation {
         if (continuation || !properties.preflightLocalizationEnabledValue()) {
             return null;
         }
-        PreFlightLocator.Result preflight = preFlightLocator.locate(prepared.resolvedWorkspace(),
-            prepared.workspaceValidator(), input, Set.of());
+        PreFlightLocator.Result preflight =
+            preFlightLocator.locate(prepared.resolvedWorkspace(), prepared.workspaceValidator(), input, Set.of());
         if (preflight.hasCandidates()) {
             loop.withInitialPhaseHint(preflight.renderBlock(), preflight.candidatePaths());
         }
-        loop.withSteeringHintProvider(text -> preFlightLocator.locate(prepared.resolvedWorkspace(),
-            prepared.workspaceValidator(), text, loop.observedPathsSnapshot()).renderBlock());
+        loop.withSteeringHintProvider(text -> preFlightLocator
+            .locate(prepared.resolvedWorkspace(), prepared.workspaceValidator(), text, loop.observedPathsSnapshot())
+            .renderBlock());
         return preflight;
     }
 
@@ -355,7 +362,8 @@ public final class AgentRunPreparation {
         Set<String> candidates = preflight.candidatePaths();
         long hitRead = candidates.stream().filter(normalizedObserved::contains).count();
         long hitEdit = candidates.stream().filter(normalizedChanged::contains).count();
-        log.info("Pre-flight localization run={}: elapsedMs={}, anchors={}, candidates={}, hitRead={}, hitEdit={}, timedOut={}",
+        log.info(
+            "Pre-flight localization run={}: elapsedMs={}, anchors={}, candidates={}, hitRead={}, hitEdit={}, timedOut={}",
             runId, preflight.elapsedMs(), preflight.anchorCount(), candidates.size(), hitRead, hitEdit,
             preflight.timedOut());
     }
@@ -407,9 +415,9 @@ public final class AgentRunPreparation {
     }
 
     private ToolRegistry reviewTools(String workspace, List<Path> extraRoots) {
-        AgentScope scope = AgentScope.readOnly(List.of(), List.of())
-            .withTools(List.of("read_*", "list_*", "glob_*", "search_*", CodeSymbolTool.NAME, ToolNames.RUN_COMMAND,
-                ToolNames.WEB_SEARCH, ToolNames.WEB_FETCH), List.of());
+        AgentScope scope =
+            AgentScope.readOnly(List.of(), List.of()).withTools(List.of("read_*", "list_*", "glob_*", "search_*",
+                CodeSymbolTool.NAME, ToolNames.RUN_COMMAND, ToolNames.WEB_SEARCH, ToolNames.WEB_FETCH), List.of());
         return toolFactory.registryForScope(workspace, scope, SandboxSink.rejectAll(), extraRoots);
     }
 
@@ -441,8 +449,8 @@ public final class AgentRunPreparation {
         if (open.isEmpty()) {
             return PROMPTS.render("system/plan-done", Map.of()).strip();
         }
-        String list = open.stream().map(item -> "- [" + item.status() + "] " + item.step())
-            .collect(Collectors.joining("\n"));
+        String list =
+            open.stream().map(item -> "- [" + item.status() + "] " + item.step()).collect(Collectors.joining("\n"));
         return PROMPTS.render("system/plan-context", Map.of("planItems", list)).strip();
     }
 
@@ -452,8 +460,7 @@ public final class AgentRunPreparation {
         toolFactory.usePlan(() -> plans.load(sessionId));
         try {
             toolFactory.registryFor(workspace, extraRoots, planSink).tools().stream()
-                .filter(tool -> !ToolNames.RUN_COMMAND.equals(tool.name())
-                    && !EnableToolsTool.NAME.equals(tool.name()))
+                .filter(tool -> !ToolNames.RUN_COMMAND.equals(tool.name()) && !EnableToolsTool.NAME.equals(tool.name()))
                 .forEach(tools::register);
         } finally {
             toolFactory.usePlan(null);
@@ -461,7 +468,7 @@ public final class AgentRunPreparation {
         tools.register(new EnableToolsTool(tools));
         RunCommandTool commands = new RunCommandTool(new PathValidator(toolFactory.resolve(workspace), extraRoots),
             commandTasks, sessionId, snapshots);
-        for (com.pilot.core.tool.Tool tool : tools.tools()) {
+        for (Tool tool : tools.tools()) {
             if (tool instanceof ReadFileTool read) {
                 commands.withReads(read.guard());
             }
