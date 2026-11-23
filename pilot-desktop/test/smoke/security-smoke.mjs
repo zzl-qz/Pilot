@@ -35,6 +35,11 @@ const invokeCases=[
   ['pilot-browser-find','fixture'],['pilot-browser-logs',false],['pilot-browser-devtools'],['pilot-browser-pick'],
   ['pilot-browser-reset-emulation'],['pilot-workbench-reload'],['pilot-mobile-open'],['pilot-mobile-copy','invalid'],
   ['pilot:select-directories'], ['pilot:save-session-markdown', 'pilot-test.md', 'probe'],
+  ['pilot:alert-show', { id: 'probe', kind: 'done', title: 'probe' }], ['pilot:alert-dismiss', 'probe'],
+  ['pilot:notify-show', { title: 'probe', body: 'probe' }], ['pilot:window-attention', { urgentCount: 1 }],
+  ['pilot:window-focus'],
+  ['pilot:desktop-runtime-sync', { runningCount: 0, pendingCount: 0, dndActive: false, keepAwake: false, minimizeToTray: false }],
+  ['pilot:desktop-shortcut-set', '']
 ];
 const probe=join(temp,'probe.cjs');
 await writeFile(probe,`const {contextBridge,ipcRenderer}=require('electron');const events=[];for(const channel of ['pilot-browser-log','pilot-browser-state','pilot-browser-download'])ipcRenderer.on(channel,()=>events.push(channel));contextBridge.exposeInMainWorld('ipcProbe',{invoke:(channel,...args)=>ipcRenderer.invoke(channel,...args),send:(channel,value)=>ipcRenderer.send(channel,value),events:()=>events});`);
@@ -43,8 +48,8 @@ delete env.ELECTRON_RUN_AS_NODE;delete env.PILOT_DESKTOP_SMOKE;
 async function denies(target,label){
   const results=await target.evaluate(async cases=>{const result=[];for(const [name,...args] of cases)result.push(await ipcProbe.invoke(name,...args));return result;},invokeCases);
   for(const result of results)assert.equal(result.code,'UNTRUSTED_WORKBENCH',label);
-  await target.evaluate(()=>{ipcProbe.send('pilot-browser-workspace','forbidden-workspace');ipcProbe.send('pilot-browser-bounds',{visible:true,x:0,y:0,width:900,height:700});ipcProbe.send('pilot-workbench-ready');});
-  passed.push(label + ': all 17 invoke channels denied');
+  await target.evaluate(()=>{ipcProbe.send('pilot-browser-workspace','forbidden-workspace');ipcProbe.send('pilot-browser-bounds',{visible:true,x:0,y:0,width:900,height:700});ipcProbe.send('pilot-workbench-ready');ipcProbe.send('pilot-alert-act',{action:'approve',id:'probe',callId:'probe'});});
+  passed.push(label + `: all ${invokeCases.length} invoke channels denied`);
 }
 try{
   desktop=await _electron.launch({chromiumSandbox:true,executablePath:prepareDevelopmentHost(),args:[root,`--user-data-dir=${join(temp,'profile')}`],env,timeout:20000});
@@ -153,6 +158,21 @@ try{
   await page.evaluate(()=>document.querySelector('#same').click());await page.waitForURL(home+'/next');
   assert.equal((await page.evaluate(()=>pilotDesktop.logs(false))).ok,true);
   passed.push('same-origin navigation: remains usable');
+  const shownAlert=await page.evaluate(()=>pilotDesktop.showFloatingAlert({id:'sec-alert',kind:'question',sessionId:'s1',callId:'c1',title:'安全冒烟选择',options:['选A','选B']}));
+  assert.equal(shownAlert.ok,true);
+  await desktop.evaluate(({BrowserWindow})=>new Promise(resolve=>{
+    const check=()=>{const alertWin=BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().startsWith('data:text/html'));if(alertWin&&!alertWin.webContents.isLoading())resolve(alertWin);else setTimeout(check,30);};check();
+  }));
+  const alertBridge=await desktop.evaluate(({BrowserWindow})=>{
+    const alertWin=BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().startsWith('data:text/html'));
+    return Promise.all([
+      alertWin.webContents.executeJavaScript('typeof window.pilotDesktop'),
+      alertWin.webContents.executeJavaScript('typeof window.pilotAlert?.act')
+    ]);
+  });
+  assert.deepEqual(alertBridge,['undefined','function']);
+  assert.equal((await page.evaluate(()=>pilotDesktop.dismissFloatingAlert('*'))).ok,true);
+  passed.push('floating alert window: isolated from workbench bridge and cleanly dismissed');
   // loadURL 是主进程 API，不触发 will-navigate；模拟意外主进程加载以独立验证 IPC 防线。
   const loading=page.waitForURL(other+'/foreign');
   await desktop.evaluate(async({BrowserWindow},url)=>{const win=BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().startsWith('http:'));await win.loadURL(url);},other+'/foreign');

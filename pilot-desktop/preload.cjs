@@ -25,6 +25,28 @@ if (window === window.top && ['http:', 'https:'].includes(location.protocol) && 
     readClipboardFiles: limits => ipcRenderer.invoke('pilot:read-clipboard-files', limits),
     saveSessionMarkdown: (name, text) => ipcRenderer.invoke('pilot:save-session-markdown', name, text),
     selectDirectories: () => ipcRenderer.invoke('pilot:select-directories'),
+    showFloatingAlert: (payload) => ipcRenderer.invoke('pilot:alert-show', payload),
+    dismissFloatingAlert: (id) => ipcRenderer.invoke('pilot:alert-dismiss', id),
+    showNativeNotification: (payload) => ipcRenderer.invoke('pilot:notify-show', payload),
+    setWindowAttention: (payload) => ipcRenderer.invoke('pilot:window-attention', payload),
+    focusMainWindow: () => ipcRenderer.invoke('pilot:window-focus'),
+    onAlertAction: (callback) => {
+      const listener = (_event, action) => callback(action);
+      ipcRenderer.on('pilot-alert-action', listener);
+      return () => ipcRenderer.removeListener('pilot-alert-action', listener);
+    },
+    onWindowFocusChange: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on('pilot-window-focus', listener);
+      return () => ipcRenderer.removeListener('pilot-window-focus', listener);
+    },
+    syncDesktopRuntime: (payload) => ipcRenderer.invoke('pilot:desktop-runtime-sync', payload),
+    setGlobalShortcut: (accelerator) => ipcRenderer.invoke('pilot:desktop-shortcut-set', accelerator),
+    onDesktopPreferenceAction: (callback) => {
+      const listener = (_event, action) => callback(action);
+      ipcRenderer.on('pilot-desktop-pref-action', listener);
+      return () => ipcRenderer.removeListener('pilot-desktop-pref-action', listener);
+    },
     onMobileConnection: callback => {
       const listener = () => callback();
       ipcRenderer.on('pilot-mobile-open', listener);

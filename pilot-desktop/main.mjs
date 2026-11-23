@@ -2,7 +2,9 @@ import { saveSessionMarkdown } from './session-export.mjs';
 import { selectProjectDirectories } from './directory-picker.mjs';
 import { installMicrophonePermissions } from './media-permission.mjs';
 import { configuredWorkbenchUrl, workbenchOrigin, workbenchIpc, installWorkbenchNavigation } from './workbench-security.mjs';
-import { app, BrowserWindow, WebContentsView, ipcMain, session, Menu, nativeImage, systemPreferences, dialog, clipboard } from 'electron';
+import { app, BrowserWindow, WebContentsView, ipcMain, session, Menu, Tray, globalShortcut, powerSaveBlocker, nativeImage, systemPreferences, dialog, clipboard, Notification, screen } from 'electron';
+import { createDesktopAlertManager } from './desktop-alerts.mjs';
+import { buildTrayMenuTemplate, createOfflineReconnector, createPowerAwakeController, normalizeWindowBounds } from './desktop-shell.mjs';
 import { startBrowserControl } from './browser-control.mjs';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
@@ -791,6 +793,158 @@ workbench.handle('pilot:save-session-markdown', (event, name, text) => saveSessi
 workbench.handle('pilot:select-directories', () => selectProjectDirectories({ origin, parent: shell, dialog }));
 workbench.handle('pilot:read-clipboard-files', (_event, limits) => readClipboardFiles(limits));
 
+let alerts = null;
+let tray = null;
+let quitting = false;
+let activeShortcut = '';
+let boundsSaveTimer = null;
+const runtimeStatus = {
+  runningCount: 0,
+  pendingCount: 0,
+  dndActive: false,
+  keepAwake: false,
+  minimizeToTray: false
+};
+const powerAwake = createPowerAwakeController({ powerSaveBlocker });
+
+function windowBoundsFile() {
+  return join(browserHome(), 'window-bounds.json');
+}
+
+function loadSavedBounds() {
+  if (smoke) return null;
+  try {
+    return JSON.parse(readFileSync(windowBoundsFile(), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function scheduleSaveBounds() {
+  if (smoke || !shell || shell.isDestroyed()) return;
+  clearTimeout(boundsSaveTimer);
+  boundsSaveTimer = setTimeout(() => {
+    boundsSaveTimer = null;
+    if (!shell || shell.isDestroyed()) return;
+    try {
+      const maximized = shell.isMaximized();
+      const raw = maximized && typeof shell.getNormalBounds === 'function' ? shell.getNormalBounds() : shell.getBounds();
+      mkdirSync(browserHome(), { recursive: true });
+      writeFileSync(windowBoundsFile(), JSON.stringify({ ...raw, maximized }));
+    } catch { /* 写窗口边界失败不影响主功能 */ }
+  }, 400);
+}
+
+function focusMainShell() {
+  if (!shell || shell.isDestroyed()) return;
+  if (shell.isMinimized()) shell.restore();
+  shell.show();
+  shell.focus();
+}
+
+function refreshTrayMenu() {
+  if (!tray || tray.isDestroyed?.()) return;
+  const parts = [];
+  if (runtimeStatus.pendingCount > 0) parts.push(`${runtimeStatus.pendingCount} 项待处理`);
+  if (runtimeStatus.runningCount > 0) parts.push(`${runtimeStatus.runningCount} 项执行中`);
+  tray.setToolTip(parts.length ? `Pilot · ${parts.join(' / ')}` : 'Pilot 工作台');
+  const template = buildTrayMenuTemplate({
+    runningCount: runtimeStatus.runningCount,
+    pendingCount: runtimeStatus.pendingCount,
+    dndActive: runtimeStatus.dndActive,
+    keepAwake: runtimeStatus.keepAwake,
+    windowVisible: Boolean(shell && !shell.isDestroyed() && shell.isVisible()),
+    handlers: {
+      toggleWindow: () => {
+        if (!shell || shell.isDestroyed()) return;
+        if (shell.isVisible() && !shell.isMinimized()) shell.hide();
+        else focusMainShell();
+        refreshTrayMenu();
+      },
+      focusPending: () => {
+        focusMainShell();
+        dispatchWorkbenchCommand('focus-pending');
+      },
+      newTask: () => {
+        focusMainShell();
+        dispatchWorkbenchCommand('new-session');
+      },
+      toggleDnd: () => {
+        workbench.send('pilot-desktop-pref-action', 'toggle-dnd');
+      },
+      toggleKeepAwake: () => {
+        workbench.send('pilot-desktop-pref-action', 'toggle-keep-awake');
+      },
+      quit: () => {
+        quitting = true;
+        app.quit();
+      }
+    }
+  });
+  tray.setContextMenu(Menu.buildFromTemplate(template));
+}
+
+if (!smoke && process.env.PILOT_DISABLE_SINGLE_INSTANCE !== '1') {
+  const locked = app.requestSingleInstanceLock();
+  if (!locked) {
+    app.quit();
+  } else {
+    app.on('second-instance', () => focusMainShell());
+  }
+}
+
+workbench.handle('pilot:alert-show', (_event, payload) => alerts ? alerts.show(payload) : { ok: false });
+workbench.handle('pilot:alert-dismiss', (_event, id) => alerts ? alerts.dismiss(id) : { ok: false });
+workbench.handle('pilot:notify-show', (_event, payload) => alerts ? alerts.showNativeNotification(payload) : { ok: false });
+workbench.handle('pilot:window-attention', (_event, payload) => alerts ? alerts.setWindowAttention(payload) : { ok: false });
+workbench.handle('pilot:window-focus', () => alerts ? alerts.focusMainWindow() : { ok: false });
+workbench.handle('pilot:desktop-runtime-sync', (_event, payload) => {
+  if (payload && typeof payload === 'object') {
+    runtimeStatus.runningCount = Math.max(0, Number(payload.runningCount) || 0);
+    runtimeStatus.pendingCount = Math.max(0, Number(payload.pendingCount) || 0);
+    runtimeStatus.dndActive = Boolean(payload.dndActive);
+    runtimeStatus.keepAwake = Boolean(payload.keepAwake);
+    runtimeStatus.minimizeToTray = Boolean(payload.minimizeToTray);
+    powerAwake.update({ keepAwake: runtimeStatus.keepAwake, runningCount: runtimeStatus.runningCount });
+    refreshTrayMenu();
+  }
+  return { ok: true };
+});
+workbench.handle('pilot:desktop-shortcut-set', (_event, accelerator) => {
+  const next = String(accelerator ?? '').trim().slice(0, 64);
+  if (activeShortcut) {
+    try { globalShortcut.unregister(activeShortcut); } catch { /* 忽略注销异常 */ }
+    activeShortcut = '';
+  }
+  if (!next) {
+    return { ok: true, accelerator: '' };
+  }
+  try {
+    const ok = globalShortcut.register(next, () => {
+      focusMainShell();
+      dispatchWorkbenchCommand('focus-composer');
+    });
+    if (!ok) {
+      return { ok: false, accelerator: '', error: `快捷键「${next}」已被系统或其他应用占用，请更换组合键。` };
+    }
+    activeShortcut = next;
+    return { ok: true, accelerator: activeShortcut };
+  } catch (error) {
+    return { ok: false, accelerator: '', error: `快捷键格式不受支持或被桌面环境拦截：${error?.message || error}` };
+  }
+});
+
+ipcMain.on('pilot-alert-act', (event, payload) => {
+  const contents = alerts?.webContents();
+  if (!contents || event.sender !== contents) return;
+  alerts.handleAlertAct(payload);
+});
+ipcMain.on('pilot-alert-resize', (event, height) => {
+  const contents = alerts?.webContents();
+  if (!contents || event.sender !== contents) return;
+  alerts.handleAlertResize(height);
+});
+
 function installMenu() {
   if (smoke) return;
   const template = [
@@ -858,9 +1012,13 @@ app.whenReady().then(async () => {
   if (icon && process.platform === 'darwin' && app.dock) app.dock.setIcon(icon);
   app.setAboutPanelOptions({ applicationName: 'Pilot', applicationVersion: '0.0.1' });
   installMenu();
+  const initialBounds = smoke
+    ? { width: 800, height: 600, maximized: false }
+    : normalizeWindowBounds(loadSavedBounds(), screen.getAllDisplays?.() || []);
   shell = new BrowserWindow({
-    width: smoke ? 800 : 1280,
-    height: smoke ? 600 : 840,
+    ...(Number.isFinite(initialBounds.x) && Number.isFinite(initialBounds.y) ? { x: initialBounds.x, y: initialBounds.y } : {}),
+    width: initialBounds.width,
+    height: initialBounds.height,
     title: 'Pilot',
     backgroundColor: '#111111',
     icon,
@@ -872,6 +1030,86 @@ app.whenReady().then(async () => {
       additionalArguments: [`--pilot-workbench-origin=${origin}`]
     }
   });
+  if (initialBounds.maximized && !smoke) {
+    shell.maximize();
+  }
+  const offlineReconnector = createOfflineReconnector({
+    healthUrl: `${origin}/api/health`,
+    onReady: () => {
+      if (shell && !shell.isDestroyed() && !workbench.current()) {
+        shell.loadURL(workbenchUrl).catch(() => {});
+      }
+    }
+  });
+  alerts = createDesktopAlertManager({
+    BrowserWindow,
+    Notification,
+    screen,
+    app,
+    getShell: () => shell,
+    onAction: (action) => workbench.send('pilot-alert-action', action),
+    platform: process.platform,
+    preloadPath: join(here, 'alert-preload.cjs'),
+    icon,
+    smoke
+  });
+  if (!smoke && icon && typeof Tray === 'function') {
+    try {
+      const trayIcon = process.platform === 'darwin' ? icon.resize({ width: 18, height: 18 }) : icon;
+      tray = new Tray(trayIcon);
+      tray.on('click', () => {
+        focusMainShell();
+        refreshTrayMenu();
+      });
+      refreshTrayMenu();
+    } catch {
+      tray = null;
+    }
+  }
+  shell.on('resize', scheduleSaveBounds);
+  shell.on('move', scheduleSaveBounds);
+  shell.on('maximize', scheduleSaveBounds);
+  shell.on('unmaximize', scheduleSaveBounds);
+  shell.on('show', refreshTrayMenu);
+  shell.on('hide', refreshTrayMenu);
+  shell.on('close', (event) => {
+    if (quitting || smoke) return;
+    if (runtimeStatus.minimizeToTray) {
+      event.preventDefault();
+      shell.hide();
+      refreshTrayMenu();
+      return;
+    }
+    if (runtimeStatus.runningCount > 0 || runtimeStatus.pendingCount > 0) {
+      event.preventDefault();
+      const total = runtimeStatus.runningCount + runtimeStatus.pendingCount;
+      void dialog.showMessageBox(shell, {
+        type: 'question',
+        title: '关闭 Pilot 主窗口',
+        message: `当前仍有 ${total} 项运行中或待处理的任务。`,
+        detail: '隐藏到后台会继续执行并在完成或需要批准时提醒你；直接退出将中断本地桌面会话视图。',
+        buttons: ['隐藏到后台继续', '仍要退出', '取消'],
+        defaultId: 0,
+        cancelId: 2
+      }).then(({ response }) => {
+        if (!shell || shell.isDestroyed()) return;
+        if (response === 0) {
+          shell.hide();
+          refreshTrayMenu();
+        } else if (response === 1) {
+          quitting = true;
+          shell.close();
+        }
+      }).catch(() => {});
+    }
+  });
+  shell.on('focus', () => {
+    try { shell.flashFrame(false); } catch { /* 平台不支持任务栏闪烁时忽略 */ }
+    workbench.send('pilot-window-focus', { focused: true });
+  });
+  shell.on('blur', () => {
+    workbench.send('pilot-window-focus', { focused: false });
+  });
   installWorkbenchNavigation(shell.webContents, workbenchUrl, {
     // 等取消导航生效后再检查当前文档，避免将候选 URL 当成已提交页面。
     openPage: url => setImmediate(() => workbench.send('pilot-browser-open', url)),
@@ -879,15 +1117,23 @@ app.whenReady().then(async () => {
   });
   installWorkbenchKeys(shell.webContents);
   shell.webContents.on('did-navigate', () => { workbenchReady = false; });
+  shell.webContents.on('did-finish-load', () => {
+    if (workbench.current()) offlineReconnector.stop();
+  });
   installMicrophonePermissions(shell.webContents, workbenchUrl, systemPreferences);
   shell.webContents.on('did-fail-load', (_event, code, _desc, _url, isMainFrame) => {
     if (!isMainFrame || code === -3 || smoke || _url?.startsWith('data:')) return;
     shell.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(offlinePage(workbenchUrl))}`).catch(() => {});
+    offlineReconnector.start();
   });
   if (!smoke) shell.loadURL(workbenchUrl).catch(() => {});
   else shell.loadURL('about:blank');
   writeEndpoint();
   shell.on('closed', () => {
+    clearTimeout(boundsSaveTimer);
+    offlineReconnector.stop();
+    alerts?.destroy();
+    alerts = null;
     shell = null;
   });
 }).catch((error) => {
@@ -895,8 +1141,22 @@ app.whenReady().then(async () => {
   app.quit();
 });
 
-app.on('before-quit', clearEndpoint);
+app.on('activate', () => {
+  focusMainShell();
+});
+
+app.on('before-quit', () => {
+  quitting = true;
+  clearTimeout(boundsSaveTimer);
+  powerAwake.destroy();
+  try { globalShortcut.unregisterAll(); } catch { /* 忽略 */ }
+  tray?.destroy?.();
+  tray = null;
+  alerts?.destroy();
+  clearEndpoint();
+});
 app.on('window-all-closed', () => {
+  alerts?.destroy();
   clearEndpoint();
   app.quit();
 });

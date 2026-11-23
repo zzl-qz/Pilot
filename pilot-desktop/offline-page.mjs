@@ -33,5 +33,5 @@ a {
 }
 a:hover { opacity: .87; }
 a:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
-</style></head><body><main><div class="brand">Pilot · 桌面工作台</div><h1>暂时无法连接服务</h1><p>启动 Pilot 服务后，重新连接。<code>${escapeHtml(target.origin)}</code></p><a href="${escapeHtml(target.href)}">重新连接</a></main></body></html>`;
+</style></head><body><main><div class="brand">Pilot · 桌面工作台</div><h1>暂时无法连接服务</h1><p>启动或重启 Pilot 服务后，系统会自动探测并恢复工作台，也可以手动点击重试。<code>${escapeHtml(target.origin)}</code></p><a href="${escapeHtml(target.href)}">重新连接</a></main></body></html>`;
 }
