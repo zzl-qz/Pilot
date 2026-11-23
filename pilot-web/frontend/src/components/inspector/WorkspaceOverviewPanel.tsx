@@ -123,22 +123,36 @@ export function WorkspaceOverviewPanel() {
   const mine = claimsOwnedBy(claims, me);
   const owners = board?.overview?.fileOwners || [];
   const detailOf = (id: string) => board?.overview?.sessions.find((item) => item.sessionId === id);
+  const sessionNameOf = (id: string) => {
+    if (!id) return '未知会话';
+    if (id === me) return '本会话';
+    return sessions.find((item) => item.sessionId === id)?.title || id;
+  };
+  const arbitrationKindLabel = (kind: string) => ({
+    FILE_CONFLICT: '文件冲突',
+    WRITE_CONFLICT: '写入冲突',
+    SANDBOX_CONFLICT: '沙箱冲突',
+    HANDOFF: '任务交接',
+    APPROVAL: '权限确认'
+  }[String(kind || '').toUpperCase()] || kind);
+  const feedStatus = feed?.status || 'idle';
 
   return (
     <div className="overview-panel" data-testid="workspace-overview">
       <div className="overview-bar">
-        <span>{loading ? '读取中…' : `${sessions.length} 个会话`}</span>
-        <span className="overview-feed" data-testid="overview-feed">
-          {connectionLabel(feed?.status || 'idle', feed?.cursor || 0, feed?.attempts || 0)}
+        <span className="overview-count">{loading ? '读取中…' : `${sessions.length} 个会话`}</span>
+        <span className={`overview-feed is-${feedStatus}`} data-testid="overview-feed">
+          <span className="overview-feed-dot" aria-hidden="true" />
+          {connectionLabel(feedStatus, feed?.cursor || 0, feed?.attempts || 0)}
         </span>
-        <span className="overview-actions">
+        <span className="overview-bar-actions">
           {feed && feed.status !== 'live' && feed.status !== 'idle' && (
             <button type="button" className="overview-refresh" onClick={() => feedRef.current?.retry()} disabled={busy}>重连</button>
           )}
           <button type="button" className="overview-refresh" onClick={() => setEpoch((value) => value + 1)} disabled={loading}>刷新</button>
         </span>
       </div>
-      {feed?.lastError && <p className="overview-line" role="status">{feed.lastError}</p>}
+      {feed?.lastError && <p className="overview-line is-warn" role="status">{feed.lastError}</p>}
       {error && <p className="overview-error" role="alert">看板读取失败：{error}</p>}
       {actionError && <p className="overview-error" role="alert">协调失败：{actionError}</p>}
       {!error && owners.length > 0 && (
@@ -159,23 +173,28 @@ export function WorkspaceOverviewPanel() {
           return (
             <li key={session.sessionId} className={isCurrent ? 'is-current' : ''}>
               <div className="overview-head">
-                <strong>{session.title || session.sessionId}</strong>
-                <span className="overview-tag">{sessionStatusLabel(session.status)}</span>
-                {session.online && <span className="overview-tag">在线</span>}
-                {isCurrent && <span className="overview-tag">当前</span>}
+                <strong title={session.title || session.sessionId}>{session.title || session.sessionId}</strong>
+                <span className="overview-tags">
+                  <span className={`overview-tag is-${String(session.status || '').toLowerCase()}`}>{sessionStatusLabel(session.status)}</span>
+                  {session.online && <span className="overview-tag is-online">在线</span>}
+                  {isCurrent && <span className="overview-tag is-current">当前</span>}
+                </span>
               </div>
               {[
-                detail && detail.pendingFiles.length > 0
+                detail && detail.pendingFiles?.length > 0
                   ? `待接受改动 ${detail.pendingFiles.length} 个：${detail.pendingFiles.join('、')}` : '',
-                detail && detail.runningCommands.length > 0
+                detail && detail.runningCommands?.length > 0
                   ? `后台命令：${detail.runningCommands.map((item) => item.command).join('、')}` : '',
-                detail && detail.arbitrations.length > 0
-                  ? `等待人工决定 ${detail.arbitrations.length} 项（${detail.arbitrations.map((item) => item.kind).join('、')}）` : '',
+                detail && detail.arbitrations?.length > 0
+                  ? `等待人工决定 ${detail.arbitrations.length} 项（${detail.arbitrations.map((item) => arbitrationKindLabel(item.kind)).join('、')}）` : '',
               ].filter(Boolean).map((text) => <p key={text} className="overview-line">{text}</p>)}
-              {detail && detail.tasks.length > 0 && (
-                <ul className="overview-tasks">
+              {detail && detail.tasks?.length > 0 && (
+                <ul className="overview-session-tasks">
                   {detail.tasks.map((task) => (
-                    <li key={task.taskId}>{task.title || task.taskId}：{task.status}</li>
+                    <li key={task.taskId}>
+                      <span>{task.title || task.taskId}</span>
+                      <span className="overview-tag">{sessionStatusLabel(task.status)}</span>
+                    </li>
                   ))}
                 </ul>
               )}
@@ -194,37 +213,38 @@ export function WorkspaceOverviewPanel() {
                 )}
               </div>
               {expanded === session.sessionId && (
-                <p className="overview-line">{session.workspace || '未记录目录'}{session.archived ? '（已归档）' : ''}</p>
+                <p className="overview-line overview-path">{session.workspace || '未记录目录'}{session.archived ? '（已归档）' : ''}</p>
               )}
             </li>
           );
         })}
       </ul>
       {target && (
-        <section className="overview-conflicts">
-          <h4>请求协作：{target}</h4>
-          <div className="overview-actions">
-            <input className="overview-input" value={reason} onChange={(event) => setReason(event.target.value)}
-              placeholder="说明为什么需要对方配合" />
-            <button type="button" className="overview-refresh" disabled={busy || !reason.trim()}
+        <section className="overview-form" onKeyDown={(e) => { if (e.key === 'Escape') setTarget(''); }}>
+          <h4 title={target}>请求协作 · {sessionNameOf(target)}</h4>
+          <input className="overview-input" value={reason} onChange={(event) => setReason(event.target.value)}
+            placeholder="说明为什么需要对方配合" autoFocus />
+          <div className="overview-form-actions">
+            <button type="button" className="overview-refresh" onClick={() => setTarget('')}>取消</button>
+            <button type="button" className="overview-refresh is-primary" disabled={busy || !reason.trim()}
               onClick={async () => {
                 if (!sessionId) return;
                 const sent = await run(() => api.coordinationRequest(sessionId, { toSessionId: target, reason: reason.trim() }));
                 if (sent) { setTarget(''); setReason(''); }
               }}>发送请求</button>
-            <button type="button" className="overview-refresh" onClick={() => setTarget('')}>取消</button>
           </div>
         </section>
       )}
       {handoffTarget && (
-        <section className="overview-conflicts">
-          <h4>请求交接：{handoffTarget}</h4>
-          <div className="overview-actions">
-            <input className="overview-input" value={handoffTask} onChange={(event) => setHandoffTask(event.target.value)}
-              placeholder="任务标识（可留空）" />
-            <input className="overview-input" value={handoffSummary} onChange={(event) => setHandoffSummary(event.target.value)}
-              placeholder="交接说明" />
-            <button type="button" className="overview-refresh" disabled={busy || !handoffSummary.trim()}
+        <section className="overview-form" onKeyDown={(e) => { if (e.key === 'Escape') setHandoffTarget(''); }}>
+          <h4 title={handoffTarget}>请求交接 · {sessionNameOf(handoffTarget)}</h4>
+          <input className="overview-input" value={handoffTask} onChange={(event) => setHandoffTask(event.target.value)}
+            placeholder="任务标识（可留空）" autoFocus />
+          <input className="overview-input" value={handoffSummary} onChange={(event) => setHandoffSummary(event.target.value)}
+            placeholder="说明需要交接的任务内容与现状" />
+          <div className="overview-form-actions">
+            <button type="button" className="overview-refresh" onClick={() => setHandoffTarget('')}>取消</button>
+            <button type="button" className="overview-refresh is-primary" disabled={busy || !handoffSummary.trim()}
               onClick={async () => {
                 if (!sessionId) return;
                 const sent = await run(() => api.coordinationHandoff(sessionId, {
@@ -232,21 +252,22 @@ export function WorkspaceOverviewPanel() {
                 }));
                 if (sent) { setHandoffTarget(''); setHandoffTask(''); setHandoffSummary(''); }
               }}>发送交接</button>
-            <button type="button" className="overview-refresh" onClick={() => setHandoffTarget('')}>取消</button>
           </div>
         </section>
       )}
       {snapshot && (claims.length > 0 || incoming.length > 0 || outgoing.length > 0
         || incomingTasks.length > 0 || outgoingTasks.length > 0) && (
-        <section className="overview-tasks">
+        <section className="overview-coord-sections">
           {claims.length > 0 && (
-            <>
+            <div className="overview-coord-block">
               <h4>占用者</h4>
-              <ul>
+              <ul className="overview-coord-list">
                 {claims.map((claim) => (
                   <li key={claim.id}>
-                    <code>{claim.path}</code>
-                    <span>{claim.sessionId === sessionId ? '本会话' : claim.sessionId} · {claim.kind === 'DIRECTORY' ? '目录' : '文件'}</span>
+                    <div className="overview-coord-copy">
+                      <code title={claim.path}>{claim.path}</code>
+                      <span title={claim.sessionId}>{sessionNameOf(claim.sessionId)} · {claim.kind === 'DIRECTORY' ? '目录' : '文件'}</span>
+                    </div>
                     {claim.sessionId === sessionId && (
                       <button type="button" className="overview-refresh" disabled={busy}
                         onClick={() => sessionId && run(() => api.coordinationReleaseClaim(sessionId, claim.id))}>释放</button>
@@ -254,63 +275,81 @@ export function WorkspaceOverviewPanel() {
                   </li>
                 ))}
               </ul>
-            </>
+            </div>
           )}
           {incoming.length > 0 && (
-            <>
+            <div className="overview-coord-block">
               <h4>待处理协作请求</h4>
-              <ul>
+              <ul className="overview-coord-list">
                 {incoming.map((item) => (
                   <li key={item.id}>
-                    <span>{item.fromSessionId}：{item.reason}</span>
-                    <button type="button" className="overview-refresh" disabled={busy}
-                      onClick={() => sessionId && run(() => api.coordinationResolveRequest(sessionId, item.id, 'accept'))}>接受</button>
-                    <button type="button" className="overview-refresh" disabled={busy}
-                      onClick={() => sessionId && run(() => api.coordinationResolveRequest(sessionId, item.id, 'decline'))}>拒绝</button>
+                    <div className="overview-coord-copy">
+                      <strong title={item.fromSessionId}>{sessionNameOf(item.fromSessionId)}</strong>
+                      <span>{item.reason}</span>
+                    </div>
+                    <div className="overview-coord-btns">
+                      <button type="button" className="overview-refresh is-primary" disabled={busy}
+                        onClick={() => sessionId && run(() => api.coordinationResolveRequest(sessionId, item.id, 'accept'))}>接受</button>
+                      <button type="button" className="overview-refresh" disabled={busy}
+                        onClick={() => sessionId && run(() => api.coordinationResolveRequest(sessionId, item.id, 'decline'))}>拒绝</button>
+                    </div>
                   </li>
                 ))}
               </ul>
-            </>
+            </div>
           )}
           {outgoing.length > 0 && (
-            <>
+            <div className="overview-coord-block">
               <h4>已发出、待回应</h4>
-              <ul>
+              <ul className="overview-coord-list">
                 {outgoing.map((item) => (
                   <li key={item.id}>
-                    <span>{item.toSessionId}：{item.reason}（{requestStatusLabel(item.status)}）</span>
+                    <div className="overview-coord-copy">
+                      <strong title={item.toSessionId}>{sessionNameOf(item.toSessionId)}</strong>
+                      <span>{item.reason}（{requestStatusLabel(item.status)}）</span>
+                    </div>
                     <button type="button" className="overview-refresh" disabled={busy}
                       onClick={() => sessionId && run(() => api.coordinationResolveRequest(sessionId, item.id, 'withdraw'))}>撤销</button>
                   </li>
                 ))}
               </ul>
-            </>
+            </div>
           )}
           {incomingTasks.length > 0 && (
-            <>
+            <div className="overview-coord-block">
               <h4>待交接任务</h4>
-              <ul>
+              <ul className="overview-coord-list">
                 {incomingTasks.map((item) => (
                   <li key={item.id}>
-                    <span>{item.fromSessionId}：{item.summary}（{handoffStatusLabel(item.status)}）</span>
-                    <button type="button" className="overview-refresh" disabled={busy}
-                      onClick={() => sessionId && run(() => api.coordinationResolveHandoff(sessionId, item.id, 'accept'))}>接受</button>
-                    <button type="button" className="overview-refresh" disabled={busy}
-                      onClick={() => sessionId && run(() => api.coordinationResolveHandoff(sessionId, item.id, 'decline'))}>拒绝</button>
+                    <div className="overview-coord-copy">
+                      <strong title={item.fromSessionId}>{sessionNameOf(item.fromSessionId)}</strong>
+                      <span>{item.summary}（{handoffStatusLabel(item.status)}）</span>
+                    </div>
+                    <div className="overview-coord-btns">
+                      <button type="button" className="overview-refresh is-primary" disabled={busy}
+                        onClick={() => sessionId && run(() => api.coordinationResolveHandoff(sessionId, item.id, 'accept'))}>接受</button>
+                      <button type="button" className="overview-refresh" disabled={busy}
+                        onClick={() => sessionId && run(() => api.coordinationResolveHandoff(sessionId, item.id, 'decline'))}>拒绝</button>
+                    </div>
                   </li>
                 ))}
               </ul>
-            </>
+            </div>
           )}
           {outgoingTasks.length > 0 && (
-            <>
+            <div className="overview-coord-block">
               <h4>已请求的交接</h4>
-              <ul>
+              <ul className="overview-coord-list">
                 {outgoingTasks.map((item) => (
-                  <li key={item.id}><span>{item.toSessionId}：{item.summary}（{handoffStatusLabel(item.status)}）</span></li>
+                  <li key={item.id}>
+                    <div className="overview-coord-copy">
+                      <strong title={item.toSessionId}>{sessionNameOf(item.toSessionId)}</strong>
+                      <span>{item.summary}（{handoffStatusLabel(item.status)}）</span>
+                    </div>
+                  </li>
                 ))}
               </ul>
-            </>
+            </div>
           )}
           {mine.length === 0 && others.length > 0 && <p className="overview-line">本会话目前没有声明占用。</p>}
         </section>
