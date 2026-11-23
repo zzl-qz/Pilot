@@ -11,6 +11,7 @@ import static org.mockito.Mockito.mock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.jupiter.api.Test;
 
@@ -144,5 +145,30 @@ class RunStateTrackerTest {
 
         assertNotNull(tracker.leaseState("run_1"));
         assertTrue(tracker.leaseLost("run_1"));
+    }
+
+    @Test
+    void reclaimsExpiredSelfOwnedLeaseAfterSystemSleepWakeupWithoutFalseLeaseLoss() {
+        RunCheckpointRepository repository = new InMemoryRunCheckpointRepository();
+        RunStateTracker tracker = new RunStateTracker(repository, "instance-a");
+        AtomicLong clock = new AtomicLong(1_000_000L);
+        tracker.withWallClock(clock::get);
+        tracker.begin("ses_1", "run_1", "/work");
+
+        // 模拟休眠超过租约期（300 秒）且没有其他实例接管：原租约已释放/过期时唤醒后应重新接管而非误报丢租约
+        repository.releaseLease("run_1", RunCheckpoint.STATUS_RUNNING, Instant.ofEpochMilli(clock.get()));
+        clock.addAndGet(300_000L);
+        tracker.renewLeases();
+
+        assertFalse(tracker.leaseLost("run_1"), "休眠唤醒且无其他实例接管时应成功续领租约");
+        assertEquals("instance-a", repository.find("run_1").orElseThrow().owner());
+
+        // 若休眠期间原租约过期且被另一实例接管，则必须如实判定丢失租约
+        clock.addAndGet(100_000L);
+        assertTrue(repository.claimLease("run_1", "instance-other", Instant.ofEpochMilli(clock.get()),
+            Duration.ofSeconds(120)));
+        clock.addAndGet(100_000L);
+        tracker.renewLeases();
+        assertTrue(tracker.leaseLost("run_1"), "其他实例持有有效租约时不得抢占，必须标记租约丢失");
     }
 }

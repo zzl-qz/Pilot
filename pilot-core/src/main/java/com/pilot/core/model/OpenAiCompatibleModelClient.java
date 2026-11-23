@@ -338,9 +338,9 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                 && NativeToolRejectedException.rejected(response.statusCode(), errorBody)) {
                 throw new NativeToolRejectedException("端点未提供当前聊天协议路由", true);
             }
-            throw new ModelClientException(ModelFailureSignals.statusKind(response.statusCode(), errorBody),
-                "模型接口返回 HTTP " + response.statusCode() + "（" + elapsedMs(startedAt) + " ms, model=" + model + "）："
-                    + errorBody);
+            throw ModelClientException.httpError(ModelFailureSignals.statusKind(response.statusCode(), errorBody),
+                response.statusCode(), ModelHttp.retryAfterMs(response.headers()), "模型接口返回 HTTP "
+                    + response.statusCode() + "（" + elapsedMs(startedAt) + " ms, model=" + model + "）：" + errorBody);
         }
 
         JsonNode root = ModelHttp.parseJson(objectMapper, response.body());
@@ -393,7 +393,9 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                         && NativeToolRejectedException.rejected(response.statusCode(), errorBody)) {
                         throw new NativeToolRejectedException("端点未提供当前聊天协议路由", true);
                     }
-                    throw new ModelClientException(ModelFailureSignals.statusKind(response.statusCode(), errorBody),
+                    throw ModelClientException.httpError(
+                        ModelFailureSignals.statusKind(response.statusCode(), errorBody), response.statusCode(),
+                        ModelHttp.retryAfterMs(response.headers()),
                         "模型接口返回 HTTP " + response.statusCode() + "：" + errorBody);
                 }
             }

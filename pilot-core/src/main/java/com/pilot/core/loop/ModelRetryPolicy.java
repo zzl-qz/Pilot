@@ -58,6 +58,53 @@ public final class ModelRetryPolicy {
     }
 
     /**
+     * 根据 HTTP 状态码或故障类别选择分级退避档位（429 限流 / 5xx 服务端异常 / 网络断连）。
+     */
+    public static RetryBudget.Tier tierOf(RuntimeException error) {
+        int code = statusCodeOf(error);
+        if (code == 429) {
+            return RetryBudget.Tier.RATE_LIMIT;
+        }
+        if (code == 408 || code >= 500) {
+            return RetryBudget.Tier.SERVER_ERROR;
+        }
+        ModelFailureKind kind = classify(error);
+        if (kind == ModelFailureKind.NETWORK || kind == ModelFailureKind.INCOMPLETE) {
+            return RetryBudget.Tier.NETWORK;
+        }
+        return RetryBudget.Tier.DEFAULT;
+    }
+
+    /** 读取异常链中模型端点返回的 Retry-After 毫秒数；无提示时返回 {@code -1}。 */
+    public static long retryAfterMs(RuntimeException error) {
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            if (cause instanceof ModelClientException client && client.retryAfterMs() >= 0) {
+                return client.retryAfterMs();
+            }
+        }
+        return -1L;
+    }
+
+    private static int statusCodeOf(RuntimeException error) {
+        if (error == null) {
+            return 0;
+        }
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            if (cause instanceof ModelClientException client && client.statusCode() > 0) {
+                return client.statusCode();
+            }
+        }
+        String message = error.getMessage();
+        if (message != null) {
+            Matcher status = HTTP_STATUS.matcher(message);
+            if (status.find()) {
+                return Integer.parseInt(status.group(1));
+            }
+        }
+        return 0;
+    }
+
+    /**
      * 判定失败分类。
      *
      * <p>优先用 {@link ModelClientException#kind()} 的结构化分类；没有分类时退回消息文本判断，

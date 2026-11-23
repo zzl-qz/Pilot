@@ -102,4 +102,24 @@ class ModelRetryPolicyTest {
         // 普通限流仍然可重试
         assertTrue(ModelRetryPolicy.isTransient(new RuntimeException("HTTP 429 Too Many Requests")));
     }
+
+    @Test
+    void resolvesBackoffTierAndRetryAfterFromStructuredAndTextErrors() {
+        ModelClientException rateLimit =
+            ModelClientException.httpError(ModelFailureKind.TRANSIENT, 429, 8_500L, "HTTP 429");
+        assertEquals(RetryBudget.Tier.RATE_LIMIT, ModelRetryPolicy.tierOf(rateLimit));
+        assertEquals(8_500L, ModelRetryPolicy.retryAfterMs(new RuntimeException("wrapped", rateLimit)));
+
+        ModelClientException server503 =
+            ModelClientException.httpError(ModelFailureKind.TRANSIENT, 503, 5_000L, "HTTP 503");
+        assertEquals(RetryBudget.Tier.SERVER_ERROR, ModelRetryPolicy.tierOf(server503));
+        assertEquals(5_000L, ModelRetryPolicy.retryAfterMs(server503));
+
+        assertEquals(RetryBudget.Tier.RATE_LIMIT, ModelRetryPolicy.tierOf(new RuntimeException("HTTP 429 rate limit")));
+        assertEquals(RetryBudget.Tier.SERVER_ERROR,
+            ModelRetryPolicy.tierOf(new RuntimeException("HTTP 502 bad gateway")));
+        assertEquals(RetryBudget.Tier.NETWORK,
+            ModelRetryPolicy.tierOf(new UncheckedIOException(new IOException("connection reset"))));
+        assertEquals(-1L, ModelRetryPolicy.retryAfterMs(new RuntimeException("no hint")));
+    }
 }

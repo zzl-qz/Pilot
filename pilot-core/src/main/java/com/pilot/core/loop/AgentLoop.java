@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -204,8 +205,13 @@ public final class AgentLoop {
     private static final int MAX_REPEAT_ABORTS = 2;
     /** 同一请求里允许模型因非法工具调用 JSON 纠偏重试的最大次数。 */
     private static final int MAX_MALFORMED_TOOL_RETRIES = 3;
-    /** 同一地址连续这么多次快照都没有可点击元素，就停止验收，不再重开页面。 */
+    /** 连续多少轮仅调用只读查文件工具且命中重复缓存后提醒模型转向推进。 */
     private static final int MAX_EMPTY_BROWSER_SNAPSHOTS = 3;
+    /** 墙钟与单调钟（或预期休眠片）差值达到此阈值时判定发生系统休眠唤醒。 */
+    private static final long SLEEP_JUMP_THRESHOLD_MS = 15_000L;
+    /** 系统休眠唤醒后给网络接口重新关联（Wi-Fi/DHCP/DNS）的最小稳定等待。 */
+    private static final long WAKEUP_RECONNECT_DELAY_MS = 2_000L;
+    private static final long NANOS_PER_MS = 1_000_000L;
     /** 阶段尾部候选提示默认存活的模型请求次数；进入探索或首次编辑后立即清退以保持前缀 append_only。 */
     static final int DEFAULT_PHASE_HINT_TURNS = 2;
     private static final Set<String> PHASE_HINT_EXPLORE_TOOLS =
@@ -227,6 +233,8 @@ public final class AgentLoop {
     private Supplier<Message> pendingInput;
     private final TraceRecorder traceRecorder;
     private final Pause retryPause;
+    private LongSupplier wallClock = System::currentTimeMillis;
+    private LongSupplier monoClock = System::nanoTime;
     /** 正在生成的文字，只给界面看。为空表示不推预览。 */
     private final Consumer<String> liveText;
     /** 模型推理增量，只给界面看，不进会话历史。 */
@@ -527,6 +535,13 @@ public final class AgentLoop {
     /** 显式只读会话（如 mode="plan" 或 review）：收尾门直接放行无改动结果，不依赖 GoalIntent 动词推断。 */
     public AgentLoop withReadOnlySession(boolean readOnlySession) {
         this.readOnlySession = readOnlySession;
+        return this;
+    }
+
+    /** 注入墙钟与单调钟供休眠唤醒测试使用。 */
+    AgentLoop withClocks(LongSupplier wallClock, LongSupplier monoClock) {
+        this.wallClock = Objects.requireNonNull(wallClock, "wallClock must not be null");
+        this.monoClock = Objects.requireNonNull(monoClock, "monoClock must not be null");
         return this;
     }
 
@@ -1535,6 +1550,7 @@ public final class AgentLoop {
         int malformedToolRetries = 0;
         String retainedGuidance = null;
         AtomicBoolean reasoningPreviewVisible = new AtomicBoolean();
+        long[] clockMark = new long[] {wallClock.getAsLong(), monoClock.getAsLong()};
         while (true) {
             if (cancellation.cancelled()) {
                 return new ModelTurn(null, stopForCancellation(messages, events));
@@ -1722,31 +1738,73 @@ public final class AgentLoop {
                 if (!kind.retryable()) {
                     throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_ERROR, "模型调用失败：" + Texts.oneLine(reason, 300));
                 }
-                connectionFailures = ModelRetryPolicy.connectionLost(reason) ? connectionFailures + 1 : 0;
-                if (connectionFailures >= ModelRetryPolicy.CONNECTION_BREAKER_FAILURES) {
-                    throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_ERROR, "同一端点连续 " + connectionFailures
-                        + " 次连接级失败（handshake / EOF / connection reset），已停止重试；进度和对话已保存，可继续执行。");
-                }
-                RetryBudget.Decision decision = retryBudget.afterFailure(reason);
-                if (!decision.retry()) {
-                    // 预算耗尽或熔断：明确停下并说明可以继续，而不是无声地一直重试
-                    throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_ERROR, "模型调用重试已停止：" + decision.reason()
-                        + "。已等待 " + Math.max(0, decision.elapsedMs() / 1000) + " 秒，" + "进度与对话已保存；确认模型服务恢复后可继续执行。");
-                }
+                boolean wokeFromSleep = compensateWakeupIfDetected(clockMark, -1L, events);
+                RetryBudget.Decision decision = nextRetryDecision(e, reason, wokeFromSleep);
                 attempt = decision.attempt();
                 events.accept(new RunRetrying(attempt, decision.delayMs(), Texts.oneLine(reason, 300),
                     decision.elapsedMs(), decision.remainingMs(), retryBudget.maxAttempts()));
                 // 上一次尝试可能已经推过一段预览：重试会重新输出全文，旧片段必须先作废。
                 events.accept(AssistantPreview.discarded());
-                if (!pause(decision.delayMs())) {
+                if (!pause(decision.delayMs(), clockMark, events)) {
                     return new ModelTurn(null, stopForCancellation(messages, events));
                 }
             }
         }
     }
 
+    private RetryBudget.Decision nextRetryDecision(RuntimeException error, String reason, boolean wokeFromSleep) {
+        if (!wokeFromSleep) {
+            connectionFailures = ModelRetryPolicy.connectionLost(reason) ? connectionFailures + 1 : 0;
+            if (connectionFailures >= ModelRetryPolicy.CONNECTION_BREAKER_FAILURES) {
+                throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_ERROR, "同一端点连续 " + connectionFailures
+                    + " 次连接级失败（handshake / EOF / connection reset），已停止重试；进度和对话已保存，可继续执行。");
+            }
+        }
+        RetryBudget.Tier tier = ModelRetryPolicy.tierOf(error);
+        long hintMs = ModelRetryPolicy.retryAfterMs(error);
+        if (wokeFromSleep) {
+            hintMs = Math.max(hintMs, WAKEUP_RECONNECT_DELAY_MS);
+        }
+        RetryBudget.Decision decision = retryBudget.afterFailure(reason, tier, hintMs);
+        if (!decision.retry()) {
+            // 预算耗尽或熔断：明确停下并说明可以继续，而不是无声地一直重试
+            throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_ERROR, "模型调用重试已停止：" + decision.reason() + "。已等待 "
+                + Math.max(0, decision.elapsedMs() / 1000) + " 秒，" + "进度与对话已保存；确认模型服务恢复后可继续执行。");
+        }
+        return decision;
+    }
+
+    /** 跨平台休眠唤醒检测：macOS/Linux 看墙钟与单调钟差值，Windows/VM 看等待片墙钟跳变。 */
+    private long detectSleepWakeup(long[] clockMark, long expectedMs) {
+        long nowWall = wallClock.getAsLong();
+        long nowMono = monoClock.getAsLong();
+        long wallDelta = Math.max(0L, nowWall - clockMark[0]);
+        long monoDelta = Math.max(0L, (nowMono - clockMark[1]) / NANOS_PER_MS);
+        clockMark[0] = nowWall;
+        clockMark[1] = nowMono;
+        long clockSkew = wallDelta - monoDelta;
+        if (clockSkew >= SLEEP_JUMP_THRESHOLD_MS) {
+            return clockSkew;
+        }
+        if (expectedMs >= 0L && wallDelta - expectedMs >= SLEEP_JUMP_THRESHOLD_MS) {
+            return wallDelta - expectedMs;
+        }
+        return 0L;
+    }
+
+    private boolean compensateWakeupIfDetected(long[] clockMark, long expectedMs, Consumer<SessionEvent> events) {
+        long sleptMs = detectSleepWakeup(clockMark, expectedMs);
+        if (sleptMs <= 0L) {
+            return false;
+        }
+        retryBudget.compensateSleep(sleptMs);
+        connectionFailures = 0;
+        events.accept(new RunContinued(1, 1, "检测到系统休眠唤醒（约 " + Math.max(1L, sleptMs / 1_000L) + " 秒），已重置重试计时并自动重连续跑"));
+        return true;
+    }
+
     /** @return false 表示用户取消或线程被打断，调用方应结束运行 */
-    private boolean pause(long delayMs) {
+    private boolean pause(long delayMs, long[] clockMark, Consumer<SessionEvent> events) {
         long waited = 0;
         while (waited < delayMs) {
             if (cancellation.cancelled()) {
@@ -1758,6 +1816,9 @@ public final class AgentLoop {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return false;
+            }
+            if (compensateWakeupIfDetected(clockMark, slice, events)) {
+                return !cancellation.cancelled();
             }
             waited += slice;
         }

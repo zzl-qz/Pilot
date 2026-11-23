@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.function.LongSupplier;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -71,6 +72,8 @@ public class RunStateTracker {
     private final String instanceId;
     private final ConcurrentMap<String, String> activeRuns = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, String> lostLeases = new ConcurrentHashMap<>();
+    private LongSupplier wallClock = System::currentTimeMillis;
+    private volatile long lastHeartbeatMs = System.currentTimeMillis();
 
     @org.springframework.beans.factory.annotation.Autowired
     public RunStateTracker(RunCheckpointRepository repository,
@@ -241,24 +244,42 @@ public class RunStateTracker {
         return List.copyOf(entries);
     }
 
+    /** 注入墙钟供休眠唤醒续租测试使用。 */
+    void withWallClock(LongSupplier wallClock) {
+        this.wallClock = wallClock;
+        this.lastHeartbeatMs = wallClock.getAsLong();
+    }
+
     /** 定期续租；失去租约时记录并停止把它当成独占运行。 */
     @Scheduled(fixedDelay = HEARTBEAT_DELAY_MS, initialDelay = INITIAL_HEARTBEAT_DELAY_MS)
     public void heartbeat() {
         maintenance.whenAvailable(this::renewLeases);
     }
 
-    private void renewLeases() {
+    void renewLeases() {
+        long nowMs = wallClock.getAsLong();
+        long gapMs = Math.max(0L, nowMs - lastHeartbeatMs);
+        lastHeartbeatMs = nowMs;
         if (activeRuns.isEmpty()) {
             return;
         }
-        Instant now = Instant.now();
+        boolean wokeFromSleep = gapMs > LEASE_SECONDS * 1_000L;
+        if (wokeFromSleep) {
+            log.info("检测到系统休眠唤醒（距上次心跳约 {} 秒），立即续租 {} 个活跃运行", Math.max(1L, gapMs / 1_000L), activeRuns.size());
+        }
+        Instant now = Instant.ofEpochMilli(nowMs);
         for (var entry : activeRuns.entrySet()) {
             String runId = entry.getKey();
             try {
-                if (!repository.renewLease(runId, instanceId, now, DEFAULT_LEASE)) {
-                    lostLeases.put(runId, "租约已被其他实例接管或已过期");
-                    log.error("运行 {} 的租约已丢失，停止把本实例状态当成权威", runId);
+                if (repository.renewLease(runId, instanceId, now, DEFAULT_LEASE)) {
+                    continue;
                 }
+                if (wokeFromSleep && repository.claimLease(runId, instanceId, now, DEFAULT_LEASE)) {
+                    log.info("系统休眠唤醒后已重新接管本实例运行 {} 的租约", runId);
+                    continue;
+                }
+                lostLeases.put(runId, "租约已被其他实例接管或已过期");
+                log.error("运行 {} 的租约已丢失，停止把本实例状态当成权威", runId);
             } catch (RuntimeException e) {
                 persistenceFailure(runId, "续租失败", e);
             }

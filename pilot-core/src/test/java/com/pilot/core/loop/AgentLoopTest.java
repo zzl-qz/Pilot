@@ -17,6 +17,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 import org.junit.jupiter.api.Test;
@@ -1360,6 +1361,47 @@ class AgentLoopTest {
         RunFailed failed =
             events.stream().filter(RunFailed.class::isInstance).map(RunFailed.class::cast).findFirst().orElseThrow();
         assertTrue(failed.retryable(), "熔断后进度已保存，可继续执行");
+    }
+
+    @Test
+    void respectsRetryAfterOn429AndRecoversAfterSleepWakeupWithoutTrippingBreaker() {
+        AtomicLong wall = new AtomicLong(1_000_000L);
+        AtomicLong mono = new AtomicLong(1_000_000_000L);
+        AtomicInteger calls = new AtomicInteger();
+        ModelClient client = (messages, tools) -> {
+            int n = calls.incrementAndGet();
+            if (n == 1) {
+                throw ModelClientException.httpError(ModelFailureKind.TRANSIENT, 429, 9_000L, "HTTP 429 rate limit");
+            }
+            if (n == 2 || n == 3) {
+                throw new ModelClientException(ModelFailureKind.NETWORK, "流式模型请求失败：connection reset",
+                    new IOException("connection reset"));
+            }
+            if (n == 4) {
+                // 第 4 次前系统发生 5 分钟休眠（墙钟跳 300s，单调钟几乎不动），唤醒后旧连接 EOF 不应触发 3 次熔断
+                wall.addAndGet(300_000L);
+                mono.addAndGet(10_000_000L);
+                throw new ModelClientException(ModelFailureKind.NETWORK, "流式模型请求失败：EOF", new IOException("EOF"));
+            }
+            return new ModelResponse("休眠唤醒并限流恢复后完成。", List.of(), null, ModelResponse.FinishReason.STOP);
+        };
+        AgentLoop loop = new AgentLoop(client, registry(), readOnlyGate(), ApprovalBroker.denyAll(), config(8, 3),
+            Cancellation.none(), () -> null, (call, result, latencyMs) -> {
+            }, millis -> {
+            }, null).withClocks(wall::get, mono::get);
+
+        AgentLoop.Result result = loop.run("继续分析", List.of(), events::add);
+
+        assertNull(result.failureCode());
+        assertEquals("休眠唤醒并限流恢复后完成。", result.finalText());
+        assertEquals(5, calls.get());
+        List<RunRetrying> retries =
+            events.stream().filter(RunRetrying.class::isInstance).map(RunRetrying.class::cast).toList();
+        assertEquals(4, retries.size());
+        assertTrue(retries.getFirst().delayMs() >= 9_000L, "429 Retry-After=9s 应生效: " + retries.getFirst());
+        assertTrue(retries.get(3).delayMs() >= 2_000L, "唤醒后首次重连应保留网络稳定等待: " + retries.get(3));
+        assertTrue(events.stream().filter(RunContinued.class::isInstance).map(RunContinued.class::cast)
+            .anyMatch(c -> c.reason().contains("休眠唤醒")), "休眠唤醒应推送明确恢复事件");
     }
 
     /** 无计划的多步任务：提醒一次 update_plan，但不判失败、也不反复催。 */

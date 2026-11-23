@@ -113,6 +113,10 @@ public class AgentRunService implements RunStarter {
      * 我们每一轮自己还有步数上限，外层再给若干轮（默认 32），避免一次触顶就把长任务停死。
      */
     private static final int MAX_GOAL_ROUNDS = Integer.getInteger("pilot.agent.max-goal-rounds", 32);
+    /** 断网或端点瞬时故障导致运行中断后的有界自动重连续跑上限。 */
+    private static final int MAX_NETWORK_AUTO_RECONNECT =
+        Integer.getInteger("pilot.retry.network-auto-reconnect-attempts", 2);
+    private static final long DEFAULT_NETWORK_RECONNECT_DELAY_MS = 3_000L;
     /** 这些失败码与任务状态同名：运行停下后任务直接记为同名状态，不归并成 INTERRUPTED。 */
     private static final Set<TaskControlStatus> PRESERVED_FAILURE_STATUSES =
         Set.of(TaskControlStatus.BLOCKED, TaskControlStatus.BUDGET_LIMITED, TaskControlStatus.WAITING,
@@ -139,6 +143,9 @@ public class AgentRunService implements RunStarter {
     private final com.pilot.server.store.QueuedMessageRepository queuedMessages;
     private final ConcurrentMap<String, Integer> autoContinueAttempts = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, String> autoContinueSignature = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Integer> networkReconnectAttempts = new ConcurrentHashMap<>();
+    long networkReconnectDelayMs =
+        Long.getLong("pilot.retry.network-reconnect-delay-ms", DEFAULT_NETWORK_RECONNECT_DELAY_MS);
     /** 会话级已启用的延迟工具，按激活顺序保存，让续跑与追问沿用同一个尾部扩展段。 */
     private final AgentRunPreparation preparation;
     private final DeferredToolRegistry deferredTools;
@@ -908,6 +915,7 @@ public class AgentRunService implements RunStarter {
         inboxes.remove(sessionId);
         autoContinueAttempts.remove(sessionId);
         autoContinueSignature.remove(sessionId);
+        networkReconnectAttempts.remove(sessionId);
         deferredTools.forget(sessionId);
         try {
             queuedMessages.clearHold(sessionId);
@@ -1010,6 +1018,12 @@ public class AgentRunService implements RunStarter {
      */
     private boolean maybeAutoContinue(String sessionId, String finishedRunId, String status, RunHandle handle,
         BudgetProgress before) {
+        if (maybeAutoReconnectNetwork(sessionId, finishedRunId, status, handle)) {
+            return true;
+        }
+        if (TaskControlStatus.COMPLETED.is(status) || RunFailureCode.CANCELLED.is(status)) {
+            networkReconnectAttempts.remove(sessionId);
+        }
         boolean budgetLimited = RunFailureCode.BUDGET_LIMITED.is(status);
         if (!RunFailureCode.MAX_STEPS.is(status) && !budgetLimited || handle.cancelled.get()
             || runStates != null && runStates.leaseLost(finishedRunId)) {
@@ -1051,6 +1065,48 @@ public class AgentRunService implements RunStarter {
         publish(sessionId, runId, new RunContinued(attempt, cap, reason));
         launch(sessionId, runId, null, List.of(), List.of(), true, null, false, null, handle.planMode);
         return true;
+    }
+
+    /** 断网或连接中断导致的可重试 MODEL_ERROR：短暂退避后自动基于已落盘记忆续跑，避免长任务因临时断网中止。 */
+    private boolean maybeAutoReconnectNetwork(String sessionId, String finishedRunId, String status, RunHandle handle) {
+        if (!TaskControlStatus.FAILED.is(status) || !handle.transientModelError || handle.cancelled.get()
+            || (runStates != null && runStates.leaseLost(finishedRunId)) || MAX_NETWORK_AUTO_RECONNECT <= 0
+            || conversations.load(sessionId).isEmpty()) {
+            return false;
+        }
+        int attempt = networkReconnectAttempts.merge(sessionId, 1, Integer::sum);
+        if (attempt > MAX_NETWORK_AUTO_RECONNECT) {
+            networkReconnectAttempts.remove(sessionId);
+            return false;
+        }
+        if (!waitReconnectCooldown(handle)) {
+            networkReconnectAttempts.remove(sessionId);
+            return false;
+        }
+        String runId = "run_" + java.util.UUID.randomUUID();
+        publish(sessionId, runId, new RunStarted("（继续上一次未完成的任务）"));
+        publish(sessionId, runId, new RunContinued(attempt, MAX_NETWORK_AUTO_RECONNECT,
+            "检测到网络断开或服务端波动导致运行中断，进度已保存，正在自动重连续跑第 " + attempt + "/" + MAX_NETWORK_AUTO_RECONNECT + " 次"));
+        launch(sessionId, runId, null, List.of(), List.of(), true, null, false, null, handle.planMode);
+        return true;
+    }
+
+    private boolean waitReconnectCooldown(RunHandle handle) {
+        long remaining = networkReconnectDelayMs;
+        while (remaining > 0L) {
+            if (handle.cancelled.get()) {
+                return false;
+            }
+            long slice = Math.min(200L, remaining);
+            try {
+                Thread.sleep(slice);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+            remaining -= slice;
+        }
+        return !handle.cancelled.get();
     }
 
     private record BudgetProgress(Set<String> completedSteps, Set<String> changedPaths, Set<List<String>> checks) {
@@ -1384,6 +1440,11 @@ public class AgentRunService implements RunStarter {
                 sessions.preview(sessionId, runId, event);
                 return;
             }
+            if (event instanceof com.pilot.core.event.RunRetrying) {
+                handle.sawRetryOrWakeup = true;
+            } else if (event instanceof RunContinued continued && continued.reason().contains("休眠唤醒")) {
+                handle.sawRetryOrWakeup = true;
+            }
             if (event instanceof RunCompleted completed) {
                 lastCompleted.set(completed);
             }
@@ -1410,6 +1471,9 @@ public class AgentRunService implements RunStarter {
                     delivered = new RunFailed(RunFailureCode.INTERRUPTED, handle.interruptedReason, true);
                 }
             } else if (event instanceof RunFailed failed) {
+                if (RunFailureCode.MODEL_ERROR.is(failed.code()) && failed.retryable() && handle.sawRetryOrWakeup) {
+                    handle.transientModelError = true;
+                }
                 taskControls.status(sessionId, failureTaskStatus(failed.code()));
                 taskControls.settleDirectRun(sessionId, RunOutcome.fromCode(failed.code()), failed.message());
             } else if (event instanceof RunEnded ended) {
@@ -1630,6 +1694,8 @@ public class AgentRunService implements RunStarter {
         private final boolean planMode;
         private volatile boolean accepting = true;
         private volatile boolean paused;
+        private volatile boolean sawRetryOrWakeup;
+        private volatile boolean transientModelError;
         /** 非用户取消的中断原因（如服务重启）；为空表示普通取消/暂停。 */
         private volatile String interruptedReason;
         private volatile Future<?> future;

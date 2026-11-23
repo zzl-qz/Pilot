@@ -19,6 +19,16 @@ import java.util.function.LongSupplier;
  * 这个类只管「值得重试的失败还要不要继续等」。
  */
 public final class RetryBudget {
+    /** 单次服务端 Retry-After 提示上限（2 分钟）。 */
+    private static final long MAX_RETRY_AFTER_HINT_MS = 120_000L;
+    private static final long RATE_LIMIT_MIN_BASE_MS = 2_000L;
+    private static final long RATE_LIMIT_MIN_MAX_MS = 60_000L;
+    private static final long SERVER_ERROR_MIN_MAX_MS = 45_000L;
+
+    /** 按故障类型区分的分级退避档位：429 限流更舒缓，5xx 中档退避，网络断连快速首试再退避。 */
+    public enum Tier {
+        DEFAULT, RATE_LIMIT, SERVER_ERROR, NETWORK
+    }
 
     /**
      * @param maxAttempts          最多重试几次（不含首次请求）
@@ -124,9 +134,30 @@ public final class RetryBudget {
     }
 
     /**
+     * 系统休眠唤醒后补偿时钟跳变：避免休眠时长把重试总时长耗尽或误触发熔断。
+     */
+    public synchronized void compensateSleep(long sleptMs) {
+        if (sleptMs <= 0) {
+            return;
+        }
+        if (started) {
+            long now = clock.getAsLong();
+            startedAt = Math.min(now, startedAt + sleptMs);
+        }
+        consecutiveFailures = 0;
+    }
+
+    /**
      * 记录一次可重试的失败，返回下一次是否继续、等多久。
      */
     public synchronized Decision afterFailure(String reason) {
+        return afterFailure(reason, Tier.DEFAULT, -1L);
+    }
+
+    /**
+     * 按分级退避档位与可选 {@code Retry-After} 毫秒提示决定下一次重试等待。
+     */
+    public synchronized Decision afterFailure(String reason, Tier tier, long retryAfterMs) {
         long now = clock.getAsLong();
         if (!started) {
             started = true;
@@ -137,7 +168,12 @@ public final class RetryBudget {
 
         long elapsed = Math.max(0L, now - startedAt);
         long remaining = settings.maxElapsedMs() <= 0 ? -1 : Math.max(0L, settings.maxElapsedMs() - elapsed);
-        long delay = delayFor(attempts);
+        Tier effectiveTier = tier == null ? Tier.DEFAULT : tier;
+        long delay = delayFor(Math.max(1, consecutiveFailures), effectiveTier);
+        if (retryAfterMs > 0) {
+            long hinted = Math.min(MAX_RETRY_AFTER_HINT_MS, retryAfterMs);
+            delay = Math.max(delay, hinted);
+        }
 
         if (settings.breakerAfterFailures() > 0 && consecutiveFailures >= settings.breakerAfterFailures()) {
             return new Decision(false, attempts, 0, elapsed, remaining, true,
@@ -158,12 +194,36 @@ public final class RetryBudget {
 
     /** 第 {@code attempt} 次重试的等待：指数增长、封顶，并带等量抖动。 */
     long delayFor(int attempt) {
+        return delayFor(attempt, Tier.DEFAULT);
+    }
+
+    long delayFor(int attempt, Tier tier) {
+        long base = tierBaseDelayMs(tier);
+        long max = tierMaxDelayMs(tier, base);
         int exponent = Math.max(0, Math.min(attempt - 1, 20));
-        long exponential = settings.baseDelayMs() << Math.min(exponent, 20);
-        long capped = Math.min(settings.maxDelayMs(), Math.max(settings.baseDelayMs(), exponential));
+        long exponential = base << Math.min(exponent, 20);
+        long capped = Math.min(max, Math.max(base, exponential));
         double jitter = Math.max(0.0, Math.min(1.0, random.getAsDouble()));
         // 等量抖动：实际等待落在 [capped/2, capped]，既能退避又不会同步重连
         return Math.max(1L, (long)(capped * (0.5 + 0.5 * jitter)));
+    }
+
+    private long tierBaseDelayMs(Tier tier) {
+        long base = settings.baseDelayMs();
+        return switch (tier) {
+            case RATE_LIMIT -> Math.max(RATE_LIMIT_MIN_BASE_MS, base * 2);
+            case SERVER_ERROR, NETWORK, DEFAULT -> base;
+        };
+    }
+
+    private long tierMaxDelayMs(Tier tier, long base) {
+        long max = settings.maxDelayMs();
+        long tiered = switch (tier) {
+            case RATE_LIMIT -> Math.max(RATE_LIMIT_MIN_MAX_MS, max * 2);
+            case SERVER_ERROR -> Math.max(SERVER_ERROR_MIN_MAX_MS, (max * 3) / 2);
+            case NETWORK, DEFAULT -> max;
+        };
+        return Math.max(base, tiered);
     }
 
     private static String clip(String reason) {

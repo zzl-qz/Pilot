@@ -12,6 +12,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.withSettings;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -38,12 +39,16 @@ import com.pilot.core.event.AssistantReasoning;
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunContinued;
+import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.event.RunUsageUpdated;
+import com.pilot.core.event.SessionEvent;
 import com.pilot.core.message.Attachment;
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.model.ModelClient;
+import com.pilot.core.model.ModelClientException;
+import com.pilot.core.model.ModelFailureKind;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ModelUsage;
 import com.pilot.core.model.ToolDefinition;
@@ -1569,6 +1574,59 @@ class AgentRunServiceTest {
             } finally {
                 runService.shutdown();
             }
+        }
+    }
+
+    @Test
+    void autoReconnectsAndCompletesAfterTransientConnectionDropButNeverOnPermanentError() throws Exception {
+        AtomicInteger flakyCalls = new AtomicInteger();
+        ModelClient flaky = (messages, tools) -> {
+            if (flakyCalls.incrementAndGet() <= 3) {
+                throw new ModelClientException(ModelFailureKind.NETWORK, "流式模型请求失败（10 ms）：connection reset",
+                    new IOException("connection reset"));
+            }
+            return new ModelResponse("断网重连后已完成任务。", List.of(), null, ModelResponse.FinishReason.STOP);
+        };
+        try (Fixture fixture = new Fixture(flaky, 8)) {
+            BlockingQueue<String> statuses = new LinkedBlockingQueue<>();
+            List<SessionEvent> observedEvents = new CopyOnWriteArrayList<>();
+            fixture.sessions.subscribe(fixture.sessionId, 0, envelope -> {
+                observedEvents.add(envelope.payload());
+                if (envelope.payload() instanceof RunCompleted) {
+                    statuses.offer("COMPLETED");
+                } else if (envelope.payload() instanceof RunFailed failed) {
+                    statuses.offer("FAILED:" + failed.code() + ":" + failed.retryable());
+                }
+            });
+            fixture.service.networkReconnectDelayMs = 0L;
+            String runId = fixture.service.claimRun(fixture.sessionId).orElseThrow();
+            fixture.sessions.publish(fixture.sessionId, runId, new RunStarted("分析目录结构"));
+            fixture.service.start(fixture.sessionId, runId, "分析目录结构");
+            assertEquals("FAILED:MODEL_ERROR:true", statuses.poll(15, TimeUnit.SECONDS));
+            assertEquals("COMPLETED", statuses.poll(15, TimeUnit.SECONDS), "可重试连接中断后应自动重连续跑直至完成");
+            assertTrue(observedEvents.stream().filter(RunContinued.class::isInstance).map(RunContinued.class::cast)
+                .anyMatch(c -> c.reason().contains("自动重连续跑")));
+        }
+
+        AtomicInteger permCalls = new AtomicInteger();
+        ModelClient permanent = (messages, tools) -> {
+            permCalls.incrementAndGet();
+            throw ModelClientException.httpError(ModelFailureKind.PERMANENT, 401, -1L, "HTTP 401 unauthorized");
+        };
+        try (Fixture fixture = new Fixture(permanent, 8)) {
+            BlockingQueue<String> statuses = new LinkedBlockingQueue<>();
+            fixture.sessions.subscribe(fixture.sessionId, 0, envelope -> {
+                if (envelope.payload() instanceof RunFailed failed) {
+                    statuses.offer("FAILED:" + failed.code() + ":" + failed.retryable());
+                }
+            });
+            fixture.service.networkReconnectDelayMs = 0L;
+            String runId = fixture.service.claimRun(fixture.sessionId).orElseThrow();
+            fixture.sessions.publish(fixture.sessionId, runId, new RunStarted("分析目录结构"));
+            fixture.service.start(fixture.sessionId, runId, "分析目录结构");
+            assertTrue(statuses.poll(10, TimeUnit.SECONDS).startsWith("FAILED:MODEL_ERROR:"));
+            assertEquals(null, statuses.poll(300, TimeUnit.MILLISECONDS), "永久错误（401）不得触发自动重连续跑");
+            assertEquals(1, permCalls.get());
         }
     }
 }

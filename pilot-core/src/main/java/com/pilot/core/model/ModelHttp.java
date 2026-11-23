@@ -3,10 +3,16 @@ package com.pilot.core.model;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.Map;
+import java.util.Optional;
 
 import com.pilot.core.http.BoundedHttp;
 import com.pilot.core.model.diagnostics.ModelRequestDumper;
@@ -78,10 +84,75 @@ final class ModelHttp {
                 throw new NativeToolRejectedException("服务端未接受原生工具或协议",
                     response.statusCode() == 404 || response.statusCode() == 405);
             }
-            throw new ModelClientException(ModelFailureSignals.statusKind(response.statusCode(), detail),
+            throw ModelClientException.httpError(ModelFailureSignals.statusKind(response.statusCode(), detail),
+                response.statusCode(), retryAfterMs(response.headers()),
                 "模型接口返回 HTTP " + response.statusCode() + "：" + detail);
         }
         return response;
+    }
+
+    /** 服务端 Retry-After 提示上限（2 分钟），防止异常网关返回超大值卡死重试。 */
+    static final long MAX_RETRY_AFTER_MS = 120_000L;
+
+    /** 从响应头解析服务端退避提示（支持 retry-after-ms、Retry-After 秒数/HTTP 日期、x-ratelimit-reset-after）。 */
+    static long retryAfterMs(HttpHeaders headers) {
+        return retryAfterMs(headers, Instant.now());
+    }
+
+    static long retryAfterMs(HttpHeaders headers, Instant now) {
+        if (headers == null) {
+            return -1L;
+        }
+        Optional<String> millis = headers.firstValue("retry-after-ms");
+        if (millis.isPresent()) {
+            long parsed = parseNonNegativeMillis(millis.get(), 1.0);
+            if (parsed >= 0) {
+                return Math.min(MAX_RETRY_AFTER_MS, parsed);
+            }
+        }
+        Optional<String> retryAfter = headers.firstValue("retry-after");
+        if (retryAfter.isPresent()) {
+            long parsed = parseRetryAfterValue(retryAfter.get(), now);
+            if (parsed >= 0) {
+                return Math.min(MAX_RETRY_AFTER_MS, parsed);
+            }
+        }
+        Optional<String> resetAfter = headers.firstValue("x-ratelimit-reset-after");
+        if (resetAfter.isPresent()) {
+            long parsed = parseNonNegativeMillis(resetAfter.get(), 1_000.0);
+            if (parsed >= 0) {
+                return Math.min(MAX_RETRY_AFTER_MS, parsed);
+            }
+        }
+        return -1L;
+    }
+
+    private static long parseRetryAfterValue(String raw, Instant now) {
+        long seconds = parseNonNegativeMillis(raw, 1_000.0);
+        if (seconds >= 0) {
+            return seconds;
+        }
+        try {
+            Instant target = ZonedDateTime.parse(raw.strip(), DateTimeFormatter.RFC_1123_DATE_TIME).toInstant();
+            return Math.max(0L, Duration.between(now == null ? Instant.now() : now, target).toMillis());
+        } catch (DateTimeParseException ignored) {
+            return -1L;
+        }
+    }
+
+    private static long parseNonNegativeMillis(String raw, double multiplier) {
+        if (raw == null || raw.isBlank()) {
+            return -1L;
+        }
+        try {
+            double value = Double.parseDouble(raw.strip());
+            if (Double.isNaN(value) || Double.isInfinite(value) || value < 0) {
+                return -1L;
+            }
+            return (long)Math.ceil(value * multiplier);
+        } catch (NumberFormatException ignored) {
+            return -1L;
+        }
     }
 
     static String snippet(String body) {

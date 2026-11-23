@@ -8,9 +8,12 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpHeaders;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -207,6 +210,44 @@ class ModelTransportAcceptanceTest {
                 worker.interrupt();
             }
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"stream", "buffered", "anthropic", "responses"})
+    void propagatesHttpStatusAndRetryAfterHeaderAcrossAllProtocols(String protocol) throws Exception {
+        try (Endpoint endpoint = new Endpoint(exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            byte[] body = "{\"error\":{\"message\":\"rate limited\"}}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Retry-After", "7");
+            exchange.sendResponseHeaders(429, body.length);
+            try (var output = exchange.getResponseBody()) {
+                output.write(body);
+            }
+        })) {
+            ModelClientException error = assertThrows(ModelClientException.class, () -> {
+                var model = client(endpoint, protocol, Duration.ofSeconds(2));
+                if ("stream".equals(protocol)) {
+                    model.chat(List.of(Message.user("执行")), List.of(), delta -> {
+                    });
+                } else {
+                    model.chat(List.of(Message.user("执行")), List.of());
+                }
+            });
+            assertEquals(ModelFailureKind.TRANSIENT, error.kind());
+            assertEquals(429, error.statusCode());
+            assertEquals(7_000L, error.retryAfterMs());
+        }
+    }
+
+    @Test
+    void parsesRetryAfterHttpDateAndMillisecondsHeader() {
+        var now = Instant.parse("2026-11-23T01:00:00Z");
+        var dateHeaders =
+            HttpHeaders.of(Map.of("Retry-After", List.of("Mon, 23 Nov 2026 01:00:15 GMT")), (a, b) -> true);
+        assertEquals(15_000L, ModelHttp.retryAfterMs(dateHeaders, now));
+
+        var msHeaders = HttpHeaders.of(Map.of("retry-after-ms", List.of("2500")), (a, b) -> true);
+        assertEquals(2_500L, ModelHttp.retryAfterMs(msHeaders, now));
     }
 
     private static ModelClient client(Endpoint endpoint, String protocol, Duration timeout) {
