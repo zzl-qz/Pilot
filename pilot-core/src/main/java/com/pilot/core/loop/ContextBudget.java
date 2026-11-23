@@ -1,5 +1,6 @@
 package com.pilot.core.loop;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -105,7 +106,14 @@ final class ContextBudget {
         int charsLimit = Math.max(1, charBudget);
         int overhead = Math.max(0, fixedOverheadTokens);
         resetCooldownIfBudgetChanged(tokensLimit, charsLimit);
-        pruneAndTruncate(messages, tokensLimit, charsLimit, overhead, boundary);
+        // 单步大输出直接跨过预压线时，先只读预演本地清理能否压回预压线以下：压不回去就先别原地改写旧前缀，
+        // 把没动过的热前缀交给下面的摘要压缩，否则这次压缩请求会白白丢掉原本命中的 KV 前缀缓存。
+        boolean compactFirst = !compactCircuitOpen && !inBackoff(messages, overhead)
+            && usage(messages, charsLimit, tokensLimit, overhead) >= PRE_COMPACT_RATIO
+            && !localCleanupSuffices(messages, tokensLimit, charsLimit, overhead, boundary);
+        if (!compactFirst) {
+            pruneAndTruncate(messages, tokensLimit, charsLimit, overhead, boundary);
+        }
 
         double usage = usage(messages, charsLimit, tokensLimit, overhead);
         if (usage < PRE_COMPACT_RATIO) {
@@ -115,10 +123,18 @@ final class ContextBudget {
         }
         recordRapidRefill();
         if (compactCircuitOpen || inBackoff(messages, overhead)) {
+            // 熔断或退避时只剩本地清理；前面为保住热前缀跳过的那次在这里补回来
+            if (compactFirst) {
+                pruneAndTruncate(messages, tokensLimit, charsLimit, overhead, boundary);
+            }
             dropIfOverBudget(messages, charsLimit, tokensLimit, overhead, boundary);
             return false;
         }
         boolean reduced = runCompactionRounds(messages, tokensLimit, charsLimit, overhead, boundary, usage, events);
+        if (!reduced && compactFirst) {
+            // 摘要压缩没生效：回退本地清理，再让硬裁剪兜底
+            pruneAndTruncate(messages, tokensLimit, charsLimit, overhead, boundary);
+        }
         updateCompactionOutcome(messages, overhead, reduced);
         dropIfOverBudget(messages, charsLimit, tokensLimit, overhead, boundary);
         return reduced;
@@ -137,29 +153,58 @@ final class ContextBudget {
     }
 
     private void pruneAndTruncate(List<Message> messages, int tokensLimit, int charsLimit, int overhead, int boundary) {
+        localCleanup(messages, tokensLimit, charsLimit, overhead, boundary, true);
+    }
+
+    /** 只读预演：本地清理能不能把水位压回预压线以下。真实历史与滞回水位都不动。 */
+    private boolean localCleanupSuffices(List<Message> messages, int tokensLimit, int charsLimit, int overhead,
+        int boundary) {
+        List<Message> probe = new ArrayList<>(messages);
+        localCleanup(probe, tokensLimit, charsLimit, overhead, boundary, false);
+        return usage(probe, charsLimit, tokensLimit, overhead) < PRE_COMPACT_RATIO;
+    }
+
+    /**
+     * 第一、二层本地清理：占位符化、旧工具图降级、超长输出首尾截断。
+     *
+     * @param commit {@code false} 时只预演（传进来的应是副本），不推进下一次批量清理的滞回水位
+     */
+    private void localCleanup(List<Message> messages, int tokensLimit, int charsLimit, int overhead, int boundary,
+        boolean commit) {
         int charStep = Math.max(1, (int)(charsLimit * COOLDOWN_STEP_RATIO));
         int tokenStep = Math.max(1, (int)(tokensLimit * COOLDOWN_STEP_RATIO));
-        // 第一、二层不花模型调用，把已读内容压缩成占位符、降级旧工具图与截断超长输出。
-        // 仅越过滞回冷却步长或触及硬保护线（95%）才批量清理一次，低水位和冷却期严格 append_only。
+        // 这两层不花模型调用。仅越过滞回冷却步长或触及硬保护线（95%）才批量清理一次，
+        // 低水位和冷却期严格 append_only。
         double usage = usage(messages, charsLimit, tokensLimit, overhead);
         int curChars = ContextCompactor.totalChars(messages);
         int curTokens = ContextCompactor.estimateTokens(messages) + overhead;
+        int pruneCharsAt = nextPruneChars;
+        int pruneTokensAt = nextPruneTokens;
         if (usage >= PRUNE_RATIO
             && (usage >= HARD_PROTECT_RATIO || curTokens >= nextPruneTokens || curChars >= nextPruneChars)) {
             ContextCompactor.dropStaleToolImages(messages, PRUNE_KEEP_TOOL_IMAGES, boundary);
             ContextCompactor.pruneToolOutputs(messages, tokensLimit, charsLimit, boundary);
-            nextPruneChars = ContextCompactor.totalChars(messages) + charStep;
-            nextPruneTokens = ContextCompactor.estimateTokens(messages) + overhead + tokenStep;
+            pruneCharsAt = ContextCompactor.totalChars(messages) + charStep;
+            pruneTokensAt = ContextCompactor.estimateTokens(messages) + overhead + tokenStep;
             usage = usage(messages, charsLimit, tokensLimit, overhead);
         }
         curChars = ContextCompactor.totalChars(messages);
         curTokens = ContextCompactor.estimateTokens(messages) + overhead;
+        int truncateCharsAt = nextTruncateChars;
+        int truncateTokensAt = nextTruncateTokens;
         if (usage >= TRUNCATE_RATIO
             && (usage >= HARD_PROTECT_RATIO || curTokens >= nextTruncateTokens || curChars >= nextTruncateChars)) {
             ContextCompactor.truncateLongToolOutputs(messages, boundary);
-            nextTruncateChars = ContextCompactor.totalChars(messages) + charStep;
-            nextTruncateTokens = ContextCompactor.estimateTokens(messages) + overhead + tokenStep;
+            truncateCharsAt = ContextCompactor.totalChars(messages) + charStep;
+            truncateTokensAt = ContextCompactor.estimateTokens(messages) + overhead + tokenStep;
         }
+        if (!commit) {
+            return;
+        }
+        nextPruneChars = pruneCharsAt;
+        nextPruneTokens = pruneTokensAt;
+        nextTruncateChars = truncateCharsAt;
+        nextTruncateTokens = truncateTokensAt;
     }
 
     private void updateLowPressureState(double usage) {

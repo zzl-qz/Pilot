@@ -171,6 +171,49 @@ class ContextBudgetTest {
             "摘要失败时应该先靠占位符把体积降下来");
     }
 
+    /** 跨过预压线但本地清理压不回 90%：摘要压缩必须收到没被提前改写的热前缀。 */
+    @Test
+    void compactionSeesTheUntouchedPrefixWhenLocalCleanupCannotReachTheLine() {
+        List<Message> messages = withToolOutputs(textHistory(6, 5_000), 3, 4_500);
+        List<Message> snapshot = List.copyOf(messages);
+        AtomicInteger calls = new AtomicInteger();
+        List<List<Message>> compacted = new ArrayList<List<Message>>();
+        ContextBudget budget = new ContextBudget((prefix, charBudget, tokenBudget) -> {
+            calls.incrementAndGet();
+            compacted.add(List.copyOf(prefix));
+            return notCompacted();
+        });
+        int limit = (int)((ContextCompactor.estimateTokens(messages) + 4_000) / 0.92);
+
+        budget.apply(messages, limit, 400_000, 4_000, event -> {
+        }, messages.size());
+
+        assertEquals(1, calls.get(), "压不回 90% 时应直接走摘要压缩");
+        assertEquals(snapshot, compacted.get(0), "摘要压缩收到的前缀必须与原地改写前一致");
+        assertEquals(snapshot, messages, "只读预演不能留下任何副作用");
+    }
+
+    /** 本地清理就能压回 90% 以下时先清理，省掉一次摘要模型调用。 */
+    @Test
+    void localCleanupAloneAvoidsTheCompactionCallWhenItCanReachTheLine() {
+        List<Message> messages = toolHistory(12, 18_000);
+        AtomicInteger calls = new AtomicInteger();
+        ContextBudget budget = new ContextBudget(recording(calls, notCompacted()));
+        int limit = (int)((ContextCompactor.estimateTokens(messages) + 4_000) / 0.92);
+
+        boolean compacted = budget.apply(messages, limit, 400_000, 4_000, event -> {
+        }, messages.size());
+
+        assertFalse(compacted);
+        assertEquals(0, calls.get(), "本地清理够用时不该调用摘要模型");
+        assertTrue(
+            messages.stream()
+                .anyMatch(message -> "tool".equals(message.role())
+                    && message.content().startsWith("[旧工具输出已清理")),
+            "旧的工具输出应被换成占位符");
+        assertTrue(ContextBudget.usage(messages, 400_000, limit, 4_000) < 0.90, "清理后应压回预压线以下");
+    }
+
     @Test
     void usageTakesTheFullerOfCharsAndTokens() {
         List<Message> ascii = List.of(Message.user("a".repeat(400)));
@@ -278,6 +321,17 @@ class ContextBudgetTest {
             messages.add(Message.tool("c" + i, "x".repeat(charsPerTool)));
         }
         return messages;
+    }
+
+    /** 在既有纯文本历史上追加一批工具输出：清理窗口还没轮到它们时，本地清理省不下体积。 */
+    private static List<Message> withToolOutputs(List<Message> messages, int groups, int charsPerTool) {
+        ArrayList<Message> appended = new ArrayList<Message>(messages);
+        for (int i = 0; i < groups; i++) {
+            appended.add(
+                Message.assistant("read " + i, List.of(new ToolCall("t" + i, "read_file", Map.of("path", "g" + i)))));
+            appended.add(Message.tool("t" + i, "y".repeat(charsPerTool)));
+        }
+        return appended;
     }
 
     private static ContextCompactor.Outcome covered(int messages) {
