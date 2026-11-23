@@ -83,8 +83,8 @@ export function PreviewPanel() {
     }
   };
 
-  function renderCodeLines() {
-    const preClass = `preview-body${wrap ? '' : ' is-nowrap'} preview-source`;
+  function renderCodeLines(withSourceClass: boolean) {
+    const preClass = `preview-body${wrap ? '' : ' is-nowrap'}${withSourceClass ? ' preview-source' : ''}`;
     const highlightLimit = lines.length <= 2500 ? codeLang : null;
     return (
       <pre ref={source} id="preview-body" className={preClass}>
@@ -129,11 +129,11 @@ export function PreviewPanel() {
         </div>
       );
     }
-    if (line && content) return renderCodeLines();
+    if (line && content) return renderCodeLines(true);
     const text = data.truncated ? `${content}\n\n…（内容过长，已截断）` : (content || '（空文件）');
     if (isMarkdown) return <div className="bubble preview-markdown"><MarkdownBody text={text} /></div>;
     if (isTabular) return <StructuredDocumentView text={content} filename={activePath} />;
-    if (content) return renderCodeLines();
+    if (content) return renderCodeLines(false);
     return <pre id="preview-body" className={`preview-body${wrap ? '' : ' is-nowrap'}`}>{text}</pre>;
   }
 
