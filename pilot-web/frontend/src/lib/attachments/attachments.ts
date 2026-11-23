@@ -86,17 +86,12 @@ export function fileBadge(name: unknown, mimeType = '') {
   return { label: (ext || 'file').slice(0, 4).toUpperCase(), tone };
 }
 
-export function formatBytes(bytes: unknown) {
+export function formatBytes(bytes: unknown, fallback = '') {
+  if (bytes == null || bytes === '') return fallback;
   const size = Number(bytes);
-  if (!Number.isFinite(size) || size < 0) {
-    return '';
-  }
-  if (size < 1024) {
-    return `${size} B`;
-  }
-  if (size < 1024 * 1024) {
-    return `${(size / 1024).toFixed(size < 10 * 1024 ? 1 : 0)} KB`;
-  }
+  if (!Number.isFinite(size) || size < 0) return fallback;
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(size < 10 * 1024 ? 1 : 0)} KB`;
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 

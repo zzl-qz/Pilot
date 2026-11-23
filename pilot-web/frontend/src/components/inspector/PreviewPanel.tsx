@@ -2,6 +2,7 @@ import { statusLetter } from './diff-format.js';
 import type { ChangeFile } from '../../types/core.js';
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../../store.js';
+import { formatBytes } from '../../lib/attachments/attachments.js';
 import { writeClipboard } from '../../lib/clipboard.js';
 import { sortChangeFiles, splitPath, statusKind } from '../../lib/changes.js';
 import { MarkdownBody } from '../MarkdownBody.jsx';
@@ -98,7 +99,7 @@ export function PreviewPanel() {
         <div className="preview-meta">
           <span className="preview-meta-path" title={data.path || path}>{data.path || path}</span>
           <span className="preview-meta-item">{lines.length} 行</span>
-          <span className="preview-meta-item">{formatBytes(data.size)}</span>
+          <span className="preview-meta-item">{formatBytes(data.size, '0 B')}</span>
           {isMarkdown && <span className="preview-meta-tag">Markdown</span>}
           {data.truncated && <span className="preview-meta-tag is-warn">已截断</span>}
           {line && <span className={`preview-meta-tag${target ? '' : ' is-warn'}`}>
@@ -127,12 +128,4 @@ export function PreviewPanel() {
       )}
     </div>
   );
-}
-
-function formatBytes(size: unknown) {
-  const value = Number(size);
-  if (!Number.isFinite(value) || value <= 0) return '0 B';
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-  return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }

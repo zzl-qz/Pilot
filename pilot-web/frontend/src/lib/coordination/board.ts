@@ -87,11 +87,6 @@ export function otherSessions(snapshot: CoordinationSnapshot, sessionId: string)
   return snapshot.sessions.filter((item) => item.sessionId !== sessionId);
 }
 
-/** 占用者查询：冲突提示与占用列表共用，避免界面自己拼接占用方。 */
-export function claimOwner(snapshot: CoordinationSnapshot, path: string): CoordinationClaim | null {
-  return snapshot.claims.find((item) => item.path === path) ?? null;
-}
-
 /** 看板连接状态的人话口径；顺带说明当前游标，便于排查是否卡在旧事件上。 */
 export function connectionLabel(status: string, cursor: number, attempts: number): string {
   if (status === 'live') return `实时 · 游标 ${cursor}`;
@@ -99,9 +94,4 @@ export function connectionLabel(status: string, cursor: number, attempts: number
   if (status === 'reconnecting') return `断线重连中（第 ${attempts} 次）· 游标 ${cursor}`;
   if (status === 'stopped') return `已停止接收 · 游标 ${cursor}`;
   return '尚未连接工作区事件流';
-}
-
-/** 事件是否需要立刻重读看板：所有协调事件都改变看板内容，这里统一返回 true，保留命名便于日后细分。 */
-export function shouldRefreshBoard(frame: { type: string }): boolean {
-  return typeof frame.type === 'string' && frame.type.length > 0;
 }

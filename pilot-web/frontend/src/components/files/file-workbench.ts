@@ -1,3 +1,4 @@
+import { formatBytes as formatAttachmentBytes } from '../../lib/attachments/attachments.js';
 /** 文件工作台纯函数：表单与后端页面操作之间的转换，单独放便于测试。 */
 
 export interface PdfForm {
@@ -64,10 +65,7 @@ export function pdfOperations(form: PdfForm): Record<string, unknown> | null {
 }
 
 export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return '—';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return formatAttachmentBytes(bytes, '—');
 }
 
 const LABELS: Record<string, string> = {

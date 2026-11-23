@@ -6,6 +6,7 @@ import { statusFromCode, verificationStatusLabel } from "../../lib/verification/
 import { commandStatusLabel } from "../../lib/command-tasks.js";
 import { verificationLabel } from "../../lib/verification/run.js";
 import { writeClipboard } from "../../lib/clipboard.js";
+import { formatBytes } from "../../lib/attachments/attachments.js";
 import { useStore } from "../../store.js";
 import { api } from "../../api.js";
 import { formatCount } from "./UsageSettings.js";
@@ -175,7 +176,7 @@ export function DiagnosticsSettings() {
             <>
               <dl className="diag-grid">
                 <div><dt>数据目录</dt><dd className="diag-path" title={maintenance.backup?.dataDir}>{maintenance.backup?.dataDir || '—'}</dd></div>
-                <div><dt>数据库</dt><dd>{formatBytes(maintenance.backup?.databaseBytes)}</dd></div>
+                <div><dt>数据库</dt><dd>{formatBytes(maintenance.backup?.databaseBytes, '—')}</dd></div>
                 <div><dt>备份</dt><dd>{maintenance.backup?.backups ?? 0} 份</dd></div>
                 <div><dt>上次备份</dt><dd>{maintenance.backup?.lastBackupAt || '从未'}</dd></div>
                 <div><dt>保留策略</dt><dd>{maintenance.retentionDays > 0 ? `${maintenance.retentionDays} 天` : '不自动清理'}</dd></div>
@@ -363,15 +364,6 @@ function PluginCompatSection({ sessionId }: { sessionId: string | null }) {
       )}
     </section>
   );
-}
-
-function formatBytes(value: unknown) {
-  if (value == null) return '—';
-  const size = Number(value) || 0;
-  if (size <= 0) return '0 B';
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function formatDuration(ms: unknown) {

@@ -75,7 +75,7 @@ export class ApiError extends Error {
   constructor(message: string, status: number, uncertain = false) { super(message); this.status = status; this.uncertain = uncertain; }
 }
 
-const jsonBody = (method: string, body: unknown) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+const jsonBody = (method: string, body: unknown, headers?: Record<string, string>) => ({ method, headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
 /** 文件工作台的根路径；会话 id 必须转义，避免路径注入。 */
 const workbenchBase = (session: string) => `/api/sessions/${encodeURIComponent(session)}/workbench/files`;
 
@@ -153,7 +153,7 @@ export const api = {
   deliveryReceipt: (id: string, body: { lease: string; success: boolean; error?: string }) => apiJson<ApiResults['deliveryReceipt']>(`/api/deliveries/${encodeURIComponent(id)}/receipt`, jsonBody('POST', body)),
   retryDelivery: (id: string, version: number) => apiJson<ApiResults['retryDelivery']>(`/api/deliveries/${encodeURIComponent(id)}/retry`, jsonBody('POST', { version })),
   voiceSettings: () => apiJson<ApiResults['voiceSettings']>('/api/voice/settings'),
-  saveVoiceSettings: (body: Update<S.VoiceServiceUpdate>) => apiJson<ApiResults['saveVoiceSettings']>('/api/voice/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  saveVoiceSettings: (body: Update<S.VoiceServiceUpdate>) => apiJson<ApiResults['saveVoiceSettings']>('/api/voice/settings', jsonBody('PUT', body)),
   transcribeVoice: (blob: Blob, signal?: AbortSignal) => {
     const body = new FormData(); body.append('file', blob, voiceFilename(blob.type));
     return apiJson<ApiResults['transcribeVoice']>('/api/voice/transcriptions', { method: 'POST', body, signal }, 75000);
@@ -162,25 +162,25 @@ export const api = {
   openBrowserWindow: () => apiJson<ApiResults['openBrowserWindow']>('/api/desktop/browser-window', { method: 'POST' }, 70000),
   sessions: () => apiJson<ApiResults['sessions']>('/api/sessions'),
   session: (id: string) => apiJson<ApiResults['session']>(`/api/sessions/${encodeURIComponent(id)}`),
-  createSession: (body: { title?: string; workspace?: string; projectId?: string; replaceBlank?: boolean }) => apiJson<ApiResults['createSession']>('/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }),
+  createSession: (body: { title?: string; workspace?: string; projectId?: string; replaceBlank?: boolean }) => apiJson<ApiResults['createSession']>('/api/sessions', jsonBody('POST', body || {})),
   /** 从当前对话分叉一条临时侧边对话（对齐 Codex 的 /side）。 */
   createSideChat: (id: string) => apiJson<ApiResults['createSideChat']>(`/api/sessions/${encodeURIComponent(id)}/side`, { method: 'POST' }),
-  renameSession: (id: string, title: string) => apiJson<ApiResults['renameSession']>(`/api/sessions/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) }),
+  renameSession: (id: string, title: string) => apiJson<ApiResults['renameSession']>(`/api/sessions/${encodeURIComponent(id)}`, jsonBody('PATCH', { title })),
   sessionPreferences: (id: string, body: { pinned?: boolean; unread?: boolean }) => apiJson<ApiResults['sessionPreferences']>(`/api/sessions/${encodeURIComponent(id)}/preferences`, jsonBody('PATCH', body)),
-  archiveSession: (id: string, archived: boolean = true) => apiJson<ApiResults['archiveSession']>(`/api/sessions/${encodeURIComponent(id)}/archive`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ archived }) }),
-  switchWorkspace: (id: string, workspace: string) => apiJson<ApiResults['switchWorkspace']>(`/api/sessions/${encodeURIComponent(id)}/workspace`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workspace }) }),
+  archiveSession: (id: string, archived: boolean = true) => apiJson<ApiResults['archiveSession']>(`/api/sessions/${encodeURIComponent(id)}/archive`, jsonBody('PATCH', { archived })),
+  switchWorkspace: (id: string, workspace: string) => apiJson<ApiResults['switchWorkspace']>(`/api/sessions/${encodeURIComponent(id)}/workspace`, jsonBody('PATCH', { workspace })),
   submissionToken: () => apiJson<{ requestId: string }>('/api/submissions/token', { cache: 'no-store' }),
   submissionResult: (requestId: string) => apiJson<SubmissionResult>('/api/submissions/result', { headers: { 'X-Pilot-Request-Id': requestId }, cache: 'no-store' }),
   acknowledgeSubmission: (requestId: string) => apiJson('/api/submissions/ack', jsonBody('POST', { requestId })),
-  sendMessage: (id: string, body: InputMessage, requestId: string) => apiJson<S.SessionControllerMessageResponse>(`/api/sessions/${encodeURIComponent(id)}/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Pilot-Request-Id': requestId }, body: JSON.stringify(body) }, 120000),
-  resend: (id: string, body: { sequence: number; content: string }, requestId: string) => apiJson<ApiResults['resend']>(`/api/sessions/${encodeURIComponent(id)}/resend`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Pilot-Request-Id': requestId }, body: JSON.stringify(body) }),
-  steer: (id: string, body: { content: string; runId?: string | null }, requestId: string) => apiJson<ApiResults['steer']>(`/api/sessions/${encodeURIComponent(id)}/steer`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Pilot-Request-Id': requestId }, body: JSON.stringify(body) }),
+  sendMessage: (id: string, body: InputMessage, requestId: string) => apiJson<S.SessionControllerMessageResponse>(`/api/sessions/${encodeURIComponent(id)}/messages`, jsonBody('POST', body, { 'X-Pilot-Request-Id': requestId }), 120000),
+  resend: (id: string, body: { sequence: number; content: string }, requestId: string) => apiJson<ApiResults['resend']>(`/api/sessions/${encodeURIComponent(id)}/resend`, jsonBody('POST', body, { 'X-Pilot-Request-Id': requestId })),
+  steer: (id: string, body: { content: string; runId?: string | null }, requestId: string) => apiJson<ApiResults['steer']>(`/api/sessions/${encodeURIComponent(id)}/steer`, jsonBody('POST', body, { 'X-Pilot-Request-Id': requestId })),
   continueRun: (id: string, requestId: string) => apiJson<ApiResults['continueRun']>(`/api/sessions/${encodeURIComponent(id)}/continue`, { method: 'POST', headers: { 'X-Pilot-Request-Id': requestId } }),
   pauseRun: (runId: string) => apiJson<ApiResults['pauseRun']>(`/api/runs/${encodeURIComponent(runId)}/pause`, { method: 'POST' }),
   cancelRun: (runId: string) => apiJson<ApiResults['cancelRun']>(`/api/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' }),
   activeRun: (id: string) => apiJson<ApiResults['activeRun']>(`/api/sessions/${encodeURIComponent(id)}/runs/active`),
-  approval: (callId: string, approved: boolean) => apiJson<ApiResults['approval']>(`/api/approvals/${encodeURIComponent(callId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ approved }) }),
-  answerQuestion: (id: string, callId: string, choice: string) => apiJson<ApiResults['answerQuestion']>(`/api/sessions/${encodeURIComponent(id)}/questions/${encodeURIComponent(callId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ choice }) }),
+  approval: (callId: string, approved: boolean) => apiJson<ApiResults['approval']>(`/api/approvals/${encodeURIComponent(callId)}`, jsonBody('POST', { approved })),
+  answerQuestion: (id: string, callId: string, choice: string) => apiJson<ApiResults['answerQuestion']>(`/api/sessions/${encodeURIComponent(id)}/questions/${encodeURIComponent(callId)}`, jsonBody('POST', { choice })),
   history: (id: string, { limit, before, after, compactTools }: { limit?: number; before?: number; after?: number; compactTools?: boolean } = {}) => {
     const params = new URLSearchParams();
     if (limit) params.set('limit', String(limit));
@@ -193,27 +193,27 @@ export const api = {
     `/api/sessions/${encodeURIComponent(id)}/events/${sequence}?revision=${revision}`),
   checkpoints: (id: string, sequence: number) => apiJson<ApiResults['checkpoints']>(`/api/sessions/${encodeURIComponent(id)}/checkpoints?sequence=${sequence}`),
   // 回退必须带 mode（code / conversation / both），分支带上 revision 做乐观锁
-  restoreCheckpoint: (id: string, body: { sequence: number; mode: string; revision?: number; operationId?: string }) => apiJson<ApiResults['restoreCheckpoint']>(`/api/sessions/${encodeURIComponent(id)}/checkpoints/restore`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }),
-  forkCheckpoint: (id: string, body: { sequence: number; revision?: number }) => apiJson<ApiResults['forkCheckpoint']>(`/api/sessions/${encodeURIComponent(id)}/checkpoints/fork`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }),
+  restoreCheckpoint: (id: string, body: { sequence: number; mode: string; revision?: number; operationId?: string }) => apiJson<ApiResults['restoreCheckpoint']>(`/api/sessions/${encodeURIComponent(id)}/checkpoints/restore`, jsonBody('POST', body || {})),
+  forkCheckpoint: (id: string, body: { sequence: number; revision?: number }) => apiJson<ApiResults['forkCheckpoint']>(`/api/sessions/${encodeURIComponent(id)}/checkpoints/fork`, jsonBody('POST', body || {})),
   task: (id: string) => apiJson<ApiResults['task']>(`/api/sessions/${encodeURIComponent(id)}/task`),
-  saveTask: (id: string, body: Update<S.TaskControlServiceRequirements>) => apiJson<ApiResults['saveTask']>(`/api/sessions/${encodeURIComponent(id)}/task`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  saveTask: (id: string, body: Update<S.TaskControlServiceRequirements>) => apiJson<ApiResults['saveTask']>(`/api/sessions/${encodeURIComponent(id)}/task`, jsonBody('PUT', body)),
   queue: (id: string) => apiJson<ApiResults['queue']>(`/api/sessions/${encodeURIComponent(id)}/queue`),
-  holdQueue: (id: string, held: boolean) => apiJson<ApiResults['holdQueue']>(`/api/sessions/${encodeURIComponent(id)}/queue/hold`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ held }) }),
-  updateQueueItem: (id: string, index: number, body: { content: string; revision?: string | null; constraints?: string[]; acceptance?: string[] }) => apiJson<ApiResults['updateQueueItem']>(`/api/sessions/${encodeURIComponent(id)}/queue/${index}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  holdQueue: (id: string, held: boolean) => apiJson<ApiResults['holdQueue']>(`/api/sessions/${encodeURIComponent(id)}/queue/hold`, jsonBody('POST', { held })),
+  updateQueueItem: (id: string, index: number, body: { content: string; revision?: string | null; constraints?: string[]; acceptance?: string[] }) => apiJson<ApiResults['updateQueueItem']>(`/api/sessions/${encodeURIComponent(id)}/queue/${index}`, jsonBody('PUT', body)),
   deleteQueueItem: (id: string, index: number, revision?: string | null) => apiJson<ApiResults['deleteQueueItem']>(`/api/sessions/${encodeURIComponent(id)}/queue/${index}?revision=${encodeURIComponent(revision || '')}`, { method: 'DELETE' }),
   moveQueueItem: (id: string, from: number, to: number, revision?: string | null) => apiJson<ApiResults['moveQueueItem']>(`/api/sessions/${encodeURIComponent(id)}/queue/${from}/move?to=${to}&revision=${encodeURIComponent(revision || '')}`, { method: 'POST' }),
-  steerQueueItem: (id: string, index: number, body: { runId?: string | null; revision?: string | null }) => apiJson<ApiResults['steerQueueItem']>(`/api/sessions/${encodeURIComponent(id)}/queue/${index}/steer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  steerQueueItem: (id: string, index: number, body: { runId?: string | null; revision?: string | null }) => apiJson<ApiResults['steerQueueItem']>(`/api/sessions/${encodeURIComponent(id)}/queue/${index}/steer`, jsonBody('POST', body)),
   plan: (id: string) => apiJson<ApiResults['plan']>(`/api/sessions/${encodeURIComponent(id)}/plan`),
   context: (id: string) => apiJson<ApiResults['context']>(`/api/sessions/${encodeURIComponent(id)}/context`),
   compactContext: (id: string) => apiJson<ApiResults['compactContext']>(`/api/sessions/${encodeURIComponent(id)}/context/compact`, { method: 'POST' }),
   sandboxAction: (id: string, sandboxId: string, action: string) => apiJson<ApiResults['sandboxAction']>(`/api/sessions/${encodeURIComponent(id)}/multi/sandboxes/${encodeURIComponent(sandboxId)}/${action}`, { method: 'POST' }),
   /** 接受前的产物清单与校验结论：近两版差异 + 依赖，避免盲批。 */
   sandboxManifest: (id: string, sandboxId: string) => apiJson<ApiResults['sandboxManifest']>(`/api/sessions/${encodeURIComponent(id)}/multi/sandboxes/${encodeURIComponent(sandboxId)}/manifest`),
-  resolveArbitration: (id: string, arbitrationId: string, body: { choice: string }) => apiJson<ApiResults['resolveArbitration']>(`/api/sessions/${encodeURIComponent(id)}/multi/arbitrations/${encodeURIComponent(arbitrationId)}/resolve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  resolveArbitration: (id: string, arbitrationId: string, body: { choice: string }) => apiJson<ApiResults['resolveArbitration']>(`/api/sessions/${encodeURIComponent(id)}/multi/arbitrations/${encodeURIComponent(arbitrationId)}/resolve`, jsonBody('POST', body)),
   diff: (id: string) => apiJson<ApiResults['diff']>(`/api/sessions/${encodeURIComponent(id)}/diff`),
   /** 单文件补丁：整份 diff 被截断时按需再取一次。 */
   fileDiff: (id: string, path: string) => apiJson<ApiResults['fileDiff']>(`/api/sessions/${encodeURIComponent(id)}/diff/file?path=${encodeURIComponent(path)}`),
-  restoreChanges: (id: string, body: { paths?: string[]; all?: boolean }) => apiJson<ApiResults['restoreChanges']>(`/api/sessions/${encodeURIComponent(id)}/diff/restore`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }),
+  restoreChanges: (id: string, body: { paths?: string[]; all?: boolean }) => apiJson<ApiResults['restoreChanges']>(`/api/sessions/${encodeURIComponent(id)}/diff/restore`, jsonBody('POST', body || {})),
   capabilities: (id: string) => apiJson<ApiResults['capabilities']>(`/api/sessions/${encodeURIComponent(id)}/capabilities`),
   /** MCP：合并视图只读、写用户级配置、信任管理。 */
   mcpServers: (id: string) => apiJson<ApiResults['mcpServers']>(`/api/sessions/${encodeURIComponent(id)}/mcp/servers`),
@@ -227,7 +227,7 @@ export const api = {
   stopCommand: (id: string, taskId: string) => apiJson<ApiResults['stopCommand']>(`/api/sessions/${encodeURIComponent(id)}/commands/${encodeURIComponent(taskId)}/stop`, { method: 'POST' }),
   runChanges: (runId: string, summary = false) => apiJson<ApiResults['runChanges']>(`/api/runs/${encodeURIComponent(runId)}/changes${summary ? '?summary=true' : ''}`),
   rollbackRun: (runId: string) => apiJson<ApiResults['rollbackRun']>(`/api/runs/${encodeURIComponent(runId)}/rollback`, { method: 'POST' }),
-  branch: (id: string, name: string) => apiJson<ApiResults['branch']>(`/api/sessions/${encodeURIComponent(id)}/branch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }),
+  branch: (id: string, name: string) => apiJson<ApiResults['branch']>(`/api/sessions/${encodeURIComponent(id)}/branch`, jsonBody('POST', { name })),
   files: (id: string, path?: string) => apiJson<ApiResults['files']>(`/api/sessions/${encodeURIComponent(id)}/files?path=${encodeURIComponent(path || '')}`),
   workspaceTree: (root: string, path: string = '') => apiJson<ApiResults['workspaceTree']>(`/api/workspaces/files?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`),
   workspaceFile: (root: string, path: string) => apiJson<ApiResults['workspaceFile']>(`/api/workspaces/file?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`),
@@ -235,13 +235,13 @@ export const api = {
   workspaceFiles: (path: string) => apiJson<ApiResults['workspaceFiles']>(`/api/workspaces/files/flat?path=${encodeURIComponent(path)}`),
   file: (id: string, path: string) => apiJson<ApiResults['file']>(`/api/sessions/${encodeURIComponent(id)}/file?path=${encodeURIComponent(path)}`),
   projects: () => apiJson<ApiResults['projects']>('/api/projects'),
-  createProject: (body: { name: string; folders?: string[]; constraints?: string }) => apiJson<ApiResults['createProject']>('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
-  renameProject: (id: string, body: { name: string }) => apiJson<ApiResults['renameProject']>(`/api/projects/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
-  saveProjectFolders: (id: string, folders: string[]) => apiJson<ApiResults['saveProjectFolders']>(`/api/projects/${encodeURIComponent(id)}/folders`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folders }) }),
-  saveProjectConstraints: (id: string, text: string) => apiJson<ApiResults['saveProjectConstraints']>(`/api/projects/${encodeURIComponent(id)}/constraints`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }),
+  createProject: (body: { name: string; folders?: string[]; constraints?: string }) => apiJson<ApiResults['createProject']>('/api/projects', jsonBody('POST', body)),
+  renameProject: (id: string, body: { name: string }) => apiJson<ApiResults['renameProject']>(`/api/projects/${encodeURIComponent(id)}`, jsonBody('PATCH', body)),
+  saveProjectFolders: (id: string, folders: string[]) => apiJson<ApiResults['saveProjectFolders']>(`/api/projects/${encodeURIComponent(id)}/folders`, jsonBody('PUT', { folders })),
+  saveProjectConstraints: (id: string, text: string) => apiJson<ApiResults['saveProjectConstraints']>(`/api/projects/${encodeURIComponent(id)}/constraints`, jsonBody('PUT', { text })),
   readProjectAgents: (id: string) => apiJson<ApiResults['readProjectAgents']>(`/api/projects/${encodeURIComponent(id)}/agents`),
   deleteProject: (id: string) => apiJson<ApiResults['deleteProject']>(`/api/projects/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  worktrees: (body: { workspace: string; branch?: string; title?: string; projectId?: string | null }) => apiJson<ApiResults['worktrees']>('/api/worktrees', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  worktrees: (body: { workspace: string; branch?: string; title?: string; projectId?: string | null }) => apiJson<ApiResults['worktrees']>('/api/worktrees', jsonBody('POST', body)),
   worktreeInfo: (path?: string) => apiJson<ApiResults['worktreeInfo']>(`/api/worktrees?path=${encodeURIComponent(path || '')}`),
   worktreeRemove: (path?: string) => apiJson<ApiResults['worktreeRemove']>(`/api/worktrees?path=${encodeURIComponent(path || '')}`, { method: 'DELETE' }),
   worktreeHandoff: (sessionId: string) => apiJson<ApiResults['worktreeHandoff']>(`/api/worktrees/handoff?sessionId=${encodeURIComponent(sessionId)}`, { method: 'POST' }),
@@ -252,33 +252,33 @@ export const api = {
   // 会话间协调：所有动作都以 sessionId 作为发起方，越权与占用冲突由服务端拒绝并带原因
   coordinationBoard: (sessionId: string) => apiJson<ApiResults['coordinationBoard']>(`/api/sessions/${encodeURIComponent(sessionId)}/coordination`),
   coordinationRequest: (sessionId: string, body: { toSessionId: string; reason: string; taskId?: string }) =>
-    apiJson<ApiResults['coordinationRequest']>(`/api/sessions/${encodeURIComponent(sessionId)}/coordination/requests`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+    apiJson<ApiResults['coordinationRequest']>(`/api/sessions/${encodeURIComponent(sessionId)}/coordination/requests`, jsonBody('POST', body)),
   coordinationResolveRequest: (sessionId: string, requestId: string, action: 'accept' | 'decline' | 'withdraw') =>
     apiJson<ApiResults['coordinationRequest']>(`/api/sessions/${encodeURIComponent(sessionId)}/coordination/requests/${encodeURIComponent(requestId)}/${action}`, { method: 'POST' }),
   coordinationClaim: (sessionId: string, body: { path: string; kind?: 'FILE' | 'DIRECTORY'; ttlSeconds?: number }) =>
-    apiJson<ApiResults['coordinationClaim']>(`/api/sessions/${encodeURIComponent(sessionId)}/coordination/claims`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+    apiJson<ApiResults['coordinationClaim']>(`/api/sessions/${encodeURIComponent(sessionId)}/coordination/claims`, jsonBody('POST', body)),
   coordinationReleaseClaim: (sessionId: string, claimId: string) =>
     apiJson<ApiResults['coordinationClaim']>(`/api/sessions/${encodeURIComponent(sessionId)}/coordination/claims/${encodeURIComponent(claimId)}`, { method: 'DELETE' }),
   coordinationHandoff: (sessionId: string, body: { toSessionId: string; taskId: string; summary: string }) =>
-    apiJson<ApiResults['coordinationHandoff']>(`/api/sessions/${encodeURIComponent(sessionId)}/coordination/handoffs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+    apiJson<ApiResults['coordinationHandoff']>(`/api/sessions/${encodeURIComponent(sessionId)}/coordination/handoffs`, jsonBody('POST', body)),
   coordinationResolveHandoff: (sessionId: string, handoffId: string, action: 'accept' | 'decline') =>
     apiJson<ApiResults['coordinationHandoff']>(`/api/sessions/${encodeURIComponent(sessionId)}/coordination/handoffs/${encodeURIComponent(handoffId)}/${action}`, { method: 'POST' }),
   settings: (signal?: AbortSignal) => apiJson<ApiResults['settings']>('/api/settings', { signal }),
   // 后端是 PUT：之前发 POST 会 405，权限与模型保存点了没反应
-  savePermissionMode: (mode: string) => apiJson<ApiResults['savePermissionMode']>('/api/settings/permission-mode', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) }),
+  savePermissionMode: (mode: string) => apiJson<ApiResults['savePermissionMode']>('/api/settings/permission-mode', jsonBody('PUT', { mode })),
   /** 工作区 .pilot/settings.json 的 allow/deny/ask 规则；每次请求都重新读盘，改完立即生效。 */
   permissionRules: (workspace: string, signal?: AbortSignal) =>
     apiJson<ApiResults['permissionRules']>(`/api/permission-rules?workspace=${encodeURIComponent(workspace)}`, { signal }),
   savePermissionRules: (body: { workspace: string; allow: string[]; deny: string[]; ask: string[] }) =>
     apiJson<ApiResults['savePermissionRules']>('/api/permission-rules', jsonBody('PUT', body)),
-  saveModel: (body: Update<S.SettingsControllerModelRequest>) => apiJson<ApiResults['saveModel']>('/api/settings/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  saveModel: (body: Update<S.SettingsControllerModelRequest>) => apiJson<ApiResults['saveModel']>('/api/settings/model', jsonBody('PUT', body)),
   clearModelKey: () => apiJson<ApiResults['clearModelKey']>('/api/settings/model/api-key', { method: 'DELETE' }),
   modelRuntime: () => apiJson<ApiResults['modelRuntime']>('/api/settings/model/runtime'),
-  saveModelRuntime: (body: Update<S.ModelRuntimeControllerUpdate>) => apiJson<ApiResults['saveModelRuntime']>('/api/settings/model/runtime', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
-  probeModels: (body: Update<S.SettingsControllerModelsRequest>) => apiJson<ApiResults['probeModels']>('/api/settings/model/models', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  saveModelRuntime: (body: Update<S.ModelRuntimeControllerUpdate>) => apiJson<ApiResults['saveModelRuntime']>('/api/settings/model/runtime', jsonBody('PUT', body)),
+  probeModels: (body: Update<S.SettingsControllerModelsRequest>) => apiJson<ApiResults['probeModels']>('/api/settings/model/models', jsonBody('POST', body)),
   skills: (sessionId?: string) => apiJson<ApiResults['skills']>(`/api/skills${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''}`),
-  skillsPreview: (body: Update<S.SkillsControllerPreviewRequest>) => apiJson<ApiResults['skillsPreview']>('/api/skills/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, 150000),
-  skillsInstall: (body: Update<S.SkillsControllerInstallRequest>) => apiJson<ApiResults['skillsInstall']>('/api/skills/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  skillsPreview: (body: Update<S.SkillsControllerPreviewRequest>) => apiJson<ApiResults['skillsPreview']>('/api/skills/preview', jsonBody('POST', body), 150000),
+  skillsInstall: (body: Update<S.SkillsControllerInstallRequest>) => apiJson<ApiResults['skillsInstall']>('/api/skills/install', jsonBody('POST', body)),
   usage: (days: number) => apiJson<ApiResults['usage']>(`/api/usage?days=${days}`),
   diagnostics: (id: string) => apiJson<ApiResults['diagnostics']>(`/api/sessions/${encodeURIComponent(id)}/diagnostics`),
   exportDiagnostics: async (sessionId?: string | null, signal?: AbortSignal) => {
@@ -316,13 +316,13 @@ export const api = {
   purgeNow: () => apiJson<ApiResults['purgeNow']>('/api/maintenance/purge', { method: 'POST' }, 120000),
   results: () => apiJson<ApiResults['results']>('/api/results'),
   result: (id: string) => apiJson<ApiResults['result']>(`/api/results/${encodeURIComponent(id)}`),
-  resultReceipt: (id: string, body: { action: string; revision?: string }) => apiJson<ApiResults['resultReceipt']>(`/api/results/${encodeURIComponent(id)}/receipt`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  resultReceipt: (id: string, body: { action: string; revision?: string }) => apiJson<ApiResults['resultReceipt']>(`/api/results/${encodeURIComponent(id)}/receipt`, jsonBody('POST', body)),
   sessionResearch: (id: string) => apiJson<ApiResults['sessionResearch']>(`/api/results/research/${encodeURIComponent(id)}`),
   scheduleHandoffPreview: (id: string) => apiJson<ApiResults['scheduleHandoffPreview']>(`/api/schedules/${encodeURIComponent(id)}/handoff`),
-  scheduleHandoff: (id: string, body: { revision: string }) => apiJson<ApiResults['scheduleHandoff']>(`/api/schedules/${encodeURIComponent(id)}/handoff`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  scheduleHandoff: (id: string, body: { revision: string }) => apiJson<ApiResults['scheduleHandoff']>(`/api/schedules/${encodeURIComponent(id)}/handoff`, jsonBody('POST', body)),
   schedules: () => apiJson<ApiResults['schedules']>('/api/schedules'),
-  createSchedule: (body: ScheduleInput) => apiJson<ApiResults['createSchedule']>('/api/schedules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
-  controlSchedule: (id: string, body: { action: string; runAt?: string }) => apiJson<ApiResults['controlSchedule']>(`/api/schedules/${encodeURIComponent(id)}/control`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  createSchedule: (body: ScheduleInput) => apiJson<ApiResults['createSchedule']>('/api/schedules', jsonBody('POST', body)),
+  controlSchedule: (id: string, body: { action: string; runAt?: string }) => apiJson<ApiResults['controlSchedule']>(`/api/schedules/${encodeURIComponent(id)}/control`, jsonBody('POST', body)),
   metrics: () => apiJson<ApiResults['metrics']>('/api/metrics'),
   regenerate: (id: string, requestId: string) => apiJson<ApiResults['regenerate']>(`/api/sessions/${encodeURIComponent(id)}/regenerate`, { method: 'POST', headers: { 'X-Pilot-Request-Id': requestId } }),
   deleteSession: (id: string) => apiJson<ApiResults['deleteSession']>(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
