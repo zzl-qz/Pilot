@@ -32,4 +32,50 @@ class ReuseScanTest {
         List<String> hit = ReuseScan.scan("A.java", "", "order.setStatus(paid);\n".repeat(4), List.of());
         assertTrue(hit.stream().anyMatch(line -> line.contains("setStatus")), hit.toString());
     }
+
+    @Test
+    void overlappingGuardChainDoesNotTriggerSelfMatchWhileDisjointCopyStillDoes() {
+        String guardChain = """
+            long cacheRead(JsonNode usage, JsonNode details) {
+                long direct = readPositive(usage, "cached_tokens");
+                if (direct >= 0) return direct;
+                long detail = readPositive(details, "cached_tokens");
+                if (detail >= 0) return detail;
+                long legacy = readPositive(usage, "prompt_cache_hit_tokens");
+                if (legacy >= 0) return legacy;
+                long fallback = readPositive(details, "cache_read_input_tokens");
+                if (fallback >= 0) return fallback;
+                return 0L;
+            }
+            """;
+        List<String> guardHits = ReuseScan.scan("ModelUsageParser.java", "", guardChain, List.of());
+        assertTrue(guardHits.isEmpty(), "相邻重叠窗口的早返回守卫链不应自我匹配误报换名复制: " + guardHits);
+
+        String disjointCopy = """
+            long parseFirst(JsonNode a, JsonNode b) {
+                long x = readPositive(a, "k1");
+                if (x >= 0) {
+                    return x;
+                }
+                long y = readPositive(b, "k2");
+                if (y >= 0) {
+                    return y;
+                }
+                return 0L;
+            }
+            long parseSecond(JsonNode c, JsonNode d) {
+                long p = readPositive(c, "k3");
+                if (p >= 0) {
+                    return p;
+                }
+                long q = readPositive(d, "k4");
+                if (q >= 0) {
+                    return q;
+                }
+                return 0L;
+            }
+            """;
+        List<String> hit = ReuseScan.scan("ModelUsageParser.java", "", disjointCopy, List.of());
+        assertTrue(hit.stream().anyMatch(line -> line.contains("换名复制")), "同文件内两段互不重叠的 6 行重复逻辑仍应准确检出: " + hit);
+    }
 }

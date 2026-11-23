@@ -138,6 +138,7 @@ final class ReuseScan {
         if (lines.size() < window) {
             return counts;
         }
+        Map<String, Integer> lastEnd = new HashMap<>();
         int minLogic = window >= WINDOW ? 3 : 2;
         int minKey = window >= WINDOW ? 40 : 24;
         for (int i = 0; i + window <= lines.size(); i++) {
@@ -151,6 +152,11 @@ final class ReuseScan {
             if (key.length() < minKey) {
                 continue;
             }
+            // 同文件内仅统计互不重叠的窗口，避免连续早返回守卫链因滑动窗口重叠自匹配误报换名复制
+            if (i < lastEnd.getOrDefault(key, 0)) {
+                continue;
+            }
+            lastEnd.put(key, i + window);
             counts.merge(key, 1, Integer::sum);
             if (samples != null) {
                 samples.putIfAbsent(key, preview(lines, i, window));
