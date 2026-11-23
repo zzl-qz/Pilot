@@ -26,8 +26,9 @@ public final class OpenAiResponsesModelClient implements ModelClient {
     private final String model;
     private final Duration timeout;
     private Duration idleTimeout;
-    private ModelProfile profile;
+    private final ModelProfile profile;
     private final Set<NativeCapability> capabilities;
+    private volatile boolean cacheParametersDisabled;
 
     public OpenAiResponsesModelClient(HttpClient httpClient, ObjectMapper mapper, URI endpoint, String apiKey,
         String model, Duration timeout, ModelProfile profile) {
@@ -58,7 +59,29 @@ public final class OpenAiResponsesModelClient implements ModelClient {
 
     @Override
     public ModelProfile profile() {
-        return profile;
+        ModelProfile p = profile;
+        if (!cacheParametersDisabled) {
+            return p;
+        }
+        return new ModelProfile(p.provider(), p.model(), ModelProfile.CACHE_NONE, p.cacheTtl(), p.instructionMessages(),
+            p.streamUsage(), false, p.compactionMode(), p.pricing());
+    }
+
+    @Override
+    public synchronized boolean disableRejectedCache(Throwable failure) {
+        if (!(failure instanceof ModelClientException) || failure.getMessage() == null) {
+            return false;
+        }
+        String message = failure.getMessage().toLowerCase(java.util.Locale.ROOT);
+        if (!message.contains("http 400") || !message.matches(
+            "(?s).*(unknown|unsupported|unrecognized|unexpected|not allowed|not permitted|extra inputs|invalid|不支持).*")) {
+            return false;
+        }
+        if (!cacheParametersDisabled && message.contains("prompt_cache_key")) {
+            cacheParametersDisabled = true;
+            return true;
+        }
+        return false;
     }
 
     @Override
@@ -144,14 +167,17 @@ public final class OpenAiResponsesModelClient implements ModelClient {
                 input.add(Map.of("role", message.role(), "content", content(message)));
             }
         }
+        ModelRequestScope.State scope = ModelRequestScope.current();
+        boolean toolsDisabled = scope.toolsDisabled();
+        boolean hasDefinitions = definitions != null && !definitions.isEmpty();
         List<Map<String, Object>> requestTools = new ArrayList<>();
-        if (definitions != null) {
+        if (hasDefinitions) {
             definitions.stream()
                 .filter(definition -> !NativeToolNames.isHidden(definition.name(), nativeCapabilities()))
                 .forEach(definition -> requestTools.add(Map.of("type", "function", "name", definition.name(),
                     "description", definition.description(), "parameters", definition.parameters())));
         }
-        if (capabilities.contains(NativeCapability.WEB_SEARCH)) {
+        if ((!toolsDisabled || hasDefinitions) && capabilities.contains(NativeCapability.WEB_SEARCH)) {
             requestTools.add(Map.of("type", "web_search"));
         }
         Map<String, Object> body = new LinkedHashMap<>();
@@ -159,10 +185,17 @@ public final class OpenAiResponsesModelClient implements ModelClient {
         body.put("max_output_tokens", capacity.outputTokens());
         body.put("store", false);
         body.put("input", input);
-        body.put("tools", requestTools);
-        if (ModelRequestScope.current().toolsDisabled()) {
+        if (!cacheParametersDisabled && profile.cacheKey() && !scope.cacheGroup().isBlank()) {
+            body.put("prompt_cache_key", "pilot-" + MeteredModelClient.hash(scope.cacheGroup()).substring(0, 32));
+        }
+        if (!toolsDisabled) {
+            body.put("tools", requestTools);
+        } else if (hasDefinitions) {
+            // 带历史工具调用的压缩/收尾保留 tools 维持缓存前缀，仅用 tool_choice="none" 禁调工具。
+            body.put("tools", requestTools);
             body.put("tool_choice", "none");
-            body.remove("tools");
+        } else {
+            body.put("tool_choice", "none");
         }
         return body;
     }

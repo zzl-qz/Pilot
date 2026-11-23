@@ -25,6 +25,7 @@ import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelPricing;
 import com.pilot.core.model.ModelProfile;
 import com.pilot.core.model.ModelResponse;
+import com.pilot.core.model.ModelUsage;
 import com.pilot.core.model.RequestReport;
 import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.model.diagnostics.ModelRequestScope;
@@ -558,5 +559,69 @@ class CacheContextTest {
         assertFalse(toolOutputs.isEmpty());
         assertTrue(toolOutputs.getFirst().contains("public class Big"),
             "压缩后重读同一未变文件必须拿回正文，不能被「文件未变化」死锁: " + toolOutputs.getFirst());
+    }
+
+    @Test
+    void cacheCreationOnFirstTurnWarmsPrefixReuseForAutoCompaction() {
+        var requests = new ArrayList<List<Message>>();
+        var purposes = new ArrayList<String>();
+        var step = new AtomicInteger();
+        var definitions = List.of(new ToolDefinition("noisy", "noisy", Map.of("type", "object")));
+        var tools = new ToolRegistry();
+        tools.register(new Tool() {
+            public String name() {
+                return "noisy";
+            }
+
+            public String description() {
+                return "noisy";
+            }
+
+            public Map<String, Object> parameters() {
+                return Map.of("type", "object");
+            }
+
+            public boolean readOnly() {
+                return true;
+            }
+
+            public String execute(Map<String, Object> args) {
+                return "ok";
+            }
+        });
+        ModelProfile anthropicShort =
+            ModelProfile.resolve(null, "claude-sonnet-4-6", "anthropic", "explicit", "", true, null, "short", null);
+        ModelClient model = new ModelClient() {
+            public ModelProfile profile() {
+                return anthropicShort;
+            }
+
+            public ModelResponse chat(List<Message> messages, List<ToolDefinition> toolDefs) {
+                requests.add(List.copyOf(messages));
+                String purpose = ModelRequestScope.current().purpose();
+                purposes.add(purpose);
+                if ("compaction".equals(purpose)) {
+                    return new ModelResponse("<summary>写缓存预热后的前缀摘要</summary>", List.of());
+                }
+                int turn = step.incrementAndGet();
+                ModelUsage usage = turn == 1 ? new ModelUsage(200, 10, 0, 0, 180, true, true, true)
+                    : new ModelUsage(200, 10, 0, 0, 0, true, true, true);
+                if (turn <= 10) {
+                    return new ModelResponse("分析" + "中".repeat(4_360),
+                        List.of(new ToolCall("n" + turn, "noisy", Map.of())), usage,
+                        ModelResponse.FinishReason.TOOL_CALLS);
+                }
+                return new ModelResponse("done", List.of(), usage, ModelResponse.FinishReason.STOP);
+            }
+        };
+        var config = new AgentLoop.Config(16, 0, 14, "stable", List::of, 0, 60_000, false);
+        var loop = new AgentLoop(model, tools, new PolicyPermissionGate(PermissionMode.AUTO), config);
+        var result = loop.run("collect data", List.of(), ignored -> {
+        });
+
+        assertNull(result.failureCode());
+        int compactIdx = purposes.indexOf("compaction");
+        assertTrue(compactIdx > 0, "应触发自动压缩，实际 purposes=" + purposes + ", tools=" + definitions);
+        assertTrue(requests.get(compactIdx).size() > 2, "首轮写缓存后自动压缩应复用主前缀而非走 2 条短摘录");
     }
 }

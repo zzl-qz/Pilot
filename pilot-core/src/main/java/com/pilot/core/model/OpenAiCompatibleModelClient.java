@@ -209,9 +209,28 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         if (!items.isEmpty() && messages.getFirst().role().equals("system")) {
             markMessage(items.getFirst(), marker, true);
         }
-        for (int index = items.size() - 1; index > 0; index--) {
-            if (markMessage(items.get(index), marker, false)) {
-                break;
+        markConversationBreakpoint(items, messages, marker, "compaction".equals(ModelRequestScope.current().purpose()));
+    }
+
+    private static void markConversationBreakpoint(List<Map<String, Object>> items, List<Message> messages,
+        Map<String, Object> marker, boolean compaction) {
+        int tailNonSystem = items.size() - 1;
+        while (tailNonSystem > 0 && "system".equals(messages.get(tailNonSystem).role())) {
+            tailNonSystem--;
+        }
+        int firstConversation = !messages.isEmpty() && "system".equals(messages.getFirst().role()) ? 1 : 0;
+        if (tailNonSystem < firstConversation) {
+            return;
+        }
+        int preferred = compaction && tailNonSystem > firstConversation ? tailNonSystem - 1 : tailNonSystem;
+        for (int index = preferred; index >= firstConversation; index--) {
+            if (!"system".equals(messages.get(index).role()) && markMessage(items.get(index), marker, false)) {
+                return;
+            }
+        }
+        for (int index = tailNonSystem; index > preferred; index--) {
+            if (!"system".equals(messages.get(index).role()) && markMessage(items.get(index), marker, false)) {
+                return;
             }
         }
     }

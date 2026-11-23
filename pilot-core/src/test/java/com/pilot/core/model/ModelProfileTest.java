@@ -41,9 +41,13 @@ class ModelProfileTest {
     @Test
     void autoCacheModeFollowsProvider() {
         assertEquals("implicit", auto("https://api.openai.com/v1/chat/completions").cacheMode());
-        assertEquals("none", auto("https://api.anthropic.com/v1/messages").cacheMode());
+        assertEquals("explicit", auto("https://api.anthropic.com/v1/messages").cacheMode());
         assertEquals("explicit", ModelProfile.resolve(URI.create("https://llm.example.com/v1"), "m",
             "anthropic-compatible", "auto", "", null, null, "short", null).cacheMode());
+        assertEquals("1h", ModelProfile.resolve(URI.create("https://api.anthropic.com/v1/messages"), "m", "auto",
+            "explicit", "1h", null, null, "short", null).cacheTtl());
+        assertEquals("none", ModelProfile.resolve(URI.create("https://api.anthropic.com/v1/messages"), "m", "auto",
+            "none", "", null, null, "short", null).cacheMode());
     }
 
     @Test

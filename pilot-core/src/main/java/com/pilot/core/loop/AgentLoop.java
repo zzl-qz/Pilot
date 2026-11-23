@@ -1838,9 +1838,14 @@ public final class AgentLoop {
         return new Result(null, RunFailureCode.CANCELLED.name(), conversation(messages));
     }
 
-    /** 端点报告了缓存命中（且用量确实来自端点）才认；估出来的缓存量不能当证据。 */
+    /** 端点报告了缓存命中或写入（且用量确实来自端点）才认；估出来的缓存量不能当证据。 */
     private void noteUsage(ModelUsage usage) {
-        if (usage.exact() && usage.inputTokens() > 0 && usage.cachedInputTokens() > 0) {
+        if (!usage.exact() || usage.inputTokens() <= 0) {
+            return;
+        }
+        boolean hit = usage.cachedInputTokens() > 0;
+        boolean warmWrite = usage.cacheWriteObserved() && usage.cacheWriteTokens() > 0;
+        if (hit || warmWrite) {
             observedCacheHit.set(true);
         }
     }

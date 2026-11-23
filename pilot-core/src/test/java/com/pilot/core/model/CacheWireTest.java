@@ -528,4 +528,29 @@ class CacheWireTest {
         });
         return server;
     }
+
+    @Test
+    void anthropicCompatibleKeepsBreakpointOffEphemeralGuidanceAndCompactionPrompt() {
+        ModelProfile compatible = ModelProfile.resolve(URI.create("https://relay.example/v1"), "claude-sonnet",
+            "anthropic-compatible", "explicit", "", null, null, "short", null);
+        OpenAiCompatibleModelClient raw = new OpenAiCompatibleModelClient(HttpClient.newHttpClient(), json,
+            URI.create("https://relay.example/v1"), "key", "claude-sonnet").withProfile(compatible);
+        List<ToolDefinition> tools = List.of(new ToolDefinition("read_file", "Read", Map.of("type", "object")));
+
+        Map<String,
+            Object> guided = raw.requestBody(
+                List.of(Message.system("base"), Message.user("hello"), Message.system("[Runtime guidance]\n短一些")),
+                tools, false);
+        JsonNode guidedMsgs = json.valueToTree(guided).path("messages");
+        assertTrue(guidedMsgs.get(1).path("content").get(0).has("cache_control"), "对话断点必须留在真实对话消息上");
+        assertFalse(guidedMsgs.get(2).path("content").toString().contains("cache_control"), "瞬态引导不能抢占断点");
+
+        Map<String, Object> compaction =
+            ModelRequestScope.within("compaction", "ses", true, () -> raw.requestBody(List.of(Message.system("base"),
+                Message.user("q1"), Message.assistant("a1", List.of()), Message.user("一次性整理指令")), tools, false));
+        JsonNode compactMsgs = json.valueToTree(compaction).path("messages");
+        assertTrue(compactMsgs.get(2).path("content").get(0).has("cache_control"), "压缩断点必须留在历史尾条上");
+        assertFalse(compactMsgs.get(3).path("content").toString().contains("cache_control"), "压缩指令不能写缓存断点");
+        assertEquals("none", compaction.get("tool_choice"));
+    }
 }

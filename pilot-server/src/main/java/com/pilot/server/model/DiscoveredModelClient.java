@@ -53,8 +53,8 @@ final class DiscoveredModelClient implements ModelClient {
     }
 
     @Override
-    public ModelProfile profile() {
-        return profile;
+    public synchronized ModelProfile profile() {
+        return applied != null ? applied.profile() : profile;
     }
 
     @Override

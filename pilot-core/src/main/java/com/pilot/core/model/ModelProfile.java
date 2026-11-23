@@ -54,12 +54,13 @@ public record ModelProfile(String provider, String model, String cacheMode, Stri
         if (!Set.of(AUTO, CACHE_EXPLICIT, CACHE_NONE).contains(mode)) {
             throw new IllegalArgumentException("不支持的缓存策略");
         }
-        if (mode.equals(CACHE_EXPLICIT) && !actual.equals(PROVIDER_ANTHROPIC_COMPATIBLE)) {
-            throw new IllegalArgumentException("显式缓存需要已确认支持 Anthropic 缓存格式的兼容端点");
+        if (mode.equals(CACHE_EXPLICIT)
+            && !(actual.equals(PROVIDER_ANTHROPIC) || actual.equals(PROVIDER_ANTHROPIC_COMPATIBLE))) {
+            throw new IllegalArgumentException("显式缓存需要 Anthropic 或已确认支持 Anthropic 缓存格式的兼容端点");
         }
         if (mode.equals(AUTO)) {
-            mode = actual.equals(PROVIDER_ANTHROPIC_COMPATIBLE) ? CACHE_EXPLICIT
-                : actual.equals(PROVIDER_ANTHROPIC) ? CACHE_NONE : CACHE_IMPLICIT;
+            mode = actual.equals(PROVIDER_ANTHROPIC) || actual.equals(PROVIDER_ANTHROPIC_COMPATIBLE) ? CACHE_EXPLICIT
+                : CACHE_IMPLICIT;
         }
         String lifetime = ttl == null ? "" : ttl;
         if (!Set.of("", "5m", "1h").contains(lifetime)) {
