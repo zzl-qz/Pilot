@@ -63,6 +63,14 @@ final class PreFlightLocator {
     private static final Pattern ROUTE_ANCHOR = Pattern.compile("(?<![\\w])(/[a-zA-Z0-9_-]+(?:/[a-zA-Z0-9_{}:-]+)+)");
     private static final Pattern BACKTICK_OR_QUOTED =
         Pattern.compile("`([^`\\r\\n]{4,80})`|\"([^\"\\r\\n]{4,80})\"|「([^」\\r\\n]{4,80})」");
+    /** 任务描述中常见的 CLI / Git / 构建 / 静态检查命令字面量，不作为源码内容锚点以免污染候选槽位。 */
+    private static final Pattern CLI_OR_BUILD_LITERAL = Pattern.compile(
+        "^(?:(?:sh|bash|zsh|cmd|powershell)\\s+)?(?:\\./)?(?:git|mvnw?|npm|pnpm|yarn|npx|node|python3?|pytest|cargo|go|docker|curl|rg|grep|sed|awk|java|javac|jlink)\\b.*"
+            + "|^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*(?:\\s.*)?$" + "|^-[a-zA-Z][-a-zA-Z0-9=.:]*$",
+        Pattern.CASE_INSENSITIVE);
+    private static final Set<String> LINT_OR_GATE_NOISE = Set.of("quality-gate", "high-cyclomatic-complexity",
+        "too-many-statements", "long-method", "too-many-parameters", "deep-nesting", "duplicate-code",
+        "checkstyle-strict", "spotless-check", "checkstyle-check");
 
     private static final Set<String> STOP_WORDS =
         Set.of("error", "config", "service", "controller", "manager", "helper", "utils", "index", "main", "test",
@@ -246,8 +254,10 @@ final class PreFlightLocator {
         extractPathAndRouteAnchors(query, found);
         extractIdentifierAnchors(query, found);
         extractQuotedAnchors(query, found);
-        return found.values().stream().sorted(Comparator.comparingInt(Anchor::weight).reversed()
-            .thenComparingInt((Anchor a) -> a.text().length()).reversed()).limit(MAX_ANCHORS).toList();
+        return found.values().stream()
+            .sorted(Comparator.comparingInt(Anchor::weight).reversed()
+                .thenComparing(Comparator.comparingInt((Anchor a) -> a.text().length()).reversed()))
+            .limit(MAX_ANCHORS).toList();
     }
 
     private static void extractPathAndRouteAnchors(String query, Map<String, Anchor> found) {
@@ -278,7 +288,8 @@ final class PreFlightLocator {
         Matcher delimMatcher = DELIMITED_IDENTIFIER.matcher(query);
         while (delimMatcher.find()) {
             String id = delimMatcher.group(1);
-            if (id.length() >= 6 && !isStopWord(id) && !looksLikeVersionOrDate(id)) {
+            if (id.length() >= 6 && !isStopWord(id) && !looksLikeVersionOrDate(id)
+                && !LINT_OR_GATE_NOISE.contains(id.toLowerCase(Locale.ROOT))) {
                 addAnchor(found, id, AnchorKind.IDENTIFIER, TIER_IDENTIFIER);
             }
         }
@@ -293,7 +304,8 @@ final class PreFlightLocator {
                 continue;
             }
             String trimmed = literal.strip();
-            if (trimmed.length() < 4 || trimmed.length() > 80 || isStopWord(trimmed)) {
+            if (trimmed.length() < 4 || trimmed.length() > 80 || isStopWord(trimmed)
+                || looksLikeCliOrGateNoise(trimmed)) {
                 continue;
             }
             if (PATH_OR_FILE.matcher(trimmed).matches()) {
@@ -302,6 +314,11 @@ final class PreFlightLocator {
                 addAnchor(found, trimmed, AnchorKind.LITERAL, TIER_LITERAL);
             }
         }
+    }
+
+    private static boolean looksLikeCliOrGateNoise(String text) {
+        String lower = text.toLowerCase(Locale.ROOT);
+        return LINT_OR_GATE_NOISE.contains(lower) || CLI_OR_BUILD_LITERAL.matcher(text).matches();
     }
 
     private static void addAnchor(Map<String, Anchor> found, String text, AnchorKind kind, int weight) {

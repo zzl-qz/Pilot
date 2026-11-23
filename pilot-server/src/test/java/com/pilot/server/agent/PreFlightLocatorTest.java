@@ -138,4 +138,29 @@ class PreFlightLocatorTest {
         assertTrue(result.candidatePaths().contains("src/main/java/demo/ReadFileTool.java"),
             result.candidates().toString());
     }
+
+    @Test
+    void prioritizesPathsAndIdentifiersOverLiteralsAndFiltersCliNoise() throws Exception {
+        Files.createDirectories(workspace.resolve("src/main/java/demo"));
+        Files.createDirectories(workspace.resolve("src/test/java/demo"));
+        Files.writeString(workspace.resolve("src/main/java/demo/MeteredModelClient.java"),
+            "public class MeteredModelClient {}\n");
+        Files.writeString(workspace.resolve("src/main/java/demo/UsageService.java"), "public class UsageService {}\n");
+        Files.writeString(workspace.resolve("src/test/java/demo/RunCommandNoiseTest.java"),
+            "class RunCommandNoiseTest { String a = \"git commit\"; String b = \"spotless:check\"; String c = \"checkstyle:check\"; String d = \"quality-gate\"; }\n");
+
+        PreFlightLocator locator = new PreFlightLocator(false, 300, 500, 6);
+        String prompt = "重构 MeteredModelClient 和 UsageService，消除 `high-cyclomatic-complexity` 与 `long-method`，"
+            + "要求跑过 `./mvnw test`、`spotless:check`、`checkstyle:check` 与 `quality-gate`，严禁执行 `git commit` 和 `git push`，"
+            + "同时注意 \"第一条普通中文提示\"、\"第二条普通中文提示\"、\"第三条普通中文提示\"、\"第四条普通中文提示\"、"
+            + "\"第五条普通中文提示\"、\"第六条普通中文提示\"、\"第七条普通中文提示\"、\"第八条普通中文提示\"。";
+
+        PreFlightLocator.Result result = locator.locate(workspace, new PathValidator(workspace), prompt, Set.of());
+        assertTrue(result.candidatePaths().contains("src/main/java/demo/MeteredModelClient.java"),
+            "高优先级标识符不应被普通字面量挤出 MAX_ANCHORS: " + result.candidates());
+        assertTrue(result.candidatePaths().contains("src/main/java/demo/UsageService.java"),
+            result.candidates().toString());
+        assertFalse(result.candidatePaths().contains("src/test/java/demo/RunCommandNoiseTest.java"),
+            "CLI/构建/质量门禁命令字面量不应污染候选列表: " + result.candidates());
+    }
 }
