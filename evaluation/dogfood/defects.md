@@ -42,7 +42,7 @@
 |---|---|---|---|---|
 | R-01 | `GoalExecutionPolicy.researchOnlyGoal()` 使用关键字表匹配用户原话，存在过拟合与误判风险 | `pilot-core/.../GoalIntent.java`、`pilot-server/.../GoalExecutionPolicy.java` | 已于 `c411bfe3` 改为结构性信号优先 + 共享 `GoalIntent`；**V4 3/3 零复现（`T002`/`T003`/`T004`）** | 已关闭 |
 | R-02 | `ContextBudget` 清理水位、滞回区间与冷却参数是否最优 | `pilot-core/.../ContextBudget.java` | X1 3v3 实测验证：80% prune / 90% pre-compact / 16% cooldown 在 106–120 轮 L3 任务全程仅压缩 1 次、稳态缓存命中 97.7%–98.1%、未命中 token 降 77.2%，按数据决定维持当前水位不调参 | 已核查保留 |
-| R-03 | Pre-flight 预定位默认注入范围、命中质量与噪声比 | `pilot-server/.../AgentRunService.java` / `PreFlightLocator` | 已顺带修复 `D-019` 扫描热点；Stage 3.2 继续通过 X2 3v3 开关对照验证注入净收益 | 待 X2 复核 |
+| R-03 | Pre-flight 预定位默认注入范围、命中质量与噪声比 | `pilot-server/.../AgentRunService.java` / `PreFlightLocator` | 已完成全 10 张冻结任务卡离线确定性审计（79–115ms 零超时、精确率@6 26.7%、噪声 73.3%，根因锁定 `BACKTICK_OR_QUOTED` 命令词挤占 `MAX_ANCHORS=8`）及 `C005`–`C008` + 预算止损前 `X2` 样本归档（见 `experiments/X2-preflight.md`）；因用户 token 预算约束提前止损于 3v3 门槛前（标「在线样本不足」），叠加 `D-022` 已兜底 0 命中无缓存回退，维持默认 `true` 并留待后续零成本离线降噪优化 | 已评估维持默认（预算止损归档） |
 | R-04 | `workflow.md` 新增指导引入的 system prompt token 增量及是否存在冗余/矛盾表述 | `pilot-core/src/main/resources/prompts/.../workflow.md` | 量化核查（`0caa2257..HEAD`）：`workflow.md` 从 `2,350` 字符 / `6,012` B / `~2,327` estTokens 增至 `2,914` 字符 / `7,400` B / `~2,860` estTokens，净增 `+564` 字符 / `+533` estTokens（占全部 `system/*.md` `7,676→8,208` 约 `+6.9%`，占 55k+ 稳态缓存前缀 `<1%` 且首轮后 ~98% 命中缓存）；且新增「首轮最小证据集」删掉了旧版制造调研瘫痪的“缺一项就先搜索或读取确认”矛盾句。按“无因果重放证据不盲动提示词”原则保留现状 | 已核查保留 |
 
 ## 三、自举过程中新发现的产品缺陷（转化为真实任务卡）
