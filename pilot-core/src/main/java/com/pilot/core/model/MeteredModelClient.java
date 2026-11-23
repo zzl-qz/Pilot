@@ -56,6 +56,23 @@ public final class MeteredModelClient implements ModelClient {
                 return delegate.profile();
             }
 
+            // 能力与降级必须穿透到底层客户端：这里只负责记账，不能把原生工具或缓存参数的
+            // 自动恢复挡在包装层。snapshot 保持默认（返回本包装），否则记账会被绕过。
+            @Override
+            public java.util.Set<NativeCapability> nativeCapabilities() {
+                return delegate.nativeCapabilities();
+            }
+
+            @Override
+            public boolean disableRejectedNativeTools(Throwable failure) {
+                return delegate.disableRejectedNativeTools(failure);
+            }
+
+            @Override
+            public boolean disableRejectedCache(Throwable failure) {
+                return delegate.disableRejectedCache(failure);
+            }
+
             @Override
             public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
                 return chat(messages, tools, null, null);
@@ -91,6 +108,11 @@ public final class MeteredModelClient implements ModelClient {
     @Override
     public boolean disableRejectedNativeTools(Throwable failure) {
         return delegate.disableRejectedNativeTools(failure);
+    }
+
+    @Override
+    public boolean disableRejectedCache(Throwable failure) {
+        return delegate.disableRejectedCache(failure);
     }
 
     @Override

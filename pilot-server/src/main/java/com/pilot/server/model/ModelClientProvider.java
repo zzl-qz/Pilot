@@ -43,6 +43,11 @@ public final class ModelClientProvider implements ModelClient {
     }
 
     @Override
+    public boolean disableRejectedCache(Throwable failure) {
+        return client().disableRejectedCache(failure);
+    }
+
+    @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
         return client().chat(messages, tools);
     }

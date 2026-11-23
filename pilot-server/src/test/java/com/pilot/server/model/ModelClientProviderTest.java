@@ -5,10 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
@@ -18,6 +20,7 @@ import com.pilot.core.model.MeteredModelClient;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelProfile;
 import com.pilot.core.model.ModelResponse;
+import com.pilot.core.model.NativeCapability;
 import com.pilot.core.model.ToolDefinition;
 import com.pilot.server.store.InMemorySettingsStore;
 
@@ -133,5 +136,43 @@ class ModelClientProviderTest {
         settings.update(null, null, "sk-2");
         client.chat(List.of(), List.of());
         assertEquals(3, built.size(), "换 API Key 也要重建，否则旧 Key 会继续生效");
+    }
+
+    /** 代理必须把能力探测与两类降级转发给当前配置的底层客户端，否则 400 降级在默认主链路失效。 */
+    @Test
+    void delegatesNativeCapabilitiesAndDowngradesToTheAppliedClient() {
+        ModelSettings settings = new ModelSettings(
+            new ModelProperties("key", "https://example.test/v1", "model-a", List.of()), new InMemorySettingsStore());
+        AtomicInteger cacheDowngrades = new AtomicInteger();
+        AtomicInteger nativeDowngrades = new AtomicInteger();
+        ModelClient client = new ModelClientProvider(settings, snapshot -> new ModelClient() {
+            @Override
+            public Set<NativeCapability> nativeCapabilities() {
+                return Set.of(NativeCapability.WEB_FETCH);
+            }
+
+            @Override
+            public boolean disableRejectedCache(Throwable failure) {
+                cacheDowngrades.incrementAndGet();
+                return true;
+            }
+
+            @Override
+            public boolean disableRejectedNativeTools(Throwable failure) {
+                nativeDowngrades.incrementAndGet();
+                return true;
+            }
+
+            @Override
+            public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
+                return new ModelResponse(snapshot.model(), List.of());
+            }
+        });
+
+        assertEquals(Set.of(NativeCapability.WEB_FETCH), client.nativeCapabilities());
+        assertTrue(client.disableRejectedCache(new IllegalStateException("HTTP 400 缓存参数被拒绝")));
+        assertTrue(client.disableRejectedNativeTools(new IllegalStateException("原生工具被拒绝")));
+        assertEquals(1, cacheDowngrades.get());
+        assertEquals(1, nativeDowngrades.get());
     }
 }

@@ -34,6 +34,8 @@ import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelClientException;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ModelUsage;
+import com.pilot.core.model.NativeCapability;
+import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.tool.ToolResults;
 import com.pilot.core.tool.command.CommandTaskManager.Task;
 import com.pilot.server.multi.SpawnAgentTool;
@@ -1326,5 +1328,42 @@ class GoalExecutionPolicyTest {
         } finally {
             snapshots.clear();
         }
+    }
+
+    /** 预算包装只负责拦截请求，原生能力与两类降级必须落到真实客户端，否则 Goal 模式下的兜底完全失效。 */
+    @Test
+    void budgetedClientDelegatesNativeCapabilitiesAndDowngrades() {
+        AtomicInteger nativeDowngrades = new AtomicInteger();
+        AtomicInteger cacheDowngrades = new AtomicInteger();
+        ModelClient delegate = new ModelClient() {
+            @Override
+            public Set<NativeCapability> nativeCapabilities() {
+                return Set.of(NativeCapability.WEB_SEARCH);
+            }
+
+            @Override
+            public boolean disableRejectedNativeTools(Throwable failure) {
+                nativeDowngrades.incrementAndGet();
+                return true;
+            }
+
+            @Override
+            public boolean disableRejectedCache(Throwable failure) {
+                cacheDowngrades.incrementAndGet();
+                return true;
+            }
+
+            @Override
+            public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
+                return new ModelResponse("ok", List.of());
+            }
+        };
+        ModelClient budgeted = policy(delegate, 20).budgetedClient();
+
+        assertEquals(Set.of(NativeCapability.WEB_SEARCH), budgeted.nativeCapabilities(), "原生能力不能被子代理包装吞掉");
+        assertTrue(budgeted.disableRejectedNativeTools(new IllegalStateException("原生工具被拒绝")));
+        assertTrue(budgeted.disableRejectedCache(new IllegalStateException("HTTP 400 缓存参数被拒绝")));
+        assertEquals(1, nativeDowngrades.get());
+        assertEquals(1, cacheDowngrades.get());
     }
 }
