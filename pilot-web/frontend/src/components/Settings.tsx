@@ -1019,6 +1019,8 @@ function DiagnosticsSettings() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState<{ message: string; error?: boolean } | null>(null);
+  const [exportNotice, setExportNotice] = useState<{ message: string; error?: boolean } | null>(null);
+  const [includeSession, setIncludeSession] = useState(true);
   const [error, setError] = useState('');
   const sequence = useRef(0);
 
@@ -1076,6 +1078,36 @@ function DiagnosticsSettings() {
     }
   };
 
+  const exportBundle = async () => {
+    if (busy) return;
+    setBusy('export');
+    setExportNotice(null);
+    try {
+      const targetSession = sessionId && includeSession ? sessionId : null;
+      const { blob, filename } = await api.exportDiagnostics(targetSession);
+      if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
+        throw new Error('当前环境不支持浏览器文件下载，请改用桌面客户端或直接请求 /api/diagnostics/export。');
+      }
+      const objectUrl = URL.createObjectURL(blob);
+      try {
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = filename;
+        link.rel = 'noopener';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      } finally {
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      }
+      setExportNotice({ message: `已导出脱敏诊断包：${filename}` });
+    } catch (err) {
+      setExportNotice({ message: errorInfo(err).message || '导出诊断包失败，请稍后重试。', error: true });
+    } finally {
+      setBusy('');
+    }
+  };
+
   const maintenance = data?.maintenance;
   const metrics = data?.metrics;
   const recovery = data?.recovery;
@@ -1090,6 +1122,30 @@ function DiagnosticsSettings() {
         {error && <p className="settings-status" role="alert">读取诊断失败。{error}{data && ' 当前显示上次读取的信息。'}</p>}
         <Button label={error ? '重新加载诊断' : '刷新诊断'} isDisabled={loading || Boolean(busy)} onClick={() => void load()} />
       </div>
+      <section className="settings-group">
+        <h3>脱敏诊断包</h3>
+        <p className="chip-hint">
+          自动剔除 API 密钥、令牌与密码等敏感信息，包含版本环境、启动恢复状态
+          {sessionId && includeSession ? '以及当前对话最近 200 条脱敏事件与失败记录' : ''}，用于排障反馈。
+        </p>
+        <div className="settings-inline-actions">
+          <Button id="export-diagnostics-btn" variant="primary"
+            label={busy === 'export' ? '正在导出…' : '导出脱敏诊断包'}
+            isDisabled={Boolean(busy)} onClick={() => void exportBundle()} />
+          {sessionId && (
+            <label className="settings-check">
+              <input type="checkbox" checked={includeSession} disabled={Boolean(busy)}
+                onChange={(event) => setIncludeSession(event.target.checked)} />
+              <span>包含当前对话记录</span>
+            </label>
+          )}
+        </div>
+        {exportNotice && (
+          <p className={exportNotice.error ? 'chip-hint is-error' : 'chip-hint'} role={exportNotice.error ? 'alert' : 'status'}>
+            {exportNotice.message}
+          </p>
+        )}
+      </section>
       {data && <>
         <section className="settings-group">
           <h3>存储与备份</h3>

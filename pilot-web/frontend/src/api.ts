@@ -281,6 +281,32 @@ export const api = {
   skillsInstall: (body: Update<S.SkillsControllerInstallRequest>) => apiJson<ApiResults['skillsInstall']>('/api/skills/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   usage: (days: number) => apiJson<ApiResults['usage']>(`/api/usage?days=${days}`),
   diagnostics: (id: string) => apiJson<ApiResults['diagnostics']>(`/api/sessions/${encodeURIComponent(id)}/diagnostics`),
+  exportDiagnostics: async (sessionId?: string | null, signal?: AbortSignal) => {
+    const url = `/api/diagnostics/export${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''}`;
+    const response = await apiFetch(url, { signal }, 60000);
+    if (!response.ok) {
+      if (response.status === 404 || response.status === 405 || response.status === 501) {
+        throw new ApiError('当前服务端暂不支持导出脱敏诊断包，请升级服务端后重试。', response.status);
+      }
+      let message = `导出诊断包失败（HTTP ${response.status}）`;
+      try {
+        const body = await response.json() as { message?: unknown; error?: unknown } | null;
+        const detail = typeof body?.message === 'string' ? body.message.trim() : '';
+        const fallback = typeof body?.error === 'string' ? body.error.trim() : '';
+        if (detail && detail !== 'No message available') message = detail;
+        else if (fallback) message = fallback;
+      } catch { /* 保持默认提示 */ }
+      throw new ApiError(message, response.status);
+    }
+    const disposition = response.headers?.get?.('content-disposition') || '';
+    const match = disposition.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/i);
+    let rawName = '';
+    if (match?.[1]) {
+      try { rawName = decodeURIComponent(match[1].trim()); } catch { rawName = match[1].trim(); }
+    }
+    const filename = rawName.replace(/[\\/]/g, '_') || `pilot-diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    return { blob: await response.blob(), filename };
+  },
   validation: (id: string) => apiJson<ApiResults['validation']>(`/api/sessions/${encodeURIComponent(id)}/validation`),
   recovery: () => apiJson<ApiResults['recovery']>('/api/recovery'),
   maintenanceStatus: () => apiJson<ApiResults['maintenanceStatus']>('/api/maintenance/status'),
