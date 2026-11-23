@@ -42,9 +42,10 @@ public final class ModelClientProvider implements ModelClient {
         return client().disableRejectedNativeTools(failure);
     }
 
+    /** 缓存参数降级交给当前生效的客户端处理，与 {@link #snapshot()} 透传的语义一致。 */
     @Override
     public boolean disableRejectedCache(Throwable failure) {
-        return client().disableRejectedCache(failure);
+        return snapshot().disableRejectedCache(failure);
     }
 
     @Override
