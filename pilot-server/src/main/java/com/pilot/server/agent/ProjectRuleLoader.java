@@ -4,13 +4,14 @@ import java.io.IOException;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
+import com.pilot.core.memory.MemoryStore;
 import com.pilot.core.permission.PermissionRules;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.server.workspace.ProjectRulesFile;
@@ -167,39 +168,115 @@ final class ProjectRuleLoader {
     }
 
     /**
-     * 记忆注入：与约定分开的独立通道——{@code MEMORY.md} 是人工审阅后的沉淀事实
-     * （remember 工具写的 {@code memory-draft.md} 候选区刻意不注入）。
-     * 与约定同目录策略：工作区往上逐层各取一份（每层只有这一个候选，近者优先，
-     * 超出预算截断），用户级 {@code ~/.pilot/MEMORY.md} 兜底。
+     * 记忆注入：与约定分开的独立通道——优先加载数据目录下经过人工审阅的 {@link MemoryStore} 索引
+     * （同一 Git 仓库的 worktree 共享），再向下兼容加载手写 {@code MEMORY.md}；
+     * 候选区均不注入提示词。总预算独立（4,000 字符 / 200 行）。
      */
     static String loadMemory(Path workspace, PromptLibrary prompts) {
-        return load(workspace, prompts, MEMORY_NAMES, MAX_MEMORY_CHARS, MAX_MEMORY_CHARS, "memory", "memory",
-            "记忆文件过长，已截断", false);
+        return loadMemory(workspace, null, prompts);
     }
 
-    private static String load(Path workspace, PromptLibrary prompts, List<String> names, int totalLimit, int fileLimit,
-        String template, String field, String truncated, boolean globalFirst) {
+    static String loadMemory(Path workspace, Path dataMemoryRoot, PromptLibrary prompts) {
+        if (workspace == null) {
+            return "";
+        }
+        int[] remaining = {MAX_MEMORY_CHARS, MemoryStore.MAX_INDEX_LINES};
+        List<String> rendered = new ArrayList<>();
+        MemoryStore store = dataMemoryRoot == null ? null : new MemoryStore(dataMemoryRoot);
+
+        if (store != null) {
+            MemoryStore.IndexView projectIndex = store.loadIndex(workspace, MemoryStore.SCOPE_PROJECT);
+            appendBoundedMemory(rendered, store.projectDir(workspace).resolve(MemoryStore.INDEX_FILE),
+                projectIndex.text(), prompts, remaining);
+        }
+        if (remaining[0] > 0 && remaining[1] > 0) {
+            for (Rule rule : collectAncestors(workspace, MEMORY_NAMES, remaining[0], "记忆文件过长，已截断")) {
+                appendBoundedMemory(rendered, rule.path(), rule.content(), prompts, remaining);
+            }
+        }
+        if (store != null) {
+            MemoryStore.IndexView userIndex = store.loadIndex(workspace, MemoryStore.SCOPE_USER);
+            appendBoundedMemory(rendered, store.userDir().resolve(MemoryStore.INDEX_FILE), userIndex.text(), prompts,
+                remaining);
+        }
+        if (remaining[0] > 0 && remaining[1] > 0) {
+            Rule user = firstRule(userHome(), MEMORY_NAMES, remaining[0], "记忆文件过长，已截断");
+            if (user != null) {
+                appendBoundedMemory(rendered, user.path(), user.content(), prompts, remaining);
+            }
+        }
+        return String.join("\n\n", rendered);
+    }
+
+    private static void appendBoundedMemory(List<String> rendered, Path source, String rawText, PromptLibrary prompts,
+        int[] remaining) {
+        if (remaining[0] <= 0 || remaining[1] <= 0 || rawText == null || rawText.isBlank()) {
+            return;
+        }
+        String bounded = fitMemoryBudget(rawText, remaining[0], remaining[1]);
+        if (bounded.isEmpty()) {
+            return;
+        }
+        rendered.add(renderMemory(prompts, source.toString(), bounded));
+        remaining[0] -= bounded.length();
+        remaining[1] -= countLines(bounded);
+    }
+
+    private static List<Rule> collectAncestors(Path workspace, List<String> names, int totalLimit, String truncated) {
         List<Rule> nearestFirst = new ArrayList<>();
         int remaining = totalLimit;
         for (Path dir = workspace.toAbsolutePath().normalize(); dir != null && remaining > 0; dir = dir.getParent()) {
-            Rule rule = firstRule(dir, names, Math.min(fileLimit, remaining), truncated);
+            Rule rule = firstRule(dir, names, remaining, truncated);
             if (rule != null) {
                 nearestFirst.add(rule);
                 remaining -= rule.content().length();
             }
         }
         Collections.reverse(nearestFirst);
-        if (remaining > 0) {
-            Rule user = firstRule(userHome(), names, Math.min(fileLimit, remaining), truncated);
-            if (user != null) {
-                // 全局约定先注入，用户级记忆沿用末尾兜底顺序。
-                nearestFirst.add(globalFirst ? 0 : nearestFirst.size(), user);
-            }
+        return nearestFirst;
+    }
+
+    private static String renderMemory(PromptLibrary prompts, String source, String content) {
+        return prompts.render("system/memory", Map.of("source", source, "memory", content)).strip();
+    }
+
+    private static String fitMemoryBudget(String raw, int maxChars, int maxLines) {
+        if (raw == null || raw.isBlank() || maxChars <= 0 || maxLines <= 0) {
+            return "";
         }
-        return nearestFirst.stream()
-            .map(rule -> prompts
-                .render("system/" + template, Map.of("source", rule.path().toString(), field, rule.content())).strip())
-            .collect(Collectors.joining("\n\n"));
+        String text = raw.replace("\r\n", "\n").replace('\r', '\n').strip();
+        boolean truncated = false;
+        String[] lines = text.split("\n", -1);
+        if (lines.length > maxLines) {
+            StringBuilder out = new StringBuilder();
+            for (int i = 0; i < maxLines; i++) {
+                if (i > 0) {
+                    out.append('\n');
+                }
+                out.append(lines[i]);
+            }
+            text = out.toString();
+            truncated = true;
+        }
+        if (text.length() > maxChars && !text.endsWith("已截断）")) {
+            int end = maxChars;
+            if (Character.isHighSurrogate(text.charAt(end - 1))) {
+                end--;
+            }
+            text = text.substring(0, end);
+            truncated = true;
+        }
+        if (truncated && !text.endsWith("已截断）")) {
+            text = text.stripTrailing() + "\n…（记忆文件过长，已截断）";
+        }
+        return text;
+    }
+
+    private static int countLines(String text) {
+        if (text == null || text.isEmpty()) {
+            return 0;
+        }
+        return text.split("\n", -1).length;
     }
 
     private static Path userHome() {
@@ -209,7 +286,7 @@ final class ProjectRuleLoader {
     private static Rule firstRule(Path dir, List<String> names, int limit, String truncated) {
         for (String name : names) {
             Path file = dir.resolve(name);
-            if (!Files.isRegularFile(file)) {
+            if (Files.isSymbolicLink(file) || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
                 continue;
             }
             try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {

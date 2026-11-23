@@ -523,6 +523,7 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
         get().loadPlan(), get().loadQueue(), get().loadTask(), get().loadNotes(), get().refreshContext(),
         // 技能按工作区解析（项目级技能随仓库走），换会话后 / 菜单必须跟着换
         get().loadSkills(),
+        get().refreshMemoryDraftCount(),
         // 切会话就要看到这个会话自己的结论，不能沿用上一个会话的
         get().loadValidation()
       ]);

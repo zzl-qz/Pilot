@@ -20,12 +20,14 @@ import com.pilot.core.exec.ExecutionBackends.Selection;
 import com.pilot.core.mcp.McpCallTool;
 import com.pilot.core.mcp.McpManager;
 import com.pilot.core.mcp.McpToolsTool;
+import com.pilot.core.memory.MemoryStore;
 import com.pilot.core.message.ToolNames;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.plan.PlanSink;
 import com.pilot.core.tool.AskUserTool;
 import com.pilot.core.tool.EnableToolsTool;
 import com.pilot.core.tool.QuestionBroker;
+import com.pilot.core.tool.ReadMemoryTool;
 import com.pilot.core.tool.ReadTracker;
 import com.pilot.core.tool.RememberTool;
 import com.pilot.core.tool.SandboxSink;
@@ -61,6 +63,7 @@ import com.pilot.server.capability.LocalResourcesTool;
 import com.pilot.server.compat.WorkspaceToolLookup;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.WebSearchProperties;
+import com.pilot.server.store.PilotDataDir;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -90,6 +93,7 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
     private Selection execution;
     private ObjectProvider<AttachmentReferences> attachmentReferences;
     private QuestionBroker questions;
+    private PilotDataDir dataDir;
     /** 建工具表时读取已经落库的计划，避免把完成的步骤退回去。 */
     private final ThreadLocal<Supplier<List<PlanItem>>> plans = ThreadLocal.withInitial(() -> List::of);
     /** 建工具表时绑定当前会话，让 ask_user 记录等待归属。 */
@@ -117,6 +121,12 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
     @Autowired(required = false)
     public void setQuestions(QuestionBroker questions) {
         this.questions = questions;
+    }
+
+    @Autowired(required = false)
+    public void setDataDir(PilotDataDir dataDir) {
+        this.dataDir = dataDir;
+        this.cache.clear();
     }
 
     @Autowired(required = false)
@@ -297,7 +307,13 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
         registry.register(new WebFetchTool(webClient));
         registry.register(new EditFileTool(validator, snapshots, reads));
         registry.register(new CreateFileTool(validator, snapshots, reads));
-        registry.register(new RememberTool(validator, snapshots));
+        if (dataDir != null) {
+            MemoryStore memoryStore = new MemoryStore(dataDir.file("memory"));
+            registry.register(new RememberTool(memoryStore, root));
+            registry.register(new ReadMemoryTool(memoryStore, root));
+        } else {
+            registry.register(new RememberTool(validator, snapshots));
+        }
         registry.register(new OfficeTool(validator, snapshots));
         registry.register(new PrepareRuntimeTool(validator));
         registry.register(new LocalResourcesTool());

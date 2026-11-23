@@ -243,3 +243,45 @@ test('仍在原会话时压缩、检查点和工作区操作正常刷新及回�
   assert.equal(useStore.getState().workspace, 'parent');
   assert.equal(useStore.getState().ui.checkpointDialog, null);
 });
+
+test('待审记忆计数忽略过期工作区响应并在 remember 工具完成后刷新', async () => {
+  const first = deferred();
+  let calls = 0;
+  api.memoryDraftCount = (workspace) => {
+    calls++;
+    if (workspace === '/repo/a') return first.promise;
+    return Promise.resolve({ count: 3 });
+  };
+  useStore.setState({ workspace: '/repo/a', pendingMemoryDrafts: 0 });
+  const stale = useStore.getState().refreshMemoryDraftCount('/repo/a');
+  useStore.setState({ workspace: '/repo/b' });
+  await useStore.getState().refreshMemoryDraftCount('/repo/b');
+  assert.equal(useStore.getState().pendingMemoryDrafts, 3);
+  first.resolve({ count: 99 });
+  await stale;
+  assert.equal(useStore.getState().pendingMemoryDrafts, 3, '旧工作区迟到响应不能覆盖当前计数');
+
+  let rememberRefresh = 0;
+  useStore.setState({
+    workspace: '/repo/c',
+    refreshMemoryDraftCount: async () => { rememberRefresh++; },
+    thread: {
+      ...initialThread(),
+      rows: [{
+        id: 't1',
+        type: 'turn',
+        user: '记住规则',
+        assistant: '',
+        reasoning: '',
+        tools: [],
+        toolIndex: { call_mem_1: { id: 'call_mem_1', name: 'remember', args: '{}', result: '', status: 'completed' } }
+      }]
+    }
+  });
+  useStore.getState().settleEvent(
+    { type: 'tool.completed', sessionId: 'a', runId: 'r1', payload: { callId: 'call_mem_1' } },
+    useStore.getState()
+  );
+  assert.equal(rememberRefresh, 1);
+  assert.equal(calls, 2);
+});

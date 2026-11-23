@@ -13,6 +13,8 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.pilot.core.memory.MemoryStore;
+import com.pilot.core.memory.MemoryType;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.server.workspace.ProjectRulesFile;
 
@@ -118,5 +120,29 @@ class ProjectRuleLoaderTest {
 
         assertTrue(memory.contains("记忆文件过长，已截断"));
         assertTrue(memory.length() < 5_500, "记忆预算独立（4k），不与约定共用 24k");
+    }
+
+    @Test
+    void loadsExternalMemoryStoreIndexAndRejectsSymlinkedLegacyMemory() throws IOException {
+        Path workspace = Files.createDirectories(root.resolve("repo"));
+        Path memoryRoot = root.resolve("pilot-data/memory");
+        MemoryStore store = new MemoryStore(memoryRoot);
+        store.addDraft(workspace, MemoryType.PROJECT, "未审草稿", "绝不能注入未审候选", "防污染");
+        store.saveEntry(workspace, MemoryStore.SCOPE_PROJECT, null, MemoryType.PROJECT, "Test Rule",
+            "Run mvnw verify before merge", "Keep build green");
+        store.saveEntry(workspace, MemoryStore.SCOPE_USER, null, MemoryType.USER, "Lang", "Communicate in Chinese", "");
+
+        Path outside = Files.writeString(root.resolve("secret.md"), "符号链接泄露内容");
+        try {
+            Files.createSymbolicLink(workspace.resolve("MEMORY.md"), outside);
+        } catch (UnsupportedOperationException | FileSystemException e) {
+            Assumptions.assumeTrue(false, "当前系统不能创建符号链接: " + e);
+        }
+
+        String memory = ProjectRuleLoader.loadMemory(workspace, memoryRoot, PromptLibrary.classpathOnly());
+        assertTrue(memory.contains("test-rule"), memory);
+        assertTrue(memory.contains("lang"), memory);
+        assertFalse(memory.contains("绝不能注入未审候选"));
+        assertFalse(memory.contains("符号链接泄露内容"));
     }
 }

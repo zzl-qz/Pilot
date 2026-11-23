@@ -16,6 +16,7 @@ import { ModelRuntimeSettings } from "./model/ModelRuntimeSettings.jsx";
 import { PermissionSettings } from "./settings/PermissionSettings.js";
 import { AlertSettings } from "./settings/AlertSettings.js";
 import { SkillsSettings } from "./settings/SkillsSettings.js";
+import { MemorySettings } from "./settings/MemorySettings.js";
 import { McpSettings } from "./settings/McpSettings.js";
 import { UsageSettings } from "./settings/UsageSettings.js";
 import { DiagnosticsSettings } from "./settings/DiagnosticsSettings.js";
@@ -27,6 +28,7 @@ const SECTIONS = [
   { id: 'permission', label: '权限', icon: 'shield', description: '决定 Pilot 写入文件和执行命令前何时需要批准。', Content: PermissionSettings },
   { id: 'alerts', label: '提醒', icon: 'bell', description: '管理完成提示音、窗口外悬浮提醒、系统通知与任务栏提示。', Content: AlertSettings },
   { id: 'skills', label: '技能', icon: 'skill', description: '管理项目级和用户级技能。', Content: SkillsSettings },
+  { id: 'memory', label: '记忆', icon: 'note', description: '审阅候选记忆，管理当前项目与个人全局记忆。', Content: MemorySettings },
   { id: 'mcp', label: 'MCP', icon: 'plug', description: '管理 MCP 服务器与信任关系，接入外部工具。', Content: McpSettings },
   { id: 'usage', label: '用量', icon: 'chart', description: '查看模型请求、Token 和可估算的费用。', Content: UsageSettings },
   { id: 'diagnostics', label: '诊断', icon: 'pulse', description: '检查存储、启动恢复和当前对话的运行记录。', Content: DiagnosticsSettings },
@@ -35,22 +37,27 @@ const SECTIONS = [
 
 export function SettingsModal() {
   const selected = useStore(state => state.ui.settingsSection);
+  const pendingMemoryDrafts = useStore(state => state.pendingMemoryDrafts);
   const section = SECTIONS.find(item => item.id === selected) ?? SECTIONS[0];
   const { Content } = section;
   const navigate = (id: string) => useStore.getState().setUi({ settingsSection: id });
+  const navLabel = (item: (typeof SECTIONS)[number]) => {
+    if (item.id !== 'memory' || pendingMemoryDrafts <= 0) return item.label;
+    return `${item.label} (${pendingMemoryDrafts > 99 ? '99+' : pendingMemoryDrafts})`;
+  };
   return (
     <Modal id="settings" title={<><span className="settings-product" aria-hidden="true">Pilot</span>设置</>}
       onClose={() => useStore.getState().setUi({ settingsOpen: false })} wide>
       <div className="settings-layout">
         <nav className="settings-nav" aria-label="设置分类">
-          {SECTIONS.map(item => <Button key={item.id} label={item.label} icon={<Icon name={item.icon} />} variant="ghost"
+          {SECTIONS.map(item => <Button key={item.id} label={navLabel(item)} icon={<Icon name={item.icon} />} variant="ghost"
             className="settings-category" aria-current={section.id === item.id ? 'page' : undefined}
             aria-controls="settings-page" onClick={() => navigate(item.id)} />)}
         </nav>
         <label className="settings-section-select">
           分类
           <select value={section.id} aria-label="设置分类" aria-controls="settings-page" onChange={event => navigate(event.target.value)}>
-            {SECTIONS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
+            {SECTIONS.map(item => <option key={item.id} value={item.id}>{navLabel(item)}</option>)}
           </select>
         </label>
         <section className="settings-body" id="settings-page" key={section.id} aria-labelledby="settings-page-title" tabIndex={0}>

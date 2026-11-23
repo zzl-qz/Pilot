@@ -206,6 +206,14 @@ export interface ApiResults {
   skills: S.SkillsControllerSkillsResponse;
   skillsPreview: S.SkillsControllerPreviewResponse;
   skillsInstall: S.SkillsControllerInstallResponse;
+  memoryOverview: MemoryOverview;
+  memoryDraftCount: MemoryDraftCount;
+  memoryImportLegacy: MemoryImportResult;
+  memoryApproveDraft: MemoryEntry;
+  memoryDiscardDraft: null;
+  memoryCreateEntry: MemoryEntry;
+  memoryUpdateEntry: MemoryEntry;
+  memoryDeleteEntry: null;
   usage: S.UsageServiceUsageReport;
   diagnostics: S.TaskDiagnosticsServiceDiagnostics;
   validation: S.DiagnosticsControllerValidationView;
@@ -235,3 +243,47 @@ export interface ScheduleDraft extends Omit<S.ScheduleServiceCreate, 'sourceSess
   requirements: Pick<S.TaskControlServiceRequirements, 'constraints' | 'acceptance'>;
 }
 export type ScheduleInput = ScheduleDraft & { sourceSessionId: string; runAt: string };
+
+export type MemoryTypeName = 'user' | 'feedback' | 'project' | 'reference';
+export type MemoryScope = 'project' | 'user';
+
+export interface MemoryDraft {
+  id: string;
+  type: MemoryTypeName;
+  title: string;
+  note: string;
+  why: string;
+  date: string;
+  createdAt: string;
+}
+
+export interface MemoryEntry {
+  slug: string;
+  scope: MemoryScope;
+  type: MemoryTypeName;
+  title: string;
+  description: string;
+  body: string;
+  updated: string;
+}
+
+export interface MemoryOverview {
+  workspace: string;
+  projectKey: string;
+  projectRoot: string;
+  storagePath: string;
+  drafts: MemoryDraft[];
+  projectEntries: MemoryEntry[];
+  userEntries: MemoryEntry[];
+  hasLegacyDrafts?: boolean;
+}
+
+export interface MemoryDraftCount {
+  count: number;
+}
+
+export interface MemoryImportResult {
+  imported: number;
+  skipped: number;
+  sourceFound: boolean;
+}

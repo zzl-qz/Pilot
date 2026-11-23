@@ -445,6 +445,10 @@ export function createSessionStreams(
           && row.toolIndex[event.payload.callId]?.name === 'install_skill')) {
         void get().loadSkills();
       }
+      if (event.type === 'tool.completed' && after.thread.rows.some(row => row.type === 'turn'
+          && row.toolIndex[event.payload.callId]?.name === 'remember')) {
+        void get().refreshMemoryDraftCount();
+      }
       if (sessionChanged) {
         set(draft => { draft.promoteBlank = null; });
         get().loadSessions();

@@ -65,6 +65,21 @@ class ToolRegistryTest {
     }
 
     @Test
+    void memoryToolsAreDeferredAndAppendedAtTailWhenEnabled() {
+        registry.register(tool("read_file", "读文件"));
+        registry.register(tool("read_memory", "读记忆"));
+        registry.register(tool("remember", "写记忆"));
+
+        List<ToolDefinition> core = registry.definitions();
+        assertEquals(List.of("read_file"), core.stream().map(ToolDefinition::name).toList());
+
+        registry.enable(List.of("remember", "read_memory"));
+        assertEquals(List.of("read_file", "remember", "read_memory"),
+            registry.definitions().stream().map(ToolDefinition::name).toList());
+        assertEquals(core, registry.definitions().subList(0, 1));
+    }
+
+    @Test
     void enabledDeferredToolsKeepTheirActivationOrder() {
         registry.register(tool("read_file", "读文件"));
         registry.register(tool("browser", "浏览器"));

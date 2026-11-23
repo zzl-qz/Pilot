@@ -40,6 +40,7 @@ let stopStreams: () => void = () => {};
 let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 let noticeCallback: (() => unknown) | null = null;
 let skillLoadSequence = 0;
+let memoryDraftCountSequence = 0;
 let interactionsInitialized = false;
 let cachedUrgentCount = 0;
 /** 桌面通知开关（与旧版同名键）。 */
@@ -197,6 +198,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   skills: [],
   /** 技能安装位置与无效项（设置页用来告诉用户「装到哪」以及哪些没通过校验）。 */
   skillsMeta: { projectRoot: '', userRoot: '', invalid: [] },
+  pendingMemoryDrafts: 0,
   /** 内置 / 快捷指令：先用 QUICK_COMMANDS 兜底，loadSkills 成功后合并技能指令。 */
   quickCommands: mergeCommands(QUICK_COMMANDS, []),
   modelOptions: [],
@@ -415,6 +417,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     try { if (!embeddedSessionId) restore = takeWorkbenchView(sessionStorage); } catch { /* 隐私模式下继续正常启动 */ }
     applyTheme(get().ui.themeMode, get().ui.accent);
     get().loadSkills();
+    void get().refreshMemoryDraftCount();
     try {
       const health = await api.health() as { frontendStale?: boolean } | null;
       set((draft) => { draft.ui.connection = { status: 'ok', text: '已连接' }; });
@@ -483,7 +486,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
 
   ...createRunStateActions({ set, get }),
 
-  async compactContext(focus) {
+  async compactContext(focus?: string) {
     const { sessionId, sessionEpoch } = get();
     const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
     if (!sessionId || get().compactingContext) return false;
@@ -615,6 +618,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
         draft.fileIndex = { items: [], sessionId: null, loading: false };
         resetFilePreview(draft);
       });
+      void get().refreshMemoryDraftCount(workspace);
       return;
     }
     try {
@@ -765,6 +769,24 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       set((draft) => {
         draft.quickCommands = mergeCommands(QUICK_COMMANDS, toSkillCommands(draft.skills || []));
       });
+    }
+  },
+
+  async refreshMemoryDraftCount(targetWorkspace) {
+    const workspace = (targetWorkspace ?? get().workspace ?? '').trim();
+    const { sessionId, sessionEpoch } = get();
+    const sequence = ++memoryDraftCountSequence;
+    const current = () =>
+      sequence === memoryDraftCountSequence
+      && (targetWorkspace !== undefined || (get().sessionId === sessionId && get().sessionEpoch === sessionEpoch))
+      && ((get().workspace || '').trim() === workspace);
+    try {
+      const data = await api.memoryDraftCount(workspace || undefined);
+      if (!current()) return;
+      const count = typeof data?.count === 'number' && data.count >= 0 ? data.count : 0;
+      set((draft) => { draft.pendingMemoryDrafts = count; });
+    } catch {
+      // 计数刷新失败时不打断正常会话操作
     }
   },
   /** 能力清单：工具、MCP 服务器、模型与权限档位，全部来自后端注册表而不是写死的文案。 */

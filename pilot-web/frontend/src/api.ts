@@ -294,6 +294,19 @@ export const api = {
   skills: (sessionId?: string) => apiJson<ApiResults['skills']>(`/api/skills${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''}`),
   skillsPreview: (body: Update<S.SkillsControllerPreviewRequest>) => apiJson<ApiResults['skillsPreview']>('/api/skills/preview', jsonBody('POST', body), 150000),
   skillsInstall: (body: Update<S.SkillsControllerInstallRequest>) => apiJson<ApiResults['skillsInstall']>('/api/skills/install', jsonBody('POST', body)),
+  memoryOverview: (workspace?: string) => apiJson<ApiResults['memoryOverview']>(`/api/memory${workspace ? `?workspace=${encodeURIComponent(workspace)}` : ''}`),
+  memoryDraftCount: (workspace?: string) => apiJson<ApiResults['memoryDraftCount']>(`/api/memory/drafts/count${workspace ? `?workspace=${encodeURIComponent(workspace)}` : ''}`),
+  memoryImportLegacy: (workspace?: string) => apiJson<ApiResults['memoryImportLegacy']>('/api/memory/import-legacy', jsonBody('POST', workspace ? { workspace } : {})),
+  memoryApproveDraft: (id: string, body: { workspace?: string; scope: 'project' | 'user'; type?: string; title?: string; note?: string; why?: string }) =>
+    apiJson<ApiResults['memoryApproveDraft']>(`/api/memory/drafts/${encodeURIComponent(id)}/approve`, jsonBody('POST', body)),
+  memoryDiscardDraft: (id: string, workspace?: string) =>
+    apiJson<ApiResults['memoryDiscardDraft']>(`/api/memory/drafts/${encodeURIComponent(id)}${workspace ? `?workspace=${encodeURIComponent(workspace)}` : ''}`, { method: 'DELETE' }),
+  memoryCreateEntry: (body: { workspace?: string; scope: 'project' | 'user'; type: string; title?: string; note: string; why?: string }) =>
+    apiJson<ApiResults['memoryCreateEntry']>('/api/memory/entries', jsonBody('POST', body)),
+  memoryUpdateEntry: (slug: string, body: { workspace?: string; scope: 'project' | 'user'; type: string; title?: string; note: string; why?: string }) =>
+    apiJson<ApiResults['memoryUpdateEntry']>(`/api/memory/entries/${encodeURIComponent(slug)}`, jsonBody('PUT', body)),
+  memoryDeleteEntry: (slug: string, scope: 'project' | 'user', workspace?: string) =>
+    apiJson<ApiResults['memoryDeleteEntry']>(`/api/memory/entries/${encodeURIComponent(slug)}?scope=${encodeURIComponent(scope)}${workspace ? `&workspace=${encodeURIComponent(workspace)}` : ''}`, { method: 'DELETE' }),
   usage: (days: number) => apiJson<ApiResults['usage']>(`/api/usage?days=${days}`),
   diagnostics: (id: string) => apiJson<ApiResults['diagnostics']>(`/api/sessions/${encodeURIComponent(id)}/diagnostics`),
   exportDiagnostics: async (sessionId?: string | null, signal?: AbortSignal) => {

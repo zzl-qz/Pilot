@@ -80,6 +80,7 @@ import com.pilot.server.run.TaskControlService;
 import com.pilot.server.skill.InstallSkillTool;
 import com.pilot.server.skill.SkillInstallService;
 import com.pilot.server.skill.SkillService;
+import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.tool.WorkspaceToolFactory;
 import com.pilot.server.work.products.ProposeSkillTool;
 import com.pilot.server.work.products.PublishArtifactTool;
@@ -119,6 +120,7 @@ public final class AgentRunPreparation {
     private SkillDraftService skillDrafts;
     private AgentProfileService agentProfiles;
     private ProjectRepository projects;
+    private PilotDataDir dataDir;
 
     public AgentRunPreparation(SessionService sessions, WorkspaceToolFactory toolFactory, AgentProperties properties,
         MultiAgentProperties multiProperties, TaskControlService taskControls, CommandTaskManager commandTasks,
@@ -160,6 +162,11 @@ public final class AgentRunPreparation {
     @Autowired(required = false)
     public void setProjects(ProjectRepository projects) {
         this.projects = projects;
+    }
+
+    @Autowired(required = false)
+    public void setDataDir(PilotDataDir dataDir) {
+        this.dataDir = dataDir;
     }
 
     public AgentLoop.Config loopConfig(PreparedRun prepared, String sessionId) {
@@ -401,7 +408,8 @@ public final class AgentRunPreparation {
         if (!rules.isEmpty()) {
             parts.add(new ContextComposition.Source("rules", rules));
         }
-        String memory = ProjectRuleLoader.loadMemory(toolFactory.resolve(workspace), PROMPTS);
+        String memory = ProjectRuleLoader.loadMemory(toolFactory.resolve(workspace),
+            dataDir == null ? null : dataDir.file("memory"), PROMPTS);
         if (!memory.isEmpty()) {
             parts.add(new ContextComposition.Source("rules", memory));
         }

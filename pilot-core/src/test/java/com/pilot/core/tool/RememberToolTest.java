@@ -2,6 +2,7 @@ package com.pilot.core.tool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
@@ -11,6 +12,8 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.pilot.core.memory.MemoryStore;
+import com.pilot.core.message.ToolCall;
 import com.pilot.core.workspace.PathValidator;
 
 /** 记忆候选区工具：只写 draft（不注入提示词）、追加而非覆盖、快照过回退语义。 */
@@ -77,5 +80,23 @@ class RememberToolTest {
     void marksItselfAsAWriteForPermissionGating() {
         assertFalse(tool().readOnly(), "写真实文件，按写操作走权限档位审批");
         assertEquals("remember", tool().name());
+    }
+
+    @Test
+    void externalMemoryModeWritesToStoreWithoutTouchingWorkspaceOrChangedPaths() {
+        MemoryStore store = new MemoryStore(workspace.resolve(".external-data/memory"));
+        RememberTool external = new RememberTool(store, workspace);
+
+        String message = external.execute(
+            Map.of("note", "构建 core 后再编 server", "type", "project", "title", "构建顺序", "why", "避免 server 读到旧本地快照包"));
+        assertTrue(message.contains("外置候选区"), message);
+        assertTrue(message.contains("project"), message);
+        assertFalse(Files.exists(workspace.resolve(".pilot/memory-draft.md")), "外置模式下绝不新建工作区草稿文件");
+        assertNull(external.changedPath(new ToolCall("c1", "remember", Map.of("note", "x"))), "外置候选写入不应标脏工作区变更");
+        assertEquals(1, store.listDrafts(workspace).size());
+        assertEquals("避免 server 读到旧本地快照包", store.listDrafts(workspace).getFirst().why());
+
+        String badType = external.execute(Map.of("note", "测试", "type", "unknown"));
+        assertTrue(badType.startsWith("ERROR:"), badType);
     }
 }

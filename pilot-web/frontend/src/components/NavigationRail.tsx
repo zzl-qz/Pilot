@@ -8,6 +8,7 @@ import { Icon } from './Icon.jsx';
 export function NavigationRail() {
   const ui = useStore(state => state.ui);
   const unread = ui.resultUnread || 0;
+  const pendingMemoryDrafts = useStore(state => state.pendingMemoryDrafts);
   const moreRef = useRef<HTMLDetailsElement>(null);
   const [moreOpen, setMoreOpen] = useState(false);
   const closeMore = (restoreFocus = false) => {
@@ -81,8 +82,12 @@ export function NavigationRail() {
           items[next]?.focus();
         }}>
         <summary className="rail-button" role="button" aria-label="更多功能" aria-haspopup="menu" aria-expanded={moreOpen}
-          aria-controls="navigation-more-menu" title="更多功能">
+          aria-controls="navigation-more-menu"
+          title={pendingMemoryDrafts > 0 ? `更多功能 · ${pendingMemoryDrafts} 条待审记忆` : '更多功能'}>
           <Icon name="more" />
+          {pendingMemoryDrafts > 0 && <span className="rail-unread" aria-label={`${pendingMemoryDrafts} 条待审记忆`}>
+            {pendingMemoryDrafts > 99 ? '99+' : pendingMemoryDrafts}
+          </span>}
           <span className="rail-tooltip" aria-hidden="true">更多功能</span>
         </summary>
         <div id="navigation-more-menu" className="navigation-more-menu" role="menu" aria-label="更多功能">
@@ -91,7 +96,9 @@ export function NavigationRail() {
           <MenuButton icon="code" label={`命令面板 (${shortcut('K')})`} onClick={() => invoke(() => open({ paletteOpen: true }))} />
           <MenuButton id="theme-toggle" icon={ui.themeMode === 'light' ? 'moon' : 'sun'} label="切换明暗主题"
             onClick={() => invoke(() => useStore.getState().setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'))} />
-          <MenuButton id="settings-open" icon="settings" label={`设置 (${shortcut(',')})`} onClick={() => invoke(() => open({ settingsOpen: true }))} />
+          <MenuButton id="settings-open" icon="settings"
+            label={pendingMemoryDrafts > 0 ? `设置 (${shortcut(',')}) · 待审 ${pendingMemoryDrafts}` : `设置 (${shortcut(',')})`}
+            onClick={() => invoke(() => open({ settingsOpen: true }))} />
         </div>
       </details>
     </div>
