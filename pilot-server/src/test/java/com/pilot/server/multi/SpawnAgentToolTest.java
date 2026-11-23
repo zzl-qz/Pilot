@@ -8,11 +8,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -30,15 +32,24 @@ import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.model.ModelClient;
+import com.pilot.core.model.ContextComposition;
+import com.pilot.core.model.ModelProfile;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ModelUsage;
+import com.pilot.core.model.RequestReport;
 import com.pilot.core.model.ToolDefinition;
+import com.pilot.core.model.diagnostics.ModelRequestScope;
 import com.pilot.core.multi.profile.AgentProfileCatalog;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.permission.PolicyPermissionGate;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.ToolResult;
+import com.pilot.server.agent.AgentRunPreparation;
+import com.pilot.server.model.ModelClientProvider;
+import com.pilot.server.model.ModelProperties;
+import com.pilot.server.model.ModelSettings;
+import com.pilot.server.store.InMemorySettingsStore;
 
 class SpawnAgentToolTest {
 
@@ -459,6 +470,68 @@ class SpawnAgentToolTest {
         route.set("child-model");
         assertTrue(tool.execute(Map.of("task", "子路由")).contains("child-route"));
         assertTrue(tool.execute(Map.of("task", "本次", "model", "flash")).contains("call-model"));
+    }
+
+    @Test
+    void routedChildModelStaysOnTheSubagentMeteringBoundary() {
+        ModelSettings settings = new ModelSettings(
+            new ModelProperties("key", "https://example.test/v1", "main-model", List.of()), new InMemorySettingsStore());
+        List<RequestReport> reports = new CopyOnWriteArrayList<>();
+        List<List<Message>> seen = new CopyOnWriteArrayList<>();
+        List<List<ToolDefinition>> seenTools = new CopyOnWriteArrayList<>();
+        List<String> groups = new CopyOnWriteArrayList<>();
+        List<String> purposes = new CopyOnWriteArrayList<>();
+        AtomicInteger chats = new AtomicInteger();
+        AtomicBoolean rejectCacheOnce = new AtomicBoolean(true);
+        AtomicBoolean downgraded = new AtomicBoolean();
+        ModelClientProvider provider = new ModelClientProvider(settings, snapshot -> new ModelClient() {
+            @Override
+            public ModelProfile profile() {
+                return ModelProfile.resolve(null, snapshot.model(), ModelProfile.AUTO, ModelProfile.AUTO, "", null, null,
+                    null, null);
+            }
+
+            @Override
+            public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
+                seen.add(List.copyOf(messages));
+                seenTools.add(tools == null ? List.of() : List.copyOf(tools));
+                groups.add(ModelRequestScope.current().cacheGroup());
+                purposes.add(ModelRequestScope.current().purpose());
+                chats.incrementAndGet();
+                if (rejectCacheOnce.getAndSet(false)) {
+                    throw new IllegalStateException("prompt_cache_key 不被支持");
+                }
+                return new ModelResponse("child answer", List.of(), new ModelUsage(11, 2, 0, true));
+            }
+
+            @Override
+            public boolean disableRejectedCache(Throwable failure) {
+                downgraded.set(true);
+                return true;
+            }
+        });
+        SpawnAgentTool tool =
+            new SpawnAgentTool((messages, tools) -> new ModelResponse("main answer", List.of()), new ToolRegistry(),
+                new PolicyPermissionGate(PermissionMode.READ_ONLY), ApprovalBroker.denyAll(),
+                new AgentLoop.Config(5, 3, "你是测试代理"), List::of, event -> {
+                }, () -> false).withChildRoute(() -> "child-model",
+                    AgentRunPreparation.meteredChildRoute(provider, "ses_m", "run_m", reports::add));
+
+        assertTrue(tool.execute(Map.of("task", "走子路由")).contains("child answer"));
+        assertTrue(tool.execute(Map.of("task", "指定模型", "model", "fast-model")).contains("child answer"));
+
+        assertEquals(List.of("ses_m:subagent:child-model", "ses_m:subagent:child-model", "ses_m:subagent:fast-model"),
+            groups, "切换模型后仍按子模型隔离缓存组，不能落回主会话组");
+        assertEquals(List.of("subagent", "subagent", "subagent"), purposes);
+        assertTrue(downgraded.get(), "缓存参数被拒后必须走降级重试");
+        assertEquals(3, chats.get(), "第一次拒绝后重试一次，指定模型再请求一次");
+        assertEquals(3, reports.size(), "每次尝试都要上报，包括失败的缓存拒绝尝试");
+        assertTrue(reports.stream().allMatch(report -> "subagent".equals(report.purpose())), "子代理用途不能被记成主请求");
+        assertTrue(reports.stream().anyMatch(report -> "failed".equals(report.status())), "被拒的尝试也要留痕");
+        for (int index = 0; index < reports.size(); index++) {
+            assertEquals(ContextComposition.estimate(seen.get(index), seenTools.get(index), List.of()).totalTokens(),
+                reports.get(index).context().totalTokens(), "子代理来源估算不能混入主会话提示词");
+        }
     }
 
     @Test

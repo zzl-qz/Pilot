@@ -181,6 +181,22 @@ public final class AgentRunPreparation {
             .withRunContext(sessionId, runId);
     }
 
+    /**
+     * 子代理按 childModel 或 spawn_agent(model=...) 切换模型时的客户端工厂。
+     *
+     * <p>切换后仍是子代理请求：独立缓存组、{@code purpose="subagent"}、不带主会话提示词来源，
+     * 同时透传用量上报，保证 {@code prompt_cache_key}、缓存参数 400 降级与请求统计都不被绕过。
+     */
+    public static java.util.function.Function<String, ModelClient> meteredChildRoute(ModelClient configured,
+        String sessionId, String runId, Consumer<RequestReport> reports) {
+        if (!(configured instanceof ModelClientProvider provider)) {
+            return null;
+        }
+        Map<String, ModelClient> routed = new java.util.concurrent.ConcurrentHashMap<>();
+        return model -> routed.computeIfAbsent(model.strip(), name -> new MeteredModelClient(provider.clientFor(name),
+            sessionId + ":subagent:" + name, "subagent", List.of(), reports).withRunContext(sessionId, runId));
+    }
+
     public AgentProfileCatalog profilesFor(String workspace) {
         return agentProfiles == null ? AgentProfileCatalog.EMPTY : agentProfiles.catalogFor(workspace);
     }
@@ -226,9 +242,10 @@ public final class AgentRunPreparation {
 
     public void configureExecutionTools(PreparedRun prepared, GoalExecutionPolicy goalPolicy, String sessionId,
         String runId, String workspace, boolean unattended, TaskControlService.TaskContract executionTask,
-        ModelClient measuredChild, ModelClient executionClient, PermissionGate sessionGate, AgentLoop.Config config,
+        ModelClient measuredChild, java.util.function.Function<String, ModelClient> routedChild,
+        PermissionGate sessionGate, AgentLoop.Config config,
         BooleanSupplier cancelled, SpawnAgentTool.UsageSink childUsage, AgentProfileCatalog profiles,
-        ModelClient configuredModel, Consumer<SessionEvent> sink, ApprovalBroker approvals,
+        Consumer<SessionEvent> sink, ApprovalBroker approvals,
         ConversationRepository conversations, ModelSettings modelSettings, MultiAgentService multiAgent,
         GitWorktrees worktrees) {
         ToolRegistry tools = prepared.tools();
@@ -253,8 +270,8 @@ public final class AgentRunPreparation {
         if (!reviewActive) {
             SpawnAgentTool spawnAgent = new SpawnAgentTool(measuredChild, tools, sessionGate, approvals, config,
                 () -> conversations.load(sessionId), sink, cancelled, childUsage, profiles);
-            if (configuredModel instanceof ModelClientProvider provider) {
-                spawnAgent.withChildRoute(() -> modelSettings.snapshot().childModel(), provider::clientFor);
+            if (routedChild != null) {
+                spawnAgent.withChildRoute(() -> modelSettings.snapshot().childModel(), routedChild);
             }
             if (worktrees != null && !planMode) {
                 Path base = toolFactory.resolve(workspace);
@@ -276,7 +293,7 @@ public final class AgentRunPreparation {
             tools.register(spawnAgent);
             if (multiProperties.enabled() && !planMode) {
                 tools.register(new DispatchAgentsTool(multiAgent, sessionId, runId, workspace, sink, cancelled,
-                    executionClient, profiles, childUsage).withExtraRoots(extraRoots).withParentPermission(
+                    measuredChild, profiles, childUsage).withExtraRoots(extraRoots).withParentPermission(
                         unattended && executionTask.automation().fullAccess() ? PermissionMode.AUTO : null));
             }
         }

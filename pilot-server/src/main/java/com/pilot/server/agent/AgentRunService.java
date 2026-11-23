@@ -1309,6 +1309,9 @@ public class AgentRunService implements RunStarter {
         ModelClient measuredChild =
             new MeteredModelClient(modelClient, sessionId + ":subagent", "subagent", List.of(), reports)
                 .withRunContext(sessionId, runId);
+        // 子代理切换模型时也走同一记账边界，不再返回裸客户端
+        java.util.function.Function<String, ModelClient> routedChild =
+            AgentRunPreparation.meteredChildRoute(modelClient, sessionId, runId, reports);
         AgentLoop.Config config = preparation.loopConfig(prepared, sessionId);
         GoalExecutionPolicy goalPolicy =
             (unattended || (!reviewActive && properties.goalModeEnabledValue())) ? new GoalExecutionPolicy(measuredMain,
@@ -1322,8 +1325,8 @@ public class AgentRunService implements RunStarter {
         var profiles = preparation.profilesFor(workspace);
         ApprovalBroker sessionApprovals = ApprovalBroker.forSession(approvals, sessionId);
         preparation.configureExecutionTools(prepared, goalPolicy, sessionId, runId, workspace, unattended,
-            executionTask, measuredChild, executionClient, runContext.sessionGate(), config, cancelled, childUsage,
-            profiles, modelClient, sink, sessionApprovals, conversations, modelSettings, multiAgent, worktrees);
+            executionTask, measuredChild, routedChild, runContext.sessionGate(), config, cancelled, childUsage,
+            profiles, sink, sessionApprovals, conversations, modelSettings, multiAgent, worktrees);
         if (!reviewActive) {
             recordPrefixSnapshot(sessionId, prepared);
         }
