@@ -1976,6 +1976,21 @@ class AgentLoopTest {
         assertFalse(events.stream().anyMatch(RunFailed.class::isInstance), "部分交付不应再发 run.failed");
     }
 
+    @Test
+    void doesNotRepeatPartialStatusAlreadyIncludedByModel() {
+        String status = "本轮为部分交付，尚未完成：浏览器实机验证";
+        ScriptedModelClient client = new ScriptedModelClient(new ModelResponse(status, List.of()),
+            new ModelResponse(status, List.of()), new ModelResponse(status, List.of()));
+        List<PlanItem> plan = List.of(new PlanItem("浏览器实机验证", PlanItem.PENDING));
+        AgentLoop loop =
+            new AgentLoop(client, registry(), readOnlyGate(), new AgentLoop.Config(8, 3, "你是测试代理", () -> plan, 1));
+
+        AgentLoop.Result result = loop.run("继续", List.of(), events::add);
+
+        assertEquals("TASK_INCOMPLETE", result.failureCode());
+        assertEquals(1, result.finalText().split("本轮为部分交付，尚未完成：", -1).length - 1, result.finalText());
+    }
+
     /** 计划里明确 blocked 的步骤不能把整轮判成失败。 */
     @Test
     void blockedPlanEndsAsPartialNotFailure() {

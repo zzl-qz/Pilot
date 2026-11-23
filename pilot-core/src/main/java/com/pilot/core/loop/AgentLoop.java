@@ -920,10 +920,13 @@ public final class AgentLoop {
             summary = content;
         }
         if (config.completionChecks() && (!openSteps.isEmpty() || !blockedSteps.isEmpty())) {
-            String partial =
-                content + "\n\n本轮为部分交付，尚未完成：" + String.join("；", openSteps.isEmpty() ? blockedSteps : openSteps);
-            if (!blockedSteps.isEmpty() && !openSteps.isEmpty()) {
-                partial = partial + "\n\n已阻塞：" + String.join("；", blockedSteps);
+            String partial = content;
+            if (!content.contains("本轮为部分交付，尚未完成：")) {
+                partial += "\n\n本轮为部分交付，尚未完成："
+                    + String.join("；", openSteps.isEmpty() ? blockedSteps : openSteps);
+                if (!blockedSteps.isEmpty() && !openSteps.isEmpty()) {
+                    partial += "\n\n已阻塞：" + String.join("；", blockedSteps);
+                }
             }
             messages.set(messages.size() - 1, Message.assistant(partial, List.of(), reasoning));
             events.accept(new AssistantDelta(partial));
