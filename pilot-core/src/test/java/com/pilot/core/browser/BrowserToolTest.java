@@ -186,6 +186,7 @@ class BrowserToolTest {
                 "key", "Enter", "values", List.of("a"), "files", List.of("a.txt"), "expression", "1"));
             assertTrue(result.startsWith("用户已接管浏览器"), action + " 应被拦截：" + result);
             assertFalse(result.startsWith("ERROR"), "拦截提示不应是 ERROR，避免模型当成故障重试：" + result);
+            assertTrue(result.contains("恢复后先重新 snapshot 验证登录态"), result);
         }
         assertTrue(backend.commands.isEmpty(), "被拦截的动作不应触达浏览器");
 

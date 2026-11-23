@@ -16,7 +16,9 @@ function node(tag, options = {}) {
     tabIndex: options.tabIndex ?? -1,
     isContentEditable: false,
     type: options.type ?? '',
-    value: '',
+    value: options.value ?? '',
+    autocomplete: options.autocomplete ?? '',
+    name: options.name ?? '',
     alt: '',
     disabled: false,
     hidden: options.hidden === true,
@@ -101,4 +103,19 @@ test('空的新任务页会标成 freshTask', () => {
   const result = snapshot({ nodes: 200, chars: 20_000 });
 
   assert.equal(result.freshTask, true);
+});
+
+test('敏感表单值和 agent 动作提示不会进入快照', () => {
+  const token = node('input', { type: 'text', name: 'apiToken', value: 'token-value-must-not-leak' });
+  const code = node('input', { type: 'text', autocomplete: 'one-time-code', value: '184203' });
+  const hidden = node('input', { type: 'hidden', name: 'csrf', value: 'csrf-token-must-not-leak' });
+  const secret = node('textarea', { name: 'clientSecret', value: 'private-note-must-not-leak' });
+  const overlay = node('div', { text: '正在填写：验证码', attrs: { 'data-pilot-agent-overlay': 'true' } });
+  mount(node('body', { children: [token, code, hidden, secret, overlay] }));
+
+  const result = snapshot({ nodes: 200, chars: 20_000 });
+  const text = result.lines.join('\n');
+
+  assert.match(text, /value=\[已遮挡\]/);
+  assert.doesNotMatch(text, /token-value-must-not-leak|184203|csrf-token-must-not-leak|private-note-must-not-leak|正在填写/);
 });

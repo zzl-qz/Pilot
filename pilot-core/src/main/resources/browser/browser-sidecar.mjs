@@ -16,9 +16,10 @@
 
 import { createRequire } from 'node:module';
 import { publicHttps, externalRequestAllowed, externalMutations, requireExternalApproval, hostDecision,
-  hostRulesFromEnv, cdpEndpoint, externalAgentHostAllowed } from './browser-policy.mjs';
+  hostRulesFromEnv, cdpEndpoint, externalAgentHostAllowed, sanitizeDiagnosticText, sanitizeDiagnosticUrl,
+  sensitivePageUrl } from './browser-policy.mjs';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, extname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 
@@ -34,6 +35,36 @@ const MAX_SNAPSHOT_NODES = 600;
 const ACTION_TIMEOUT_MS = 8000;
 const NAVIGATION_TIMEOUT_MS = 30000;
 const MAX_SCREENSHOT_BYTES = 4 * 1024 * 1024;
+let downloadSequence = 0;
+const SENSITIVE_MASK_COLOR = '#171717';
+const SENSITIVE_FIELD_SELECTOR = [
+  'input[type="password"]',
+  'input[autocomplete*="password" i]',
+  'input[autocomplete="one-time-code" i]',
+  'input[autocomplete^="cc-" i]',
+  'input[name*="password" i]', 'input[id*="password" i]',
+  'input[name*="token" i]', 'input[id*="token" i]',
+  'input[name*="csrf" i]', 'input[id*="csrf" i]',
+  'input[name*="secret" i]', 'input[id*="secret" i]',
+  'input[name*="otp" i]', 'input[id*="otp" i]',
+  'input[name*="card" i]', 'input[id*="card" i]',
+  'input[name*="cvv" i]', 'input[id*="cvv" i]',
+  'input[name*="cvc" i]', 'input[id*="cvc" i]',
+  'input[name*="security" i]', 'input[id*="security" i]',
+  'input[name*="ssn" i]', 'input[id*="ssn" i]',
+  'textarea[name*="password" i]', 'textarea[id*="password" i]',
+  'textarea[name*="token" i]', 'textarea[id*="token" i]',
+  'textarea[name*="csrf" i]', 'textarea[id*="csrf" i]',
+  'textarea[name*="secret" i]', 'textarea[id*="secret" i]',
+  'textarea[name*="card" i]', 'textarea[id*="card" i]',
+  'textarea[name*="otp" i]', 'textarea[id*="otp" i]',
+  'textarea[name*="cvv" i]', 'textarea[id*="cvv" i]',
+  'textarea[name*="cvc" i]', 'textarea[id*="cvc" i]',
+  'textarea[name*="security" i]', 'textarea[id*="security" i]',
+  'textarea[name*="ssn" i]', 'textarea[id*="ssn" i]',
+  '[data-sensitive]',
+].join(',');
+const AGENT_OVERLAY_STYLE = '[data-pilot-agent-overlay] { visibility: hidden !important; }';
 const DEFAULT_VIEWPORT = Object.freeze({ width: 1280, height: 800 });
 const DEFAULT_MIRROR_WIDTH = 960;
 const DEFAULT_MIRROR_QUALITY = 55;
@@ -258,17 +289,17 @@ function attachPage(session, page) {
     const location = message.location();
     const entry = {
       type: message.type(),
-      text: message.text(),
-      at: location && location.url ? `${location.url}:${location.lineNumber}` : ''
+      text: sanitizeDiagnosticText(message.text()),
+      at: location && location.url ? `${sanitizeDiagnosticUrl(location.url)}:${location.lineNumber}` : ''
     };
     pushLimited(session.console, entry);
     appendLog(session, `[console] [${entry.type}] ${entry.text}${entry.at ? ' @ ' + entry.at : ''}`);
   });
   page.on('pageerror', (error) => {
-    pushLimited(session.console, { type: 'pageerror', text: String(error.message || error), at: '' });
+    pushLimited(session.console, { type: 'pageerror', text: sanitizeDiagnosticText(error.message || error), at: '' });
   });
   page.on('dialog', async (dialog) => {
-    pushLimited(session.console, { type: 'dialog', text: `${dialog.type()}: ${dialog.message()}`, at: '' });
+    pushLimited(session.console, { type: 'dialog', text: sanitizeDiagnosticText(`${dialog.type()}: ${dialog.message()}`), at: '' });
     try {
       if (dialog.type() === 'alert' || dialog.type() === 'beforeunload') await dialog.accept();
       else await dialog.dismiss();
@@ -279,7 +310,7 @@ function attachPage(session, page) {
   page.on('request', (request) => {
     const entry = {
       method: request.method(),
-      url: request.url(),
+      url: sanitizeDiagnosticUrl(request.url()),
       type: request.resourceType(),
       status: null,
       failure: null
@@ -351,7 +382,7 @@ async function reportNavigation(session, url) {
   send({
     event: 'nav',
     session: session.id,
-    url,
+    url: sanitizeDiagnosticUrl(url),
     embed: session.embed !== false,
     frameOptions: session.frameOptions || '',
     ...state,
@@ -515,24 +546,41 @@ function refuseOffAllowlist(current) {
   throw new Error(`当前页面不在智能体允许的源站上（${page.url()}）。人可以继续浏览；智能体的点击、输入和跳转已停用。`);
 }
 
-async function showAgentCursor(page, locator) {
+async function showAgentAction(page, locator, kind) {
   const box = await locator.boundingBox().catch(() => null);
   if (!box) return;
   const x = Math.round(box.x + Math.min(box.width, 24) / 2);
   const y = Math.round(box.y + Math.min(box.height, 24) / 2);
-  await page.evaluate(({ x, y }) => {
-    let mark = document.getElementById('pilot-agent-cursor');
-    if (!mark) {
-      mark = document.createElement('div');
-      mark.id = 'pilot-agent-cursor';
-      mark.style.cssText = 'position:fixed;z-index:2147483647;width:16px;height:16px;margin:-8px 0 0 -8px;border:2px solid #e8a54b;border-radius:50%;box-shadow:0 0 0 4px rgba(232,165,75,.25);pointer-events:none';
-      (document.documentElement || document.body).appendChild(mark);
+  const verbs = { click: '点击', hover: '查看', fill: '填写', type: '输入', select: '选择', upload: '选择文件' };
+  const target = await locator.evaluate((el) => el.getAttribute('aria-label')
+    || (el.labels && el.labels[0] && el.labels[0].innerText)
+    || el.getAttribute('placeholder')
+    || (el.matches('button,a,[role="button"]') ? el.innerText : '')
+    || '').catch(() => '');
+  const status = `${verbs[kind] || '操作'}${target ? `：${String(target).replace(/\s+/g, ' ').trim().slice(0, 48)}` : ''}`;
+  await page.evaluate(({ x, y, status }) => {
+    let overlay = document.querySelector('[data-pilot-agent-overlay]');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.dataset.pilotAgentOverlay = 'true';
+      overlay.setAttribute('aria-hidden', 'true');
+      overlay.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;user-select:none;font:12px/1.3 system-ui,sans-serif;color:#171717';
+      const cursor = document.createElement('span');
+      cursor.style.cssText = 'position:absolute;width:16px;height:16px;margin:-8px 0 0 -8px;border:2px solid #e8a54b;border-radius:50%;background:rgba(232,165,75,.18);box-shadow:0 0 0 4px rgba(232,165,75,.2)';
+      const pill = document.createElement('span');
+      pill.dataset.pilotAgentStatus = 'true';
+      pill.style.cssText = 'position:absolute;display:block;left:14px;top:-26px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:4px 8px;border:1px solid rgba(0,0,0,.15);border-radius:5px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.2)';
+      overlay.append(cursor, pill);
+      (document.documentElement || document.body).appendChild(overlay);
     }
-    mark.style.left = x + 'px';
-    mark.style.top = y + 'px';
-    clearTimeout(mark._hide);
-    mark._hide = setTimeout(() => mark.remove(), 900);
-  }, { x, y }).catch(() => {});
+    overlay.style.left = `${x}px`;
+    overlay.style.top = `${y}px`;
+    const pill = overlay.querySelector('[data-pilot-agent-status]');
+    pill.textContent = status;
+    pill.style.left = `${Math.min(14, Math.max(-220, innerWidth - x - 225))}px`;
+    clearTimeout(overlay._hide);
+    overlay._hide = setTimeout(() => overlay.remove(), 1400);
+  }, { x, y, status }).catch(() => {});
 }
 
 function appendLog(session, line) {
@@ -540,7 +588,7 @@ function appendLog(session, line) {
     const dir = join(process.cwd(), 'browser-logs');
     mkdirSync(dir, { recursive: true });
     const name = String(session.id || 'session').replace(/[^a-zA-Z0-9_-]/g, '_');
-    appendFileSync(join(dir, `${name}.log`), line + '\n');
+    appendFileSync(join(dir, `${name}.log`), sanitizeDiagnosticText(line) + '\n');
   } catch {
     // 日志写失败不影响页面操作
   }
@@ -563,7 +611,7 @@ async function createSession(id) {
 async function createLocalSession(id, browser) {
   const context = await browser.newContext({
     viewport: DEFAULT_VIEWPORT,
-    acceptDownloads: false,
+    acceptDownloads: true,
     serviceWorkers: 'block'
   });
   context.setDefaultTimeout(ACTION_TIMEOUT_MS);
@@ -580,14 +628,14 @@ async function createLocalSession(id, browser) {
         navigation: request.isNavigationRequest(), origin: session.externalOrigin,
         actionApproved: Boolean(session.actionApproved), hosts: HOST_RULES });
       if (!allowed) {
-        pushLimited(session.console, { type: 'blocked', text: `已拦截未授权请求：${request.method()} ${request.url()}`, at: '' });
+        pushLimited(session.console, { type: 'blocked', text: sanitizeDiagnosticText(`已拦截未授权请求：${request.method()} ${request.url()}`), at: '' });
         return route.abort('blockedbyclient');
       }
       return route.continue();
     }
     if (request.isNavigationRequest() && request.frame() === session.page?.mainFrame()
       && !loopbackUrl(request.url()) && request.url() !== 'about:blank') {
-      pushLimited(session.console, { type: 'blocked', text: `已拦截对非本机地址的导航：${request.url()}`, at: '' });
+      pushLimited(session.console, { type: 'blocked', text: sanitizeDiagnosticText(`已拦截对非本机地址的导航：${request.url()}`), at: '' });
       return route.abort('blockedbyclient');
     }
     return route.continue();
@@ -648,7 +696,7 @@ async function startScreencast(session) {
         frame: frame.data,
         w: (frame.metadata && frame.metadata.deviceWidth) || null,
         h: (frame.metadata && frame.metadata.deviceHeight) || null,
-        url: page.url(),
+        url: sanitizeDiagnosticUrl(page.url()),
         ts: now
       });
     });
@@ -688,7 +736,7 @@ async function publishSnapshot(session) {
       frame: shot.toString('base64'),
       w: viewport.width,
       h: viewport.height,
-      url: page.url(),
+      url: sanitizeDiagnosticUrl(page.url()),
       ts: Date.now()
     });
   } catch {
@@ -714,21 +762,18 @@ async function closeScreencast(session) {
   }
 }
 
-// 智能体动作的坐标上报：给前端涟漪高亮用，拿不到坐标就跳过，绝不影响主流程。
+// 智能体动作坐标供镜像事件使用；页面提示即使没有镜像订阅也会显示。
 async function reportAction(session, kind, args) {
-  if (!session.mirror) return;
   try {
-    const box = await locatorFor(session, args).boundingBox();
+    const locator = locatorFor(session, args);
+    const box = await locator.boundingBox();
     if (box) {
-      send({
-        event: 'agent-action',
-        session: session.id,
-        kind,
-        x: Math.round(box.x + box.width / 2),
-        y: Math.round(box.y + box.height / 2),
-        ref: String(args.ref || args.selector || ''),
-        ts: Date.now()
-      });
+      if (session.mirror) send({
+          event: 'agent-action', session: session.id, kind,
+          x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2),
+          ref: String(args.ref || args.selector || ''), ts: Date.now()
+        });
+      await showAgentAction(session.page, locator, kind);
     }
   } catch {
     // 页面在动，坐标拿不到就算了
@@ -791,6 +836,9 @@ const SNAPSHOT_SCRIPT = `(limits) => {
     || INTERACTIVE_ROLES.has((el.getAttribute('role') || '').toLowerCase())
     || el.hasAttribute('onclick') || el.isContentEditable && el.getAttribute('contenteditable') !== 'inherit'
     || (el.tabIndex >= 0 && el.tagName !== 'BODY' && el.tagName !== 'HTML');
+  const sensitiveField = (el) => el.hasAttribute('data-sensitive') || el.type === 'hidden'
+    || /password|one-time-code|token|csrf|secret|credit.?card|card|otp|cvv|cvc|security.?code|ssn/i
+      .test([el.type, el.autocomplete, el.name, el.id].join(' '));
   const attrs = (el) => {
     const out = [];
     const tag = el.tagName.toLowerCase();
@@ -799,12 +847,14 @@ const SNAPSHOT_SCRIPT = `(limits) => {
       out.push('type=' + (el.type || 'text'));
       if (el.type === 'checkbox' || el.type === 'radio') out.push(el.checked ? 'checked' : 'unchecked');
       else if (el.type === 'file') out.push('files=' + (el.files ? el.files.length : 0));
-      else if (el.type !== 'password' && el.value) out.push('value=' + JSON.stringify(clean(el.value, 60)));
+      else if (sensitiveField(el) && el.value) out.push('value=[已遮挡]');
+      else if (el.value) out.push('value=' + JSON.stringify(clean(el.value, 60)));
       if (el.placeholder) out.push('placeholder=' + JSON.stringify(clean(el.placeholder, 60)));
       if (el.accept) out.push('accept=' + clean(el.accept, 40));
       if (el.multiple) out.push('multiple');
     } else if (tag === 'textarea') {
-      if (el.value) out.push('value=' + JSON.stringify(clean(el.value, 60)));
+      if (sensitiveField(el) && el.value) out.push('value=[已遮挡]');
+      else if (el.value) out.push('value=' + JSON.stringify(clean(el.value, 60)));
       if (el.placeholder) out.push('placeholder=' + JSON.stringify(clean(el.placeholder, 60)));
     } else if (tag === 'select') {
       const chosen = el.selectedOptions && el.selectedOptions[0];
@@ -831,6 +881,7 @@ const SNAPSHOT_SCRIPT = `(limits) => {
   };
   const walk = (el, depth) => {
     if (!el || truncated || SKIP.has(el.tagName.toUpperCase())) return;
+    if (el.hasAttribute('data-pilot-agent-overlay')) return;
     const hide = concealment(el);
     if (hide === 'tree') return;
     const tag = el.tagName.toLowerCase();
@@ -965,6 +1016,27 @@ async function snapshot(current) {
   return header.concat('', result.lines).join('\n');
 }
 
+async function screenshotMasks(page) {
+  const masks = [page.locator(SENSITIVE_FIELD_SELECTOR)];
+  const mainOrigin = new URL(page.url()).origin;
+  const frames = await page.frames();
+  const childFrames = frames.filter(frame => frame.parentFrame() === page.mainFrame());
+  const crossOriginFrames = new Set(childFrames.map(frame => frame.url()).filter(url => {
+      try { return new URL(url).origin !== mainOrigin; }
+      catch { return true; }
+    }));
+  const framesByName = new Map(childFrames.filter(frame => frame.name()).map(frame => [frame.name(), frame.url()]));
+  const iframes = await page.locator('iframe').evaluateAll(elements => elements.map(el => ({
+    src: el.src || '', name: el.name || '', srcdoc: el.hasAttribute('srcdoc')
+  })));
+  iframes.forEach((frame, index) => {
+    const frameUrl = framesByName.get(frame.name) || (childFrames.length === iframes.length
+      ? childFrames[index].url() : frame.src);
+    if (frame.srcdoc || crossOriginFrames.has(frameUrl)) masks.push(page.locator('iframe').nth(index));
+  });
+  return masks;
+}
+
 function locatorFor(current, args) {
   const page = pageOf(current);
   if (args.ref) {
@@ -1013,7 +1085,7 @@ async function describePage(current) {
   } catch {
     // 页面正在导航
   }
-  return `当前页面: ${title || '(无标题)'} <${page.url()}>`;
+  return `当前页面: ${sanitizeDiagnosticText(title || '(无标题)')} <${sanitizeDiagnosticUrl(page.url())}>`;
 }
 
 async function elementMissing(error, args) {
@@ -1262,12 +1334,15 @@ const handlers = {
   },
 
   async snapshot(args, current) {
-    return { text: await snapshot(current) };
+    const page = pageOf(current);
+    if (sensitivePageUrl(page.url())) return { text: `敏感登录或支付页面已隐藏页面内容（${sanitizeDiagnosticUrl(page.url())}）。请由用户完成验证或确认页面状态后继续。` };
+    return { text: sanitizeDiagnosticText(await snapshot(current)) };
   },
 
   // 固定的只读诊断，无任意表达式、事件触发、DOM 写入或网络请求。
   async inspect(args, current) {
     const page = pageOf(current);
+    if (sensitivePageUrl(page.url())) return { text: `敏感登录或支付页面已隐藏布局和元素信息（${sanitizeDiagnosticUrl(page.url())}）。请由用户完成验证或确认页面状态后继续。` };
     const overview = await page.evaluate(() => {
       const candidates = [...document.querySelectorAll('main,aside,header,footer,nav,[role="main"],[data-pilot-ref],button,input,textarea,select')];
       const visible = candidates.filter(el => {
@@ -1305,7 +1380,6 @@ const handlers = {
     const page = pageOf(current);
     const locator = locatorFor(current, args);
     await reportAction(current, 'click', args);
-    await showAgentCursor(page, locator);
     const button = args.button === 'right' ? 'right' : 'left';
     const clickCount = Number(args.clickCount) === 2 ? 2 : 1;
     try {
@@ -1320,7 +1394,7 @@ const handlers = {
     refuseOffAllowlist(current);
     const page = pageOf(current);
     const locator = locatorFor(current, args);
-    await showAgentCursor(page, locator);
+    await reportAction(current, 'hover', args);
     try {
       await stopIfPageGone(page, () => locator.hover({ timeout: ACTION_TIMEOUT_MS }));
     } catch (error) {
@@ -1331,13 +1405,22 @@ const handlers = {
 
   async text(args, current) {
     const page = pageOf(current);
-    const text = await page.locator('body').innerText({ timeout: ACTION_TIMEOUT_MS }).catch(() => '');
+    if (sensitivePageUrl(page.url())) return { text: `敏感登录或支付页面已隐藏页面文本（${sanitizeDiagnosticUrl(page.url())}）。请由用户完成验证或确认页面状态后继续。`, url: sanitizeDiagnosticUrl(page.url()) };
+    const text = await page.evaluate(() => {
+      const overlay = document.querySelector('[data-pilot-agent-overlay]');
+      const previous = overlay?.style.visibility;
+      if (overlay) overlay.style.visibility = 'hidden';
+      const value = document.body.innerText || '';
+      if (overlay) overlay.style.visibility = previous;
+      return value;
+    }).catch(() => '');
     const clipped = text.length > 8000 ? text.slice(0, 8000) + '\n…（已截断）' : text;
-    return { text: clipped || '页面没有可读文本', url: page.url() };
+    return { text: sanitizeDiagnosticText(clipped || '页面没有可读文本'), url: sanitizeDiagnosticUrl(page.url()) };
   },
 
   async links(args, current) {
     const page = pageOf(current);
+    if (sensitivePageUrl(page.url())) return { text: `敏感登录或支付页面已隐藏链接（${sanitizeDiagnosticUrl(page.url())}）。请由用户完成验证或确认页面状态后继续。`, url: sanitizeDiagnosticUrl(page.url()) };
     const links = await page.evaluate(() => Array.from(document.querySelectorAll('a[href]')).slice(0, 80).map((node) => ({
       text: (node.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 80),
       href: node.href
@@ -1403,8 +1486,20 @@ const handlers = {
       page.waitForEvent('download', { timeout: ACTION_TIMEOUT_MS }),
       locator.click({ timeout: ACTION_TIMEOUT_MS })
     ]);
-    await download.saveAs(String(args.path));
-    return { text: `已下载到 ${args.path}`, url: page.url() };
+    let suggested = basename(String(download.suggestedFilename() || 'download')
+      .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')).replace(/^\.+/, '').replace(/[. ]+$/, '').slice(0, 120);
+    if (/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(suggested)) suggested = `_${suggested}`;
+    const extension = extname(suggested).toLowerCase();
+    const blockedExtensions = new Set(['.app', '.appx', '.bat', '.cmd', '.com', '.command', '.dll', '.dmg', '.exe', '.hta',
+      '.jar', '.js', '.jse', '.msi', '.pkg', '.ps1', '.psm1', '.scr', '.sh', '.sys', '.vbe', '.vbs', '.wsf']);
+    if (blockedExtensions.has(extension)) {
+      throw new Error(`已阻止下载危险文件类型：${suggested}（${extension}）。请由用户在浏览器中自行检查并下载。`);
+    }
+    const path = join(dirname(String(args.path)), `${Date.now()}-${++downloadSequence}-${suggested || 'download'}`);
+    mkdirSync(dirname(path), { recursive: true });
+    await download.saveAs(path);
+    const source = sanitizeDiagnosticUrl(page.url());
+    return { text: `已下载文件：${suggested || 'download'}\n文件类型依据：${extension || '无扩展名'}（仅检查扩展名）\n来源页面：${source}\n保存位置：${path}`, url: source };
   },
 
   async fill(args, current) {
@@ -1485,18 +1580,24 @@ const handlers = {
     const page = pageOf(current);
     mkdirSync(dirname(args.path), { recursive: true });
     let path = String(args.path);
-    const options = { path, type: 'png', fullPage: Boolean(args.fullPage) };
+    const masks = sensitivePageUrl(page.url()) ? [page.locator('body')] : await screenshotMasks(page);
+    const options = { path, type: 'png', fullPage: Boolean(args.fullPage), mask: masks,
+      maskColor: SENSITIVE_MASK_COLOR, style: AGENT_OVERLAY_STYLE };
     if (args.ref || args.selector) {
-      await locatorFor(current, args).screenshot({ path, type: 'png' });
+      const elementOptions = { ...options };
+      delete elementOptions.fullPage;
+      await locatorFor(current, args).screenshot(elementOptions);
     } else {
       await page.screenshot(options);
     }
     if (statSync(path).size > MAX_SCREENSHOT_BYTES) {
       path = path.replace(/\.png$/i, '') + '.jpg';
       if (args.ref || args.selector) {
-        await locatorFor(current, args).screenshot({ path, type: 'jpeg', quality: 70 });
+        const elementOptions = { ...options, path, type: 'jpeg', quality: 70 };
+        delete elementOptions.fullPage;
+        await locatorFor(current, args).screenshot(elementOptions);
       } else {
-        await page.screenshot({ path, type: 'jpeg', quality: 70, fullPage: Boolean(args.fullPage) });
+        await page.screenshot({ ...options, path, type: 'jpeg', quality: 70 });
       }
     }
     return { text: `已截图\n${await describePage(current)}`, screenshot: path };
@@ -1510,7 +1611,7 @@ const handlers = {
     if (filtered.length === 0) return { text: `控制台没有记录。\n完整日志: ${file}` };
     const shown = filtered.slice(-100);
     return { text: `控制台记录 ${filtered.length} 条（显示最近 ${shown.length} 条）。完整日志: ${file}\n`
-      + shown.map((entry) => `[${entry.type}] ${entry.text}${entry.at ? ' @ ' + entry.at : ''}`).join('\n') };
+      + shown.map((entry) => `[${entry.type}] ${sanitizeDiagnosticText(entry.text)}${entry.at ? ' @ ' + sanitizeDiagnosticUrl(entry.at) : ''}`).join('\n') };
   },
 
   async network(args, current) {
@@ -1525,7 +1626,7 @@ const handlers = {
     if (entries.length === 0) return { text: `没有匹配的网络请求。\n完整日志: ${file}` };
     const shown = entries.slice(-100);
     return { text: `网络请求 ${entries.length} 条（显示最近 ${shown.length} 条）。完整日志: ${file}\n`
-      + shown.map((entry) => `${entry.method} ${entry.url} → ${entry.failure ? 'FAILED ' + entry.failure
+      + shown.map((entry) => `${entry.method} ${sanitizeDiagnosticUrl(entry.url)} → ${entry.failure ? 'FAILED ' + sanitizeDiagnosticText(entry.failure)
         : entry.status === null ? '(等待响应)' : entry.status} [${entry.type}]`).join('\n') };
   },
 
@@ -1655,9 +1756,11 @@ async function dispatch(request) {
 async function handle(request) {
   try {
     const result = await dispatch(request);
+    if (typeof result?.text === 'string') result.text = sanitizeDiagnosticText(result.text);
+    if (typeof result?.url === 'string') result.url = sanitizeDiagnosticUrl(result.url);
     send({ id: request.id, ok: true, ...result });
   } catch (error) {
-    send({ id: request.id, ok: false, error: String(error && error.message ? error.message : error).split('\n')[0] });
+    send({ id: request.id, ok: false, error: sanitizeDiagnosticText(String(error && error.message ? error.message : error).split('\n')[0]) });
   }
 }
 

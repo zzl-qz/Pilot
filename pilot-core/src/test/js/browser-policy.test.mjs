@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { cdpEndpoint, externalAgentHostAllowed, hostDecision, hostRulesFromEnv, parseHosts,
-  publicHttps } from '../../main/resources/browser/browser-policy.mjs';
+  publicHttps, sanitizeDiagnosticText, sanitizeDiagnosticUrl, sensitivePageUrl } from '../../main/resources/browser/browser-policy.mjs';
 
 test('parseHosts 接受逗号与空白两种分隔，并统一小写去空白', () => {
   assert.deepEqual(parseHosts('a.com, b.com  c.com'), ['a.com', 'b.com', 'c.com']);
@@ -88,4 +88,23 @@ test('externalAgentHostAllowed 空清单等于谁都不碰，且 deny 优先', (
   // 外部浏览器只接管网页，about:blank / 非 http(s) 一律不放
   assert.equal(externalAgentHostAllowed('about:blank', hosts), false);
   assert.equal(externalAgentHostAllowed('file:///etc/passwd', { allow: ['*'], deny: [] }), false);
+});
+
+test('浏览器诊断会遮挡认证凭据、令牌和敏感 URL 参数', () => {
+  const text = sanitizeDiagnosticText('Authorization: Bearer abcdef123456 token=secret-value sk-abcdefghijklmnop https://x.test/cb?code=oauth-secret');
+  assert.doesNotMatch(text, /abcdef123456|secret-value|sk-abcdefghijklmnop|oauth-secret/);
+  const url = sanitizeDiagnosticUrl('https://user:pass@example.test/api?ok=1&access_token=secret#state=private');
+  assert.match(url, /ok=1/);
+  assert.doesNotMatch(url, /user|pass|secret|private/);
+});
+
+test('脱敏不会误伤普通筛选参数', () => {
+  assert.match(sanitizeDiagnosticUrl('https://example.test/search?author=alice&status=open'), /author=alice/);
+});
+
+test('敏感登录和支付页面不向模型返回页面内容', () => {
+  assert.equal(sensitivePageUrl('https://accounts.google.com/signin'), true);
+  assert.equal(sensitivePageUrl('https://shop.example/checkout/order'), true);
+  assert.equal(sensitivePageUrl('http://localhost:5173/dashboard'), false);
+  assert.equal(sensitivePageUrl('file:///checkout'), false);
 });

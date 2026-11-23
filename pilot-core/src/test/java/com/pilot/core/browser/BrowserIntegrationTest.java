@@ -212,6 +212,76 @@ class BrowserIntegrationTest {
     }
 
     @Test
+    void modelSnapshotAndScreenshotHideAgentOverlayAndSensitivePageFields() throws IOException {
+        run("navigate", "url", base);
+        run("evaluate", "expression", """
+            (() => {
+              const field = document.createElement('input');
+              field.name = 'apiToken'; field.value = 'secret-token-value';
+              field.style.cssText = 'position:fixed;left:100px;top:100px;width:200px;height:40px;background:#00ff00;color:#00ff00';
+              document.body.append(field);
+              const frame = document.createElement('iframe');
+              frame.srcdoc = '<body style="margin:0;background:#00ff00"></body>';
+              frame.style.cssText = 'position:fixed;left:350px;top:100px;width:100px;height:60px;border:0';
+              document.body.append(frame);
+              return 'ready';
+            })()
+            """);
+
+        String snapshot = run("snapshot");
+        assertTrue(snapshot.contains("value=[已遮挡]"), snapshot);
+        assertFalse(snapshot.contains("secret-token-value"), snapshot);
+
+        String sendRef = ref(snapshot, "button", "发送到队列");
+        run("click", "ref", sendRef);
+        assertTrue(run("evaluate", "expression", "document.querySelector('[data-pilot-agent-overlay]')?.textContent")
+            .contains("点击"));
+        assertFalse(run("snapshot").contains("正在点击"));
+
+        ToolResult result = tool.executeResult(Map.of("action", "screenshot"));
+        BufferedImage screenshot = ImageIO.read(Path.of(result.images().getFirst().path()).toFile());
+        assertEquals(0xFF171717, screenshot.getRGB(150, 120), "敏感输入框应被遮挡");
+        assertEquals(0xFF171717, screenshot.getRGB(400, 130), "srcdoc iframe 应被遮挡");
+    }
+
+    @Test
+    void withholdsSensitivePagesScrubsDiagnosticsAndReviewsDownloads() throws IOException {
+        String login = run("navigate", "url", base + "login?token=login-secret-value");
+        assertFalse(login.contains("login-secret-value"), login);
+        assertTrue(run("snapshot").contains("敏感登录或支付页面已隐藏"));
+        assertTrue(run("text").contains("敏感登录或支付页面已隐藏"));
+        assertTrue(run("inspect").contains("敏感登录或支付页面已隐藏"));
+        assertTrue(run("links").contains("敏感登录或支付页面已隐藏"));
+
+        run("navigate", "url", base);
+        run("evaluate", "expression", "console.error('Authorization: Bearer diagnostic-secret-123456'); fetch('/api/queue?access_token=oauth-secret-value')");
+        String console = run("console");
+        String network = run("network", "failedOnly", true);
+        assertFalse(console.contains("diagnostic-secret-123456"), console);
+        assertFalse(network.contains("oauth-secret-value"), network);
+        assertTrue(network.contains("access_token"), network);
+
+        run("evaluate", "expression", """
+            (() => {
+              for (const [id, name, data] of [['good-download', 'report.txt', 'data:text/plain,hello'],
+                ['bad-download', 'payload.exe', 'data:application/octet-stream,blocked']]) {
+                const link = document.createElement('a');
+                link.id = id; link.href = data; link.download = name; link.textContent = name;
+                link.style.cssText = 'position:fixed;left:10px;top:10px';
+                document.body.append(link);
+              }
+              return 'ready';
+            })()
+            """);
+        String safeDownload = run("download", "selector", "#good-download");
+        assertTrue(safeDownload.contains("report.txt"), safeDownload);
+        Matcher savedPath = Pattern.compile("保存位置：(.+)").matcher(safeDownload);
+        assertTrue(savedPath.find(), safeDownload);
+        assertTrue(Files.isRegularFile(Path.of(savedPath.group(1))), safeDownload);
+        assertTrue(run("download", "selector", "#bad-download").contains("已阻止下载危险文件类型"));
+    }
+
+    @Test
     void sessionsAreIsolatedAndNonLoopbackNavigationIsRefused() {
         assertTrue(run("navigate", "url", base).startsWith("已打开"));
         run("evaluate", "expression", "localStorage.setItem('secret','a')");

@@ -104,6 +104,50 @@ export function externalAgentHostAllowed(value, hosts) {
   return allow.length > 0 && hostDecision(parsed.hostname.toLowerCase(), hosts) === 'allow';
 }
 
+const SENSITIVE_QUERY_KEY = /^(?:access[_-]?token|refresh[_-]?token|id[_-]?token|token|secret|password|passwd|authorization|auth|credential|session|cookie|api[_-]?key|client[_-]?secret|code|otp|state)$/i;
+
+/** Remove credential-like values before browser diagnostics are retained or returned to the model. */
+export function sanitizeDiagnosticText(value) {
+  return String(value ?? '')
+    .replace(/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g, '[已遮挡私钥]')
+    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/-]{6,}={0,2}/gi, '$1 [已遮挡]')
+    .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]{8,})?/g, '[已遮挡令牌]')
+    .replace(/(?<![A-Za-z0-9_-])(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{16,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|glpat-[A-Za-z0-9_-]{10,}|hf_[A-Za-z0-9]{12,})/g, '[已遮挡密钥]')
+    .replace(/([?&#](?:token|access_token|refresh_token|id_token|secret|password|passwd|authorization|auth|credential|session|cookie|api[_-]?key|client[_-]?secret|code|otp|state)=)[^&#\s]*/gi, '$1[已遮挡]')
+    .replace(/((?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|passwd|authorization|secret|token)\s*[=:]\s*)(["']?)[^\s"',;&]{4,}/gi, '$1$2[已遮挡]');
+}
+
+/** Remove URL userinfo and credential-like query/fragment values while preserving useful diagnostics. */
+export function sanitizeDiagnosticUrl(value) {
+  try {
+    const url = new URL(String(value));
+    url.username = '';
+    url.password = '';
+    for (const key of [...url.searchParams.keys()]) {
+      if (SENSITIVE_QUERY_KEY.test(key)) url.searchParams.set(key, '[已遮挡]');
+    }
+    if (url.hash && SENSITIVE_QUERY_KEY.test(url.hash)) url.hash = '#[已遮挡]';
+    return sanitizeDiagnosticText(url.toString());
+  } catch {
+    return sanitizeDiagnosticText(value);
+  }
+}
+
+/** Identity, payment, and authentication pages are withheld from model-readable page output. */
+export function sensitivePageUrl(value) {
+  try {
+    const url = new URL(String(value));
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    const host = url.hostname.toLowerCase();
+    const knownHosts = ['accounts.google.com', 'login.microsoftonline.com', 'login.live.com', 'appleid.apple.com',
+      'idmsa.apple.com', 'checkout.stripe.com', 'paypal.com', 'www.paypal.com'];
+    return knownHosts.includes(host) || /(^|\.)(?:accounts?|auth|identity|login|signin|checkout|payments?)\./.test(host)
+      || /\/(?:login|log-in|sign-?in|oauth|authorize|checkout|payment|billing)(?:\/|$)/i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
 export const externalMutations = new Set(['click', 'dblclick', 'right_click', 'hover', 'fill', 'type', 'press',
   'select', 'upload', 'download', 'evaluate', 'reload', 'back', 'forward']);
 

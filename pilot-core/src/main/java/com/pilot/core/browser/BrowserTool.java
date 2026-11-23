@@ -160,7 +160,8 @@ public final class BrowserTool extends PromptedTool implements LocalInteraction 
         // 观察类放行——用户操作的进度恰是智能体需要的上下文。
         if (backend.interactionsPaused(sessionId) && PAUSED_BLOCKS.contains(action)) {
             return ToolResult.text("用户已接管浏览器并暂停了智能体的页面操作。"
-                + "snapshot / screenshot / console / network / wait 等观察动作仍可用（可了解用户当前进度）；" + "交互与导航动作请等用户恢复后再试。");
+                + "登录、验证码或 MFA 请由用户在当前页面完成；snapshot / screenshot / console / network / wait 等观察动作仍可用。"
+                + "用户恢复后先重新 snapshot 验证登录态，不要重放接管前的旧 ref 或交互动作。");
         }
         Map<String, Object> command = new LinkedHashMap<>();
         command.put("op", action);
@@ -172,7 +173,7 @@ public final class BrowserTool extends PromptedTool implements LocalInteraction 
         if ("screenshot".equals(action)) {
             command.put("path", nextScreenshot().toString());
         } else if ("download".equals(action)) {
-            command.put("path", nextScreenshot().resolveSibling("download-" + shots.get() + ".bin").toString());
+            command.put("path", nextScreenshot().resolveSibling("downloads").resolve("download-placeholder").toString());
         }
         BrowserBackend.Reply reply;
         try {
