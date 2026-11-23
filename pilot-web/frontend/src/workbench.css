@@ -760,9 +760,18 @@ html[data-theme] .project-head .project-actions {
   background: linear-gradient(to right, transparent, var(--sidebar) 36%);
   pointer-events: none;
 }
+html[data-theme] .project-head .project-actions > button {
+  pointer-events: auto;
+}
 html[data-theme] .project-head:hover .project-actions,
 html[data-theme] .project-head:focus-within .project-actions {
   pointer-events: auto;
+}
+@media (hover: none) {
+  html[data-theme] .project-head .project-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 html[data-theme] .session-item { position: relative; min-height: 30px; border-radius: 6px; transition: background-color 0.12s ease, color 0.12s ease; }
 html[data-theme] .session-item.is-active { box-shadow: none; font-weight: 520; }
