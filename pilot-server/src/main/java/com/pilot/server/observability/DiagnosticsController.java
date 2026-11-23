@@ -1,11 +1,18 @@
 package com.pilot.server.observability;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 
+import org.springframework.http.CacheControl;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.pilot.core.session.Session;
@@ -31,9 +38,22 @@ import lombok.RequiredArgsConstructor;
 public class DiagnosticsController {
     private final SessionService sessions;
     private final TaskDiagnosticsService diagnostics;
+    private final DiagnosticsExportService exporter;
     private final ValidationLedger validations;
     private final RecoveryReportService recovery;
     private final RunStateTracker runStates;
+
+    @GetMapping(value = "/diagnostics/export", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<byte[]> export(@RequestParam(required = false) String sessionId) {
+        if (sessionId != null && !sessionId.isBlank()) {
+            requireSession(sessionId.trim());
+        }
+        DiagnosticsExportService.ExportResult result = exporter.export(sessionId);
+        return ResponseEntity.ok().contentType(new MediaType(MediaType.APPLICATION_JSON, StandardCharsets.UTF_8))
+            .cacheControl(CacheControl.noStore()).header(HttpHeaders.CONTENT_DISPOSITION,
+                ContentDisposition.attachment().filename(result.filename()).build().toString())
+            .body(result.payload());
+    }
 
     @GetMapping("/sessions/{id}/diagnostics")
     public TaskDiagnosticsService.Diagnostics diagnose(@PathVariable String id) {
