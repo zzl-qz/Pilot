@@ -109,7 +109,7 @@ export function WorkspaceOverviewPanel() {
 
   const snapshot = board?.snapshot ?? null;
   const me = sessionId || '';
-  // 旧服务端只返回概览：没有协调快照时仍按概览里的会话列表展示。
+  // 未创建会话时只读工作区概览：没有协调快照时按概览里的会话列表展示。
   const sessions = snapshot?.sessions.length ? snapshot.sessions : (board?.overview?.sessions || []).map((item) => ({
     sessionId: item.sessionId, title: item.title, status: item.running ? 'RUNNING' : 'PAUSED',
     workspace: board?.overview?.workspace || '', online: false, archived: false

@@ -222,8 +222,7 @@ function ProjectDirectoryBrowser({ disabled, selected, onAdd, onClose }: {
     setBusy(true);
     api.workspaceRoots().then(result => {
       if (request !== version.current) return;
-      const legacy = result as S.WorkspaceServiceRootEntry[] | { roots?: S.WorkspaceServiceRootEntry[] };
-      const entries = Array.isArray(legacy) ? legacy : legacy?.roots || [];
+      const entries = Array.isArray(result) ? result : [];
       setRoots(entries);
       return browse(workspace || entries[0]?.path || '');
     }).catch(failure => {

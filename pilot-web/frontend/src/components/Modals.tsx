@@ -36,7 +36,7 @@ const TASK_STATUS_LABELS: Record<string, string> = {
   WAITING: '等待外部事件', NEED_INPUT: '需要输入',
   UNVERIFIED: '结果未验证', NO_PROGRESS: '暂无有效进展', REVIEW_UNAVAILABLE: '核验暂不可用'
 };
-const EXECUTION_MODES: Record<string, string> = { DIRECT: '普通执行', GOAL: '持续推进目标', PROBE: '旧版探查任务', UNASSESSED: '旧版待迁移任务' };
+const EXECUTION_MODES: Record<string, string> = { DIRECT: '普通执行', GOAL: '持续推进目标' };
 
 /** 任务契约：目标 / 约束 / 验收记录 / 执行评估，随事件更新，可手动补充约束。 */
 export function TaskContract() {
@@ -265,8 +265,7 @@ function WorkspacePicker() {
     try {
       const data = await api.workspaceRoots();
       if (request !== version.current) return;
-      const legacy = data as S.WorkspaceServiceRootEntry[] | { roots?: S.WorkspaceServiceRootEntry[] } | null;
-      const next = Array.isArray(legacy) ? legacy : legacy?.roots || [];
+      const next = Array.isArray(data) ? data : [];
       setRoots(next);
       await browse(workspace || next[0]?.path || '');
     } catch (failure) {

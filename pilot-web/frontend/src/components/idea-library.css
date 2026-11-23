@@ -56,6 +56,3 @@
 .idea-file-remove:hover { background: var(--err); border-color: var(--err); color: #fff; opacity: 1; }
 .idea-file-remove:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; opacity: 1; }
 .idea-file-remove:disabled { opacity: 0.4; cursor: not-allowed; }
-.idea-legacy { border-top: 1px solid var(--line); padding-top: 10px; }
-.idea-legacy summary { cursor: pointer; }
-.idea-legacy .idea-list { margin-top: 8px; }

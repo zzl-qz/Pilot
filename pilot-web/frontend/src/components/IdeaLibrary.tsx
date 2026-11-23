@@ -26,7 +26,6 @@ export default function IdeaLibrary({ onClose }: { onClose: () => void }) {
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
-  const [legacyOpen, setLegacyOpen] = useState(false);
   const [preview, setPreview] = useState<{ name: string; src: string } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -150,17 +149,6 @@ export default function IdeaLibrary({ onClose }: { onClose: () => void }) {
           </div>
         </li>)}
       </ul>
-      <details className="idea-legacy" onToggle={event => setLegacyOpen(event.currentTarget.open)}>
-        <summary>查看当前会话的旧想法</summary>
-        {legacyOpen && <LegacyIdeas disabled={busy || loading || loadFailed} copyToLibrary={(id, text, createdAt) => {
-          const idea = { id: `legacy:${id}`, text, files: [], createdAt };
-          void changeLibrary(async () => {
-            await saveIdea(idea);
-            setIdeas(await listIdeas());
-            setStatus('已复制到想法库。');
-          }, '复制到想法库失败，请重试。');
-        }} />}
-      </details>
       {/* 大图放在弹窗内容里：原生 dialog 在顶层，挂在外面会被它盖住 */}
       {preview && <ImagePreview name={preview.name} src={preview.src} onClose={() => setPreview(null)} />}
     </div>
@@ -201,28 +189,4 @@ function IdeaFile({ file, saved = false, disabled = false, onOpen, onRemove }: {
     {onRemove && <button type="button" className="idea-file-remove" title="移除" aria-label={`移除 ${file.name}`}
       disabled={disabled} onClick={onRemove}><Icon name="close" /></button>}
   </div>;
-}
-
-function LegacyIdeas({ disabled, copyToLibrary }: {
-  disabled: boolean;
-  copyToLibrary: (id: string, text: string, createdAt: string) => void;
-}) {
-  const session = useStore(state => state.sessionId);
-  const state = useStore(store => store.notesState);
-  const error = useStore(store => store.notesError);
-  const notes = useStore(store => store.notes);
-  const load = useStore.getState().loadNotes;
-  useEffect(() => { if (state === 'idle') void load(); }, [session, state, load]);
-  return <>
-    {(state === 'loading' || state === 'idle') && <p role="status">正在读取旧想法…</p>}
-    {state === 'error' && <div role="alert">{error} <Button size="sm" label="重试" onClick={() => void load()} /></div>}
-    {state === 'ready' && !notes.length && <p className="idea-hint">这里没有旧想法。</p>}
-    <ul className="idea-list" aria-label="旧会话想法">
-      {notes.map(note => <li className="idea-card" key={note.id}>
-        <p className="idea-text">{note.content}</p>
-        <Button size="sm" variant="secondary" label="复制到想法库" isDisabled={disabled}
-          onClick={() => copyToLibrary(`${session ?? 'draft'}:${note.id}`, note.content, note.createdAt)} />
-      </li>)}
-    </ul>
-  </>;
 }
