@@ -261,7 +261,7 @@ class SandboxStoreTest {
         var first = store();
         first.recordTasks("ses",
             List.of(new SandboxStore.TaskView("t1", "one", "a", "running", "executing", 1),
-                new SandboxStore.TaskView("t2", "two", "a", "READY", "ready", 0),
+                new SandboxStore.TaskView("t2", "two", "a", "PENDING", "pending", 0),
                 new SandboxStore.TaskView("t3", "three", "a", "done", "done", 1)));
         var restored = store().tasks("ses");
         assertEquals(List.of("cancelled", "cancelled", "done"),

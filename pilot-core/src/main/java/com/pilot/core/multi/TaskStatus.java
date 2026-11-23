@@ -18,12 +18,8 @@ public enum TaskStatus {
     CONFLICT("conflict", "🔴变更冲突"), FAILED("failed", "❌失败"), BLOCKED("blocked", "⛔已阻断"),
     CANCELLED("cancelled", "🚫已取消");
 
-    /**
-     * 重启后执行者已经不在的状态。
-     * ready、verifying 是旧版本写过、现在不再产生的值，留着才能把旧数据收敛掉。
-     */
-    public static final List<String> ABANDONED_AFTER_RESTART =
-        List.of(PENDING.wireName(), RUNNING.wireName(), "ready", "verifying");
+    /** 重启后执行者已经不在的非终态，启动恢复时统一收敛为已取消。 */
+    public static final List<String> ABANDONED_AFTER_RESTART = List.of(PENDING.wireName(), RUNNING.wireName());
 
     private final String wireName;
     private final String label;
