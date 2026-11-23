@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  claimsOwnedBy, connectionLabel, handoffStatusLabel, openFor, otherSessions, readBoard, requestStatusLabel,
-  sessionStatusLabel
+  alertKindLabel, claimsOwnedBy, connectionLabel, handoffStatusLabel, openFor, otherSessions, readBoard,
+  requestStatusLabel, sessionStatusLabel
 } from '../../../frontend/src/lib/coordination/board.js';
 
 const claim = (id, sessionId, path) => ({
@@ -26,6 +26,9 @@ const boardPayload = () => ({
     handoffs: [
       { id: 'h1', fromSessionId: 's2', toSessionId: 's1', taskId: 't1', summary: '接手构建', status: 'PENDING', createdAt: '', updatedAt: '', expiresAt: '' },
       { id: 'h2', fromSessionId: 's1', toSessionId: 's2', taskId: 't2', summary: '接手文档', status: 'PENDING', createdAt: '', updatedAt: '', expiresAt: '' }
+    ],
+    alerts: [
+      { kind: 'DEADLOCK', sessionIds: ['s1', 's2'], summary: '检测到会话互相等待' }
     ]
   },
   overview: { workspace: '/repo', sessions: [], fileOwners: [], generatedAt: '2026-11-23T00:00:00Z' }
@@ -35,6 +38,8 @@ test('读协调看板：快照与概览同时保留', () => {
   const board = readBoard(boardPayload());
   assert.equal(board.snapshot.sessions.length, 2);
   assert.equal(board.snapshot.claims[0].id, 'c1');
+  assert.equal(board.snapshot.alerts.length, 1);
+  assert.equal(board.snapshot.alerts[0].kind, 'DEADLOCK');
   assert.equal(board.overview.workspace, '/repo');
 });
 
@@ -73,7 +78,11 @@ test('状态与连接文案覆盖各阶段与未知值', () => {
   assert.equal(sessionStatusLabel('SOMETHING_NEW'), 'SOMETHING_NEW');
   assert.equal(sessionStatusLabel(undefined), '未知');
   assert.equal(requestStatusLabel('WITHDRAWN'), '已撤销');
+  assert.equal(requestStatusLabel('EXPIRED'), '已过期');
   assert.equal(handoffStatusLabel('EXPIRED'), '已过期');
+  assert.equal(alertKindLabel('DEADLOCK'), '互等死锁');
+  assert.equal(alertKindLabel('STALLED_DEPENDENCY'), '目标停滞');
+  assert.equal(alertKindLabel('CUSTOM'), 'CUSTOM');
   assert.match(connectionLabel('live', 12, 0), /实时 · 游标 12/);
   assert.match(connectionLabel('reconnecting', 8, 3), /第 3 次/);
   assert.match(connectionLabel('stopped', 8, 0), /已停止/);

@@ -9,14 +9,21 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const REQUEST_LABELS: Record<string, string> = {
-  PENDING: '待回应', ACCEPTED: '已接受', DECLINED: '已拒绝', WITHDRAWN: '已撤销'
+  PENDING: '待回应', ACCEPTED: '已接受', DECLINED: '已拒绝', WITHDRAWN: '已撤销', EXPIRED: '已过期'
 };
 
 const HANDOFF_LABELS: Record<string, string> = {
   PENDING: '待接受', ACCEPTED: '已接受', DECLINED: '已拒绝', EXPIRED: '已过期'
 };
 
-const EMPTY_SNAPSHOT: CoordinationSnapshot = { projectId: null, sessions: [], claims: [], requests: [], handoffs: [] };
+const ALERT_LABELS: Record<string, string> = {
+  DEADLOCK: '互等死锁',
+  STALLED_DEPENDENCY: '目标停滞'
+};
+
+const EMPTY_SNAPSHOT: CoordinationSnapshot = {
+  projectId: null, sessions: [], claims: [], requests: [], handoffs: [], alerts: []
+};
 
 export function sessionStatusLabel(status: string | undefined | null): string {
   return (status && STATUS_LABELS[status]) || status || '未知';
@@ -28,6 +35,10 @@ export function requestStatusLabel(status: string): string {
 
 export function handoffStatusLabel(status: string): string {
   return HANDOFF_LABELS[status] || status;
+}
+
+export function alertKindLabel(kind: string): string {
+  return ALERT_LABELS[kind] || kind || '协作告警';
 }
 
 /**
@@ -56,7 +67,8 @@ function normalizeSnapshot(snapshot: Partial<CoordinationSnapshot>): Coordinatio
     sessions: Array.isArray(snapshot.sessions) ? snapshot.sessions : [],
     claims: Array.isArray(snapshot.claims) ? snapshot.claims : [],
     requests: Array.isArray(snapshot.requests) ? snapshot.requests : [],
-    handoffs: Array.isArray(snapshot.handoffs) ? snapshot.handoffs : []
+    handoffs: Array.isArray(snapshot.handoffs) ? snapshot.handoffs : [],
+    alerts: Array.isArray(snapshot.alerts) ? snapshot.alerts : []
   };
 }
 

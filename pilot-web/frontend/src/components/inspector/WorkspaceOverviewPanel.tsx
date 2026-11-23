@@ -3,10 +3,10 @@ import { api } from '../../api.js';
 import { useStore } from '../../store.js';
 import { createCoordinationFeed, type CoordinationFeedState } from '../../lib/coordination/feed.js';
 import {
-  claimsOwnedBy, connectionLabel, handoffStatusLabel, openFor, otherSessions, readBoard, requestStatusLabel,
-  sessionStatusLabel
+  alertKindLabel, claimsOwnedBy, connectionLabel, handoffStatusLabel, openFor, otherSessions, readBoard,
+  requestStatusLabel, sessionStatusLabel
 } from '../../lib/coordination/board.js';
-import type { CoordinationBoard } from '../../types/coordination.js';
+import type { CoordinationBoard, CoordinationSessionView } from '../../types/coordination.js';
 
 /** 一批事件合成一次重读：短时间内的多次改动不该每次都整块拉取看板。 */
 const EVENT_REFRESH_MS = 200;
@@ -110,12 +110,15 @@ export function WorkspaceOverviewPanel() {
   const snapshot = board?.snapshot ?? null;
   const me = sessionId || '';
   // 未创建会话时只读工作区概览：没有协调快照时按概览里的会话列表展示。
-  const sessions = snapshot?.sessions.length ? snapshot.sessions : (board?.overview?.sessions || []).map((item) => ({
-    sessionId: item.sessionId, title: item.title, status: item.running ? 'RUNNING' : 'PAUSED',
-    workspace: board?.overview?.workspace || '', online: false, archived: false
-  }));
+  const sessions: CoordinationSessionView[] = snapshot?.sessions.length
+    ? snapshot.sessions
+    : (board?.overview?.sessions || []).map((item) => ({
+      sessionId: item.sessionId, title: item.title, status: item.running ? 'RUNNING' : 'PAUSED',
+      workspace: board?.overview?.workspace || '', online: false, archived: false
+    }));
   const others = snapshot ? otherSessions(snapshot, me) : [];
   const claims = snapshot?.claims || [];
+  const alerts = snapshot?.alerts || [];
   const incoming = snapshot ? openFor(snapshot.requests, me, 'incoming') : [];
   const outgoing = snapshot ? openFor(snapshot.requests, me, 'outgoing') : [];
   const incomingTasks = snapshot ? openFor(snapshot.handoffs, me, 'incoming') : [];
@@ -155,6 +158,27 @@ export function WorkspaceOverviewPanel() {
       {feed?.lastError && <p className="overview-line is-warn" role="status">{feed.lastError}</p>}
       {error && <p className="overview-error" role="alert">看板读取失败：{error}</p>}
       {actionError && <p className="overview-error" role="alert">协调失败：{actionError}</p>}
+      {!error && alerts.length > 0 && (
+        <section className="overview-alerts" role="alert" data-testid="overview-alerts">
+          <h4>看门狗协作告警（{alerts.length}）</h4>
+          <ul>
+            {alerts.map((alert, idx) => (
+              <li key={`${alert.kind}-${alert.sessionIds.join('-')}-${idx}`}
+                className={alert.kind === 'DEADLOCK' ? 'is-deadlock' : 'is-stalled'}>
+                <div className="overview-alert-head">
+                  <span className={`overview-tag ${alert.kind === 'DEADLOCK' ? 'is-deadlock' : 'is-stalled'}`}>
+                    {alertKindLabel(alert.kind)}
+                  </span>
+                  <span className="overview-alert-chain">
+                    {alert.sessionIds.map((id) => sessionNameOf(id)).join(alert.kind === 'DEADLOCK' ? ' ↔ ' : ' → ')}
+                  </span>
+                </div>
+                {alert.summary && <p className="overview-alert-summary">{alert.summary}</p>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {!error && owners.length > 0 && (
         <section className="overview-conflicts">
           <h4>同一批文件被多个会话改着</h4>
@@ -176,6 +200,10 @@ export function WorkspaceOverviewPanel() {
                 <strong title={session.title || session.sessionId}>{session.title || session.sessionId}</strong>
                 <span className="overview-tags">
                   <span className={`overview-tag is-${String(session.status || '').toLowerCase()}`}>{sessionStatusLabel(session.status)}</span>
+                  {session.stalled && (
+                    <span className="overview-tag is-stalled"
+                      title={session.lastActivityAt ? `最近活动：${session.lastActivityAt}` : '长时间无新活动'}>疑似停滞</span>
+                  )}
                   {session.online && <span className="overview-tag is-online">在线</span>}
                   {isCurrent && <span className="overview-tag is-current">当前</span>}
                 </span>
