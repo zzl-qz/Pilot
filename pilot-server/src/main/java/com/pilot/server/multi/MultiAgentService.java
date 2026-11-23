@@ -53,12 +53,11 @@ import com.pilot.core.loop.Cancellation;
 import com.pilot.core.loop.ContextCompactor;
 import com.pilot.core.loop.ExecutionPolicy;
 import com.pilot.core.message.Message;
+import com.pilot.core.model.DelegatingModelClient;
 import com.pilot.core.model.MeteredModelClient;
 import com.pilot.core.model.ModelClient;
-import com.pilot.core.model.ModelProfile;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ModelUsage;
-import com.pilot.core.model.NativeCapability;
 import com.pilot.core.model.ToolDefinition;
 import com.pilot.core.model.diagnostics.ModelRequestScope;
 import com.pilot.core.multi.AgentReport;
@@ -750,27 +749,8 @@ public class MultiAgentService {
 
     /** Admits every model request before dispatch and settles usage immediately after its response. */
     private static ModelClient usageMetering(ModelClient delegate, UsageMeter meter, MultiAgentBudgetLedger budget) {
-        return new ModelClient() {
-            @Override
-            public ModelProfile profile() {
-                return delegate.profile();
-            }
-
-            @Override
-            public Set<NativeCapability> nativeCapabilities() {
-                return delegate.nativeCapabilities();
-            }
-
-            @Override
-            public boolean disableRejectedNativeTools(Throwable failure) {
-                return delegate.disableRejectedNativeTools(failure);
-            }
-
-            @Override
-            public boolean disableRejectedCache(Throwable failure) {
-                return delegate.disableRejectedCache(failure);
-            }
-
+        // 能力与降级由 DelegatingModelClient 统一转发：预算准入与用量结算只由本包装的 chat 负责。
+        return new DelegatingModelClient(delegate) {
             @Override
             public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
                 return chat(messages, tools, null, null);

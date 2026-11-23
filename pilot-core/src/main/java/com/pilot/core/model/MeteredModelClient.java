@@ -16,9 +16,8 @@ import com.pilot.core.util.Sha256;
 import tools.jackson.databind.ObjectMapper;
 
 /** 覆盖主调用、压缩、子代理和失败尝试的统一记账边界。 */
-public final class MeteredModelClient implements ModelClient {
+public final class MeteredModelClient extends DelegatingModelClient {
     private static final ObjectMapper JSON = new ObjectMapper();
-    private final ModelClient delegate;
     private final String group;
     private final String purpose;
     private final List<ContextComposition.Source> sources;
@@ -33,7 +32,7 @@ public final class MeteredModelClient implements ModelClient {
 
     public MeteredModelClient(ModelClient delegate, String group, String purpose,
         List<ContextComposition.Source> sources, Consumer<RequestReport> sink) {
-        this.delegate = delegate;
+        super(delegate);
         this.group = group;
         this.purpose = purpose;
         this.sources = sources == null ? List.of() : List.copyOf(sources);
@@ -50,29 +49,8 @@ public final class MeteredModelClient implements ModelClient {
     /** 观察一次已获准的请求用量。预算和请求用途由调用方决定。 */
     public static ModelClient observeUsage(ModelClient delegate, Runnable beforeRequest,
         BiConsumer<Long, ModelUsage> afterRequest) {
-        return new ModelClient() {
-            @Override
-            public ModelProfile profile() {
-                return delegate.profile();
-            }
-
-            // 能力与降级必须穿透到底层客户端：这里只负责记账，不能把原生工具或缓存参数的
-            // 自动恢复挡在包装层。snapshot 保持默认（返回本包装），否则记账会被绕过。
-            @Override
-            public java.util.Set<NativeCapability> nativeCapabilities() {
-                return delegate.nativeCapabilities();
-            }
-
-            @Override
-            public boolean disableRejectedNativeTools(Throwable failure) {
-                return delegate.disableRejectedNativeTools(failure);
-            }
-
-            @Override
-            public boolean disableRejectedCache(Throwable failure) {
-                return delegate.disableRejectedCache(failure);
-            }
-
+        // 能力与降级由 DelegatingModelClient 统一穿透，这里只负责记账与 before/after 钩子。
+        return new DelegatingModelClient(delegate) {
             @Override
             public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
                 return chat(messages, tools, null, null);
@@ -96,26 +74,6 @@ public final class MeteredModelClient implements ModelClient {
     }
 
     @Override
-    public ModelProfile profile() {
-        return delegate.profile();
-    }
-
-    @Override
-    public java.util.Set<NativeCapability> nativeCapabilities() {
-        return delegate.nativeCapabilities();
-    }
-
-    @Override
-    public boolean disableRejectedNativeTools(Throwable failure) {
-        return delegate.disableRejectedNativeTools(failure);
-    }
-
-    @Override
-    public boolean disableRejectedCache(Throwable failure) {
-        return delegate.disableRejectedCache(failure);
-    }
-
-    @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
         return invoke(messages, tools, null, null, false);
     }
@@ -133,7 +91,7 @@ public final class MeteredModelClient implements ModelClient {
 
     private ModelResponse invoke(List<Message> messages, List<ToolDefinition> tools, Consumer<String> text,
         Consumer<String> reasoning, boolean streaming) {
-        ModelClient target = delegate.snapshot();
+        ModelClient target = delegate().snapshot();
         String model = target.profile().model();
         List<Message> outbound = messages;
         if (model != null && !model.isBlank() && previousModel != null && !previousModel.equals(model)) {

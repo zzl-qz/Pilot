@@ -27,6 +27,7 @@ import com.pilot.core.message.Attachment;
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.message.ToolNames;
+import com.pilot.core.model.DelegatingModelClient;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ModelUsage;
@@ -395,29 +396,8 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     }
 
     ModelClient budgetedClient() {
-        return new ModelClient() {
-            @Override
-            public com.pilot.core.model.ModelProfile profile() {
-                return model.profile();
-            }
-
-            // 能力与降级只是转发：预算拦截由本包装的 chat/chargeRequest 负责，
-            // 原生工具拒绝与缓存参数拒绝必须落到真正的底层客户端才能自动恢复。
-            @Override
-            public Set<com.pilot.core.model.NativeCapability> nativeCapabilities() {
-                return model.nativeCapabilities();
-            }
-
-            @Override
-            public boolean disableRejectedNativeTools(Throwable failure) {
-                return model.disableRejectedNativeTools(failure);
-            }
-
-            @Override
-            public boolean disableRejectedCache(Throwable failure) {
-                return model.disableRejectedCache(failure);
-            }
-
+        // 能力与降级由 DelegatingModelClient 统一转发：预算拦截只由本包装的 chat/chargeRequest 负责。
+        return new DelegatingModelClient(model) {
             @Override
             public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
                 return chat(messages, tools, null);
