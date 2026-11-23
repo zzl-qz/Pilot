@@ -6,14 +6,17 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionRepository;
+import com.pilot.core.session.SessionStatus;
 
 /**
  * 会话间显式协调协议：协作请求、文件/目录占用与任务交接。
@@ -32,6 +35,10 @@ public final class SessionCoordinationService {
     public static final Duration DEFAULT_CLAIM_TTL = Duration.ofMinutes(30);
     /** 默认交接待办期限。 */
     public static final Duration DEFAULT_HANDOFF_TTL = Duration.ofHours(12);
+    /** 默认协作请求期限：目标长期未回应时自动收口为已过期。 */
+    public static final Duration DEFAULT_REQUEST_TTL = Duration.ofHours(2);
+    /** 默认停滞判定阈值：运行中会话连续无新活动超过该时长则标记为疑似停滞。 */
+    public static final Duration DEFAULT_STALL_TIMEOUT = Duration.ofMinutes(3);
 
     /** 释放原因：占用方主动释放。 */
     public static final String RELEASED = "released";
@@ -39,8 +46,15 @@ public final class SessionCoordinationService {
     public static final String LEASE_EXPIRED = "lease-expired";
     /** 释放原因：占用会话已经不存在（崩溃或被删除）。 */
     public static final String SESSION_GONE = "session-gone";
-    /** 交接结束原因：超时而没有接受。 */
+    /** 释放原因：占用会话已异常终止（失败/取消/中断），提前释放避免幽灵占锁。 */
+    public static final String OWNER_INACTIVE = "owner-inactive";
+    /** 交接或请求结束原因：超时而没有接受。 */
     public static final String HANDOFF_EXPIRED = "expired";
+    public static final String REQUEST_EXPIRED = "expired";
+
+    /** 看门狗单次巡检摘要，供日志与可观测性记录。 */
+    public record WatchdogReport(int sweptCount, int deadlockCount, int stalledSessionCount) {
+    }
 
     private final SessionRepository sessions;
     private final CoordinationScopeResolver scopes;
@@ -50,10 +64,13 @@ public final class SessionCoordinationService {
     private final Clock clock;
     private final Duration claimTtl;
     private final Duration handoffTtl;
+    private final Duration requestTtl;
+    private final Duration stallTimeout;
     private final Object lock = new Object();
     private final List<CoordinationRequest> requests = new ArrayList<>();
     private final List<CoordinationClaim> claims = new ArrayList<>();
     private final List<CoordinationHandoff> handoffs = new ArrayList<>();
+    private final Set<String> announcedAlerts = new HashSet<>();
 
     public SessionCoordinationService(SessionRepository sessions, CoordinationScopeResolver scopes,
         WorkspaceEventPublisher events, CoordinationSnapshotStore store, CoordinationSettings settings) {
@@ -65,6 +82,8 @@ public final class SessionCoordinationService {
         this.clock = settings.clock();
         this.claimTtl = settings.claimTtl();
         this.handoffTtl = settings.handoffTtl();
+        this.requestTtl = settings.requestTtl();
+        this.stallTimeout = settings.stallTimeout();
         CoordinationSnapshot saved = store.load();
         requests.addAll(saved.requests());
         claims.addAll(saved.claims());
@@ -112,7 +131,7 @@ public final class SessionCoordinationService {
             } else {
                 Instant now = clock.instant();
                 result = new CoordinationRequest(newId(), from.projectId(), from.id(), to.id(), reason, task,
-                    CoordinationRequestStatus.PENDING, now, now);
+                    CoordinationRequestStatus.PENDING, now, now, now.plus(requestTtl));
                 requests.add(result);
                 out.add(WorkspaceEventDraft
                     .of(WorkspaceEventType.COORDINATION_REQUESTED, from.id(), directoryOf(from), "协作请求 → " + to.id())
@@ -281,15 +300,58 @@ public final class SessionCoordinationService {
 
     /** 立即清理过期条目；返回清理条数，供指标端点观测。 */
     public int sweepNow() {
+        return patrol().sweptCount();
+    }
+
+    /**
+     * 看门狗巡检：主动清理过期或失效占用/请求/交接，并检测跨会话互等死锁与运行停滞会话。
+     * 同一告警签名只在首次出现时推送 {@link WorkspaceEventType#COORDINATION_ALERT}，避免定时刷屏。
+     */
+    public WatchdogReport patrol() {
         List<WorkspaceEventDraft> out = new ArrayList<>();
-        int before;
+        int swept;
+        int deadlocks = 0;
+        int stalledSessions = 0;
         synchronized (lock) {
-            before = claims.size() + (int)handoffs.stream().filter(CoordinationHandoffStatus.PENDING::equals).count();
+            Instant now = clock.instant();
+            int openBefore = countActiveEntries();
             sweep(out);
-            before -= claims.size() + (int)handoffs.stream().filter(CoordinationHandoffStatus.PENDING::equals).count();
+            swept = Math.max(0, openBefore - countActiveEntries());
+
+            List<CoordinationSessionView> allViews =
+                sessions.list().stream().map(candidate -> toSessionView(candidate, now)).toList();
+            for (CoordinationSessionView view : allViews) {
+                if (view.stalled()) {
+                    stalledSessions++;
+                }
+            }
+            List<CoordinationAlert> alerts = CoordinationDiagnostics.analyze(allViews, requests, handoffs);
+            Set<String> activeSignatures = new HashSet<>();
+            for (CoordinationAlert alert : alerts) {
+                if (CoordinationAlert.DEADLOCK.equals(alert.kind())) {
+                    deadlocks++;
+                }
+                String signature = alert.kind() + ":" + String.join(",", alert.sessionIds());
+                activeSignatures.add(signature);
+                if (announcedAlerts.add(signature)) {
+                    String subjectSession = alert.sessionIds().isEmpty() ? null : alert.sessionIds().getFirst();
+                    String projectId = subjectSession == null ? null
+                        : sessions.find(subjectSession).map(Session::projectId).orElse(null);
+                    out.add(WorkspaceEventDraft
+                        .of(WorkspaceEventType.COORDINATION_ALERT, subjectSession, null, alert.summary())
+                        .withProject(projectId).withDetail("kind", alert.kind())
+                        .withDetail("sessions", String.join(",", alert.sessionIds())));
+                }
+            }
+            announcedAlerts.retainAll(activeSignatures);
         }
         flush(out);
-        return before;
+        return new WatchdogReport(swept, deadlocks, stalledSessions);
+    }
+
+    private int countActiveEntries() {
+        return claims.size() + (int)requests.stream().filter(entry -> entry.status().open()).count()
+            + (int)handoffs.stream().filter(entry -> entry.status().open()).count();
     }
 
     private CoordinationRequest decideRequest(String callerSessionId, String requestId,
@@ -352,7 +414,7 @@ public final class SessionCoordinationService {
         return result;
     }
 
-    /** 清理过期占用与超时交接；返回要发布的事件，由调用方在解锁后发布。 */
+    /** 清理过期占用、异常终止会话的幽灵占用、超时协作请求与超时交接；返回要发布的事件，由调用方在解锁后发布。 */
     private void sweep(List<WorkspaceEventDraft> out) {
         Instant now = clock.instant();
         boolean changed = false;
@@ -361,12 +423,30 @@ public final class SessionCoordinationService {
             String reason = null;
             if (claim.expiredAt(now)) {
                 reason = LEASE_EXPIRED;
-            } else if (sessions.find(claim.sessionId()).isEmpty()) {
-                reason = SESSION_GONE;
+            } else {
+                Optional<Session> owner = sessions.find(claim.sessionId());
+                if (owner.isEmpty()) {
+                    reason = SESSION_GONE;
+                } else if (isAbortedOwner(owner.get().status())) {
+                    reason = OWNER_INACTIVE;
+                }
             }
             if (reason != null) {
                 iterator.remove();
                 out.add(releaseEvent(claim, reason));
+                changed = true;
+            }
+        }
+        for (int index = 0; index < requests.size(); index++) {
+            CoordinationRequest request = requests.get(index);
+            if (request.expiredAt(now)) {
+                CoordinationRequest expired = request.withStatus(CoordinationRequestStatus.EXPIRED, now);
+                requests.set(index, expired);
+                out.add(WorkspaceEventDraft
+                    .of(WorkspaceEventType.COORDINATION_UPDATED, expired.toSessionId(), null, "协作请求 expired")
+                    .withProject(expired.projectId()).withDetail("requestId", expired.id())
+                    .withDetail("status", expired.status().name()).withDetail("reason", REQUEST_EXPIRED)
+                    .withDetail("from", expired.fromSessionId()).withDetail("to", expired.toSessionId()));
                 changed = true;
             }
         }
@@ -384,16 +464,28 @@ public final class SessionCoordinationService {
         }
     }
 
+    private static boolean isAbortedOwner(SessionStatus status) {
+        return status == SessionStatus.FAILED || status == SessionStatus.CANCELLED
+            || status == SessionStatus.INTERRUPTED;
+    }
+
+    private CoordinationSessionView toSessionView(Session candidate, Instant now) {
+        Instant lastActivity = candidate.updatedAt();
+        boolean stalled = candidate.status() == SessionStatus.RUNNING && lastActivity != null
+            && !lastActivity.plus(stallTimeout).isAfter(now);
+        return new CoordinationSessionView(candidate.id(), candidate.title(), candidate.status().name(),
+            candidate.workspace(), presence.isOnline(candidate.id()), candidate.archived(), lastActivity, stalled);
+    }
+
     private CoordinationSnapshot visibleSnapshot(Session caller) {
+        Instant now = clock.instant();
         ProjectCoordinationScope callerScope = scopes.resolve(caller);
         List<CoordinationSessionView> visibleSessions = new ArrayList<>();
         for (Session candidate : sessions.list()) {
             if (!shares(callerScope, candidate)) {
                 continue;
             }
-            visibleSessions
-                .add(new CoordinationSessionView(candidate.id(), candidate.title(), candidate.status().name(),
-                    candidate.workspace(), presence.isOnline(candidate.id()), candidate.archived()));
+            visibleSessions.add(toSessionView(candidate, now));
         }
         List<CoordinationClaim> visibleClaims =
             claims.stream().filter(claim -> claimVisible(caller, callerScope, claim)).toList();
@@ -401,8 +493,10 @@ public final class SessionCoordinationService {
             .filter(entry -> partiesVisible(caller, callerScope, entry.fromSessionId(), entry.toSessionId())).toList();
         List<CoordinationHandoff> visibleHandoffs = handoffs.stream()
             .filter(entry -> partiesVisible(caller, callerScope, entry.fromSessionId(), entry.toSessionId())).toList();
+        List<CoordinationAlert> visibleAlerts =
+            CoordinationDiagnostics.analyze(visibleSessions, visibleRequests, visibleHandoffs);
         return new CoordinationSnapshot(callerScope.projectId(), visibleSessions, visibleClaims, visibleRequests,
-            visibleHandoffs);
+            visibleHandoffs, visibleAlerts);
     }
 
     private boolean claimVisible(Session caller, ProjectCoordinationScope callerScope, CoordinationClaim claim) {

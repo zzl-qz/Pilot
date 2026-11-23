@@ -24,9 +24,12 @@ public class CoordinationProtocolConfiguration {
     public SessionCoordinationService sessionCoordinationService(SessionRepository sessions,
         CoordinationScopeResolver scopes, WorkspaceEventPublisher events, CoordinationSnapshotStore store,
         SessionPresenceRegistry presence, @Value("${pilot.coordination.claim-ttl-minutes:30}") long claimTtlMinutes,
-        @Value("${pilot.coordination.handoff-ttl-hours:12}") long handoffTtlHours) {
+        @Value("${pilot.coordination.handoff-ttl-hours:12}") long handoffTtlHours,
+        @Value("${pilot.coordination.request-ttl-minutes:120}") long requestTtlMinutes,
+        @Value("${pilot.coordination.stall-timeout-seconds:180}") long stallTimeoutSeconds) {
         CoordinationSettings settings = new CoordinationSettings(presence, Clock.systemUTC(),
-            Duration.ofMinutes(Math.max(1, claimTtlMinutes)), Duration.ofHours(Math.max(1, handoffTtlHours)));
+            Duration.ofMinutes(Math.max(1, claimTtlMinutes)), Duration.ofHours(Math.max(1, handoffTtlHours)),
+            Duration.ofMinutes(Math.max(1, requestTtlMinutes)), Duration.ofSeconds(Math.max(30, stallTimeoutSeconds)));
         return new SessionCoordinationService(sessions, scopes, events, store, settings);
     }
 }

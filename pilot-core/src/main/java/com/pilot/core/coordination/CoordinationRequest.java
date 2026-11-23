@@ -12,7 +12,12 @@ import java.util.Objects;
  * @param taskId    关联任务标识，可为空串
  */
 public record CoordinationRequest(String id, String projectId, String fromSessionId, String toSessionId, String reason,
-    String taskId, CoordinationRequestStatus status, Instant createdAt, Instant updatedAt) {
+    String taskId, CoordinationRequestStatus status, Instant createdAt, Instant updatedAt, Instant expiresAt) {
+
+    public CoordinationRequest(String id, String projectId, String fromSessionId, String toSessionId, String reason,
+        String taskId, CoordinationRequestStatus status, Instant createdAt, Instant updatedAt) {
+        this(id, projectId, fromSessionId, toSessionId, reason, taskId, status, createdAt, updatedAt, null);
+    }
 
     public CoordinationRequest {
         id = requireText(id, "id");
@@ -23,10 +28,16 @@ public record CoordinationRequest(String id, String projectId, String fromSessio
         Objects.requireNonNull(status, "status must not be null");
         Objects.requireNonNull(createdAt, "createdAt must not be null");
         updatedAt = updatedAt == null ? createdAt : updatedAt;
+        expiresAt = expiresAt == null ? createdAt.plus(SessionCoordinationService.DEFAULT_REQUEST_TTL) : expiresAt;
     }
 
     public CoordinationRequest withStatus(CoordinationRequestStatus next, Instant at) {
-        return new CoordinationRequest(id, projectId, fromSessionId, toSessionId, reason, taskId, next, createdAt, at);
+        return new CoordinationRequest(id, projectId, fromSessionId, toSessionId, reason, taskId, next, createdAt, at,
+            expiresAt);
+    }
+
+    public boolean expiredAt(Instant now) {
+        return status.open() && !expiresAt.isAfter(now);
     }
 
     private static String requireText(String value, String name) {

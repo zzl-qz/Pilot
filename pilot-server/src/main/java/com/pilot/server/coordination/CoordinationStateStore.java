@@ -96,16 +96,17 @@ public class CoordinationStateStore implements CoordinationSnapshotStore {
     }
 
     private record RequestPayload(String id, String projectId, String fromSessionId, String toSessionId, String reason,
-        String taskId, String status, String createdAt, String updatedAt) {
+        String taskId, String status, String createdAt, String updatedAt, String expiresAt) {
         static RequestPayload of(CoordinationRequest request) {
             return new RequestPayload(request.id(), request.projectId(), request.fromSessionId(), request.toSessionId(),
                 request.reason(), request.taskId(), request.status().name(), request.createdAt().toString(),
-                request.updatedAt().toString());
+                request.updatedAt().toString(), request.expiresAt().toString());
         }
 
         CoordinationRequest toRequest() {
             return new CoordinationRequest(id, projectId, fromSessionId, toSessionId, reason, taskId,
-                CoordinationRequestStatus.valueOf(status), Instant.parse(createdAt), Instant.parse(updatedAt));
+                CoordinationRequestStatus.valueOf(status), Instant.parse(createdAt), Instant.parse(updatedAt),
+                expiresAt == null || expiresAt.isBlank() ? null : Instant.parse(expiresAt));
         }
     }
 

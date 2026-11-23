@@ -8,16 +8,23 @@ import java.util.List;
  * <p>只包含协调数据本身，不含沙箱改动、仲裁报告和事件正文。
  */
 public record CoordinationSnapshot(String projectId, List<CoordinationSessionView> sessions,
-    List<CoordinationClaim> claims, List<CoordinationRequest> requests, List<CoordinationHandoff> handoffs) {
+    List<CoordinationClaim> claims, List<CoordinationRequest> requests, List<CoordinationHandoff> handoffs,
+    List<CoordinationAlert> alerts) {
+
+    public CoordinationSnapshot(String projectId, List<CoordinationSessionView> sessions,
+        List<CoordinationClaim> claims, List<CoordinationRequest> requests, List<CoordinationHandoff> handoffs) {
+        this(projectId, sessions, claims, requests, handoffs, List.of());
+    }
 
     public CoordinationSnapshot {
         sessions = sessions == null ? List.of() : List.copyOf(sessions);
         claims = claims == null ? List.of() : List.copyOf(claims);
         requests = requests == null ? List.of() : List.copyOf(requests);
         handoffs = handoffs == null ? List.of() : List.copyOf(handoffs);
+        alerts = alerts == null ? List.of() : List.copyOf(alerts);
     }
 
     public static CoordinationSnapshot empty() {
-        return new CoordinationSnapshot(null, List.of(), List.of(), List.of(), List.of());
+        return new CoordinationSnapshot(null, List.of(), List.of(), List.of(), List.of(), List.of());
     }
 }

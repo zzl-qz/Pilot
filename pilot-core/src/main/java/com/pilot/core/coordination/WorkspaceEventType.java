@@ -6,8 +6,8 @@ public enum WorkspaceEventType {
     RUN_FINISHED("run.finished"), SANDBOX_CHANGED("sandbox.changed"), FILE_CLAIMED("file.claimed"),
     FILE_RELEASED("file.released"), ARBITRATION_CREATED("arbitration.created"),
     ARBITRATION_RESOLVED("arbitration.resolved"), COORDINATION_REQUESTED("coordination.requested"),
-    COORDINATION_UPDATED("coordination.updated"), HANDOFF_CREATED("handoff.created"),
-    HANDOFF_RESOLVED("handoff.resolved");
+    COORDINATION_UPDATED("coordination.updated"), COORDINATION_ALERT("coordination.alert"),
+    HANDOFF_CREATED("handoff.created"), HANDOFF_RESOLVED("handoff.resolved");
 
     private final String wireName;
 
