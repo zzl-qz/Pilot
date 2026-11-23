@@ -260,6 +260,69 @@ class BrowserToolTest {
         assertEquals("https://example.com/job/1", backend.commands.getLast().get("expected_url"));
     }
 
+    @Test
+    void preservesExternalScopeAndUrlRejections() {
+        BrowserTool browser = tool();
+        for (String url : List.of("http://example.com/", "https://user:pass@example.com/", "https://127.0.0.1/",
+            "https://foo.localhost/", "https://localhost/", "https://[::1]/")) {
+            String result =
+                browser.execute(Map.of("action", "navigate", "url", url, "external", true, "purpose", "查资料"));
+            assertTrue(result.startsWith("ERROR: "), url + " -> " + result);
+        }
+        assertTrue(browser.execute(Map.of("action", "press", "key", "Enter", "external", true, "purpose", "提交"))
+            .contains("外网交互需要 expected_url"));
+        assertTrue(backend.commands.isEmpty());
+    }
+
+    @Test
+    void mapsClickTabInputAndLogFamilies() {
+        BrowserTool browser = tool();
+        browser.execute(Map.of("action", "dblclick", "ref", "e1"));
+        browser.execute(Map.of("action", "right_click", "selector", "#menu"));
+        browser.execute(Map.of("action", "hover", "ref", "e2"));
+        browser.execute(Map.of("action", "switch_tab", "tabId", "t7"));
+        browser.execute(Map.of("action", "close_tab", "tabId", "t7"));
+        browser.execute(Map.of("action", "type", "ref", "e3", "text", "搜索词", "submit", false));
+        browser.execute(Map.of("action", "select", "ref", "e4", "values", "选项"));
+        browser.execute(Map.of("action", "console", "level", "error", "clear", true));
+        browser.execute(Map.of("action", "wait", "text", "加载中", "selector", "#done", "ms", -5));
+        browser.execute(Map.of("action", "screenshot", "ref", "e5", "fullPage", false));
+
+        assertEquals(Map.of("op", "click", "ref", "e1", "clickCount", 2), backend.commands.get(0));
+        assertEquals(Map.of("op", "click", "selector", "#menu", "button", "right"), backend.commands.get(1));
+        assertEquals(Map.of("op", "hover", "ref", "e2"), backend.commands.get(2));
+        assertEquals(Map.of("op", "switch_tab", "tabId", "t7"), backend.commands.get(3));
+        assertEquals(Map.of("op", "close_tab", "tabId", "t7"), backend.commands.get(4));
+        assertEquals(Map.of("op", "type", "ref", "e3", "text", "搜索词"), backend.commands.get(5));
+        assertEquals(Map.of("op", "select", "ref", "e4", "values", List.of("选项")), backend.commands.get(6));
+        assertEquals(Map.of("op", "console", "level", "error", "clear", true), backend.commands.get(7));
+        assertEquals(Map.of("op", "wait", "text", "加载中", "selector", "#done", "ms", 0L), backend.commands.get(8));
+        // 截图目标与 fullPage=false 只影响 ref 传递：false 不写进命令，path 由 BrowserTool 追加
+        assertEquals("e5", backend.commands.get(9).get("ref"));
+        assertFalse(backend.commands.get(9).containsKey("fullPage"));
+    }
+
+    @Test
+    void rejectsMissingTargetsAndUploadLimits() throws IOException {
+        Files.writeString(workspace.resolve("a.txt"), "x");
+        BrowserTool browser = tool();
+        for (String action : List.of("hover", "download", "fill", "type", "select", "upload")) {
+            String result = browser
+                .execute(Map.of("action", action, "text", "x", "values", List.of("a"), "files", List.of("a.txt")));
+            assertTrue(result.contains("需要 ref（来自 snapshot）或 selector"), action + " -> " + result);
+        }
+        List<String> eleven = new ArrayList<>();
+        for (int i = 0; i <= 10; i++) {
+            eleven.add("a.txt");
+        }
+        assertTrue(browser.execute(Map.of("action", "upload", "ref", "e1", "files", eleven))
+            .startsWith("ERROR: upload 一次最多 10 个文件"));
+        assertEquals("ok", browser.execute(Map.of("action", "upload", "ref", "e1", "files", eleven.subList(1, 11))));
+        assertEquals(10, ((List<?>)backend.commands.getLast().get("files")).size());
+        assertTrue(browser.execute(Map.of("action", "fill", "ref", "e1", "text", 42)).contains("需要 text"));
+        assertEquals(1, backend.commands.size());
+    }
+
     private static final class FakeBackend implements BrowserBackend {
         private Availability availability = Availability.ready();
         private final List<Map<String, Object>> commands = new ArrayList<>();
