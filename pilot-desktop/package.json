@@ -12,7 +12,8 @@
     "test:ui": "node test/smoke/ui-smoke.mjs",
     "test:browser": "node browser-viewport-smoke.mjs",
     "test:security": "node test/smoke/security-smoke.mjs",
-    "test:host": "node ../scripts/verify-desktop-host.mjs"
+    "test:host": "node ../scripts/verify-desktop-host.mjs",
+    "package:release": "node ../scripts/package-desktop-release.mjs --verify"
   },
   "devDependencies": {
     "electron": "45.2.1"
