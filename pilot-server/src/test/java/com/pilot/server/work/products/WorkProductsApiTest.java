@@ -28,7 +28,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.pilot.core.plan.PlanSink;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.ToolRegistry;
-import com.pilot.server.agent.AgentRunService;
+import com.pilot.server.agent.AgentRunPreparation;
 
 @SpringBootTest(properties = {"pilot.store=memory", "pilot.runtime.provision=false", "pilot.web-search.local=false"})
 @AutoConfigureMockMvc
@@ -51,7 +51,7 @@ class WorkProductsApiTest {
     @Autowired
     SkillDraftService drafts;
     @Autowired
-    AgentRunService runs;
+    AgentRunPreparation preparation;
     @TempDir
     Path workspace;
 
@@ -60,9 +60,10 @@ class WorkProductsApiTest {
         String session = sessions.createSession("工具绑定", workspace.toString()).id();
         PlanSink sink = (items, explanation) -> {
         };
-        ToolRegistry main =
-            ReflectionTestUtils.invokeMethod(runs, "sessionTools", session, "run", workspace.toString(), sink);
-        ToolRegistry review = ReflectionTestUtils.invokeMethod(runs, "reviewTools", workspace.toString());
+        ToolRegistry main = ReflectionTestUtils.invokeMethod(preparation, "sessionTools", session, "run",
+            workspace.toString(), sink, List.of());
+        ToolRegistry review =
+            ReflectionTestUtils.invokeMethod(preparation, "reviewTools", workspace.toString(), List.of());
         assertTrue(main.find("publish_artifact").isPresent());
         assertTrue(main.find("propose_skill").isPresent());
         assertTrue(main.names().contains("enable_tools"));
