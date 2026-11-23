@@ -75,6 +75,15 @@ async function run(page, name) {
   await page.locator('.thread').hover();
   await page.mouse.wheel(0, -800);
   await page.waitForFunction(() => { const el = document.querySelector('.thread'); return el && el.scrollTop < el.scrollHeight - el.clientHeight - 30; });
+  await page.evaluate(() => new Promise((resolve) => {
+    const el = document.querySelector('.thread');
+    let previous = el.scrollTop;
+    const check = () => requestAnimationFrame(() => {
+      if (el.scrollTop === previous) resolve();
+      else { previous = el.scrollTop; check(); }
+    });
+    check();
+  }));
   // 阅读中途刷新，不触发重新激活或历史重建。
   await page.locator('.thread').evaluate(el => { el.scrollTop = 250; el.dispatchEvent(new Event('scroll')); });
   const before = await page.evaluate(() => ({ instance: pageInstance, text: store.getState().composerApi.getText(), scroll: document.querySelector('.thread').scrollTop }));

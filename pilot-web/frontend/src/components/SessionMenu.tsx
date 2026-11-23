@@ -148,8 +148,12 @@ export function SessionActionDialog({ action, onClose }: { action: SessionAction
   useLayoutEffect(() => {
     return () => {
       requestAnimationFrame(() => {
-        // 关闭和下一次操作可能落在同一帧，已打开的菜单或对话优先持有焦点。
-        if (!document.querySelector('dialog[open], [aria-modal="true"], [data-workbench-menu-open]')) restoreFocus(action.trigger);
+        // 关闭和下一次操作可能落在同一帧，已打开的菜单、对话或新焦点优先保留，避免回抢焦点。
+        const active = document.activeElement;
+        const focusLost = !active || active === document.body || !active.isConnected;
+        if (focusLost && !document.querySelector('dialog[open], [aria-modal="true"], [data-workbench-menu-open]')) {
+          restoreFocus(action.trigger);
+        }
       });
     };
   }, [action]);

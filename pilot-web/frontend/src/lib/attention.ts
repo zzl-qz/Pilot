@@ -141,7 +141,7 @@ export function suggestAllowRule(
   if (name === 'edit_file' || name === 'create_file' || name === 'apply_patch') {
     const rawPath = typeof structuredArgs?.path === 'string' ? structuredArgs.path.trim().replace(/\\/g, '/') : '';
     const firstDir = rawPath && rawPath.includes('/') ? rawPath.replace(/^\.\//, '').split('/')[0] : '';
-    if (firstDir && firstDir !== '.' && firstDir !== '..' && !/[*()[\]]/.test(firstDir)) {
+    if (firstDir && firstDir !== '.' && firstDir !== '..' && !/[:*()[\]]/.test(firstDir)) {
       return {
         rule: `${name}(${firstDir}/**)`,
         label: `允许修改 ${firstDir}/`

@@ -160,6 +160,24 @@ try {
     ['s1', 'q1', '滚动发布']
   );
 
+  // macOS Option+1 会将 event.key 变成 '¡'，必须回退读取 event.code === 'Digit1'
+  await page.evaluate(() => {
+    window.store.setState({
+      pendingQuestions: {
+        q1_mac: { callId: 'q1_mac', question: 'macOS Option+1 测试？', options: ['方案A', '方案B'], requestedAt: Date.now() }
+      }
+    });
+  });
+  await qDock.waitFor();
+  await page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: '¡', code: 'Digit1', altKey: true, bubbles: true, cancelable: true }));
+  });
+  await qDock.waitFor({ state: 'hidden' });
+  assert.deepEqual(
+    await page.evaluate(() => window.calls.filter((c) => c.name === 'answerQuestion').at(-1)?.args),
+    ['s1', 'q1_mac', '方案A']
+  );
+
   // 409 过期提问自动移除卡片并提示用户
   await page.evaluate(() => {
     window.failQuestion = true;
@@ -363,6 +381,40 @@ try {
     });
   });
   await page.locator('.onboarding-checklist').waitFor();
+  const modelStep = page.locator('.onboarding-steps li').first();
+  await modelStep.getByText('1. 配置对话模型与 API Key', { exact: true }).waitFor();
+  assert.equal(await modelStep.evaluate((el) => el.classList.contains('is-done')), false);
+
+  // 仅有 workspace 但未配置 API Key 时仍显示检查清单
+  await page.evaluate(() => {
+    window.store.setState({ workspace: '/tmp/ws1' });
+  });
+  await page.locator('.onboarding-checklist').waitFor();
+  assert.equal(await modelStep.evaluate((el) => el.classList.contains('is-done')), false);
+
+  // 模拟保存模型配置期间（modelSave.busy = true），EmptyState 不得递归卡死或误弹提示
+  await page.evaluate(() => {
+    window.store.setState((draft) => {
+      draft.ui.notice = null;
+      draft.modelSave = { busy: true, message: '正在保存模型配置…', error: false };
+    });
+  });
+  await page.waitForTimeout(50);
+  assert.equal(await page.evaluate(() => window.store.getState().ui.notice), null);
+
+  // 配置模型与密钥且已有工作区后，恢复 modelSave 并验证就绪检查自动收起
+  await page.evaluate(() => {
+    window.store.setState((draft) => {
+      draft.modelSave = { busy: false, message: '', error: false };
+      draft.settingsData = {
+        model: 'gpt-test',
+        modelEndpoint: 'https://example.test/v1',
+        modelApiKeySet: true,
+        attachmentLimits: { maxFiles: 64, maxFileBytes: 2097152, maxTotalBytes: 26214400, maxRequestBytes: 37000000 }
+      };
+    });
+  });
+  await page.locator('.onboarding-checklist').waitFor({ state: 'hidden' });
 
   await page.evaluate(() => {
     window.store.setState((draft) => {

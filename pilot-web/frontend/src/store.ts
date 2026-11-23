@@ -419,7 +419,13 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     get().loadSkills();
     void get().refreshMemoryDraftCount();
     try {
-      const health = await api.health() as { frontendStale?: boolean } | null;
+      const response = await api.health();
+      if (response && typeof (response as Response).ok === 'boolean' && !(response as Response).ok) {
+        throw new Error(`HTTP ${(response as Response).status}`);
+      }
+      const health = response && typeof (response as Response).json === 'function'
+        ? await (response as Response).json().catch(() => null) as { frontendStale?: boolean } | null
+        : (response as { frontendStale?: boolean } | null);
       set((draft) => { draft.ui.connection = { status: 'ok', text: '已连接' }; });
       if (health?.frontendStale) {
         get().showNotice('界面资源不是最新构建：请运行 npm --prefix pilot-web/frontend run build 后刷新。');

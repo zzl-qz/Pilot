@@ -13,12 +13,12 @@ test('usagePercent 优先用后端算好的值，缺了按用量除预算', () =
   assert.equal(usagePercent(null), 0);
 });
 
-test('usageLevel 与自动收缩水位对齐：80% 折叠、97% 硬裁剪', () => {
+test('usageLevel 与自动收缩水位对齐：80% 警告、92% 高温', () => {
   assert.equal(usageLevel(0), 'normal');
   assert.equal(usageLevel(79), 'normal');
   assert.equal(usageLevel(80), 'warn');
-  assert.equal(usageLevel(96), 'warn');
-  assert.equal(usageLevel(97), 'danger');
+  assert.equal(usageLevel(91), 'warn');
+  assert.equal(usageLevel(92), 'danger');
   assert.equal(usageLevel(100), 'danger');
 });
 

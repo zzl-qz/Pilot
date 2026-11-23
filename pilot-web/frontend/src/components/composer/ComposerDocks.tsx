@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { PendingApproval, PendingQuestion } from "../../types/thread.js";
+import type { PendingApproval, PendingQuestion, ThreadRow } from "../../types/thread.js";
 import { Button } from "@astryxdesign/core/Button";
 import { StatusDot } from "@astryxdesign/core/StatusDot";
 import { useStore } from "../../store.js";
@@ -10,10 +10,12 @@ import { questionChoice, toolArgsText, toolLabel } from "../../lib/tool-meta.js"
 import { agentStatusLabel, agentStatusDotVariant, summarizeAgents } from "../../lib/agents.js";
 import { Icon } from "../Icon.jsx";
 
+const EMPTY_ROWS: ThreadRow[] = [];
+
 export function ResumeBar() {
   const running = useStore((state) => state.running);
   const lastOutcome = useStore((state) => state.lastOutcome);
-  const rows = useStore((state) => state.thread?.rows || []);
+  const rows = useStore((state) => state.thread?.rows ?? EMPTY_ROWS);
   const latestResult = latestRunResult(rows);
   const resumable = Boolean(latestResult?.resumable && !latestResult.continued);
   const bar = resumeBar({ running, needInput: lastOutcome === 'NEED_INPUT', resumable, outcome: latestResult?.outcome || latestResult?.errorCode || '' });
@@ -347,8 +349,13 @@ function QuestionCard({
       if (event.isComposing || event.keyCode === 229 || event.getModifierState?.('AltGraph')) return;
       if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
       if (blockingModalOpen() || isTypingElement(event.target)) return;
-      if (/^[1-9]$/.test(event.key)) {
-        const optionIndex = Number(event.key) - 1;
+      const digit = /^[1-9]$/.test(event.key)
+        ? Number(event.key)
+        : /^Digit([1-9])$/.test(event.code)
+          ? Number(event.code.slice(5))
+          : 0;
+      if (digit > 0) {
+        const optionIndex = digit - 1;
         if (optionIndex < options.length) {
           event.preventDefault();
           void onSubmit(options[optionIndex]);

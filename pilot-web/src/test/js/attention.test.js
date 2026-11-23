@@ -34,6 +34,14 @@ test('suggestAllowRule generates safe prefix/directory rules and blocks high-ris
     suggestAllowRule('edit_file', 'src/components/App.tsx', { path: 'src/components/App.tsx' }),
     { rule: 'edit_file(src/**)', label: '允许修改 src/' }
   );
+  assert.deepEqual(
+    suggestAllowRule('edit_file', 'C:\\repo\\src\\App.tsx', { path: 'C:\\repo\\src\\App.tsx' }),
+    { rule: 'edit_file', label: '记住文件修改' }
+  );
+  assert.deepEqual(
+    suggestAllowRule('edit_file', '/repo/src/App.tsx', { path: '/repo/src/App.tsx' }),
+    { rule: 'edit_file', label: '记住文件修改' }
+  );
   assert.equal(suggestAllowRule('run_command', 'rm -rf ./dist', { command: 'rm -rf ./dist' }), null);
   assert.equal(suggestAllowRule('run_command', 'npm test && rm -rf ./dist', { command: 'npm test && rm -rf ./dist' }), null);
   assert.equal(suggestAllowRule('run_command', 'echo hi | sh', { command: 'echo hi | sh' }), null);

@@ -286,7 +286,13 @@ function EmptyState() {
   const workspace = useStore(state => state.workspace || state.draftSession?.workspace || '');
   const project = useStore(state => state.projects.find(item => item.id === state.currentProjectId));
   const settingsData = useStore(state => state.settingsData);
-  const modelReady = useStore(state => state.modelReady());
+  // 不能在 selector 里调用 state.modelReady()：那是带 showNotice 副作用的发送前守卫，
+  // 保存模型期间会触发 useSyncExternalStore 同步 setState 无限递归卡死界面。
+  const modelConfigured = Boolean(
+    settingsData?.model?.trim()
+    && settingsData?.modelApiKeySet
+    && (settingsData.modelEndpoint === undefined || settingsData.modelEndpoint.trim())
+  );
   const soundEnabled = useStore(state => state.alertPrefs.soundEnabled);
   const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
     try { return localStorage.getItem('pilot.onboarding.dismissed') === '1'; } catch { return false; }
@@ -307,7 +313,7 @@ function EmptyState() {
     { title: '调研问题', sub: '核对来源，交付可下载的报告', prompt: '请帮我调研以下问题，优先查阅原始来源，说明时间与不确定性，整理为报告并保存到成果面板。调研问题：' },
     { title: '整理资料', sub: '提取要点、核对数据与缺失项', prompt: '请根据我提供的文件整理要点或表格，核对数字和来源，缺失数据不要猜测，并将结果保存到成果面板。具体要求：' }
   ];
-  const showOnboarding = Boolean(settingsData && !onboardingDismissed && (!modelReady || !workspace));
+  const showOnboarding = Boolean(settingsData && !onboardingDismissed && (!modelConfigured || !workspace));
   return (
     <div className="thread-scroll-region conversation-thread">
       <div className="thread is-empty">
@@ -331,9 +337,9 @@ function EmptyState() {
                   </button>
                 </div>
                 <ul className="onboarding-steps">
-                  <li className={modelReady ? 'is-done' : ''}>
-                    <span>{modelReady ? '✓ 模型服务与密钥已就绪' : '1. 配置对话模型与 API Key'}</span>
-                    {!modelReady && (
+                  <li className={modelConfigured ? 'is-done' : ''}>
+                    <span>{modelConfigured ? '✓ 模型服务与密钥已就绪' : '1. 配置对话模型与 API Key'}</span>
+                    {!modelConfigured && (
                       <Button size="sm" variant="primary" label="去配置"
                         onClick={() => useStore.getState().setUi({ settingsOpen: true, settingsSection: 'model' })} />
                     )}

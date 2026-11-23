@@ -169,3 +169,15 @@ test('toolArgsText 收到结构化对象参数时提取核心字段而不输出 
   assert.equal(toolArgsText('edit_file', { path: 'src/App.tsx' }), 'src/App.tsx');
   assert.equal(toolArgsText('command_status', { taskId: 'abc1234567890', waitSeconds: 10 }), 'abc12345… · 最多等 10 秒');
 });
+
+test('toolArgsText 保留带空格的命令、路径与搜索参数', () => {
+  assert.equal(
+    toolArgsText('run_command', '{command=git status --short --branch,timeoutSeconds=120}'),
+    'git status --short --branch'
+  );
+  assert.equal(
+    toolArgsText('read_file', '{path=docs/design review/tasks.md,start_line=1}'),
+    'docs/design review/tasks.md'
+  );
+  assert.equal(toolArgsText('web_search', '{query=spring boot 4,limit=5}'), 'spring boot 4');
+});

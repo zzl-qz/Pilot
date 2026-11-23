@@ -105,7 +105,8 @@ function toolArgsText(name: string, args: unknown) {
     const match = raw.match(new RegExp(`(?:^|[{,\\s])${key}=([^,}\\s]+)`));
     return match ? match[1].trim().replace(/^["']|["']$/g, '') : '';
   };
-  if (name === 'run_command') return field('command') || raw;
+  const valueField = (key: string) => (obj && obj[key] != null ? String(obj[key]).trim() : extractSimpleArg(raw, key));
+  if (name === 'run_command') return valueField('command') || raw;
   if (name === 'command_status') {
     const id = shortId(field('taskId'));
     const wait = field('waitSeconds');
@@ -138,10 +139,10 @@ function toolArgsText(name: string, args: unknown) {
     if (BROWSER_ACTIONS[raw]) return BROWSER_ACTIONS[raw];
     return label || raw.replace(/^\{|\}$/g, '');
   }
-  if (name === 'web_search') return field('query') || raw;
-  if (name === 'web_fetch') return (field('url') || raw).replace(/^https?:\/\//, '');
+  if (name === 'web_search') return valueField('query') || raw;
+  if (name === 'web_fetch') return (valueField('url') || raw).replace(/^https?:\/\//, '');
   if (name === 'read_file' || name === 'edit_file' || name === 'create_file' || name === 'list_dir' || name === 'search_text' || name === 'glob_files') {
-    return field('path') || field('query') || raw;
+    return valueField('path') || valueField('query') || raw;
   }
   return raw.replace(/^\{|\}$/g, '');
 }

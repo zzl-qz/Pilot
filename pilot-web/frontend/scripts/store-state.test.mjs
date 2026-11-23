@@ -571,3 +571,41 @@ test('历史回放用已保存的运行差异替换只有路径的占位文件',
     assert.equal(result.changedFiles[0].removed, 34);
   } finally { Object.assign(api, original); useStore.setState(saved); }
 });
+
+test('init 解析 /api/health Response 检测过期构建，并在非 2xx 时标记连接异常', async () => {
+  reset();
+  const saved = useStore.getState();
+  const previousFetch = fetchHandler;
+  const previousDocument = globalThis.document;
+  const { api } = await import('../src/api.js');
+  const original = { ...api };
+  const notices = [];
+  globalThis.document = { ...previousDocument, documentElement: { dataset: {} }, querySelector: () => null };
+  globalThis.EventSource = undefined;
+  api.skills = async () => ({ available: [], invalid: [] });
+  api.memoryDraftCount = async () => ({ count: 0 });
+  api.projects = async () => [];
+  api.settings = async () => ({ model: 'm', modelEndpoint: 'https://e.test', modelApiKeySet: true, permissionMode: 'AUTO', modelOptions: [] });
+  api.sessions = async () => [];
+  api.pendingInteractions = async () => ({ approvals: [], questions: [] });
+  useStore.setState({ showNotice: message => notices.push(message), startNewSession: () => {} });
+  try {
+    fetchHandler = async () => Response.json({ status: 'ok', frontendStale: true });
+    await useStore.getState().init(null);
+    assert.equal(useStore.getState().ui.connection.status, 'ok');
+    assert.ok(notices.some(text => text.includes('界面资源不是最新构建')));
+
+    notices.length = 0;
+    fetchHandler = async () => new Response('down', { status: 503 });
+    await useStore.getState().init(null);
+    assert.equal(useStore.getState().ui.connection.status, 'error');
+    assert.equal(useStore.getState().ui.connection.text, '无法连接后端');
+  } finally {
+    closeStreams();
+    Object.assign(api, original);
+    fetchHandler = previousFetch;
+    globalThis.document = previousDocument;
+    delete globalThis.EventSource;
+    useStore.setState(saved);
+  }
+});
