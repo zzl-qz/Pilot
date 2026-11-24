@@ -1,5 +1,6 @@
 package com.pilot.core.tool.code;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -21,6 +22,24 @@ class CodeDiagnosticsToolTest {
         assertTrue(result.contains("src/A.java:1: 错误"), result);
         assertTrue(result.contains("已截断到 50 条"), result);
         assertFalse(result.contains("src/A.java:51:"));
+    }
+
+    @Test
+    void zeroDiagnosticsReturnsCleanPassInsteadOfUnavailableError() {
+        CodeDiagnosticsTool tool = new CodeDiagnosticsTool(() -> "ready", path -> "");
+        assertEquals(CodeDiagnosticsTool.NO_DIAGNOSTICS, tool.execute(Map.of()));
+    }
+
+    @Test
+    void explicitCheckerErrorIsPreserved() {
+        CodeDiagnosticsTool tool = new CodeDiagnosticsTool(() -> "ready", path -> "ERROR: 代码检查超时");
+        assertEquals("ERROR: 代码检查超时", tool.execute(Map.of()));
+    }
+
+    @Test
+    void unavailableCheckerStillReturnsErrorOnDirectExecute() {
+        CodeDiagnosticsTool tool = new CodeDiagnosticsTool(() -> "", path -> "");
+        assertTrue(tool.execute(Map.of()).startsWith("ERROR:"));
     }
 
     @Test
