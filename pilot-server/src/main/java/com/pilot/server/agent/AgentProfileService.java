@@ -28,12 +28,12 @@ public class AgentProfileService {
     private final AgentProperties agentProperties;
     private final PilotDataDir dataDir;
 
-    /** 按工作区扫描两级代理目录。 */
+    /** 按工作区扫描项目级与用户级代理目录，并合并随包内置角色（项目级 &gt; 用户级 &gt; 内置级）。 */
     public AgentProfileCatalog catalogFor(String workspace) {
         List<Path> roots = new ArrayList<>();
         roots.add(projectRootFor(workspace));
         roots.add(userRoot());
-        return AgentProfileCatalog.scan(roots);
+        return AgentProfileCatalog.scanWithBuiltins(roots);
     }
 
     /** 项目级代理目录固定为 {@code <workspace>/.pilot/agents}：目录即协议，不设配置。 */

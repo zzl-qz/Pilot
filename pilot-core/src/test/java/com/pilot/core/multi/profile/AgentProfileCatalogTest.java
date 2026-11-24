@@ -188,4 +188,29 @@ class AgentProfileCatalogTest {
         assertTrue(parsed.writable());
         assertEquals(List.of("git push"), parsed.denyCommands());
     }
+
+    @Test
+    void scanWithBuiltinsLoadsDefaultProfilesAndAllowsProjectOverride() throws IOException {
+        AgentProfileCatalog builtinsOnly = AgentProfileCatalog.scanWithBuiltins(List.of(dir.resolve("missing")));
+        assertTrue(builtinsOnly.invalid().isEmpty(), "内置子代理定义应全部有效");
+        assertTrue(builtinsOnly.find("explorer").isPresent());
+        assertTrue(builtinsOnly.find("reviewer").isPresent());
+        assertTrue(builtinsOnly.find("verifier").isPresent());
+        assertFalse(builtinsOnly.find("explorer").orElseThrow().writable());
+        assertFalse(builtinsOnly.find("reviewer").orElseThrow().writable());
+        assertFalse(builtinsOnly.find("verifier").orElseThrow().writable());
+        assertTrue(builtinsOnly.find("verifier").orElseThrow().denyCommands().contains("git push"));
+
+        // 项目目录同名覆盖内置角色
+        write("reviewer.md", """
+            ---
+            description: 自定义项目审查员
+            ---
+            项目自定义规则。
+            """);
+        AgentProfileCatalog overridden = AgentProfileCatalog.scanWithBuiltins(List.of(dir));
+        assertEquals("自定义项目审查员", overridden.find("reviewer").orElseThrow().description());
+        assertTrue(overridden.find("explorer").isPresent());
+        assertTrue(overridden.find("verifier").isPresent());
+    }
 }

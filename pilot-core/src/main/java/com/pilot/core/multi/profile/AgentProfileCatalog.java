@@ -1,6 +1,7 @@
 package com.pilot.core.multi.profile;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -29,6 +30,8 @@ public final class AgentProfileCatalog {
     private static final int MAX_PROFILES = 32;
     /** 角色提示词长度上限（对齐技能正文）：代理身份声明不该比技能指引更长。 */
     private static final int MAX_PROMPT_LINES = 300;
+    private static final String BUILTIN_INDEX = "agents/index.txt";
+    private static final String BUILTIN_PREFIX = "agents/";
 
     public static final AgentProfileCatalog EMPTY = new AgentProfileCatalog(Map.of(), List.of());
 
@@ -45,31 +48,80 @@ public final class AgentProfileCatalog {
     }
 
     /**
-     * 扫描代理目录。
+     * 扫描代理目录（仅外部目录，不含内置角色）。
      *
      * @param roots 按优先级降序传入（项目级在前）；不存在的目录跳过
      */
     public static AgentProfileCatalog scan(List<Path> roots) {
+        return scan(roots, false);
+    }
+
+    /**
+     * 扫描代理目录并追加随包内置角色（项目级 &gt; 用户级 &gt; 内置级，同名高优先级遮蔽内置）。
+     *
+     * @param roots 按优先级降序传入（项目级在前）；不存在的目录跳过
+     */
+    public static AgentProfileCatalog scanWithBuiltins(List<Path> roots) {
+        return scan(roots, true);
+    }
+
+    private static AgentProfileCatalog scan(List<Path> roots, boolean includeBuiltins) {
         Map<String, AgentProfile> byName = new LinkedHashMap<>();
         List<AgentProblem> problems = new ArrayList<>();
-        for (Path root : roots) {
-            if (root == null || !Files.isDirectory(root)) {
-                continue;
-            }
-            List<Path> files;
-            try (Stream<Path> entries = Files.list(root)) {
-                files = entries.filter(Files::isRegularFile).filter(path -> !Files.isSymbolicLink(path))
-                    .filter(path -> path.getFileName().toString().endsWith(".md"))
-                    .sorted(Comparator.comparing(path -> path.getFileName().toString())).toList();
-            } catch (IOException e) {
-                problems.add(new AgentProblem("（目录）", root.toString(), "扫描失败：" + e.getClass().getSimpleName()));
-                continue;
-            }
-            for (Path file : files) {
-                load(file, byName, problems);
+        if (roots != null) {
+            for (Path root : roots) {
+                if (root == null || !Files.isDirectory(root)) {
+                    continue;
+                }
+                List<Path> files;
+                try (Stream<Path> entries = Files.list(root)) {
+                    files = entries.filter(Files::isRegularFile).filter(path -> !Files.isSymbolicLink(path))
+                        .filter(path -> path.getFileName().toString().endsWith(".md"))
+                        .sorted(Comparator.comparing(path -> path.getFileName().toString())).toList();
+                } catch (IOException e) {
+                    problems.add(new AgentProblem("（目录）", root.toString(), "扫描失败：" + e.getClass().getSimpleName()));
+                    continue;
+                }
+                for (Path file : files) {
+                    load(file, byName, problems);
+                }
             }
         }
+        if (includeBuiltins) {
+            loadBuiltins(byName, problems);
+        }
         return new AgentProfileCatalog(Map.copyOf(byName), List.copyOf(problems));
+    }
+
+    private static void loadBuiltins(Map<String, AgentProfile> byName, List<AgentProblem> problems) {
+        ClassLoader loader = AgentProfileCatalog.class.getClassLoader();
+        String indexText = readResource(loader, BUILTIN_INDEX);
+        if (indexText == null || indexText.isBlank()) {
+            return;
+        }
+        for (String line : indexText.lines().toList()) {
+            String name = line.strip();
+            if (name.isEmpty() || name.startsWith("#")) {
+                continue;
+            }
+            if (byName.containsKey(name)) {
+                continue;
+            }
+            String resourcePath = BUILTIN_PREFIX + name + ".md";
+            String content = readResource(loader, resourcePath);
+            if (content == null) {
+                continue;
+            }
+            parseAndStore(name, "builtin/" + name + ".md", content, byName, problems);
+        }
+    }
+
+    private static String readResource(ClassLoader loader, String path) {
+        try (InputStream stream = loader.getResourceAsStream(path)) {
+            return stream == null ? null : new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     private static void load(Path file, Map<String, AgentProfile> byName, List<AgentProblem> problems) {
@@ -94,23 +146,36 @@ public final class AgentProfileCatalog {
             problems.add(new AgentProblem(name, file.toString(), "读取失败：" + e.getClass().getSimpleName()));
             return;
         }
+        parseAndStore(name, file.toString(), text, byName, problems);
+    }
+
+    private static void parseAndStore(String name, String source, String text, Map<String, AgentProfile> byName,
+        List<AgentProblem> problems) {
+        if (byName.size() >= MAX_PROFILES) {
+            problems.add(new AgentProblem(name, source, "有效代理数已达上限 " + MAX_PROFILES + "，本代理被跳过"));
+            return;
+        }
+        if (!VALID_NAME.matcher(name).matches()) {
+            problems.add(new AgentProblem(name, source, "文件名必须匹配 ^[a-z][a-z0-9-]{0,63}$"));
+            return;
+        }
         AgentFrontmatter.Parsed parsed;
         try {
             parsed = AgentFrontmatter.parse(text);
         } catch (IllegalArgumentException e) {
-            problems.add(new AgentProblem(name, file.toString(), e.getMessage()));
+            problems.add(new AgentProblem(name, source, e.getMessage()));
             return;
         }
         if (parsed.name() != null && !parsed.name().equals(name)) {
-            problems.add(new AgentProblem(name, file.toString(), "name 声明（" + parsed.name() + "）与文件名不一致；文件名是真源名"));
+            problems.add(new AgentProblem(name, source, "name 声明（" + parsed.name() + "）与文件名不一致；文件名是真源名"));
             return;
         }
         if (parsed.body().isEmpty()) {
-            problems.add(new AgentProblem(name, file.toString(), "正文为空：代理定义只有 frontmatter，没有角色提示词"));
+            problems.add(new AgentProblem(name, source, "正文为空：代理定义只有 frontmatter，没有角色提示词"));
             return;
         }
         if (parsed.body().lines().count() > MAX_PROMPT_LINES) {
-            problems.add(new AgentProblem(name, file.toString(), "角色提示词超过 " + MAX_PROMPT_LINES + " 行上限"));
+            problems.add(new AgentProblem(name, source, "角色提示词超过 " + MAX_PROMPT_LINES + " 行上限"));
             return;
         }
         byName.put(name, new AgentProfile(name, parsed.description(), parsed.tools(), parsed.files(),
