@@ -846,11 +846,101 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     }
     try {
       const status = await api.browserStatus(sessionId);
-      set((draft) => { draft.ui.browserStatus = status; });
+      if (!status) {
+        return null;
+      }
+      set((draft) => {
+        draft.ui.browserStatus = status;
+        draft.ui.mirror.paused = Boolean(status.paused);
+        draft.ui.mirror.agentControlled = Boolean(status.agentControlled);
+        draft.ui.mirror.controlStatus = typeof status.controlStatus === 'string' ? status.controlStatus : '';
+        draft.ui.mirror.headless = status.headless ?? true;
+        if (status.activeLane) draft.ui.mirror.activeLane = status.activeLane;
+        if (Array.isArray(status.lanes)) draft.ui.mirror.lanes = status.lanes;
+        if (Array.isArray(status.handoffs)) draft.ui.mirror.handoffs = status.handoffs;
+        if (typeof status.evidenceCount === 'number') draft.ui.mirror.evidenceCount = status.evidenceCount;
+      });
       return status;
     } catch {
       // 浏览器运行时不在线时接口也会报错，界面按「不可用」展示即可
       return null;
+    }
+  },
+  async selectBrowserLane(browserSessionId) {
+    const { sessionId } = get();
+    if (!sessionId) return false;
+    try {
+      const result = await api.selectBrowserLane(sessionId, browserSessionId);
+      if (!result || !result.ok) {
+        get().showNotice(result?.error || '切换浏览器泳道失败');
+        return false;
+      }
+      set((draft) => {
+        if (result.activeLane) draft.ui.mirror.activeLane = result.activeLane;
+      });
+      return true;
+    } catch (error) {
+      get().showNotice(errorInfo(error).message || '切换浏览器泳道失败');
+      return false;
+    }
+  },
+  async resumeBrowserHandoff(browserSessionId, note) {
+    const { sessionId } = get();
+    if (!sessionId) return false;
+    try {
+      const result = await api.resumeBrowserHandoff(sessionId, { browserSessionId, note });
+      if (!result || !result.ok) {
+        get().showNotice(result?.error || '交回浏览器控制权失败');
+        return false;
+      }
+      set((draft) => {
+        if (Array.isArray(result.handoffs)) draft.ui.mirror.handoffs = result.handoffs;
+        if (!draft.ui.mirror.handoffs.length) draft.ui.mirror.paused = false;
+      });
+      return true;
+    } catch (error) {
+      get().showNotice(errorInfo(error).message || '交回浏览器控制权失败');
+      return false;
+    }
+  },
+  async cancelBrowserHandoff(browserSessionId, reason) {
+    const { sessionId } = get();
+    if (!sessionId) return false;
+    try {
+      const result = await api.cancelBrowserHandoff(sessionId, { browserSessionId, reason });
+      if (!result || !result.ok) {
+        get().showNotice(result?.error || '取消浏览器接管失败');
+        return false;
+      }
+      set((draft) => {
+        if (Array.isArray(result.handoffs)) draft.ui.mirror.handoffs = result.handoffs;
+        if (!draft.ui.mirror.handoffs.length) draft.ui.mirror.paused = false;
+      });
+      return true;
+    } catch (error) {
+      get().showNotice(errorInfo(error).message || '取消浏览器接管失败');
+      return false;
+    }
+  },
+  async stopBrowserControl(browserSessionId) {
+    const { sessionId } = get();
+    if (!sessionId) return false;
+    try {
+      const result = await api.stopBrowserControl(sessionId, browserSessionId);
+      if (!result || !result.ok) {
+        get().showNotice(result?.error || '停止浏览器控制失败');
+        return false;
+      }
+      set((draft) => {
+        draft.ui.mirror.agentControlled = false;
+        draft.ui.mirror.controlStatus = '';
+        draft.ui.mirror.paused = true;
+      });
+      void get().loadBrowserStatus();
+      return true;
+    } catch (error) {
+      get().showNotice(errorInfo(error).message || '停止浏览器控制失败');
+      return false;
     }
   },
   async loadUsage(days) {

@@ -34,6 +34,13 @@ export const QUICK_COMMANDS: BuiltinCommand[] = [
     prompt: (args) => `/review${args ? ` ${args}` : ''}`
   },
   {
+    name: '/browser',
+    label: '浏览器任务',
+    hint: '启用浏览器与独立浏览器子代理完成网页验收或操作（可附目标 URL/要求）',
+    aliases: ['browser'],
+    prompt: (args) => `/browser${args ? ` ${args}` : ''}`
+  },
+  {
     name: '/explain',
     label: '解释代码',
     hint: '解释文件、模块或调用链',

@@ -18,7 +18,20 @@ interface SessionConnections {
 
 /** 会话切换时重置浏览器状态，默认按无窗口模式提供替代操作。 */
 export function emptyMirror(): MirrorState {
-  return { mode: 'idle', url: '', headless: true };
+  return {
+    mode: 'idle',
+    url: '',
+    headless: true,
+    paused: false,
+    agentControlled: false,
+    controlStatus: '',
+    activeLane: '',
+    lanes: [],
+    handoffs: [],
+    lastAction: null,
+    evidenceCount: 0,
+    evidenceVersion: 0
+  };
 }
 /**
  * 清空当前会话的全部界面状态：切换会话与「开新对话」共用同一套重置。

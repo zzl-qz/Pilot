@@ -542,3 +542,126 @@ export function ComposerChangesStrip() {
   );
 }
 
+const HANDOFF_KIND_LABELS: Record<string, string> = {
+  auth: '需要登录 / MFA',
+  captcha: '需要人机验证',
+  payment: '需要支付确认',
+  manual: '需要人工协助'
+};
+
+export function BrowserControlDock() {
+  const mirror = useStore((state) => state.ui.mirror);
+  const stopBrowserControl = useStore((state) => state.stopBrowserControl);
+  const setUi = useStore((state) => state.setUi);
+  const [stopping, setStopping] = useState(false);
+
+  if (!mirror.agentControlled || (mirror.handoffs && mirror.handoffs.length > 0)) {
+    return null;
+  }
+
+  return (
+    <section id="browser-control-dock" className="browser-control-dock" role="status" aria-label="浏览器正在被智能体控制">
+      <div className="browser-control-dock-info">
+        <span className="browser-control-dot" aria-hidden="true" />
+        <strong>Pilot 正在控制浏览器</strong>
+        {mirror.controlStatus && <span className="browser-control-dock-step">{mirror.controlStatus}</span>}
+      </div>
+      <div className="browser-control-dock-actions">
+        <Button
+          size="sm"
+          variant="ghost"
+          label="查看浏览器"
+          onClick={() => setUi({ inspectorOpen: true, inspectorTab: 'browser' })}
+        />
+        <button
+          type="button"
+          className="browser-stop-btn"
+          disabled={stopping}
+          onClick={async () => {
+            setStopping(true);
+            try {
+              await stopBrowserControl(mirror.activeLane || undefined);
+            } finally {
+              setStopping(false);
+            }
+          }}
+        >
+          {stopping ? '正在停止…' : '停止控制 (Stop)'}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+export function BrowserHandoffDock() {
+  const handoffs = useStore((state) => state.ui.mirror.handoffs);
+  const resumeHandoff = useStore((state) => state.resumeBrowserHandoff);
+  const cancelHandoff = useStore((state) => state.cancelBrowserHandoff);
+  const setUi = useStore((state) => state.setUi);
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [busyId, setBusyId] = useState('');
+
+  if (!handoffs || !handoffs.length) {
+    return null;
+  }
+
+  return (
+    <section id="browser-handoff-dock" className="browser-handoff-dock" role="region" aria-label="浏览器接管请求">
+      {handoffs.map((item) => {
+        const busy = busyId === item.handoffId;
+        const label = HANDOFF_KIND_LABELS[item.kind] || '请求接管浏览器';
+        return (
+          <article key={item.handoffId} className="browser-handoff-card">
+            <div className="browser-handoff-head">
+              <span className="browser-handoff-kind">{label}</span>
+              {item.url && <span className="browser-handoff-url mono" title={item.url}>{item.url}</span>}
+            </div>
+            <p className="browser-handoff-reason">{item.reason}</p>
+            <div className="browser-handoff-actions">
+              <input
+                type="text"
+                className="browser-handoff-note"
+                placeholder="可选备注（例如：已登录完成，请继续验证首页）"
+                value={notes[item.handoffId] || ''}
+                disabled={busy}
+                onChange={(event) => {
+                  const val = event.target.value;
+                  setNotes((prev) => ({ ...prev, [item.handoffId]: val }));
+                }}
+              />
+              <Button
+                size="sm"
+                variant="ghost"
+                label="打开浏览器"
+                onClick={() => setUi({ inspectorOpen: true, inspectorTab: 'browser' })}
+              />
+              <Button
+                size="sm"
+                variant="ghost"
+                label="取消"
+                isDisabled={busy}
+                onClick={async () => {
+                  setBusyId(item.handoffId);
+                  await cancelHandoff(item.browserSessionId, '用户在输入框快捷取消接管');
+                  setBusyId('');
+                }}
+              />
+              <Button
+                size="sm"
+                variant="primary"
+                label={busy ? '交回中…' : '我已完成，交回智能体'}
+                isDisabled={busy}
+                onClick={async () => {
+                  setBusyId(item.handoffId);
+                  await resumeHandoff(item.browserSessionId, notes[item.handoffId] || '');
+                  setBusyId('');
+                }}
+              />
+            </div>
+          </article>
+        );
+      })}
+    </section>
+  );
+}
+

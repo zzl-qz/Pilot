@@ -45,4 +45,16 @@ test('suggestAllowRule generates safe prefix/directory rules and blocks high-ris
   assert.equal(suggestAllowRule('run_command', 'rm -rf ./dist', { command: 'rm -rf ./dist' }), null);
   assert.equal(suggestAllowRule('run_command', 'npm test && rm -rf ./dist', { command: 'npm test && rm -rf ./dist' }), null);
   assert.equal(suggestAllowRule('run_command', 'echo hi | sh', { command: 'echo hi | sh' }), null);
+  assert.deepEqual(
+    suggestAllowRule('browser', 'click', { browserAction: 'click', browserOrigin: 'http://localhost:5173', highRisk: false }),
+    { rule: 'browser(http://localhost:5173)', label: '允许在 localhost:5173 操作' }
+  );
+  assert.equal(
+    suggestAllowRule('browser', 'evaluate', { browserAction: 'evaluate', browserOrigin: 'http://localhost:5173', highRisk: true }),
+    null
+  );
+  assert.equal(
+    suggestAllowRule('browser', 'click', { browserAction: 'click', browserOrigin: 'https://checkout.stripe.com', highRisk: true }),
+    null
+  );
 });

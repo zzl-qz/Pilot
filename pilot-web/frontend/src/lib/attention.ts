@@ -81,10 +81,12 @@ export function classifyApprovalRisk(
   if (name === 'run_command' || name === 'command_input' || name === 'stop_command') category = '执行命令';
   else if (name === 'edit_file' || name === 'create_file' || name === 'apply_patch' || name === 'office') category = '修改文件';
   else if (name === 'mcp_tools' || name === 'mcp_call') category = '外部工具';
-  else if (name === 'browser') category = '浏览器操作';
+  else if (name === 'browser' || name === 'browser_agent') category = '浏览器操作';
   else if (name === 'hook_command') category = '工作区钩子';
+  const browserAction = typeof structuredArgs?.browserAction === 'string' ? structuredArgs.browserAction.toLowerCase() : '';
+  const browserHighRisk = name === 'browser' && ['evaluate', 'upload', 'download'].includes(browserAction);
   const textToInspect = `${command}\n${String(argsSummary || '')}`;
-  const highRisk = Boolean(structuredArgs?.highRisk) || HIGH_RISK_PATTERNS.some((pattern) => pattern.test(textToInspect));
+  const highRisk = Boolean(structuredArgs?.highRisk) || browserHighRisk || HIGH_RISK_PATTERNS.some((pattern) => pattern.test(textToInspect));
   return { category, highRisk, summary };
 }
 
@@ -151,6 +153,21 @@ export function suggestAllowRule(
       rule: name,
       label: name === 'create_file' ? '记住新建文件' : '记住文件修改'
     };
+  }
+
+  if (name === 'browser') {
+    const action = typeof structuredArgs?.browserAction === 'string' ? structuredArgs.browserAction.toLowerCase() : '';
+    const origin = typeof structuredArgs?.browserOrigin === 'string' ? structuredArgs.browserOrigin.trim() : '';
+    if (!origin || ['evaluate', 'upload', 'download'].includes(action)) return null;
+    try {
+      const parsed = new URL(origin);
+      return {
+        rule: `browser(${parsed.origin})`,
+        label: `允许在 ${parsed.host} 操作`
+      };
+    } catch {
+      return null;
+    }
   }
 
   return null;

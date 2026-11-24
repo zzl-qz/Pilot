@@ -16,7 +16,7 @@ import { VoiceInput } from './VoiceInput.jsx';
 import { SubmissionNotice } from './SubmissionNotice.jsx';
 import { MessageQueue } from './MessageQueue.jsx';
 import { VerificationStrip } from './VerificationStrip.jsx';
-import { ResumeBar, ApprovalDock, QuestionDock, AgentDock, ComposerChangesStrip } from './composer/ComposerDocks.js';
+import { ResumeBar, ApprovalDock, QuestionDock, BrowserControlDock, BrowserHandoffDock, AgentDock, ComposerChangesStrip } from './composer/ComposerDocks.js';
 import { createComposerInput } from '../lib/composer-input.js';
 import { resolveComposerAction, resolveSteerEntry } from '../lib/composer-state.js';
 import { rankFileMatches } from '../lib/mention.js';
@@ -762,6 +762,8 @@ export function Composer() {
         </div>}
         <ApprovalDock />
         <QuestionDock />
+        <BrowserControlDock />
+        <BrowserHandoffDock />
         <ResumeBar />
         <MessageQueue />
         <AgentDock />

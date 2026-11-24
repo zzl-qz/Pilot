@@ -23,6 +23,7 @@ const TOOL_LABELS: Record<string, string> = {
   command_input: '写输入',
   stop_command: '停命令',
   browser: '浏览器',
+  browser_agent: '浏览器子代理',
   web_search: '联网搜索',
   web_fetch: '拉取网页',
   mcp_tools: 'MCP 工具',
@@ -57,21 +58,38 @@ export function questionChoice(option: string, custom: string) {
 
 const BROWSER_ACTIONS: Record<string, string> = {
   navigate: '打开',
+  new_tab: '新建标签',
+  tabs: '查看标签',
+  switch_tab: '切换标签',
+  close_tab: '关闭标签',
+  handoff: '请求接管',
   click: '点击',
+  dblclick: '双击',
+  right_click: '右键',
   type: '输入',
   fill: '填写',
   press: '按键',
   hover: '悬停',
   select: '选择',
+  check: '勾选',
+  uncheck: '取消勾选',
   scroll: '滚动',
+  drag: '拖拽',
+  dialog: '弹窗处理',
+  batch: '批量操作',
   screenshot: '截图',
-  inspect: '检查',
+  record: '操作录像',
+  inspect: '检查布局',
+  resize: '调整视口',
   snapshot: '快照',
   wait: '等待',
   upload: '上传',
   download: '下载',
   evaluate: '脚本',
-  tabs: '标签',
+  console: '控制台',
+  network: '网络请求',
+  text: '读正文',
+  links: '读链接',
   back: '后退',
   forward: '前进',
   reload: '刷新',
@@ -125,6 +143,13 @@ function toolArgsText(name: string, args: unknown) {
   if (name === 'stop_command') {
     const id = shortId(field('taskId'));
     return id ? `停止 ${id}` : '停止后台命令';
+  }
+  if (name === 'browser_agent') {
+    const label = field('label');
+    const targetUrl = field('url');
+    const task = field('task') || raw;
+    if (label && targetUrl) return `${label} · ${targetUrl.replace(/^https?:\/\//, '')}`;
+    return label || task.replace(/^\{|\}$/g, '');
   }
   if (name === 'browser') {
     const action = field('action') || raw.split(/[\s,]/)[0] || '';
@@ -333,7 +358,7 @@ function iconKindForTool(name: string): ToolIconKind {
     || name === 'stop_command') return 'terminal';
   if (name === 'search_text' || name === 'glob_files') return 'search';
   if (name === 'list_dir') return 'folder';
-  if (name === 'browser' || name === 'web_search' || name === 'web_fetch') return 'browser';
+  if (name === 'browser' || name === 'browser_agent' || name === 'web_search' || name === 'web_fetch') return 'browser';
   if (name === 'update_plan' || name === 'promote_goal') return 'plan';
   if (name === 'spawn_agent' || name === 'dispatch_agents') return 'agent';
   return 'tool';

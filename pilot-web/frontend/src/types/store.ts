@@ -1,5 +1,5 @@
 import type { ApiClient } from '../api.js';
-import type { ApiResults, BrowserStatus, ExecutionMode, GlobalPendingApproval, GlobalPendingQuestion, PendingInteractionsSnapshot, UniversalFileResponse } from './api.js';
+import type { ApiResults, BrowserActionEvent, BrowserHandoff, BrowserLane, BrowserStatus, ExecutionMode, GlobalPendingApproval, GlobalPendingQuestion, PendingInteractionsSnapshot, UniversalFileResponse } from './api.js';
 import type * as S from './server.js';
 import type { ProjectSummary, SessionSummary, ChangeFile } from './core.js';
 import type { ReducerState, PlanItem, RunUsage, Notice } from './thread.js';
@@ -30,7 +30,20 @@ import type { SideChatTab, SideChatsState } from './content.js';
 import type { DraftSession, RefreshOptions } from './sync.js';
 import type { EventEnvelope } from './events.js';
 
-export interface MirrorState { mode: 'idle' | 'live' | 'closed'; url: string; headless: boolean }
+export interface MirrorState {
+  mode: 'idle' | 'live' | 'closed';
+  url: string;
+  headless: boolean;
+  paused: boolean;
+  agentControlled: boolean;
+  controlStatus: string;
+  activeLane: string;
+  lanes: BrowserLane[];
+  handoffs: BrowserHandoff[];
+  lastAction: BrowserActionEvent | null;
+  evidenceCount: number;
+  evidenceVersion: number;
+}
 /** 正在编辑的排队消息：用内容指纹而不是下标定位，刷新/重排后不会改到别的消息。 */
 export interface QueueEditTarget { index: number; key: string }
 export interface ComposerBridge {
@@ -157,6 +170,11 @@ export interface StoreActions {
   probeModels(body: Parameters<ApiClient['probeModels']>[0]): ReturnType<ApiClient['probeModels']>;
   loadSkills(): Promise<void>; refreshMemoryDraftCount(workspace?: string): Promise<void>; loadCapabilities(): Promise<ApiResults['capabilities'] | null>;
   loadValidation(): Promise<void>;
-  loadBrowserStatus(): Promise<BrowserStatus | null>; loadUsage(days: number): Promise<void>; refreshActiveRun(): Promise<void>;
+  loadBrowserStatus(): Promise<BrowserStatus | null>;
+  selectBrowserLane(browserSessionId: string): Promise<boolean>;
+  resumeBrowserHandoff(browserSessionId?: string, note?: string): Promise<boolean>;
+  cancelBrowserHandoff(browserSessionId?: string, reason?: string): Promise<boolean>;
+  stopBrowserControl(browserSessionId?: string): Promise<boolean>;
+  loadUsage(days: number): Promise<void>; refreshActiveRun(): Promise<void>;
 }
 export type StoreState = StoreData & StoreActions;

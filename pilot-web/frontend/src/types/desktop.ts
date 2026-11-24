@@ -4,7 +4,18 @@ export interface DesktopAction { ok: boolean; error?: string; text?: string; url
 export interface SelectDirectoriesResult { ok: boolean; canceled?: boolean; paths?: string[]; code?: string; message?: string }
 export interface BrowserRecent { url: string; title?: string; favicon?: string }
 export interface BrowserEmulation { width: number; height: number }
-export interface DesktopBrowserTab extends BrowserRecent { id: string; loading?: boolean; sessionId?: string | null; detached?: boolean; emulated?: BrowserEmulation | null }
+export interface DesktopBrowserTab extends BrowserRecent {
+  id: string;
+  loading?: boolean;
+  sessionId?: string | null;
+  ownerSessionId?: string | null;
+  agentId?: string;
+  label?: string;
+  detached?: boolean;
+  emulated?: BrowserEmulation | null;
+  agentControlled?: boolean;
+  controlStatus?: string;
+}
 export interface DesktopBrowserState {
   tabs: DesktopBrowserTab[]; activeId: string | null; url: string; canGoBack: boolean; canGoForward: boolean;
   loading: boolean; cover: string | null; emulated: BrowserEmulation | null; error: string; recents: BrowserRecent[];

@@ -7,7 +7,121 @@ import type { EventEnvelope } from './events.js';
 export type { EventEnvelope } from './events.js';
 export interface HistoryPage { events: EventEnvelope[]; hasMore: boolean; total?: number; historyRevision?: number }
 export interface ActionResponse { ok?: boolean; message?: string; error?: string }
-export interface BrowserStatus { enabled: boolean; capable: boolean; available: boolean; reason?: string; paused?: boolean; headless?: boolean }
+export interface BrowserLane {
+  browserSessionId: string;
+  parentSessionId: string;
+  agentId: string;
+  label: string;
+  createdAt?: string;
+}
+export interface BrowserHandoff {
+  handoffId: string;
+  sessionId: string;
+  browserSessionId: string;
+  agentId?: string;
+  kind: 'auth' | 'captcha' | 'payment' | 'manual' | string;
+  reason: string;
+  url?: string;
+  requestedAt: string;
+  expiresAt?: string | null;
+}
+export interface BrowserActionEvent {
+  event?: string;
+  action?: string;
+  status?: string;
+  summary?: string;
+  url?: string;
+  title?: string;
+  selector?: string;
+  ref?: string;
+  browserSessionId?: string;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  viewportWidth?: number;
+  viewportHeight?: number;
+  box?: { x: number; y: number; width: number; height: number } | null;
+  ts?: number;
+}
+export interface BrowserEvidenceItem {
+  id: string;
+  sessionId: string;
+  browserSessionId: string;
+  runId?: string;
+  agentId?: string;
+  timestamp: string;
+  action: string;
+  status: string;
+  url?: string;
+  title?: string;
+  summary?: string;
+  screenshotPath?: string;
+  recordingPath?: string;
+  downloadPath?: string;
+  downloadName?: string;
+  downloadMime?: string;
+  downloadBytes?: number;
+  blockedOrigins?: string[];
+  consoleErrors?: number;
+  failedRequests?: number;
+  gateKind?: string;
+}
+export interface BrowserEvidenceSummary {
+  total: number;
+  screenshots?: number;
+  recordings?: number;
+  downloads?: number;
+  errors?: number;
+  handoffs?: number;
+  blockedOrigins?: string[];
+}
+export interface BrowserRecordingFrame {
+  ts: number;
+  offsetMs: number;
+  url?: string;
+  w: number;
+  h: number;
+  data: string;
+}
+export interface BrowserRecordingAction {
+  ts: number;
+  offsetMs: number;
+  kind: string;
+  status?: string;
+  url?: string;
+  ref?: string;
+  x?: number | null;
+  y?: number | null;
+  box?: { x: number; y: number; width: number; height: number } | null;
+}
+export interface BrowserRecordingReplay {
+  version: number;
+  startedAt: number;
+  endedAt: number;
+  durationMs: number;
+  viewport: { width: number; height: number };
+  frames: BrowserRecordingFrame[];
+  actions: BrowserRecordingAction[];
+}
+export interface BrowserEvidenceResponse {
+  items: BrowserEvidenceItem[];
+  summary: BrowserEvidenceSummary;
+}
+export interface BrowserStatus {
+  enabled: boolean;
+  capable: boolean;
+  available: boolean;
+  reason?: string;
+  paused?: boolean;
+  agentControlled?: boolean;
+  controlStatus?: string;
+  headless?: boolean;
+  activeLane?: string;
+  lanes?: BrowserLane[];
+  handoffs?: BrowserHandoff[];
+  evidenceCount?: number;
+}
 export interface GlobalPendingApproval {
   callId: string;
   sessionId: string;
@@ -171,6 +285,11 @@ export interface ApiResults {
   mcpDeleteServer: null;
   mcpTrust: S.McpTrustControllerTrustResponse;
   browserStatus: BrowserStatus;
+  browserHandoffResume: { ok: boolean; resolved?: boolean; handoffs?: BrowserHandoff[]; error?: string };
+  browserHandoffCancel: { ok: boolean; resolved?: boolean; handoffs?: BrowserHandoff[]; error?: string };
+  browserLane: { ok: boolean; activeLane?: string; error?: string };
+  browserStopControl: { ok: boolean; browserSessionId?: string; paused?: boolean; agentControlled?: boolean; error?: string };
+  browserEvidence: BrowserEvidenceResponse;
   stopCommand: S.CommandTaskManagerTask;
   runChanges: S.ChangeServiceRunChangeReport & { summary?: string };
   rollbackRun: S.RunSnapshotServiceRollbackReport;

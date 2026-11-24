@@ -1,4 +1,4 @@
-import type { ApiResults, InputMessage, SubmissionResult, Update, ScheduleDraft, ScheduleInput } from './types/api.js';
+import type { ActionResponse, ApiResults, BrowserRecordingReplay, InputMessage, SubmissionResult, Update, ScheduleDraft, ScheduleInput } from './types/api.js';
 import type * as S from './types/server.js';
 import { errorInfo } from './lib/errors.js';
 import { voiceFilename } from './lib/voice-input.js';
@@ -228,6 +228,44 @@ export const api = {
   mcpDeleteServer: (id: string, name: string) => apiJson<ApiResults['mcpDeleteServer']>(`/api/sessions/${encodeURIComponent(id)}/mcp/servers/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   mcpTrust: (id: string, body: Update<S.McpTrustControllerTrustRequest>) => apiJson<ApiResults['mcpTrust']>(`/api/sessions/${encodeURIComponent(id)}/mcp/trust`, jsonBody('POST', body)),
   browserStatus: (id: string) => apiJson<ApiResults['browserStatus']>(`/api/sessions/${encodeURIComponent(id)}/browser/status`),
+  resumeBrowserHandoff: (id: string, body: { browserSessionId?: string; note?: string } = {}) =>
+    apiJson<ApiResults['browserHandoffResume']>(`/api/sessions/${encodeURIComponent(id)}/browser/handoff/resume`, jsonBody('POST', body)),
+  cancelBrowserHandoff: (id: string, body: { browserSessionId?: string; reason?: string } = {}) =>
+    apiJson<ApiResults['browserHandoffCancel']>(`/api/sessions/${encodeURIComponent(id)}/browser/handoff/cancel`, jsonBody('POST', body)),
+  selectBrowserLane: (id: string, browserSessionId: string) =>
+    apiJson<ApiResults['browserLane']>(`/api/sessions/${encodeURIComponent(id)}/browser/lane`, jsonBody('POST', { browserSessionId })),
+  stopBrowserControl: (id: string, browserSessionId?: string) =>
+    apiJson<ApiResults['browserStopControl']>(`/api/sessions/${encodeURIComponent(id)}/browser/stop-control`, jsonBody('POST', browserSessionId ? { browserSessionId } : {})),
+  browserEvidence: (id: string, runId = '', limit = 80) => {
+    const params = new URLSearchParams();
+    if (runId) params.set('runId', runId);
+    params.set('limit', String(limit));
+    return apiJson<ApiResults['browserEvidence']>(`/api/sessions/${encodeURIComponent(id)}/browser/evidence?${params}`);
+  },
+  browserEvidenceImageUrl: (id: string, evidenceId: string) =>
+    `/api/sessions/${encodeURIComponent(id)}/browser/evidence/${encodeURIComponent(evidenceId)}/image`,
+  browserEvidenceRecording: (id: string, evidenceId: string) =>
+    apiJson<BrowserRecordingReplay>(`/api/sessions/${encodeURIComponent(id)}/browser/evidence/${encodeURIComponent(evidenceId)}/recording`),
+  browserNavigate: (id: string, url: string, browserSessionId?: string) =>
+    apiJson<ActionResponse & { text?: string }>(`/api/sessions/${encodeURIComponent(id)}/browser/navigate`, jsonBody('POST', browserSessionId ? { url, browserSessionId } : { url })),
+  browserBack: (id: string, browserSessionId?: string) =>
+    apiJson<ActionResponse & { text?: string }>(`/api/sessions/${encodeURIComponent(id)}/browser/back`, jsonBody('POST', browserSessionId ? { browserSessionId } : {})),
+  browserForward: (id: string, browserSessionId?: string) =>
+    apiJson<ActionResponse & { text?: string }>(`/api/sessions/${encodeURIComponent(id)}/browser/forward`, jsonBody('POST', browserSessionId ? { browserSessionId } : {})),
+  browserReload: (id: string, browserSessionId?: string) =>
+    apiJson<ActionResponse & { text?: string }>(`/api/sessions/${encodeURIComponent(id)}/browser/reload`, jsonBody('POST', browserSessionId ? { browserSessionId } : {})),
+  browserStop: (id: string, browserSessionId?: string) =>
+    apiJson<ActionResponse & { text?: string }>(`/api/sessions/${encodeURIComponent(id)}/browser/stop`, jsonBody('POST', browserSessionId ? { browserSessionId } : {})),
+  browserPointer: (id: string, body: { action: string; x: number; y: number; deltaX?: number; deltaY?: number; browserSessionId?: string }) =>
+    apiJson<ActionResponse & { text?: string }>(`/api/sessions/${encodeURIComponent(id)}/browser/pointer`, jsonBody('POST', body)),
+  browserPick: (id: string, body: { x: number; y: number; browserSessionId?: string }) =>
+    apiJson<ActionResponse & { text?: string }>(`/api/sessions/${encodeURIComponent(id)}/browser/pick`, jsonBody('POST', body)),
+  browserKeys: (id: string, body: { key?: string; text?: string; browserSessionId?: string }) =>
+    apiJson<ActionResponse & { text?: string }>(`/api/sessions/${encodeURIComponent(id)}/browser/keys`, jsonBody('POST', body)),
+  browserResize: (id: string, body: { width: number; height: number; browserSessionId?: string }) =>
+    apiJson<ActionResponse & { text?: string }>(`/api/sessions/${encodeURIComponent(id)}/browser/resize`, jsonBody('POST', body)),
+  browserLogs: (id: string, body: { network?: boolean; clear?: boolean; level?: string; browserSessionId?: string }) =>
+    apiJson<ActionResponse & { text?: string }>(`/api/sessions/${encodeURIComponent(id)}/browser/logs`, jsonBody('POST', body)),
   stopCommand: (id: string, taskId: string) => apiJson<ApiResults['stopCommand']>(`/api/sessions/${encodeURIComponent(id)}/commands/${encodeURIComponent(taskId)}/stop`, { method: 'POST' }),
   runChanges: (runId: string, summary = false) => apiJson<ApiResults['runChanges']>(`/api/runs/${encodeURIComponent(runId)}/changes${summary ? '?summary=true' : ''}`),
   rollbackRun: (runId: string) => apiJson<ApiResults['rollbackRun']>(`/api/runs/${encodeURIComponent(runId)}/rollback`, { method: 'POST' }),

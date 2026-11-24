@@ -169,14 +169,37 @@ export function createSessionStreams(
     const source = new EventSource(`/api/sessions/${encodeURIComponent(sessionId)}/browser/state-stream`);
     mirrorSource = source;
     const current = () => mirrorSource === source && get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
-    for (const kind of ['nav', 'state', 'status', 'closed']) {
+    for (const kind of ['nav', 'state', 'status', 'action', 'control-state', 'control-stopped', 'handoff', 'evidence', 'closed']) {
       source.addEventListener(kind, (message) => {
         if (!current()) return;
         let payload: unknown;
         try { payload = kind === 'closed' ? null : JSON.parse(message.data); }
         catch { return; }
-        const update = browserStateUpdate(kind, payload);
-        set(draft => { Object.assign(draft.ui.mirror, update); });
+        const update = browserStateUpdate(kind, payload, get().ui.mirror);
+        set(draft => {
+          Object.assign(draft.ui.mirror, update);
+          if (kind === 'handoff') {
+            const data = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+            if (data?.event === 'requested') {
+              draft.ui.browserDot = true;
+              draft.ui.attentionKind = 'attention';
+            }
+          }
+        });
+        if (kind === 'control-stopped') {
+          get().showNotice('已停止浏览器自动控制，页面控制权已交回给你。');
+        }
+        if (kind === 'handoff') {
+          const data = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+          if (data?.event === 'requested') {
+            const h = data.handoff && typeof data.handoff === 'object' ? (data.handoff as Record<string, unknown>) : null;
+            const reason = typeof h?.reason === 'string' && h.reason ? h.reason : '需要你在浏览器页面亲自完成登录、验证或支付';
+            get().showNotice(`浏览器请求接管：${reason}`, {
+              label: '查看浏览器',
+              onAction: () => get().setUi({ inspectorOpen: true, inspectorTab: 'browser' })
+            });
+          }
+        }
       });
     }
     source.onerror = () => {
