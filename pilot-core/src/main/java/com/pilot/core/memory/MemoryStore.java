@@ -312,8 +312,20 @@ public final class MemoryStore {
             }
             String needle = query == null ? "" : query.strip().toLowerCase(Locale.ROOT);
             int cap = Math.max(1, Math.min(limit <= 0 ? 20 : limit, 50));
-            return candidates.stream().filter(entry -> typeOrNull == null || typeOrNull.wire().equals(entry.type()))
-                .filter(entry -> matchesQuery(entry, needle)).limit(cap).toList();
+            List<Entry> typed = candidates.stream()
+                .filter(entry -> typeOrNull == null || typeOrNull.wire().equals(entry.type())).toList();
+            if (needle.isEmpty()) {
+                return typed.stream().limit(cap).toList();
+            }
+            List<String> terms = tokenizeQuery(needle);
+            record Scored(Entry entry, int score) {
+            }
+            return typed.stream().map(entry -> new Scored(entry, scoreEntry(entry, needle, terms)))
+                .filter(item -> item.score() > 0)
+                .sorted(Comparator.comparingInt(Scored::score).reversed()
+                    .thenComparing(item -> SCOPE_PROJECT.equals(item.entry().scope()) ? 0 : 1)
+                    .thenComparing(item -> item.entry().updated(), Comparator.reverseOrder()))
+                .limit(cap).map(Scored::entry).toList();
         }
     }
 
@@ -427,16 +439,133 @@ public final class MemoryStore {
         return SCOPE_USER.equals(scope) ? userDir() : projectDir(workspace);
     }
 
-    private static boolean matchesQuery(Entry entry, String needle) {
-        if (needle.isEmpty()) {
-            return true;
+    private static final Pattern QUERY_SPLIT = Pattern.compile("[\\s,，。、;；:：/\\\\|()\\[\\]{}\"']+");
+
+    private static List<String> tokenizeQuery(String needle) {
+        List<String> terms = new ArrayList<>();
+        for (String piece : QUERY_SPLIT.split(needle)) {
+            String term = piece.strip();
+            if (!term.isEmpty() && !terms.contains(term)) {
+                terms.add(term);
+                if (terms.size() >= 12) {
+                    break;
+                }
+            }
         }
-        return containsLower(entry.slug(), needle) || containsLower(entry.title(), needle)
-            || containsLower(entry.description(), needle) || containsLower(entry.body(), needle);
+        return terms.isEmpty() ? List.of(needle) : terms;
     }
 
-    private static boolean containsLower(String value, String needle) {
-        return value != null && value.toLowerCase(Locale.ROOT).contains(needle);
+    private static int scoreEntry(Entry entry, String needle, List<String> terms) {
+        String slug = lower(entry.slug());
+        String title = lower(entry.title());
+        String desc = lower(entry.description());
+        String body = lower(entry.body());
+        int score = 0;
+
+        if (slug.equals(needle)) {
+            score += 100;
+        }
+        if (slug.contains(needle)) {
+            score += 40;
+        }
+        if (title.contains(needle)) {
+            score += 30;
+        }
+        if (desc.contains(needle)) {
+            score += 20;
+        }
+        if (body.contains(needle)) {
+            score += 10;
+        }
+
+        int matchedTerms = 0;
+        for (String term : terms) {
+            int termScore = scoreTerm(term, slug, title, desc, body);
+            if (termScore > 0) {
+                matchedTerms++;
+                score += termScore;
+            }
+        }
+        if (matchedTerms == terms.size() && terms.size() > 1) {
+            score += 25;
+        }
+        return score;
+    }
+
+    private static int scoreTerm(String term, String slug, String title, String desc, String body) {
+        int score = 0;
+        if (slug.contains(term)) {
+            score += 20;
+        }
+        if (title.contains(term)) {
+            score += 15;
+        }
+        if (desc.contains(term)) {
+            score += 10;
+        }
+        if (body.contains(term)) {
+            score += 5;
+        }
+        if (score > 0) {
+            return score;
+        }
+        if (isCjk(term)) {
+            if (term.length() == 2) {
+                if (matchesNearbyChars(title, term) || matchesNearbyChars(desc, term)) {
+                    return 8;
+                }
+                if (matchesNearbyChars(body, term)) {
+                    return 4;
+                }
+            } else if (term.length() >= 4) {
+                int total = term.length() - 1;
+                int hits = 0;
+                for (int i = 0; i < total; i++) {
+                    String gram = term.substring(i, i + 2);
+                    if (title.contains(gram) || desc.contains(gram) || body.contains(gram)) {
+                        hits++;
+                    }
+                }
+                if (hits * 2 >= total) {
+                    return 4 + hits * 2;
+                }
+            }
+        }
+        return 0;
+    }
+
+    private static boolean isCjk(String text) {
+        if (text.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < text.length(); i++) {
+            Character.UnicodeScript script = Character.UnicodeScript.of(text.charAt(i));
+            if (script != Character.UnicodeScript.HAN) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** 2 字中文简称（如「单测」匹配「单元测试」）：两字按序出现且间隔不超过 4 个字符。 */
+    private static boolean matchesNearbyChars(String field, String twoChars) {
+        char first = twoChars.charAt(0);
+        char second = twoChars.charAt(1);
+        int idx = field.indexOf(first);
+        while (idx >= 0) {
+            int limit = Math.min(field.length(), idx + 6);
+            for (int j = idx + 1; j < limit; j++) {
+                if (field.charAt(j) == second) {
+                    return true;
+                }
+            }
+            idx = field.indexOf(first, idx + 1);
+        }
+        return false;
+    }
+
+    private static String lower(String value) {
+        return value == null ? "" : value.toLowerCase(Locale.ROOT);
     }
 
     private static Path legacyDraftFile(Path workspace) {

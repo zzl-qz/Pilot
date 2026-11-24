@@ -208,4 +208,27 @@ class MemoryStoreTest {
         assertEquals(3, second.skipped());
         assertEquals(3, store.draftCount(workspace));
     }
+
+    @Test
+    void multiTermWeightedSearchRanksTitleAndMultiHitAboveSingleBodyHit() throws IOException {
+        Path workspace = Files.createDirectories(temp.resolve("ws-search"));
+        MemoryStore store = new MemoryStore(temp.resolve("data-search/memory"));
+
+        MemoryStore.Entry bodyOnly = store.saveEntry(workspace, MemoryStore.SCOPE_PROJECT, null, MemoryType.PROJECT,
+            "发布检查清单", "普通发布注意事项", "发布前顺带提一句 maven 命令。");
+        MemoryStore.Entry mavenTest = store.saveEntry(workspace, MemoryStore.SCOPE_PROJECT, null, MemoryType.FEEDBACK,
+            "Maven 单元测试命令", "跑单测先装 pilot-core", "后端改动后用 Maven 跑单元测试，避免漏编译。");
+        store.saveEntry(workspace, MemoryStore.SCOPE_PROJECT, null, MemoryType.USER, "主题配色", "深色主题", "喜欢暗色界面");
+
+        // 多词中英文混合 + 中文简称「单测」匹配「单元测试」，且双词+标题命中排在仅正文单词命中之前
+        List<MemoryStore.Entry> hits = store.searchEntries(workspace, null, "maven 单测", null, 10);
+        assertEquals(2, hits.size());
+        assertEquals(mavenTest.slug(), hits.get(0).slug());
+        assertEquals(bodyOnly.slug(), hits.get(1).slug());
+
+        // 长中文短语 2-gram 召回
+        List<MemoryStore.Entry> phraseHits = store.searchEntries(workspace, null, "单元测试指令", null, 10);
+        assertFalse(phraseHits.isEmpty());
+        assertEquals(mavenTest.slug(), phraseHits.getFirst().slug());
+    }
 }
