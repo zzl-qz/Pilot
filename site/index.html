@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pilot · 在你工作区里工作的 Coding Agent</title>
-<meta name="description" content="Pilot 是一个用 Java 构建、可自托管的本地 Coding Agent。任务在受控工作区里执行，文件、命令与网络能力都经过工具边界与权限策略，全过程以可重放的事件流呈现。">
+<title>Pilot · 在你工作区里运行的任务执行 Agent</title>
+<meta name="description" content="Pilot 是一个用 Java 25 构建、可自托管的本机任务执行与 Coding Agent。支持 Web、Electron 桌面与 Android 客户端，内置浏览器子代理、文件系统沙箱与可复核完成凭证。">
 <meta name="theme-color" content="#0a0c10">
-<meta property="og:title" content="Pilot · 在你工作区里工作的 Coding Agent">
-<meta property="og:description" content="Java 构建、可自托管：理解任务、检查仓库、修改文件、运行验证、汇报差异。">
+<meta property="og:title" content="Pilot · 在你工作区里运行的任务执行 Agent">
+<meta property="og:description" content="Java 25 构建、可自托管：读仓库、改代码、自动测页面、跑验证并留下可复核的完成凭证。">
 <meta property="og:type" content="website">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230a0c10'/%3E%3Cpath d='M11 23V9h6.5a5 5 0 0 1 0 10H15' stroke='%236ea8ff' stroke-width='2.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="styles.css">
@@ -21,7 +21,7 @@
       <svg viewBox="0 0 24 24" fill="none"><path d="M6 19V5h6.8a4.6 4.6 0 0 1 0 9.2H11" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/></svg>
     </span>
     Pilot
-    <span class="brand-sub">本地 Coding Agent</span>
+    <span class="brand-sub">本机任务执行 Agent</span>
   </a>
   <nav class="nav" aria-label="主导航">
     <a href="#demo">界面</a>
@@ -47,19 +47,19 @@
     </div>
 
     <div class="hero-inner">
-      <p class="eyebrow"><span class="dot"></span>Java 25 · 自托管 · 可审查</p>
+      <p class="eyebrow"><span class="dot"></span>Java 25 · 自托管 · Web / 桌面 / Android</p>
 
-      <h1>它在你自己的<br><span class="grad">工作区里改代码</span></h1>
+      <h1>它在你自己的<br><span class="grad">工作区里执行与验证</span></h1>
 
       <p class="lede">
-        提交任务，Pilot 读仓库、列计划、改文件、跑验证，然后把每一步摊开给你看。
-        模型供应商可以换，执行边界不能绕——路径、工具、命令全部在后端硬校验。
+        提交任务，Pilot 读仓库、列计划、改文件、操作内置浏览器、跑验证，然后把每一步证据摊开给你审阅。
+        支持 OpenAI 与 Anthropic 多协议端点，路径、权限、高危命令红线全部在后端硬校验。
       </p>
 
       <div class="install" role="group" aria-label="安装命令">
         <span class="install-prompt" aria-hidden="true">$</span>
-        <code>git clone https://github.com/zzl-qz/Pilot.git &amp;&amp; cd Pilot &amp;&amp; ./start.cmd</code>
-        <button class="copy icon-only" data-copy="git clone https://github.com/zzl-qz/Pilot.git && cd Pilot && ./start.cmd" aria-label="复制安装命令">
+        <code>git clone https://github.com/zzl-qz/Pilot.git &amp;&amp; cd Pilot &amp;&amp; bash start.sh</code>
+        <button class="copy icon-only" data-copy="git clone https://github.com/zzl-qz/Pilot.git && cd Pilot && bash start.sh" aria-label="复制安装命令">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M15 6H6a2 2 0 0 0-2 2v9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
         </button>
       </div>
@@ -73,10 +73,10 @@
       </div>
 
       <dl class="stats" aria-label="项目规模">
-        <div><dt>机制</dt><dd><span class="count" data-count="9" data-pad="2">09</span></dd></div>
-        <div><dt>工具</dt><dd><span class="count" data-count="14">14</span></dd></div>
+        <div><dt>核心机制</dt><dd><span class="count" data-count="24">24</span></dd></div>
+        <div><dt>内置工具</dt><dd><span class="count" data-count="30">30</span><small>+</small></dd></div>
         <div><dt>权限档位</dt><dd><span class="count" data-count="4" data-pad="2">04</span></dd></div>
-        <div><dt>上下文预算</dt><dd><span class="count" data-count="120">120</span><small>k</small></dd></div>
+        <div><dt>运行终端</dt><dd><span class="count" data-count="3" data-pad="2">03</span></dd></div>
       </dl>
     </div>
   </section>
@@ -85,12 +85,12 @@
   <div class="marquee" aria-label="技术栈">
     <div class="marquee-track">
       <span>Java 25</span><i>·</i><span>Spring Boot 4</span><i>·</i><span>SQLite WAL</span><i>·</i>
-      <span>Server-Sent Events</span><i>·</i><span>Jackson 3</span><i>·</i><span>虚拟线程</span><i>·</i>
-      <span>OpenAI 兼容端点</span><i>·</i><span>Maven Wrapper</span><i>·</i>
+      <span>Server-Sent Events</span><i>·</i><span>OpenAI / Anthropic SSE</span><i>·</i><span>Playwright 浏览器子代理</span><i>·</i>
+      <span>Electron 桌面壳</span><i>·</i><span>Android 客户端</span><i>·</i><span>Seatbelt / bubblewrap</span><i>·</i>
       <span aria-hidden="true">Java 25</span><i aria-hidden="true">·</i><span aria-hidden="true">Spring Boot 4</span><i aria-hidden="true">·</i>
       <span aria-hidden="true">SQLite WAL</span><i aria-hidden="true">·</i><span aria-hidden="true">Server-Sent Events</span><i aria-hidden="true">·</i>
-      <span aria-hidden="true">Jackson 3</span><i aria-hidden="true">·</i><span aria-hidden="true">虚拟线程</span><i aria-hidden="true">·</i>
-      <span aria-hidden="true">OpenAI 兼容端点</span><i aria-hidden="true">·</i><span aria-hidden="true">Maven Wrapper</span><i aria-hidden="true">·</i>
+      <span aria-hidden="true">OpenAI / Anthropic SSE</span><i aria-hidden="true">·</i><span aria-hidden="true">Playwright 浏览器子代理</span><i aria-hidden="true">·</i>
+      <span aria-hidden="true">Electron 桌面壳</span><i aria-hidden="true">·</i><span aria-hidden="true">Android 客户端</span><i aria-hidden="true">·</i><span aria-hidden="true">Seatbelt / bubblewrap</span><i aria-hidden="true">·</i>
     </div>
   </div>
 
@@ -218,7 +218,7 @@
             <div class="approval-actions">
               <button class="btn btn-primary btn-sm" type="button" disabled>允许</button>
               <button class="btn btn-ghost btn-sm" type="button" disabled>拒绝</button>
-              <span class="approval-note">等待 45 秒后按拒绝处理</span>
+              <span class="approval-note">附改动 Diff 预览；默认等待 300 秒后按拒绝处理</span>
             </div>
           </div>
           <p class="mock-note">Agent 线程停在 <code>CompletableFuture.join()</code> 上，不轮询、不占 CPU；超时由 broker 直接完成成拒绝。</p>
@@ -307,8 +307,8 @@
   <section class="section" id="mechanics">
     <header class="section-head">
       <p class="kicker">架构</p>
-      <h2>九个机制，各管一件事</h2>
-      <p class="sub">按机制而非 Maven 模块划分：一个机制常常一半在 <code>pilot-core</code>（契约与执行），一半在 <code>pilot-server</code>（装配与持久化）。</p>
+      <h2>九组核心机制，各管一件事</h2>
+      <p class="sub">按机制而非 Maven 模块划分：同一机制通常横跨 <code>pilot-core</code>（契约与执行）、<code>pilot-server</code>（装配与持久化）与多端界面。</p>
     </header>
 
     <div class="mech-group reveal">
@@ -328,59 +328,59 @@
         </article>
         <article class="card mech spot">
           <span class="num">03</span>
-          <h3>上下文管理</h3>
-          <p>四层收缩，代价从低到高：占位符 → 截断 → 摘要 → 硬裁剪。</p>
-          <p class="refs"><code>ContextBudget</code></p>
+          <h3>上下文与记忆</h3>
+          <p>四层滞回收缩（80%/86%/90%/96%）护住前缀缓存；外置长期记忆草稿经人工审阅发布。</p>
+          <p class="refs"><code>ContextBudget</code><code>MemoryStore</code></p>
         </article>
         <article class="card mech spot">
           <span class="num">04</span>
-          <h3>提示词装配</h3>
-          <p>正文全在资源文件，按 order 拼接、按 requires 过滤，变量缺失即报错。</p>
-          <p class="refs"><code>PromptLibrary</code></p>
+          <h3>提示词与规则</h3>
+          <p>正文全在资源文件，支持 <code>AGENTS.md</code> 与 <code>.pilot/rules</code> Glob 规则，变量缺失即报错。</p>
+          <p class="refs"><code>PromptLibrary</code><code>ProjectRuleLoader</code></p>
         </article>
       </div>
     </div>
 
     <div class="mech-group reveal">
-      <p class="group-label"><span>05—07</span>边界与协作</p>
+      <p class="group-label"><span>05—07</span>边界、浏览器与协作</p>
       <div class="grid grid-3">
         <article class="card mech spot">
           <span class="num">05</span>
-          <h3>工具机制</h3>
-          <p>注册即能力：未注册的工具模型看不见，用法教学也不进提示词。</p>
-          <p class="refs"><code>Tool</code><code>ToolExecutor</code></p>
+          <h3>工具与浏览器子代理</h3>
+          <p>按可用性动态声明；内置独立浏览器子代理，支持同源 iframe 穿透、Take Control 蓝框与交互式录像回放。</p>
+          <p class="refs"><code>ToolExecutor</code><code>BrowserSubagentTool</code></p>
         </article>
         <article class="card mech spot">
           <span class="num">06</span>
-          <h3>权限与审批</h3>
-          <p>四档热切换；审批用 Future 挂起，超时即拒绝，零轮询。</p>
-          <p class="refs"><code>PolicyPermissionGate</code><code>PathValidator</code></p>
+          <h3>权限、红线与沙箱</h3>
+          <p>四档热切换 + <code>plan</code> 只读模式；AUTO 强制高危命令红线，macOS/Linux 默认启用命令文件系统沙箱。</p>
+          <p class="refs"><code>CommandRiskGuard</code><code>OsSandbox</code></p>
         </article>
         <article class="card mech spot">
           <span class="num">07</span>
-          <h3>多智能体</h3>
-          <p>任务 DAG 构造即校验无环；子 Agent 只产 diff，硬校验跑在隔离副本上。</p>
-          <p class="refs"><code>TaskGraph</code><code>DiffSandbox</code></p>
+          <h3>多智能体与完成凭证</h3>
+          <p>DAG 子任务产出 diff 沙箱提案；任务验证证据与浏览器宿主机证据统一收进可导出完成凭证。</p>
+          <p class="refs"><code>TaskGraph</code><code>CompletionBundleService</code></p>
         </article>
       </div>
     </div>
 
     <div class="mech-group reveal">
-      <p class="group-label"><span>08—09</span>状态与观测</p>
+      <p class="group-label"><span>08—09</span>状态、多协议与观测</p>
       <div class="grid grid-2">
         <article class="card mech spot">
           <span class="num">08</span>
           <h3>快照与回退</h3>
           <p>写前备份、双指纹链检测外部修改；冲突就拒绝恢复，不静默覆盖。三种范围：只撤代码、只撤对话、一起撤。</p>
-          <p class="card-foot">单文件上限 8MB；符号链接、硬链接与目录占位一律拒绝恢复</p>
+          <p class="card-foot">符号链接、硬链接与目录占位一律拒绝恢复；文件改动审批附带 Diff 预览</p>
           <p class="refs"><code>RunSnapshotService</code><code>CheckpointController</code></p>
         </article>
         <article class="card mech spot">
           <span class="num">09</span>
-          <h3>模型与可观测</h3>
-          <p>协议转换与运行时解耦，配置热切换；工具调用落 JSONL trace，指标走进程内计数器。</p>
-          <p class="card-foot">trace 只存 300 字符摘要，避免把文件内容和密钥写进长期日志</p>
-          <p class="refs"><code>ModelClient</code><code>JsonlTraceRecorder</code><code>RunMetrics</code></p>
+          <h3>多协议模型与脱敏诊断</h3>
+          <p>支持 OpenAI Chat Completions / Responses 与 Anthropic Messages 原生 SSE 流式、Prompt Caching 与用量计价；支持一键导出脱敏诊断包。</p>
+          <p class="card-foot">SecretScrubber 全链路脱敏，POSIX 下数据库与落盘日志默认收紧为 0600</p>
+          <p class="refs"><code>ModelClient</code><code>SecretScrubber</code><code>DiagnosticsExportService</code></p>
         </article>
       </div>
     </div>
@@ -411,24 +411,19 @@
         <div class="code-head">
           <span class="code-file">ContextBudget.java</span>
           <span class="code-lang">java</span>
-          <span class="code-line">:54</span>
+          <span class="code-line">:101</span>
         </div>
         <div class="code-split">
-          <pre><code><span class="c-kw">boolean</span> apply(List&lt;Message&gt; messages, <span class="c-kw">int</span> limit, Consumer&lt;SessionEvent&gt; events) {
-    <span class="c-kw">int</span> charBudget = Math.max(<span class="c-num">1</span>, limit);
-    <span class="c-kw">int</span> tokenBudget = charBudget;
-    <span class="c-kw">double</span> usage = usage(messages, charBudget, tokenBudget);
-
-    <span class="c-cm">// 第一、二层不花模型调用</span>
-    <span class="c-kw">if</span> (usage &gt;= PRUNE_RATIO) {        <span class="c-cm">// 55%</span>
-        ContextCompactor.pruneToolOutputs(messages, limit);
-    }
-    <span class="c-kw">if</span> (usage &gt;= TRUNCATE_RATIO) {     <span class="c-cm">// 70%</span>
-        ContextCompactor.truncateLongToolOutputs(messages);
-    }</code></pre>
+          <pre><code><span class="c-cm">// 跨过预压线时先只读预演：本地清理压不回去就先保住热前缀做摘要</span>
+<span class="c-kw">boolean</span> compactFirst = !compactCircuitOpen &amp;&amp; !inBackoff(messages, overhead)
+    &amp;&amp; usage(messages, charsLimit, tokensLimit, overhead) &gt;= PRE_COMPACT_RATIO
+    &amp;&amp; !localCleanupSuffices(messages, tokensLimit, charsLimit, overhead, boundary);
+<span class="c-kw">if</span> (!compactFirst) {
+    pruneAndTruncate(messages, tokensLimit, charsLimit, overhead, boundary);
+}</code></pre>
           <aside class="code-notes">
-            <p><b>为什么两个预算同值。</b>英文 4 字符约 1 token，中文接近 1 字符 1 token。只按字符判断，中文会话会在真正接近窗口前被当成「还很空」。</p>
-            <p><b>为什么先做不要钱的。</b>占位符化和截断只是 O(n) 遍历；摘要要花一次模型调用，还必须接受细节永久丢失。</p>
+            <p><b>双预算与滞回冷却。</b>token 预算对齐模型输入窗口，字符上限独立作内存护栏；80% 以下保持严格只追加，减少打穿 Prompt Cache。</p>
+            <p><b>先预演再改写。</b>单步大输出直接越过 90% 预压线时，若本地清理不足以压回，先把原热前缀交给摘要压缩，避免白丢缓存命中。</p>
           </aside>
         </div>
       </div>
@@ -437,22 +432,18 @@
         <div class="code-head">
           <span class="code-file">PathValidator.java</span>
           <span class="code-lang">java</span>
-          <span class="code-line">:89</span>
+          <span class="code-line">:138</span>
         </div>
         <div class="code-split">
-          <pre><code><span class="c-cm">// 从候选路径向上找最近的现存祖先，取它的真实路径</span>
+          <pre><code><span class="c-cm">// 取最近现存祖先的真实路径（含悬空链接检查），再拼回未创建后缀</span>
 Path existing = candidate;
-<span class="c-kw">while</span> (existing != <span class="c-kw">null</span> &amp;&amp; !Files.exists(existing)) {
+<span class="c-kw">while</span> (existing != <span class="c-kw">null</span> &amp;&amp; !Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) {
     existing = existing.getParent();
 }
-Path realExisting = existing.toRealPath();
-<span class="c-kw">if</span> (!realExisting.startsWith(root)) {
-    <span class="c-kw">throw new</span> WorkspaceViolationException(
-            <span class="c-str">"路径超出工作区（符号链接）: "</span> + value);
-}</code></pre>
+<span class="c-kw">return</span> existing.toRealPath().resolve(existing.relativize(candidate)).normalize();</code></pre>
           <aside class="code-notes">
             <p><b>只做 startsWith 会被绕过。</b>工作区里一个 <code>link → /etc</code> 的符号链接，<code>link/passwd</code> 前缀检查是通的。</p>
-            <p><b>为什么要「现存祖先」。</b>新建文件时目标还不存在，直接 <code>toRealPath()</code> 会抛异常；取现存祖先再拼后缀，两种情况都覆盖。</p>
+            <p><b>为什么要「现存祖先」加 NOFOLLOW。</b>既兼容新建文件和 Windows 8.3 短路径，也能拦住指向工作区外的悬空链接。</p>
           </aside>
         </div>
       </div>
@@ -461,23 +452,20 @@ Path realExisting = existing.toRealPath();
         <div class="code-head">
           <span class="code-file">InMemoryApprovalBroker.java</span>
           <span class="code-lang">java</span>
-          <span class="code-line">:46</span>
+          <span class="code-line">:63</span>
         </div>
         <div class="code-split">
-          <pre><code>future.completeOnTimeout(<span class="c-kw">false</span>, timeout.toMillis(), MILLISECONDS)
-        .whenComplete((approved, error) -&gt; pending.remove(callId, entry));
-<span class="c-kw">return</span> future;
-
-<span class="c-cm">// ToolExecutor 侧：阻塞等待，不轮询</span>
-<span class="c-kw">boolean</span> approved;
-<span class="c-kw">try</span> {
-    approved = decision.join();
-} <span class="c-kw">catch</span> (CompletionException e) {
-    approved = <span class="c-kw">false</span>;
-}</code></pre>
+          <pre><code>future.completeOnTimeout(<span class="c-kw">false</span>, timeout.toMillis(), TimeUnit.MILLISECONDS)
+    .whenComplete((approved, error) -&gt; {
+        <span class="c-kw">if</span> (pending.remove(callId, entry)) {
+            rejectionReasons.remove(callId);
+            notifyListeners();
+        }
+    });
+<span class="c-kw">return</span> future;</code></pre>
           <aside class="code-notes">
-            <p><b>超时默认拒绝。</b><code>completeOnTimeout(false, …)</code> 把安全侧写进类型系统：没人处理也不会变成放行。</p>
-            <p><b>阻塞但不轮询。</b>线程停在 Future 上，用户点击即唤醒；轮询写法会把延迟和 CPU 一起搭进去。</p>
+            <p><b>超时默认拒绝。</b><code>completeOnTimeout(false, …)</code> 把安全侧写进并发原语：默认 300 秒无人处理也不会变成放行。</p>
+            <p><b>跨端推送不轮询。</b>线程停在 Future 上，用户从 Web、桌面悬浮窗或 Android 点击即唤醒，拒绝时可回传具体原因。</p>
           </aside>
         </div>
       </div>
@@ -498,31 +486,31 @@ Path realExisting = existing.toRealPath();
         </thead>
         <tbody>
           <tr>
-            <td><code>READ_ONLY</code><span class="tag">默认</span></td>
+            <td><code>READ_ONLY</code></td>
             <td class="yes" data-label="读">放行</td><td class="no" data-label="写">拒绝</td><td class="no" data-label="命令">拒绝</td>
-            <td>先看看它想干什么</td>
+            <td>只读分析（也可通过 <code>plan</code> 模式或 <code>/review</code> 触发）</td>
           </tr>
           <tr>
             <td><code>ASK</code></td>
             <td class="yes" data-label="读">放行</td><td class="ask" data-label="写">逐次审批</td><td class="ask" data-label="命令">逐次审批</td>
-            <td>认真改代码，但每步想确认</td>
+            <td>初次试用或重要仓库，每步看 Diff 确认</td>
           </tr>
           <tr>
             <td><code>AUTO_EDIT</code></td>
             <td class="yes" data-label="读">放行</td><td class="yes" data-label="写">直接执行</td><td class="ask" data-label="命令">逐次审批</td>
-            <td>信任编辑，仍需看住命令</td>
+            <td>信任编辑与本机浏览器交互，仍看住命令</td>
           </tr>
           <tr>
-            <td><code>AUTO</code></td>
-            <td class="yes" data-label="读">放行</td><td class="yes" data-label="写">直接执行</td><td class="yes" data-label="命令">直接执行</td>
-            <td>仅限可丢弃的隔离工作区</td>
+            <td><code>AUTO</code><span class="tag">默认</span></td>
+            <td class="yes" data-label="读">放行</td><td class="yes" data-label="写">直接执行</td><td class="yes" data-label="命令">常规放行（高危红线拦截/确认）</td>
+            <td>日常开发（仍强制拦删根/家目录、强推受保护分支与凭证外发）</td>
           </tr>
         </tbody>
       </table>
     </div>
     <p class="note">
       <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/><path d="M12 8v5M12 16h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-      权限不是操作系统沙箱。路径限制与命令白名单不能替代容器或独立账户隔离，使用真实模型时请先备份并优先在可丢弃工作区试用。
+      macOS（Seatbelt）与 Linux（bubblewrap）对主会话命令默认启用文件系统沙箱，但本地沙箱与权限策略仍不等同于多租户虚拟机隔离。首次试用请先切换到 <code>ASK</code> / <code>READ_ONLY</code> 并在可丢弃工作区验证。
     </p>
   </section>
 
@@ -531,7 +519,7 @@ Path realExisting = existing.toRealPath();
     <header class="section-head">
       <p class="kicker">上手</p>
       <h2>三步，跑在你自己机器上</h2>
-      <p class="sub">需要 JDK 25。启动脚本先构建、跑测试，成功后才启动服务；失败不会拿旧包顶上。</p>
+      <p class="sub">首次启动会自动在私有缓存内准备 JDK 25、Node 22 与桌面依赖，构建并验证通过后才启动服务；失败不会拿旧包顶上。</p>
     </header>
 
     <ol class="steps">
@@ -567,7 +555,7 @@ Path realExisting = existing.toRealPath();
               <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M15 6H6a2 2 0 0 0-2 2v9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
             </button>
           </div>
-          <p class="step-hint">默认 <code>http://localhost:9999</code>，权限为 <code>READ_ONLY</code>。</p>
+          <p class="step-hint">默认监听 <code>http://localhost:9999</code>（同步启动 Electron 桌面壳），默认权限为 <code>AUTO</code>，初次试用请先切到 <code>ASK</code> 或 <code>READ_ONLY</code>。</p>
         </div>
       </li>
       <li class="step reveal">
@@ -575,7 +563,7 @@ Path realExisting = existing.toRealPath();
         <div class="step-body">
           <h3>接上真实模型</h3>
           <div class="mini-code block">
-            <pre><code><span class="c-cm"># 环境变量，或被 Git 忽略的 application-local.yaml</span>
+            <pre><code><span class="c-cm"># 支持 OpenAI Chat Completions / Responses 及 Anthropic Messages</span>
 PILOT_MODEL_API_KEY=你的密钥
 PILOT_MODEL_ENDPOINT=https://api.openai.com/v1/chat/completions
 PILOT_MODEL_MODEL=gpt-4o-mini
@@ -584,7 +572,7 @@ PILOT_WORKSPACE=/绝对/工作区路径</code></pre>
               <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M15 6H6a2 2 0 0 0-2 2v9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
             </button>
           </div>
-          <p class="step-hint">无密钥时可先用 Mock 流程熟悉界面。</p>
+          <p class="step-hint">无密钥时可在模型设置切 Mock 模式体验界面流程。</p>
         </div>
       </li>
     </ol>
@@ -598,12 +586,12 @@ PILOT_WORKSPACE=/绝对/工作区路径</code></pre>
       <p class="sub">如实记录，比含糊其辞更有用。</p>
     </header>
     <div class="grid grid-2 limits">
-      <article class="limit reveal"><h3>不是沙箱</h3><p>命令内部的越界、子进程网络访问、提示注入越权，只能靠容器与可丢弃工作区解决。</p></article>
-      <article class="limit reveal"><h3>token 是估算值</h3><p>中文按 1 字符 1 token、英文按 4 字符 1 token，可能比真实 tokenizer 更早触发压缩。</p></article>
-      <article class="limit reveal"><h3>摘要不可逆</h3><p>被折叠的对话细节只剩摘要，续跑时可能需要复读原文件。</p></article>
-      <article class="limit reveal"><h3>命令副作用不可回退</h3><p>检查点只覆盖写工具记录的路径，<code>sed -i</code> 或构建产物不在恢复范围。</p></article>
-      <article class="limit reveal"><h3>多智能体不自动合并</h3><p>冲突与结论分歧一律交人裁决，这是刻意的产品选择。</p></article>
-      <article class="limit reveal"><h3>没有成本统计</h3><p>响应里的 usage 被丢弃，token 花费无法对账；上下文预算按字符估算。</p></article>
+      <article class="limit reveal"><h3>不是虚拟机级沙箱</h3><p>macOS/Linux 默认启用文件系统沙箱，Windows 需独立配置受限运行器；跨机器与不可信代码仍建议容器或独立隔离环境。</p></article>
+      <article class="limit reveal"><h3>token 预算含估算</h3><p>响应会记录服务端真实 usage 与费用，但发包前预算控制采用字符/token 估算，可能略早于真实 tokenizer 触发压缩。</p></article>
+      <article class="limit reveal"><h3>摘要不可逆</h3><p>被折叠的对话细节只剩两段式交接摘要，续跑时关键源码可能需要按需复读。</p></article>
+      <article class="limit reveal"><h3>命令副作用不可回退</h3><p>检查点只覆盖写文件工具记录的路径，<code>sed -i</code> 或外部构建产物不在自动回退范围。</p></article>
+      <article class="limit reveal"><h3>多智能体不自动合并</h3><p>冲突与结论分歧一律交人裁决，不绕过审阅静默覆盖工作区。</p></article>
+      <article class="limit reveal"><h3>单机与共享令牌</h3><p>面向个人单机使用，没有多租户账号或集群调度；远程访问使用单共享令牌，不建议直接暴露公网。</p></article>
     </div>
   </section>
 
@@ -611,7 +599,7 @@ PILOT_WORKSPACE=/绝对/工作区路径</code></pre>
   <section class="closing">
     <div class="closing-inner">
       <h2>先在自己的仓库里<br><span class="grad">试一件小事</span></h2>
-      <p class="sub">从 <code>READ_ONLY</code> 开始，让它先解释代码；确认行为符合预期，再放开写入。</p>
+      <p class="sub">从 <code>plan</code> 模式或 <code>ASK</code> 档位开始，让它先读懂代码、列出改动 Diff；确认符合预期，再放手执行。</p>
       <div class="cta">
         <a class="btn btn-primary" href="https://github.com/zzl-qz/Pilot" rel="noopener">
           打开仓库
@@ -633,7 +621,7 @@ PILOT_WORKSPACE=/绝对/工作区路径</code></pre>
         </span>
         Pilot
       </a>
-      <p class="footer-note">用 Java 构建的本地 Coding Agent 原型。适合本地开发与评估，不是可无监督修改生产代码的成熟产品。</p>
+      <p class="footer-note">用 Java 25 构建的本机任务执行 Agent（开发预览）。适合受监督的本机开发与自动化验收，不建议用于无人值守生产操作。</p>
     </div>
     <nav class="footer-nav" aria-label="页脚导航">
       <div>
@@ -652,7 +640,7 @@ PILOT_WORKSPACE=/绝对/工作区路径</code></pre>
       <div>
         <p class="footer-head">关于</p>
         <a href="https://github.com/zzl-qz/Pilot/blob/master/README.md" rel="noopener">README <span class="ext">↗</span></a>
-        <a href="https://github.com/zzl-qz/Pilot/blob/master/PRODUCT_PLAN.md" rel="noopener">产品计划 <span class="ext">↗</span></a>
+        <a href="https://github.com/zzl-qz/Pilot/blob/master/docs-public/README.md" rel="noopener">公开文档 <span class="ext">↗</span></a>
         <a href="https://github.com/zzl-qz/Pilot/issues" rel="noopener">反馈 <span class="ext">↗</span></a>
       </div>
     </nav>
@@ -662,7 +650,7 @@ PILOT_WORKSPACE=/绝对/工作区路径</code></pre>
     <span class="footer-facts">
       <span>代码与数据默认留在本机</span>
       <span>无遥测</span>
-      <span>MIT</span>
+      <span>Apache-2.0</span>
     </span>
   </div>
 </footer>
