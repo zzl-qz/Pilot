@@ -6,7 +6,19 @@ const calls = [];
 let response = () => new Response(markdown);
 globalThis.window = { fetch(url) { calls.push(url); return response(); } };
 const { downloadSessionExport } = await import('../src/lib/session-export.ts');
+const { buildTranscript } = await import('../src/lib/transcript.ts');
 const run = () => downloadSessionExport('s/1', '项目/会话');
+
+test('离线转录保留多行、收口围栏并脱敏各类凭据且不误伤普通 key 字段', () => {
+  const text = buildTranscript({ title: '归档', messages: [{ role: 'user', text:
+    '标题\n\n- 项目\n\n行内 ```inline``` 正常保留\nkey: "explorer"\n~~~js\nconst apiKey = "sk-proj-abcdefghijk"\npassword="very-secret-value"\n' +
+    'https://user:very-secret-pass@example.com\nghp_abcdefghijk github_pat_abcdefghijk AIza123456789012345678901 AKIA1234567890123456' }] });
+  assert.match(text, /## 对话\n\n### 你\n\n标题\n\n- 项目/);
+  assert.match(text, /\n~~~\n/);
+  assert.match(text, /key: "explorer"/);
+  assert.doesNotMatch(text, /very-secret|abcdefghijk|123456789012345678901/);
+  assert.match(text, /https:\/\/\*\*\*:\*\*\*@example\.com/);
+});
 
 test('在读取全文前打开另存为，写入关闭成功后才报告文件名', async t => {
   calls.length = 0;

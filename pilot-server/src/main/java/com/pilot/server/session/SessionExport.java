@@ -99,10 +99,10 @@ public final class SessionExport {
             }
             if ("user".equals(message.role())) {
                 shown++;
-                out.append("## 你\n\n").append(clip(message.content(), 4000)).append("\n\n");
+                out.append("### 你\n\n").append(safeBody(message.content(), 4000)).append("\n\n");
             } else if ("assistant".equals(message.role()) && !message.content().isBlank()) {
                 shown++;
-                out.append("## Pilot\n\n").append(clip(message.content(), 4000)).append("\n\n");
+                out.append("### Pilot\n\n").append(safeBody(message.content(), 4000)).append("\n\n");
             }
         }
         if (shown == 0) {
@@ -132,17 +132,68 @@ public final class SessionExport {
         if (text == null || text.isEmpty()) {
             return "";
         }
-        return text.replaceAll("sk-[A-Za-z0-9]{8,}", "sk-***")
-            .replaceAll("(?i)(bearer\\s+)[A-Za-z0-9._\\-]{8,}", "$1***")
-            .replaceAll("(?i)((?:api[_-]?key|token|secret|password|passwd)\\s*[=:]\\s*)[A-Za-z0-9._\\-]{4,}", "$1***");
+        return text.replaceAll("(?i)(https?://)[^:/\\s@]+:[^@/\\s]+@", "$1***:***@")
+            .replaceAll("(?i)(Bearer\\s+)[A-Za-z0-9._\\-]{8,}", "$1***")
+            .replaceAll("(?i)(sk-(?:proj-|ant-|or-)?)[A-Za-z0-9_-]{8,}", "$1***")
+            .replaceAll("(?i)(ghp_|github_pat_)[A-Za-z0-9_]{8,}", "$1***")
+            .replaceAll("(?i)(xox[baprs]-)[A-Za-z0-9-]{10,}", "$1***")
+            .replaceAll("(?i)(AIza)[A-Za-z0-9_-]{20,}", "$1***")
+            .replaceAll("(?i)(AKIA)[A-Z0-9]{12,}", "$1***")
+            .replaceAll(
+                "(?i)([\"']?(?:(?:api|access|secret|private)[_-]?key|token|secret|password|passwd)[\"']?"
+                    + "\\s*[:=]\\s*[\"']?)[^\"'\\s,}()（）]{4,}",
+                "$1***");
+    }
+
+    private static String safeBody(String text, int limit) {
+        return closeFence(clipBlock(text, limit));
+    }
+
+    private static String closeFence(String text) {
+        char fence = 0;
+        int fenceLength = 0;
+        for (String line : text.split("\\R", -1)) {
+            String trimmed = line.stripLeading();
+            if (fence == 0) {
+                if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+                    char marker = trimmed.charAt(0);
+                    int length = countLeading(trimmed, marker);
+                    String info = trimmed.substring(length);
+                    if (marker == '`' && info.indexOf('`') >= 0) {
+                        continue;
+                    }
+                    fence = marker;
+                    fenceLength = length;
+                }
+            } else {
+                int closingLength = countLeading(trimmed, fence);
+                if (closingLength >= fenceLength && trimmed.substring(closingLength).isBlank()) {
+                    fence = 0;
+                    fenceLength = 0;
+                }
+            }
+        }
+        return fence == 0 ? text : text + "\n" + String.valueOf(fence).repeat(fenceLength);
+    }
+
+    private static int countLeading(String text, char target) {
+        int count = 0;
+        while (count < text.length() && text.charAt(count) == target) {
+            count++;
+        }
+        return count;
     }
 
     private static String clip(String text) {
-        return clip(text, RESULT_CHARS);
+        String value = text == null ? "" : text.replace("\r\n", "\n").replace('\r', '\n').replace('\n', ' ').strip();
+        if (value.length() <= RESULT_CHARS) {
+            return value;
+        }
+        return value.substring(0, RESULT_CHARS) + "…";
     }
 
-    private static String clip(String text, int limit) {
-        String value = text == null ? "" : text.strip().replace("\n", " ");
+    private static String clipBlock(String text, int limit) {
+        String value = text == null ? "" : text.replace("\r\n", "\n").replace('\r', '\n').strip();
         if (value.length() <= limit) {
             return value;
         }

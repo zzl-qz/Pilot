@@ -13,17 +13,53 @@ export function buildTranscript({ title, workspace, exportedAt, messages }: { ti
   if (workspace || exportedAt) {
     lines.push('');
   }
+  const bodyLines: string[] = [];
   for (const message of Array.isArray(messages) ? messages : []) {
-    const text = String(message.text || '').trim();
+    const text = safeBody(String(message.text || '').trim(), 4000);
     if (message.role === 'tools') {
       if (message.summary) {
-        lines.push(`> 工具调用：${message.summary}`, '');
+        bodyLines.push(`> 工具调用：${message.summary.replace(/\r?\n/g, ' ').trim()}`, '');
       }
     } else if (text) {
-      lines.push(message.role === 'user' ? '## 你' : '## Pilot', '', text, '');
+      bodyLines.push(message.role === 'user' ? '### 你' : '### Pilot', '', text, '');
     }
   }
-  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+  if (bodyLines.length) {
+    lines.push('## 对话', '', ...bodyLines);
+  }
+  return redact(lines.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd()) + '\n';
+}
+
+function safeBody(text: string, limit: number) {
+  const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const clipped = normalized.length > limit ? `${normalized.slice(0, limit)}…` : normalized;
+  const lines = clipped.split('\n');
+  let fence = '';
+  for (const line of lines) {
+    const trimmed = line.trimStart();
+    if (!fence) {
+      const opening = /^(?:`{3,}|~{3,})/.exec(trimmed);
+      if (opening) {
+        const rest = trimmed.slice(opening[0].length);
+        if (opening[0][0] === '`' && rest.includes('`')) continue;
+        fence = opening[0];
+      }
+    } else if (new RegExp(`^${fence[0]}{${fence.length},}\\s*$`).test(trimmed)) {
+      fence = '';
+    }
+  }
+  return fence ? `${clipped}\n${fence}` : clipped;
+}
+
+function redact(text: string) {
+  return text.replace(/(https?:\/\/)[^:/\s@]+:[^@/\s]+@/gi, '$1***:***@')
+    .replace(/(Bearer\s+)[A-Za-z0-9._-]{8,}/gi, '$1***')
+    .replace(/(sk-(?:proj-|ant-|or-)?)[A-Za-z0-9_-]{8,}/gi, '$1***')
+    .replace(/(ghp_|github_pat_)[A-Za-z0-9_]{8,}/gi, '$1***')
+    .replace(/(xox[baprs]-)[A-Za-z0-9-]{10,}/gi, '$1***')
+    .replace(/(AIza)[A-Za-z0-9_-]{20,}/gi, '$1***')
+    .replace(/(AKIA)[A-Z0-9]{12,}/gi, '$1***')
+    .replace(/(["']?(?:(?:api|access|secret|private)[_-]?key|token|secret|password|passwd)["']?\s*[:=]\s*["']?)[^"'\s,}()（）]{4,}/gi, '$1***');
 }
 
 /** 触发浏览器保存。没有下载能力时返回 false，调用方改走复制。 */
