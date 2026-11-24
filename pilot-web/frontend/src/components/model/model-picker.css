@@ -24,6 +24,8 @@ html[data-theme] .pilot-model-picker {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  max-width: 100%;
+  min-width: 0;
   padding: 4px 9px;
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -32,11 +34,34 @@ html[data-theme] .pilot-model-picker {
   font-size: 12px;
   cursor: pointer;
 }
+.pilot-model-picker .model-picker-profile-chip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pilot-model-picker .model-picker-profile-chip:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
 .pilot-model-picker .model-picker-profile-chip.is-active {
   border-color: var(--accent);
   background: var(--ui-selected);
   font-weight: 600;
 }
+.pilot-model-picker .model-picker-profile-chip small {
+  flex-shrink: 0;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.pilot-model-picker .model-picker-profile-chip svg { flex-shrink: 0; }
+.pilot-model-picker .model-picker-profile-chip small.is-fallback { border: 1px solid var(--accent); }
+.pilot-model-picker .model-picker-profile-chip small.is-keyless { border: 1px solid var(--line); }
 .pilot-model-picker .model-picker-profile-chip:disabled { opacity: 0.6; cursor: default; }
 @media (pointer: coarse), (max-width: 640px) {
   .pilot-model-picker .model-picker-head button { min-width: 44px; min-height: 44px; }

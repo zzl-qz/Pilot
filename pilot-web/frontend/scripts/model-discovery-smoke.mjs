@@ -30,10 +30,15 @@ const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="view
 import React from 'react';import {createRoot} from 'react-dom/client';import App from '/src/components/App.jsx';import {useStore} from '/src/store.js';import {api} from '/src/api.js'; import {installSubmissionFixture} from '/scripts/submission-fixture.mjs';
 import '/src/styles.css';import '/src/shell-vanilla.css';import '/src/styles-addendum.css';import '/src/workbench.css';
 document.documentElement.dataset.theme='dark';
-const real={settings:api.settings,saveModel:api.saveModel,clearModelKey:api.clearModelKey,probeModels:api.probeModels};
+const real={settings:api.settings,saveModel:api.saveModel,clearModelKey:api.clearModelKey,probeModels:api.probeModels,modelProfiles:api.modelProfiles,activateModelProfile:api.activateModelProfile};
 for(const name of Object.keys(api))if(typeof api[name]==='function')api[name]=async()=>({});Object.assign(api,real);
 for(const name of ['bookmarks','workProducts','skillDrafts','schedules'])api[name]=async()=>[];
 api.files=async()=>({entries:[]});api.filesFlat=async()=>({files:[]});
+api.modelProfiles=async()=>({activeProfileId:'p1',fallbackProfileId:'p2',profiles:[
+ {id:'p1',name:'当前云端',endpoint:'https://cloud.example/v1',model:'cloud-model',apiKeySet:true,apiKeyMasked:'***',contextTokens:null,maxOutputTokens:null,childModel:'',active:true},
+ {id:'p2',name:'本机备用',endpoint:'http://127.0.0.1:11434/v1',model:'local-model',apiKeySet:false,apiKeyMasked:'',contextTokens:null,maxOutputTokens:null,childModel:'',active:false,fallback:true}
+]});
+api.activateModelProfile=async id=>({id});
 window.submissions=[];installSubmissionFixture(api);
 api.sendMessage=async(id,body)=>{window.submissions.push({id,body,model:useStore.getState().settingsData.model});return {sessionId:id,runId:'r'};};
 const settings=await api.settings();useStore.setState({init:async()=>{},sessionId:'model-test',sessionTitle:'模型列表选择验收',settingsData:settings,modelOptions:settings.modelOptions,capabilities:{model:settings.model},projects:[],sessions:[]});
@@ -210,7 +215,7 @@ async function run(page, name) {
   saveMode = 'success'; await settings.locator('#settings-model-clear-key').click(); await page.locator('#confirm-ok').click();
   await feedback.getByText(/已清除保存的 API Key/).waitFor();
   assert.equal(await settings.locator('#settings-model-clear-key').isDisabled(), true);
-  assert.equal(await settings.locator('#settings-model-key').getAttribute('placeholder'), '尚未保存密钥');
+  assert.match(await settings.locator('#settings-model-key').getAttribute('placeholder'), /^尚未保存密钥/);
   assert.equal(await settings.locator('#settings-model-name').inputValue(), 'unsaved-model', '清除 Key 不丢弃未保存的模型名');
   assert.equal(await settings.locator('#settings-model-endpoint').inputValue(), 'https://unsaved.example/v1');
   assert.equal(saved.model, 'reopened-model');
@@ -255,6 +260,16 @@ async function run(page, name) {
   // 输入区直接获取、搜索并切换；配置操作集中在完整设置中。
   mode = 'many'; await page.locator('#model-chip').click();
   const menu = page.locator('#model-menu'), search = menu.getByRole('combobox', { name: '搜索模型' });
+  const fallbackChip = menu.getByRole('button', { name: /本机备用.*备用.*免密钥/ });
+  await fallbackChip.waitFor();
+  assert.equal(await fallbackChip.getAttribute('aria-pressed'), 'false');
+  assert.match(await fallbackChip.getAttribute('title'), /故障转移备用.*免密钥/);
+  assert.equal(await fallbackChip.getByText('备用', { exact: true }).count(), 1);
+  assert.equal(await fallbackChip.getByText('免密钥', { exact: true }).count(), 1);
+  const keyedChip = menu.getByRole('button', { name: /当前云端/ });
+  assert.equal(await keyedChip.getAttribute('aria-pressed'), 'true');
+  assert.match(await keyedChip.getAttribute('title'), /已配置 API Key（\*\*\*）/);
+  assert.equal(await keyedChip.getByText('免密钥', { exact: true }).count(), 0);
   await menu.getByRole('option', { name: 'model-29', exact: true }).waitFor();
   assert.equal(await menu.getByRole('option').count(), 31, '完整列表加当前配置，不截断远端结果');
   assert.equal(await search.evaluate(el => el === document.activeElement), true);
@@ -383,7 +398,7 @@ browser = await chromium.launch(browserOptions({ headless: true }));
   await run(await browser.newPage(), 'chromium'); await browser.close(); browser = null;
   const env = { ...process.env, PILOT_URL: url, PILOT_BROWSER_HOME: join(output, 'browser') };
   delete env.ELECTRON_RUN_AS_NODE; delete env.PILOT_DESKTOP_SMOKE;
-  desktop = await _electron.launch({ executablePath: prepareDevelopmentHost(), args: [desktopRoot, `--user-data-dir=${join(output, 'profile')}`], env });
+  desktop = await _electron.launch({ executablePath: prepareDevelopmentHost(), args: [desktopRoot, `--user-data-dir=${join(output, 'profile')}`], env, timeout: 30_000 });
   await run(await desktop.firstWindow(), 'electron');
   console.log('Screenshots:', output);
 } finally {

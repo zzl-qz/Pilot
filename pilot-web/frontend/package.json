@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "test:delivery": "node --import ./scripts/register-typescript.mjs --test scripts/agent-delivery.test.mjs",
-    "test:models": "node scripts/model-discovery-smoke.mjs",
+    "test:models": "node --import ./scripts/register-typescript.mjs --test scripts/model-picker.test.mjs && node scripts/model-discovery-smoke.mjs",
     "test:refresh": "node scripts/workbench-refresh-smoke.mjs",
     "test:mobile": "node scripts/mobile-connection-smoke.mjs",
     "test:usage": "node --import ./scripts/register-typescript.mjs --test scripts/request-usage.test.mjs && node scripts/request-usage-smoke.mjs",

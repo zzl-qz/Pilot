@@ -7,6 +7,7 @@ import { useStore } from '../../store.js';
 import { buildModelUpdate, normalizeModelNames } from '../../lib/model-settings.js';
 import { useModelDiscovery } from './ModelDiscovery.jsx';
 import { Icon } from '../Icon.jsx';
+import { modelProfileChipLabels } from './model-picker-state.js';
 import './model-picker.css';
 
 /** 输入区只负责快速切换；连接配置和手动填写统一进入模型设置。 */
@@ -154,14 +155,20 @@ export function ModelPicker({ onClose, models, initialModel = '', initialEndpoin
         <span>{profiles.length}</span>
       </div>
       <div className="model-picker-profile-chips">
-        {profiles.map(profile => <button key={profile.id} type="button"
-          className={`model-picker-profile-chip${profile.active ? ' is-active' : ''}`}
-          disabled={feedback.busy || Boolean(activatingProfile)}
-          title={`${profile.model} · ${profile.endpoint}`}
-          onClick={() => void selectProfile(profile)}>
+        {profiles.map(profile => {
+          const labels = modelProfileChipLabels(profile);
+          return <button key={profile.id} type="button"
+            className={`model-picker-profile-chip${profile.active ? ' is-active' : ''}`}
+            aria-pressed={profile.active}
+            disabled={feedback.busy || Boolean(activatingProfile)}
+            title={labels.title}
+            onClick={() => void selectProfile(profile)}>
           <span>{profile.name}</span>
+          {labels.fallback && <small className="is-fallback">{labels.fallback}</small>}
+          {labels.keyless && <small className="is-keyless">{labels.keyless}</small>}
           {activatingProfile === profile.id ? <small>切换中…</small> : profile.active && <Icon name="check" />}
-        </button>)}
+          </button>;
+        })}
       </div>
       {profileError && <p className="model-picker-message" role="alert">{profileError}</p>}
     </div>}
