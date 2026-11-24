@@ -40,7 +40,10 @@ const TOOL_LABELS: Record<string, string> = {
   wait_until: '等待',
   ask_user: '提问',
   code_diagnostics: '诊断',
-  code_symbol: '符号'
+  code_symbol: '符号',
+  git_status: 'Git 状态',
+  git_diff: 'Git 差异',
+  git_log: 'Git 历史'
 };
 
 export function parseAsk(args: string) {

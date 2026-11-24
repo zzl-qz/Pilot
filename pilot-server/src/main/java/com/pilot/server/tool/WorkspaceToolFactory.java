@@ -53,6 +53,9 @@ import com.pilot.core.tool.file.GlobFilesTool;
 import com.pilot.core.tool.file.ListDirTool;
 import com.pilot.core.tool.file.MoveFileTool;
 import com.pilot.core.tool.file.ReadFileTool;
+import com.pilot.core.tool.git.GitDiffTool;
+import com.pilot.core.tool.git.GitLogTool;
+import com.pilot.core.tool.git.GitStatusTool;
 import com.pilot.core.tool.file.SandboxCreateFileTool;
 import com.pilot.core.tool.file.SandboxEditFileTool;
 import com.pilot.core.tool.file.SearchTool;
@@ -298,6 +301,15 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
         if (view.allowsTool(CodeSymbolTool.NAME)) {
             registry.register(new CodeSymbolTool(validator));
         }
+        if (view.allowsTool(GitStatusTool.NAME)) {
+            registry.register(new GitStatusTool(validator));
+        }
+        if (view.allowsTool(GitDiffTool.NAME)) {
+            registry.register(new GitDiffTool(validator));
+        }
+        if (view.allowsTool(GitLogTool.NAME)) {
+            registry.register(new GitLogTool(validator));
+        }
         if (view.allowsTool(ToolNames.WEB_SEARCH)) {
             registry.register(searchTool());
         }
@@ -365,6 +377,9 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
         LocalCodeChecker code = LocalCodeChecker.installed(root);
         registry.register(new CodeDiagnosticsTool(() -> code.available() ? "ready" : "", code::diagnose));
         registry.register(new CodeSymbolTool(validator));
+        registry.register(new GitStatusTool(validator));
+        registry.register(new GitDiffTool(validator));
+        registry.register(new GitLogTool(validator));
         if (questions != null) {
             registry.register(new AskUserTool(questions, sessionId));
         }
