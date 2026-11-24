@@ -12,6 +12,8 @@ import static org.mockito.Mockito.when;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -21,6 +23,8 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.ObjectProvider;
 
 import com.pilot.core.browser.BrowserBackend;
+import com.pilot.core.browser.BrowserEvidenceRecord;
+import com.pilot.core.browser.BrowserHandoffBroker;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.PlanRepository;
 import com.pilot.core.session.RunCheckpointRepository;
@@ -30,6 +34,7 @@ import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.server.attachment.AttachmentReferences;
 import com.pilot.server.attachment.AttachmentService;
+import com.pilot.server.browser.BrowserEvidenceService;
 import com.pilot.server.multi.SandboxStore;
 import com.pilot.server.run.RunStarter;
 import com.pilot.server.run.TaskControlService;
@@ -44,6 +49,8 @@ import com.pilot.server.work.files.DocumentService;
 import com.pilot.server.work.files.FileWorkbenchService;
 import com.pilot.server.work.products.SkillDraftService;
 import com.pilot.server.work.products.WorkProductService;
+
+import tools.jackson.databind.ObjectMapper;
 
 /** 会话删除必须级联文档工作台，且失败时保留会话以便原样重试。 */
 class SessionCleanupServiceTest {
@@ -94,6 +101,42 @@ class SessionCleanupServiceTest {
         assertTrue(failure.retryable());
         assertTrue(failure.getMessage().contains("可重试"), failure.getMessage());
         verify(sessions, never()).delete(anyString());
+    }
+
+    @Test
+    void deletesBrowserTreeCancelsHandoffsAndClearsEvidence() throws Exception {
+        Path workspace = Files.createDirectory(temp.resolve("workspace-b"));
+        SessionService sessions = new SessionService();
+        Session session = sessions.createSession("cleanup-browser", workspace.toString());
+        PilotDataDir dataDir = new PilotDataDir(temp.toString());
+        DocumentService documents =
+            new DocumentService(new AutomationStore((SqliteStore)null), dataDir, mock(WorkProductService.class));
+        BrowserBackend backend = mock(BrowserBackend.class);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<BrowserBackend> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(backend);
+        RunStarter runs = mock(RunStarter.class);
+        when(runs.activeRun(anyString())).thenReturn(Optional.empty());
+        AttachmentReferences references = mock(AttachmentReferences.class);
+        when(references.retainedOwners()).thenReturn(Set.of());
+        SessionCleanupService service = new SessionCleanupService(sessions, mock(ConversationRepository.class),
+            mock(PlanRepository.class), mock(RunRepository.class), mock(SandboxStore.class), runs,
+            mock(TaskControlService.class), mock(CommandTaskManager.class), provider, mock(ValidationLedger.class),
+            mock(ToolCallJournalFactory.class), mock(RunCheckpointRepository.class), mock(WorkProductService.class),
+            mock(SkillDraftService.class), mock(FileWorkbenchService.class), documents, mock(AttachmentService.class),
+            dataDir, references, mock(SessionNotes.class), new StorageHealthService());
+        BrowserHandoffBroker handoffs = new BrowserHandoffBroker();
+        BrowserEvidenceService evidence = new BrowserEvidenceService(dataDir, new ObjectMapper());
+        service.setBrowserServices(handoffs, evidence);
+        var future = handoffs.request(new BrowserHandoffBroker.PendingHandoff("h1", session.id(),
+            session.id() + "::browser::b1", "b1", "auth", "登录", "", Instant.now(), null), Duration.ofSeconds(10));
+        evidence.record(new BrowserEvidenceRecord("ev1", session.id(), session.id(), "r1", "", Instant.now(),
+            "navigate", "ok", "http://127.0.0.1:5173/", "", "ok", "", "", "", "", 0L, List.of(), 0, 0, ""));
+
+        assertTrue(service.delete(session.id()));
+        verify(backend).closeSessionTree(session.id());
+        assertFalse(future.join().completed());
+        assertTrue(evidence.list(session.id(), "", 10).isEmpty());
     }
 
     private SessionCleanupService cleanup(SessionService sessions, DocumentService documents, PilotDataDir dataDir,

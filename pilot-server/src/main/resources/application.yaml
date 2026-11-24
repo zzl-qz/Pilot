@@ -70,6 +70,9 @@ pilot:
     # deny-hosts 始终优先，写错 allow 也不会放过被拒的主机。改完重启生效。
     allow-hosts: ${PILOT_BROWSER_ALLOW_HOSTS:}
     deny-hosts: ${PILOT_BROWSER_DENY_HOSTS:}
+    sensitive-hosts: ${PILOT_BROWSER_SENSITIVE_HOSTS:}
+    sensitive-allow-hosts: ${PILOT_BROWSER_SENSITIVE_ALLOW_HOSTS:}
+    max-download-bytes: ${PILOT_BROWSER_MAX_DOWNLOAD_BYTES:0}
     # 外部 CDP 端点：填上后浏览器工具直接接管你自己开着的 Chrome（如 http://127.0.0.1:9222）。
     # 只接受本机回环地址；外部会话只能操作 allow-hosts 清单里的主机，留空清单表示谁都不碰。
     cdp-endpoint: ${PILOT_BROWSER_CDP:}

@@ -215,6 +215,26 @@ class AgentRunPreparationTest {
             }, false);
             assertFalse(actPrepared.planMode());
             assertTrue(actPrepared.tools().find("edit_file").isPresent(), "默认 act 模式应保留写文件工具");
+
+            AgentRunPreparation.PreparationInput browserInput = new AgentRunPreparation.PreparationInput(sessionId,
+                "run_browser", "/browser 检查首页布局", null, false, List.of(), false, null, false, Set.of(), List.of());
+            AgentRunPreparation.PreparedRun browserPrepared =
+                preparation.prepare(browserInput, (items, explanation) -> {
+                }, ignored -> {
+                }, false);
+            assertTrue(browserPrepared.browserMode());
+            assertTrue(browserPrepared.availableTools().contains("browser_agent"));
+            assertTrue(browserPrepared.systemPrompt().contains("/browser"));
+
+            AgentRunPreparation.PreparationInput browserInPlan =
+                new AgentRunPreparation.PreparationInput(sessionId, "run_browser_plan", "/browser 检查首页布局", null, false,
+                    List.of(), false, null, false, Set.of(), List.of("browser_agent"));
+            AgentRunPreparation.PreparedRun browserPlanPrepared =
+                preparation.prepare(browserInPlan, (items, explanation) -> {
+                }, ignored -> {
+                }, true);
+            assertFalse(browserPlanPrepared.browserMode());
+            assertFalse(browserPlanPrepared.availableTools().contains("browser_agent"));
         } finally {
             commandTasks.close();
         }

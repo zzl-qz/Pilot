@@ -9,10 +9,13 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import com.pilot.core.browser.BrowserEvidenceRecord;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.server.browser.BrowserEvidenceService;
 import com.pilot.server.run.TaskControlService;
 import com.pilot.server.run.TaskControlStatus;
 import com.pilot.server.session.lookup.SessionLookup;
@@ -43,13 +46,19 @@ public class CompletionBundleService {
     private final ValidationStatusService validationStatus;
     private final VerificationPolicyService policies;
     private final RunSnapshotService snapshots;
+    private BrowserEvidenceService browserEvidence;
+
+    @Autowired(required = false)
+    public void setBrowserEvidence(BrowserEvidenceService browserEvidence) {
+        this.browserEvidence = browserEvidence;
+    }
 
     public record CompletionBundle(int version, String generatedAt, String sessionId, String taskId, String goal,
         List<String> constraints, List<TaskControlService.Acceptance> acceptance, List<String> corrections,
         String status, String mode, String phase, String gap, String workspace, ValidationSnapshot verification,
         VerificationPolicyService.PolicyReport policy, List<ValidationEvidence> evidence,
         List<ChangeService.RunFileChange> changes, int added, int removed, boolean changesTruncated,
-        String changesError, List<String> nextSteps) {
+        String changesError, List<String> nextSteps, List<BrowserEvidenceRecord> browserEvidence) {
         public CompletionBundle {
             version = version <= 0 ? 1 : version;
             generatedAt = generatedAt == null ? "" : generatedAt;
@@ -68,6 +77,18 @@ public class CompletionBundleService {
             changes = changes == null ? List.of() : List.copyOf(changes);
             changesError = changesError == null ? "" : changesError;
             nextSteps = copy(nextSteps);
+            browserEvidence = browserEvidence == null ? List.of() : List.copyOf(browserEvidence);
+        }
+
+        public CompletionBundle(int version, String generatedAt, String sessionId, String taskId, String goal,
+            List<String> constraints, List<TaskControlService.Acceptance> acceptance, List<String> corrections,
+            String status, String mode, String phase, String gap, String workspace, ValidationSnapshot verification,
+            VerificationPolicyService.PolicyReport policy, List<ValidationEvidence> evidence,
+            List<ChangeService.RunFileChange> changes, int added, int removed, boolean changesTruncated,
+            String changesError, List<String> nextSteps) {
+            this(version, generatedAt, sessionId, taskId, goal, constraints, acceptance, corrections, status, mode,
+                phase, gap, workspace, verification, policy, evidence, changes, added, removed, changesTruncated,
+                changesError, nextSteps, List.of());
         }
 
         private static List<String> copy(List<String> value) {
@@ -103,6 +124,8 @@ public class CompletionBundleService {
         ChangeService.RunChangeReport report = latest == null ? null : changes(latest.runId());
         List<ChangeService.RunFileChange> changes = report == null ? List.of() : report.files();
         List<String> nextSteps = nextSteps(task, verification, policy);
+        List<BrowserEvidenceRecord> browserRecords =
+            browserEvidence == null ? List.of() : browserEvidence.list(sessionId, "", 40);
         return new CompletionBundle(1, Instant.now().toString(), sessionId, task == null ? "" : task.taskId(),
             task == null ? "" : task.originalGoal(), task == null ? List.of() : task.constraints(),
             task == null ? List.of() : task.acceptance(), task == null ? List.of() : task.corrections(),
@@ -110,7 +133,7 @@ public class CompletionBundleService {
             executionValue(task, TaskControlService.Execution::phase),
             executionValue(task, TaskControlService.Execution::gap), workspace.toString(), verification, policy,
             evidence, changes, report == null ? 0 : report.added(), report == null ? 0 : report.removed(),
-            report != null && report.truncated(), report == null ? "" : report.error(), nextSteps);
+            report != null && report.truncated(), report == null ? "" : report.error(), nextSteps, browserRecords);
     }
 
     /** 只核对证据是否仍覆盖当前文件；不会自动重跑测试。 */
@@ -222,6 +245,18 @@ public class CompletionBundleService {
         if (!bundle.nextSteps().isEmpty()) {
             text.append("## 下一步\n\n");
             bundle.nextSteps().forEach(item -> text.append("- ").append(item).append('\n'));
+            text.append('\n');
+        }
+        if (!bundle.browserEvidence().isEmpty()) {
+            text.append("## 浏览器验证证据\n\n");
+            text.append("| 时间 | 动作 | 状态 | URL | 控制台错误 | 失败请求 | 摘要 |\n");
+            text.append("| --- | --- | --- | --- | --- | --- | --- |\n");
+            for (BrowserEvidenceRecord item : bundle.browserEvidence()) {
+                text.append("| ").append(item.timestamp()).append(" | `").append(item.action()).append("` | ")
+                    .append(item.status()).append(" | `").append(item.url()).append("` | ").append(item.consoleErrors())
+                    .append(" | ").append(item.failedRequests()).append(" | ")
+                    .append(item.summary().replace('\n', ' ').replace('|', '/')).append(" |\n");
+            }
             text.append('\n');
         }
         text.append("---\n\n");

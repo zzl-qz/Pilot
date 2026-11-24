@@ -1,8 +1,10 @@
 package com.pilot.server.browser;
 
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -10,6 +12,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,6 +20,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -119,7 +123,8 @@ public class BrowserControlController {
 
     /** 用户接管：把页面留给用户，智能体的交互/导航动作被温和拦截（观察类放行）。 */
     @PostMapping("/{id}/browser/pause")
-    public ResponseEntity<Void> pause(@PathVariable String id) {
+    public ResponseEntity<Void> pause(@PathVariable String id,
+        @RequestBody(required = false) Map<String, Object> body) {
         requireSession(id);
         browser.setPaused(id, true);
         return ResponseEntity.noContent().build();
@@ -137,10 +142,84 @@ public class BrowserControlController {
 
     /** 恢复智能体的页面操作。 */
     @PostMapping("/{id}/browser/resume")
-    public ResponseEntity<Void> resume(@PathVariable String id) {
+    public ResponseEntity<Void> resume(@PathVariable String id,
+        @RequestBody(required = false) Map<String, Object> body) {
         requireSession(id);
         browser.setPaused(id, false);
         return ResponseEntity.noContent().build();
+    }
+
+    /** 立即终止智能体对页面的自动控制，清除蓝色控制框并暂停后续自动动作。 */
+    @PostMapping("/{id}/browser/stop-control")
+    public Map<String, Object> stopControl(@PathVariable String id,
+        @RequestBody(required = false) Map<String, Object> body) {
+        requireSession(id);
+        return browser.stopControl(id, browserSessionId(body));
+    }
+
+    /** 完成接管并唤醒等待中的浏览器或子代理操作。 */
+    @PostMapping("/{id}/browser/handoff/resume")
+    public Map<String, Object> resumeHandoff(@PathVariable String id,
+        @RequestBody(required = false) Map<String, Object> body) {
+        requireSession(id);
+        String target = browserSessionId(body);
+        String note = body == null ? "" : text(body.get("note"), 500);
+        return browser.resumeHandoff(id, target, note);
+    }
+
+    /** 取消正在等待的接管请求。 */
+    @PostMapping("/{id}/browser/handoff/cancel")
+    public Map<String, Object> cancelHandoff(@PathVariable String id,
+        @RequestBody(required = false) Map<String, Object> body) {
+        requireSession(id);
+        String target = browserSessionId(body);
+        String reason = body == null ? "" : text(body.get("reason"), 500);
+        return browser.cancelHandoff(id, target, reason);
+    }
+
+    /** 切换镜像控制面板聚焦的浏览器泳道（主会话或某个子代理）。 */
+    @PostMapping("/{id}/browser/lane")
+    public Map<String, Object> selectLane(@PathVariable String id,
+        @RequestBody(required = false) Map<String, Object> body) {
+        requireSession(id);
+        String target = browserSessionId(body);
+        return browser.selectLane(id, target);
+    }
+
+    /** 查询本会话的浏览器宿主机证据清单。 */
+    @GetMapping("/{id}/browser/evidence")
+    public Map<String, Object> evidence(@PathVariable String id, @RequestParam(required = false) String runId,
+        @RequestParam(defaultValue = "80") int limit) {
+        requireSession(id);
+        return browser.evidence(id, runId, Math.max(1, Math.min(limit, 200)));
+    }
+
+    /** 按证据编号读取受控目录下的真实截图文件。 */
+    @GetMapping("/{id}/browser/evidence/{evidenceId}/image")
+    public ResponseEntity<FileSystemResource> evidenceImage(@PathVariable String id, @PathVariable String evidenceId) {
+        requireSession(id);
+        Optional<Path> resolved = browser.resolveEvidenceImage(id, evidenceId);
+        if (resolved.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        Path file = resolved.get();
+        String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
+        MediaType type = name.endsWith(".png") ? MediaType.IMAGE_PNG : MediaType.IMAGE_JPEG;
+        return ResponseEntity.ok().contentType(type).header("Cache-Control", "private, max-age=60")
+            .body(new FileSystemResource(file));
+    }
+
+    /** 按证据编号读取受控目录下的可回放过程录像 JSON。 */
+    @GetMapping("/{id}/browser/evidence/{evidenceId}/recording")
+    public ResponseEntity<FileSystemResource> evidenceRecording(@PathVariable String id,
+        @PathVariable String evidenceId) {
+        requireSession(id);
+        Optional<Path> resolved = browser.resolveEvidenceRecording(id, evidenceId);
+        if (resolved.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON)
+            .header("Cache-Control", "private, max-age=60").body(new FileSystemResource(resolved.get()));
     }
 
     /** 地址栏：用户直接输入地址打开页面（简写 localhost:5173 会自动补 http://）。 */
@@ -149,28 +228,30 @@ public class BrowserControlController {
         @RequestBody(required = false) Map<String, Object> body) {
         requireSession(id);
         String raw = body == null ? null : String.valueOf(body.getOrDefault("url", "")).strip();
-        if (raw.isEmpty()) {
+        if (raw == null || raw.isEmpty()) {
             return Map.of("ok", false, "error", "请先输入要打开的地址");
         }
-        return browser.userAction(id, "navigate", Map.of("url", withScheme(raw)));
+        return browser.userAction(id, browserSessionId(body), "navigate", Map.of("url", withScheme(raw)));
     }
 
     @PostMapping("/{id}/browser/back")
-    public Map<String, Object> back(@PathVariable String id) {
+    public Map<String, Object> back(@PathVariable String id, @RequestBody(required = false) Map<String, Object> body) {
         requireSession(id);
-        return browser.userAction(id, "back", Map.of());
+        return browser.userAction(id, browserSessionId(body), "back", Map.of());
     }
 
     @PostMapping("/{id}/browser/forward")
-    public Map<String, Object> forward(@PathVariable String id) {
+    public Map<String, Object> forward(@PathVariable String id,
+        @RequestBody(required = false) Map<String, Object> body) {
         requireSession(id);
-        return browser.userAction(id, "forward", Map.of());
+        return browser.userAction(id, browserSessionId(body), "forward", Map.of());
     }
 
     @PostMapping("/{id}/browser/reload")
-    public Map<String, Object> reload(@PathVariable String id) {
+    public Map<String, Object> reload(@PathVariable String id,
+        @RequestBody(required = false) Map<String, Object> body) {
         requireSession(id);
-        return browser.userAction(id, "reload", Map.of());
+        return browser.userAction(id, browserSessionId(body), "reload", Map.of());
     }
 
     /**
@@ -190,7 +271,7 @@ public class BrowserControlController {
         args.put("y", clamp(coord(body.get("y")), 0, 4096));
         args.put("deltaX", clamp(coord(body.get("deltaX")), -4000, 4000));
         args.put("deltaY", clamp(coord(body.get("deltaY")), -4000, 4000));
-        return browser.userAction(id, "mouse", args);
+        return browser.userAction(id, browserSessionId(body), "mouse", args);
     }
 
     /** 面板里的「选择元素」：把点到的东西描述成一段可粘贴的引用。 */
@@ -203,7 +284,7 @@ public class BrowserControlController {
         Map<String, Object> args = new LinkedHashMap<>();
         args.put("x", clamp(coord(body.get("x")), 0, 4096));
         args.put("y", clamp(coord(body.get("y")), 0, 4096));
-        return browser.userAction(id, "pick", args);
+        return browser.userAction(id, browserSessionId(body), "pick", args);
     }
 
     /** 面板尺寸变化：把页面视口设成面板大小，画面才能铺满且点击坐标 1:1。 */
@@ -217,14 +298,14 @@ public class BrowserControlController {
         Map<String, Object> args = new LinkedHashMap<>();
         args.put("width", clamp(coord(body.get("width")), 280, 1920));
         args.put("height", clamp(coord(body.get("height")), 220, 1600));
-        return browser.userAction(id, "resize", args);
+        return browser.userAction(id, browserSessionId(body), "resize", args);
     }
 
     /** 面板里的「停止加载」：中断当前导航，页面会停在当前状态。 */
     @PostMapping("/{id}/browser/stop")
-    public Map<String, Object> stop(@PathVariable String id) {
+    public Map<String, Object> stop(@PathVariable String id, @RequestBody(required = false) Map<String, Object> body) {
         requireSession(id);
-        return browser.userAction(id, "stop", Map.of());
+        return browser.userAction(id, browserSessionId(body), "stop", Map.of());
     }
 
     /** 面板里的「控制台」：读页面 console 记录（可选 level 过滤 / clear 清空）。 */
@@ -241,7 +322,7 @@ public class BrowserControlController {
             }
         }
         String op = body != null && Boolean.TRUE.equals(body.get("network")) ? "network" : "console";
-        return browser.userAction(id, op, args);
+        return browser.userAction(id, browserSessionId(body), op, args);
     }
 
     /** 面板里的键盘动作：key 单键（Enter / Backspace / ArrowDown…）或 text 整段文本。 */
@@ -263,7 +344,14 @@ public class BrowserControlController {
         if (args.isEmpty()) {
             return Map.of("ok", false, "error", "缺少按键内容");
         }
-        return browser.userAction(id, "keys", args);
+        return browser.userAction(id, browserSessionId(body), "keys", args);
+    }
+
+    private static String browserSessionId(Map<String, Object> body) {
+        if (body == null || body.get("browserSessionId") == null) {
+            return "";
+        }
+        return String.valueOf(body.get("browserSessionId")).strip();
     }
 
     private static String normalizePointerAction(Object value) {

@@ -8,6 +8,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -15,6 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Stream;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.core.io.ClassPathResource;
@@ -97,6 +101,36 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     private volatile BrowserEventListener eventListener;
     /** 用户接管开关（会话级内存态，不落库）：BrowserTool 据此拦截交互类动作。 */
     private final ConcurrentMap<String, Boolean> interactionsPaused = new ConcurrentHashMap<>();
+    /** 派生出的子浏览器泳道（键为 childBrowserSessionId）。 */
+    private final ConcurrentMap<String, LaneInfo> childLanes = new ConcurrentHashMap<>();
+    /** 智能体自动控制锁定态（键为 browserSessionId）。 */
+    private final ConcurrentMap<String, ControlState> agentControls = new ConcurrentHashMap<>();
+    private volatile String sensitiveHosts = "";
+    private volatile String sensitiveAllowHosts = "";
+    private volatile long maxDownloadBytes = 0L;
+
+    private record ControlState(boolean active, String status) {
+    }
+
+    public record LaneInfo(String browserSessionId, String parentSessionId, String agentId, String label,
+        Instant createdAt) {
+        public LaneInfo {
+            browserSessionId = browserSessionId == null ? "" : browserSessionId.strip();
+            parentSessionId = parentSessionId == null ? "" : parentSessionId.strip();
+            agentId = agentId == null ? "" : agentId.strip();
+            label = label == null ? "" : label.strip();
+            createdAt = createdAt == null ? Instant.now() : createdAt;
+        }
+    }
+
+    @Autowired(required = false)
+    public void setSensitiveRules(@Value("${pilot.browser.sensitive-hosts:}") String sensitiveHosts,
+        @Value("${pilot.browser.sensitive-allow-hosts:}") String sensitiveAllowHosts,
+        @Value("${pilot.browser.max-download-bytes:0}") long maxDownloadBytes) {
+        this.sensitiveHosts = sensitiveHosts == null ? "" : sensitiveHosts.strip();
+        this.sensitiveAllowHosts = sensitiveAllowHosts == null ? "" : sensitiveAllowHosts.strip();
+        this.maxDownloadBytes = Math.max(0L, maxDownloadBytes);
+    }
 
     public BrowserRuntime(BrowserHome browserHome, ObjectMapper mapper, RuntimeMirrors mirrors,
         @Value("${pilot.browser.enabled:true}") boolean enabled,
@@ -145,10 +179,70 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
     @Override
     public void closeSession(String sessionId) {
         interactionsPaused.remove(sessionId); // 会话关闭即复位接管开关
+        childLanes.remove(sessionId);
+        agentControls.remove(sessionId);
         PlaywrightBackend current = backend;
         if (current != null) {
             current.closeSession(sessionId);
         }
+    }
+
+    @Override
+    public void closeSessionTree(String parentSessionId) {
+        String parent = parentSessionId == null ? "" : parentSessionId.strip();
+        if (parent.isEmpty()) {
+            return;
+        }
+        for (LaneInfo lane : List.copyOf(childLanes.values())) {
+            if (parent.equals(lane.parentSessionId())) {
+                closeSession(lane.browserSessionId());
+            }
+        }
+        closeSession(parent);
+    }
+
+    public void registerChildSession(String parentSessionId, String childBrowserSessionId, String agentId,
+        String label) {
+        if (parentSessionId == null || parentSessionId.isBlank() || childBrowserSessionId == null
+            || childBrowserSessionId.isBlank()) {
+            return;
+        }
+        String parent = parentSessionId.strip();
+        String child = childBrowserSessionId.strip();
+        String cleanAgent = agentId == null ? "" : agentId.strip();
+        String cleanLabel = label == null || label.isBlank() ? "子代理浏览器" : label.strip();
+        childLanes.put(child, new LaneInfo(child, parent, cleanAgent, cleanLabel, Instant.now()));
+    }
+
+    public void unregisterChildSession(String childBrowserSessionId) {
+        if (childBrowserSessionId != null && !childBrowserSessionId.isBlank()) {
+            childLanes.remove(childBrowserSessionId.strip());
+        }
+    }
+
+    public String parentSessionOf(String browserSessionId) {
+        if (browserSessionId == null || browserSessionId.isBlank()) {
+            return "";
+        }
+        String key = browserSessionId.strip();
+        LaneInfo lane = childLanes.get(key);
+        if (lane != null) {
+            return lane.parentSessionId();
+        }
+        int marker = key.indexOf("::browser::");
+        return marker > 0 ? key.substring(0, marker) : key;
+    }
+
+    public List<LaneInfo> activeLanes(String parentSessionId) {
+        String parent = parentSessionId == null ? "" : parentSessionId.strip();
+        if (parent.isEmpty()) {
+            return List.of();
+        }
+        List<LaneInfo> result = new ArrayList<>();
+        result.add(new LaneInfo(parent, parent, "", "主会话", Instant.EPOCH));
+        childLanes.values().stream().filter(lane -> parent.equals(lane.parentSessionId()))
+            .sorted(Comparator.comparing(LaneInfo::createdAt)).forEach(result::add);
+        return List.copyOf(result);
     }
 
     /** 用户接管：暂停/恢复智能体的页面交互动作（观察类不受影响）；内存态，重启即清零。 */
@@ -162,7 +256,84 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
 
     @Override
     public boolean interactionsPaused(String sessionId) {
-        return interactionsPaused.containsKey(sessionId);
+        if (interactionsPaused.containsKey(sessionId)) {
+            return true;
+        }
+        String parent = parentSessionOf(sessionId);
+        return !parent.equals(sessionId) && interactionsPaused.containsKey(parent);
+    }
+
+    @Override
+    public void clearOverlay(String sessionId) {
+        recordControlState(sessionId, false, "");
+        PlaywrightBackend current = backend;
+        if (current != null) {
+            current.clearOverlay(sessionId);
+        }
+    }
+
+    @Override
+    public boolean agentControlled(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            return false;
+        }
+        ControlState state = agentControls.get(sessionId);
+        return state != null && state.active();
+    }
+
+    public String agentControlStatus(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            return "";
+        }
+        ControlState state = agentControls.get(sessionId);
+        return state == null ? "" : state.status();
+    }
+
+    /** 仅更新运行时的控制态投影（用于接收 sidecar 主动推送的事件，避免回发死循环）。 */
+    public void recordControlState(String sessionId, boolean active, String status) {
+        if (sessionId == null || sessionId.isBlank()) {
+            return;
+        }
+        if (active) {
+            agentControls.put(sessionId, new ControlState(true, status == null ? "" : status));
+        } else {
+            agentControls.remove(sessionId);
+        }
+    }
+
+    @Override
+    public void setAgentControl(String sessionId, boolean active, String status, boolean resume) {
+        recordControlState(sessionId, active, status);
+        PlaywrightBackend current = backend;
+        if (current != null) {
+            current.setAgentControl(sessionId, active, status, resume);
+        }
+    }
+
+    @Override
+    public void stopControl(String sessionId) {
+        if (sessionId != null && !sessionId.isBlank()) {
+            recordControlState(sessionId, false, "");
+            setInteractionsPaused(sessionId, true);
+        }
+        PlaywrightBackend current = backend;
+        if (current != null) {
+            current.stopControl(sessionId);
+        }
+    }
+
+    @Override
+    public boolean supportsProcessRecording() {
+        PlaywrightBackend current = backend;
+        return current != null && current.supportsProcessRecording();
+    }
+
+    @Override
+    public void invalidateRefs(String sessionId) {
+        PlaywrightBackend current = backend;
+        if (current != null) {
+            current.invalidateRefs(sessionId);
+        }
     }
 
     @Override
@@ -403,6 +574,11 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         passthrough.put("PILOT_BROWSER_ALLOW_HOSTS", allowHosts);
         passthrough.put("PILOT_BROWSER_DENY_HOSTS", denyHosts);
         passthrough.put("PILOT_BROWSER_CDP", cdpEndpoint);
+        passthrough.put("PILOT_BROWSER_SENSITIVE_HOSTS", sensitiveHosts);
+        passthrough.put("PILOT_BROWSER_SENSITIVE_ALLOW_HOSTS", sensitiveAllowHosts);
+        if (maxDownloadBytes > 0) {
+            passthrough.put("PILOT_BROWSER_MAX_DOWNLOAD_BYTES", Long.toString(maxDownloadBytes));
+        }
         passthrough.forEach((key, value) -> {
             if (!value.isEmpty()) {
                 env.put(key, value);

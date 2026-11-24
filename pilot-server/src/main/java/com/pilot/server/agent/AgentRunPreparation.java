@@ -9,8 +9,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -18,6 +20,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.approval.ApprovalBroker;
+import com.pilot.core.browser.BrowserHandoffBroker;
+import com.pilot.core.browser.BrowserTool;
 import com.pilot.core.event.ExecutionUpdated;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.loop.AgentLoop;
@@ -62,6 +66,9 @@ import com.pilot.core.tool.command.StopCommandTool;
 import com.pilot.core.tool.file.ReadFileTool;
 import com.pilot.core.workspace.AgentScope;
 import com.pilot.core.workspace.PathValidator;
+import com.pilot.server.browser.BrowserEvidenceService;
+import com.pilot.server.browser.BrowserRuntime;
+import com.pilot.server.browser.BrowserSubagentTool;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.MultiAgentProperties;
 import com.pilot.server.git.GitWorktrees;
@@ -75,6 +82,7 @@ import com.pilot.server.multi.SpawnAgentTool;
 import com.pilot.server.multi.SubagentCheckouts;
 import com.pilot.server.multi.SubagentCheckouts.Opened;
 import com.pilot.server.multi.WorkspaceOverviewService;
+import com.pilot.server.run.BrowserMode;
 import com.pilot.server.run.ReviewMode;
 import com.pilot.server.run.TaskControlService;
 import com.pilot.server.skill.InstallSkillTool;
@@ -98,8 +106,9 @@ import lombok.extern.slf4j.Slf4j;
 public final class AgentRunPreparation {
     private static final PromptLibrary PROMPTS = PromptLibrary.standard();
     /** 只读分析/规划模式（mode="plan"）下除 WritesFiles 外一并剥离的副作用工具。 */
-    private static final Set<String> PLAN_EXCLUDED_TOOLS = Set.of("publish_artifact", "propose_skill", "install_skill",
-        "prepare_runtime", "stop_command", "command_input", ToolNames.DISPATCH_AGENTS, "office", "browser", "mcp_call");
+    private static final Set<String> PLAN_EXCLUDED_TOOLS =
+        Set.of("publish_artifact", "propose_skill", "install_skill", "prepare_runtime", "stop_command", "command_input",
+            ToolNames.DISPATCH_AGENTS, ToolNames.BROWSER_AGENT, "office", "browser", "mcp_call");
 
     private final SessionService sessions;
     private final WorkspaceToolFactory toolFactory;
@@ -121,6 +130,9 @@ public final class AgentRunPreparation {
     private AgentProfileService agentProfiles;
     private ProjectRepository projects;
     private PilotDataDir dataDir;
+    private BrowserRuntime browserRuntime;
+    private BrowserEvidenceService browserEvidence;
+    private BrowserHandoffBroker browserHandoffs;
 
     public AgentRunPreparation(SessionService sessions, WorkspaceToolFactory toolFactory, AgentProperties properties,
         MultiAgentProperties multiProperties, TaskControlService taskControls, CommandTaskManager commandTasks,
@@ -169,6 +181,14 @@ public final class AgentRunPreparation {
         this.dataDir = dataDir;
     }
 
+    @Autowired(required = false)
+    public void setBrowserServices(BrowserRuntime browserRuntime, BrowserEvidenceService browserEvidence,
+        BrowserHandoffBroker browserHandoffs) {
+        this.browserRuntime = browserRuntime;
+        this.browserEvidence = browserEvidence;
+        this.browserHandoffs = browserHandoffs;
+    }
+
     public AgentLoop.Config loopConfig(PreparedRun prepared, String sessionId) {
         return new AgentLoop.Config(properties.maxSteps(), properties.repeatRemindAt(), properties.repeatAbortAt(),
             prepared.systemPrompt(), () -> plans.load(sessionId), properties.maxPlanContinues(),
@@ -187,12 +207,12 @@ public final class AgentRunPreparation {
      * <p>切换后仍是子代理请求：独立缓存组、{@code purpose="subagent"}、不带主会话提示词来源，
      * 同时透传用量上报，保证 {@code prompt_cache_key}、缓存参数 400 降级与请求统计都不被绕过。
      */
-    public static java.util.function.Function<String, ModelClient> meteredChildRoute(ModelClient configured,
-        String sessionId, String runId, Consumer<RequestReport> reports) {
+    public static Function<String, ModelClient> meteredChildRoute(ModelClient configured, String sessionId,
+        String runId, Consumer<RequestReport> reports) {
         if (!(configured instanceof ModelClientProvider provider)) {
             return null;
         }
-        Map<String, ModelClient> routed = new java.util.concurrent.ConcurrentHashMap<>();
+        Map<String, ModelClient> routed = new ConcurrentHashMap<>();
         return model -> routed.computeIfAbsent(model.strip(), name -> new MeteredModelClient(provider.clientFor(name),
             sessionId + ":subagent:" + name, "subagent", List.of(), reports).withRunContext(sessionId, runId));
     }
@@ -211,12 +231,26 @@ public final class AgentRunPreparation {
         Path resolvedWorkspace = toolFactory.resolve(workspace);
         List<Path> extraRoots = projectFolders(input.sessionId());
         PathValidator workspaceValidator = new PathValidator(resolvedWorkspace, extraRoots);
-        ReviewMode review = ReviewMode.parse(input.unattended() ? input.automationGoal() : input.input());
+        String rawInput = input.unattended() ? input.automationGoal() : input.input();
+        ReviewMode review = ReviewMode.parse(rawInput);
+        BrowserMode browserMode = BrowserMode.parse(rawInput);
         boolean planMode = requestedPlanMode && !review.active();
+        boolean browserModeActive = browserMode.active() && !review.active() && !planMode;
         ToolRegistry tools = review.active() ? reviewTools(workspace, extraRoots)
             : sessionTools(input.sessionId(), input.runId(), workspace, planSink, extraRoots);
-        List<String> inheritedDeferred =
+        List<String> baseDeferred =
             review.active() ? List.of() : inheritedDeferredTools(input.deferredToolSnapshot(), input.history());
+        List<String> inheritedDeferred = baseDeferred;
+        if (browserModeActive) {
+            ArrayList<String> combined = new ArrayList<>(baseDeferred);
+            if (!combined.contains(ToolNames.BROWSER)) {
+                combined.add(ToolNames.BROWSER);
+            }
+            if (!combined.contains(ToolNames.BROWSER_AGENT)) {
+                combined.add(ToolNames.BROWSER_AGENT);
+            }
+            inheritedDeferred = List.copyOf(combined);
+        }
         tools.enable(inheritedDeferred);
 
         SkillCatalog catalog = skills.catalogFor(workspace);
@@ -230,22 +264,21 @@ public final class AgentRunPreparation {
         }
 
         Set<String> availableTools =
-            new LinkedHashSet<>(review.active() ? tools.names() : sessionTools(tools, planMode));
+            new LinkedHashSet<>(review.active() ? tools.names() : sessionTools(tools, planMode, browserModeActive));
         addNativeToolNames(availableTools, input.nativeCapabilities());
-        List<ContextComposition.Source> promptSources =
-            systemPromptParts(input.sessionId(), workspace, availableTools, catalog, review, planMode);
+        List<ContextComposition.Source> promptSources = systemPromptParts(input.sessionId(), workspace, availableTools,
+            catalog, review, planMode, browserModeActive);
         String systemPrompt =
             promptSources.stream().map(ContextComposition.Source::text).collect(Collectors.joining("\n\n"));
         return new PreparedRun(workspace, resolvedWorkspace, workspaceValidator, review, tools, availableTools,
-            promptSources, systemPrompt, inheritedDeferred, planMode);
+            promptSources, systemPrompt, inheritedDeferred, planMode, browserModeActive);
     }
 
     public void configureExecutionTools(PreparedRun prepared, GoalExecutionPolicy goalPolicy, String sessionId,
         String runId, String workspace, boolean unattended, TaskControlService.TaskContract executionTask,
-        ModelClient measuredChild, java.util.function.Function<String, ModelClient> routedChild,
-        PermissionGate sessionGate, AgentLoop.Config config,
-        BooleanSupplier cancelled, SpawnAgentTool.UsageSink childUsage, AgentProfileCatalog profiles,
-        Consumer<SessionEvent> sink, ApprovalBroker approvals,
+        ModelClient measuredChild, Function<String, ModelClient> routedChild, PermissionGate sessionGate,
+        AgentLoop.Config config, BooleanSupplier cancelled, SpawnAgentTool.UsageSink childUsage,
+        AgentProfileCatalog profiles, Consumer<SessionEvent> sink, ApprovalBroker approvals,
         ConversationRepository conversations, ModelSettings modelSettings, MultiAgentService multiAgent,
         GitWorktrees worktrees) {
         ToolRegistry tools = prepared.tools();
@@ -291,6 +324,11 @@ public final class AgentRunPreparation {
                 });
             }
             tools.register(spawnAgent);
+            if (!planMode && browserRuntime != null) {
+                tools.register(new BrowserSubagentTool(browserRuntime, sessionId, runId,
+                    new PathValidator(toolFactory.resolve(workspace), extraRoots), measuredChild, sessionGate,
+                    approvals, config, sink, cancelled, childUsage, browserHandoffs, browserEvidence));
+            }
             if (multiProperties.enabled() && !planMode) {
                 tools.register(new DispatchAgentsTool(multiAgent, sessionId, runId, workspace, sink, cancelled,
                     measuredChild, profiles, childUsage).withExtraRoots(extraRoots).withParentPermission(
@@ -298,6 +336,9 @@ public final class AgentRunPreparation {
             }
         }
         tools.enable(inheritedDeferred);
+        if (prepared.browserMode() && !planMode && !reviewActive) {
+            tools.enable(List.of(ToolNames.BROWSER, ToolNames.BROWSER_AGENT));
+        }
     }
 
     public String currentTaskContext(String sessionId) {
@@ -417,7 +458,7 @@ public final class AgentRunPreparation {
     }
 
     private List<ContextComposition.Source> systemPromptParts(String sessionId, String workspace,
-        Set<String> availableTools, SkillCatalog catalog, ReviewMode review, boolean planMode) {
+        Set<String> availableTools, SkillCatalog catalog, ReviewMode review, boolean planMode, boolean browserMode) {
         Map<String, String> variables = new LinkedHashMap<>(PromptLibrary.environment(workspace));
         variables.put("skills", skills.catalogText(catalog));
         List<ContextComposition.Source> parts = new ArrayList<>(PROMPTS.systemParts(variables, availableTools));
@@ -436,6 +477,8 @@ public final class AgentRunPreparation {
         } else if (planMode) {
             parts.add(new ContextComposition.Source("system",
                 "当前处于只读分析与规划模式（plan）：只读代码、分析问题与制定可执行方案或计划；写工具已剥离，不得修改工作区文件或运行写命令。"));
+        } else if (browserMode) {
+            parts.add(new ContextComposition.Source("system", PROMPTS.render("browser/protocol", Map.of()).strip()));
         }
         return List.copyOf(parts);
     }
@@ -465,9 +508,12 @@ public final class AgentRunPreparation {
         return toolFactory.registryForScope(workspace, scope, SandboxSink.rejectAll(), extraRoots);
     }
 
-    private Set<String> sessionTools(ToolRegistry base, boolean planMode) {
+    private Set<String> sessionTools(ToolRegistry base, boolean planMode, boolean browserMode) {
         Set<String> names = new LinkedHashSet<>(base.names());
         names.add(ToolNames.SPAWN_AGENT);
+        if (!planMode && ((browserRuntime != null && browserRuntime.availability().available()) || browserMode)) {
+            names.add(ToolNames.BROWSER_AGENT);
+        }
         if (multiProperties.enabled() && !planMode) {
             names.add(ToolNames.DISPATCH_AGENTS);
         }
@@ -538,7 +584,12 @@ public final class AgentRunPreparation {
         if (skillInstaller != null && skills != null && skills.enabled()) {
             tools.register(new InstallSkillTool(skillInstaller, skills, objectMapper, workspace));
         }
-        toolFactory.sessionExtras(sessionId, workspace).forEach(tools::register);
+        toolFactory.sessionExtras(sessionId, workspace).forEach(extra -> {
+            if (extra instanceof BrowserTool browserTool) {
+                browserTool.withRunContext(sessionId, runId, "");
+            }
+            tools.register(extra);
+        });
         return tools;
     }
 
@@ -581,11 +632,19 @@ public final class AgentRunPreparation {
     public record PreparedRun(String workspace, Path resolvedWorkspace, PathValidator workspaceValidator,
         ReviewMode review, ToolRegistry tools, Set<String> availableTools,
         List<ContextComposition.Source> promptSources, String systemPrompt, List<String> inheritedDeferredTools,
-        boolean planMode) {
+        boolean planMode, boolean browserMode) {
         public PreparedRun {
             availableTools = Set.copyOf(availableTools);
             promptSources = List.copyOf(promptSources);
             inheritedDeferredTools = List.copyOf(inheritedDeferredTools);
+        }
+
+        public PreparedRun(String workspace, Path resolvedWorkspace, PathValidator workspaceValidator,
+            ReviewMode review, ToolRegistry tools, Set<String> availableTools,
+            List<ContextComposition.Source> promptSources, String systemPrompt, List<String> inheritedDeferredTools,
+            boolean planMode) {
+            this(workspace, resolvedWorkspace, workspaceValidator, review, tools, availableTools, promptSources,
+                systemPrompt, inheritedDeferredTools, planMode, false);
         }
     }
 }

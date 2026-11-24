@@ -1,10 +1,12 @@
 package com.pilot.server.browser;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
@@ -12,16 +14,20 @@ import java.util.concurrent.Executors;
 
 import jakarta.annotation.PreDestroy;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.pilot.core.browser.BrowserBackend;
 import com.pilot.core.browser.BrowserEventListener;
+import com.pilot.core.browser.BrowserEvidenceRecord;
+import com.pilot.core.browser.BrowserHandoffBroker;
 import com.pilot.core.tool.Availability;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -52,6 +58,8 @@ public class BrowserControlService implements BrowserEventListener {
     private final int quality;
     private final boolean enabled;
     private final ConcurrentMap<String, State> states = new ConcurrentHashMap<>();
+    private volatile BrowserHandoffBroker handoffs;
+    private volatile BrowserEvidenceService evidence;
     /** 控制动作（开/关镜像、置前）串行执行，避免并发拉起重复请求。 */
     private final ExecutorService controls = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "pilot-browser-control");
@@ -72,6 +80,22 @@ public class BrowserControlService implements BrowserEventListener {
         runtime.setEventListener(this);
     }
 
+    @Autowired(required = false)
+    public void setHandoffs(BrowserHandoffBroker handoffs) {
+        this.handoffs = handoffs;
+        if (handoffs != null) {
+            handoffs.addListener(this::onHandoffEvent);
+        }
+    }
+
+    @Autowired(required = false)
+    public void setEvidence(BrowserEvidenceService evidence) {
+        this.evidence = evidence;
+        if (evidence != null) {
+            evidence.addListener(this::onEvidenceRecord);
+        }
+    }
+
     /** 镜像链路是否开启（pilot.browser.mirror.enabled=false 时端点直接 204）。 */
     public boolean mirrorEnabled() {
         return enabled;
@@ -85,9 +109,27 @@ public class BrowserControlService implements BrowserEventListener {
     /** 镜像面板的轻量状态：前端据此决定是否显示浏览器 tab、能否连 SSE。 */
     public Map<String, Object> status(String sessionId) {
         Availability availability = runtime.availability();
-        return Map.of("enabled", enabled, "capable", runtime.mirrorCapable(), "available", availability.available(),
-            "reason", availability.reason(), "paused", runtime.interactionsPaused(sessionId), "headless",
-            runtime.headless());
+        String activeLane = activeLaneOf(sessionId);
+        List<BrowserHandoffBroker.PendingHandoff> pending = handoffs == null ? List.of() : handoffs.pending(sessionId);
+        List<BrowserRuntime.LaneInfo> lanes = runtime.activeLanes(sessionId);
+        int evidenceCount =
+            evidence == null ? 0 : evidence.list(sessionId, "", BrowserEvidenceService.MAX_RECORDS_PER_SESSION).size();
+        boolean controlled = runtime.agentControlled(activeLane)
+            || (!activeLane.equals(sessionId) && runtime.agentControlled(sessionId));
+        Map<String, Object> status = new LinkedHashMap<>();
+        status.put("enabled", enabled);
+        status.put("capable", runtime.mirrorCapable());
+        status.put("available", availability.available());
+        status.put("reason", availability.reason());
+        status.put("paused", runtime.interactionsPaused(sessionId) || runtime.interactionsPaused(activeLane));
+        status.put("agentControlled", controlled);
+        status.put("controlStatus", currentControlStatus(sessionId, activeLane));
+        status.put("headless", runtime.headless());
+        status.put("activeLane", activeLane);
+        status.put("lanes", lanes);
+        status.put("handoffs", pending);
+        status.put("evidenceCount", evidenceCount);
+        return status;
     }
 
     /** 订阅某个会话的镜像帧；连接建立即补发当前状态与最新一帧。 */
@@ -123,11 +165,24 @@ public class BrowserControlService implements BrowserEventListener {
                     controlCapture(state);
                 }
                 push(state, emitter, "state", statePayload(sessionId));
-                if (state.subscribers.containsKey(emitter) && state.navigation != null) {
-                    push(state, emitter, "nav", state.navigation.toString());
+                JsonNode activeNav = state.laneNavs.getOrDefault(state.activeLane, state.navigation);
+                if (state.subscribers.containsKey(emitter) && activeNav != null) {
+                    push(state, emitter, "nav", activeNav.toString());
                 }
-                if (state.subscribers.containsKey(emitter) && capture && state.frame != null) {
-                    push(state, emitter, "frame", state.frame.toString());
+                JsonNode activeAction = state.laneActions.get(state.activeLane);
+                if (state.subscribers.containsKey(emitter) && activeAction != null) {
+                    push(state, emitter, "action", activeAction.toString());
+                }
+                if (handoffs != null && state.subscribers.containsKey(emitter)) {
+                    List<BrowserHandoffBroker.PendingHandoff> pending = handoffs.pending(sessionId);
+                    if (!pending.isEmpty()) {
+                        push(state, emitter, "handoff",
+                            handoffSnapshotJson(sessionId, "pending", pending.getFirst(), ""));
+                    }
+                }
+                JsonNode activeFrame = state.laneFrames.getOrDefault(state.activeLane, state.frame);
+                if (state.subscribers.containsKey(emitter) && capture && activeFrame != null) {
+                    push(state, emitter, "frame", activeFrame.toString());
                 }
                 return emitter;
             }
@@ -162,21 +217,103 @@ public class BrowserControlService implements BrowserEventListener {
         }
     }
 
-    /** 把某个会话的浏览器窗口置前（不置顶循环）。 */
+    /** 把某个会话当前选中的浏览器窗口置前（不置顶循环）。 */
     public void focus(String sessionId) {
-        controls.execute(() -> runtime.focusPage(sessionId));
+        String target = activeLaneOf(sessionId);
+        controls.execute(() -> runtime.focusPage(target));
     }
 
-    /**
-     * 用户在内置浏览器面板里发起的动作：导航（navigate/back/forward/reload）与页面交互
-     * （mouse/keys）。这些是本机用户自己的操作，不受「接管」开关与工具审批约束——
-     * 接管正是为了让用户自己动手；面板与智能体操作的是同一个页面。
-     *
-     * @param op   sidecar 协议里的操作名
-     * @param args 该操作的参数（坐标、文本、URL…）
-     * @return 给前端的结果（成功与否、文本提示）
-     */
+    public Map<String, Object> selectLane(String sessionId, String browserSessionId) {
+        String target = browserSessionId == null || browserSessionId.isBlank() ? sessionId : browserSessionId.strip();
+        if (!target.equals(sessionId) && !sessionId.equals(runtime.parentSessionOf(target))) {
+            return Map.of("ok", false, "error", "目标浏览器通道不属于当前会话");
+        }
+        State state = states.get(sessionId);
+        if (state == null) {
+            return Map.of("ok", true, "activeLane", target);
+        }
+        synchronized (state) {
+            String previous = state.activeLane;
+            state.activeLane = target;
+            state.frame = state.laneFrames.get(target);
+            state.navigation = state.laneNavs.get(target);
+            if (!previous.equals(target) && state.capturing()) {
+                controls.execute(() -> {
+                    runtime.mirrorControl(previous, false, maxWidth, quality);
+                    runtime.mirrorControl(target, true, maxWidth, quality);
+                });
+            }
+            broadcast(state, "state", statePayload(sessionId));
+            if (state.navigation != null) {
+                broadcast(state, "nav", state.navigation.toString());
+            }
+            JsonNode lastAction = state.laneActions.get(target);
+            if (lastAction != null) {
+                broadcast(state, "action", lastAction.toString());
+            }
+            if (state.capturing() && state.frame != null) {
+                broadcast(state, "frame", state.frame.toString());
+            }
+        }
+        return Map.of("ok", true, "activeLane", target);
+    }
+
+    public Map<String, Object> resumeHandoff(String sessionId, String browserSessionId, String note) {
+        if (handoffs == null) {
+            setPaused(sessionId, false);
+            return Map.of("ok", true, "resolved", false, "handoffs", List.of());
+        }
+        String target = resolveTargetBrowserSession(sessionId, browserSessionId);
+        if (target == null) {
+            return Map.of("ok", false, "error", "目标浏览器通道不属于当前会话");
+        }
+        boolean resolved = handoffs.resume(target, note);
+        if (!resolved && target.equals(sessionId)) {
+            setPaused(sessionId, false);
+        }
+        return Map.of("ok", true, "resolved", resolved, "handoffs", handoffs.pending(sessionId));
+    }
+
+    public Map<String, Object> cancelHandoff(String sessionId, String browserSessionId, String reason) {
+        if (handoffs == null) {
+            setPaused(sessionId, false);
+            return Map.of("ok", true, "resolved", false, "handoffs", List.of());
+        }
+        String target = resolveTargetBrowserSession(sessionId, browserSessionId);
+        if (target == null) {
+            return Map.of("ok", false, "error", "目标浏览器通道不属于当前会话");
+        }
+        boolean resolved = handoffs.cancel(target, reason);
+        return Map.of("ok", true, "resolved", resolved, "handoffs", handoffs.pending(sessionId));
+    }
+
+    public Map<String, Object> evidence(String sessionId, String runId, int limit) {
+        if (evidence == null) {
+            return Map.of("items", List.of(), "summary", Map.of("total", 0));
+        }
+        List<BrowserEvidenceRecord> items = evidence.list(sessionId, runId, limit);
+        Map<String, Object> summary = evidence.summary(sessionId, runId);
+        return Map.of("items", items, "summary", summary);
+    }
+
+    public Optional<Path> resolveEvidenceImage(String sessionId, String evidenceId) {
+        return evidence == null ? Optional.empty() : evidence.resolveScreenshot(sessionId, evidenceId);
+    }
+
+    public Optional<Path> resolveEvidenceRecording(String sessionId, String evidenceId) {
+        return evidence == null ? Optional.empty() : evidence.resolveRecording(sessionId, evidenceId);
+    }
+
     public Map<String, Object> userAction(String sessionId, String op, Map<String, Object> args) {
+        return userAction(sessionId, null, op, args);
+    }
+
+    public Map<String, Object> userAction(String sessionId, String targetBrowserSessionId, String op,
+        Map<String, Object> args) {
+        String target = resolveTargetBrowserSession(sessionId, targetBrowserSessionId);
+        if (target == null) {
+            return Map.of("ok", false, "error", "目标浏览器通道不属于当前会话");
+        }
         Map<String, Object> command = new LinkedHashMap<>();
         command.put("op", op);
         if (args != null) {
@@ -186,15 +323,17 @@ public class BrowserControlService implements BrowserEventListener {
         command.put("op", op);
         command.put("userInitiated", true);
         try {
-            BrowserBackend.Reply reply = runtime.execute(sessionId, command, USER_COMMAND_TIMEOUT);
+            BrowserBackend.Reply reply = runtime.execute(target, command, USER_COMMAND_TIMEOUT);
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("ok", true);
             result.put("text", reply.text() == null ? "" : reply.text());
+            result.put("browserSessionId", target);
             return result;
         } catch (RuntimeException e) {
             Map<String, Object> failure = new LinkedHashMap<>();
             failure.put("ok", false);
             failure.put("error", e.getMessage() == null ? "浏览器操作失败" : e.getMessage());
+            failure.put("browserSessionId", target);
             return failure;
         }
     }
@@ -206,34 +345,104 @@ public class BrowserControlService implements BrowserEventListener {
      */
     public void setPaused(String sessionId, boolean paused) {
         runtime.setInteractionsPaused(sessionId, paused);
+        String activeLane = activeLaneOf(sessionId);
+        controls.execute(() -> {
+            if (paused) {
+                runtime.clearOverlay(activeLane);
+            } else {
+                runtime.setAgentControl(activeLane, false, "", true);
+            }
+        });
         State state = states.get(sessionId);
         if (state != null) {
             broadcast(state, "state", statePayload(sessionId));
         }
     }
 
+    /** 立即终止智能体控制锁定、移除页面蓝框并暂停后续交互动作，交由用户接管。 */
+    public Map<String, Object> stopControl(String sessionId, String targetBrowserSessionId) {
+        String target = resolveTargetBrowserSession(sessionId, targetBrowserSessionId);
+        if (target == null) {
+            return Map.of("ok", false, "error", "目标浏览器通道不属于当前会话");
+        }
+        runtime.stopControl(target);
+        State state = states.get(sessionId);
+        if (state != null) {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("event", "control-stopped");
+            body.put("session", target);
+            body.put("browserSessionId", target);
+            body.put("agentControlled", false);
+            body.put("controlStatus", "");
+            broadcast(state, "control-stopped", mapper.writeValueAsString(body));
+            broadcast(state, "state", statePayload(sessionId));
+        }
+        return Map.of("ok", true, "browserSessionId", target, "paused", true, "agentControlled", false);
+    }
+
     @Override
     public void onEvent(String sessionId, String kind, JsonNode payload) {
+        String parentId = "browser-closed".equals(kind) ? "" : runtime.parentSessionOf(sessionId);
+        if (parentId == null || parentId.isBlank()) {
+            parentId = sessionId;
+        }
         switch (kind) {
             case "mirror-frame" -> {
-                State state = states.get(sessionId);
+                State state = states.get(parentId);
                 if (state == null) {
                     return;
                 }
                 synchronized (state) {
                     if (state.capturing()) {
-                        state.frame = payload; // latest-wins；无画面消费者时不保留帧。
-                        broadcast(state, "frame", payload.toString());
+                        state.laneFrames.put(sessionId, payload);
+                        if (sessionId.equals(state.activeLane)) {
+                            state.frame = payload; // latest-wins；无画面消费者时不保留帧。
+                            broadcast(state, "frame", payload.toString());
+                        }
                     }
                 }
             }
-            case "agent-action" -> broadcastTo(sessionId, "action", payload);
-            case "nav" -> {
-                State state = states.get(sessionId);
+            case "agent-action" -> {
+                JsonNode enriched = withBrowserSessionId(payload, sessionId);
+                State state = states.get(parentId);
                 if (state != null) {
                     synchronized (state) {
-                        state.navigation = payload;
-                        broadcast(state, "nav", payload.toString());
+                        state.laneActions.put(sessionId, enriched);
+                        broadcast(state, "action", enriched.toString());
+                    }
+                }
+            }
+            case "control-state" -> {
+                boolean active = payload.path("agentControlled").asBoolean(false);
+                String controlStatus = payload.path("controlStatus").asString("");
+                runtime.recordControlState(sessionId, active, controlStatus);
+                JsonNode enriched = withBrowserSessionId(payload, sessionId);
+                State state = states.get(parentId);
+                if (state != null) {
+                    broadcast(state, "control-state", enriched.toString());
+                    broadcast(state, "state", statePayload(parentId));
+                }
+            }
+            case "control-stopped" -> {
+                runtime.recordControlState(sessionId, false, "");
+                runtime.setInteractionsPaused(sessionId, true);
+                JsonNode enriched = withBrowserSessionId(payload, sessionId);
+                State state = states.get(parentId);
+                if (state != null) {
+                    broadcast(state, "control-stopped", enriched.toString());
+                    broadcast(state, "state", statePayload(parentId));
+                }
+            }
+            case "nav" -> {
+                JsonNode enriched = withBrowserSessionId(payload, sessionId);
+                State state = states.get(parentId);
+                if (state != null) {
+                    synchronized (state) {
+                        state.laneNavs.put(sessionId, enriched);
+                        if (sessionId.equals(state.activeLane)) {
+                            state.navigation = enriched;
+                        }
+                        broadcast(state, "nav", enriched.toString());
                     }
                 }
             }
@@ -243,6 +452,9 @@ public class BrowserControlService implements BrowserEventListener {
                     synchronized (state) {
                         state.frame = null;
                         state.navigation = null;
+                        state.laneFrames.clear();
+                        state.laneNavs.clear();
+                        state.laneActions.clear();
                         broadcast(state, "closed", payload.toString());
                     }
                 }
@@ -260,14 +472,6 @@ public class BrowserControlService implements BrowserEventListener {
     }
 
     // ---- 内部 ---------------------------------------------------------------------------
-
-    private void broadcastTo(String sessionId, String name, JsonNode payload) {
-        State state = states.get(sessionId);
-        if (state == null) {
-            return;
-        }
-        broadcast(state, name, payload.toString());
-    }
 
     private void broadcast(State state, String name, String data) {
         synchronized (state) {
@@ -304,7 +508,9 @@ public class BrowserControlService implements BrowserEventListener {
         // 订阅清空：停帧、清缓存帧，接管开关一并复位（没人看着页面就不算接管中）
         runtime.setInteractionsPaused(state.id, false);
         state.frame = null;
-        controls.execute(() -> runtime.mirrorControl(state.id, false, maxWidth, quality));
+        state.laneFrames.clear();
+        String active = state.activeLane;
+        controls.execute(() -> runtime.mirrorControl(active, false, maxWidth, quality));
         // 先排入旧连接的停止命令，再允许新 state 被创建，避免旧停止命令覆盖新订阅。
         states.remove(state.id, state);
     }
@@ -312,31 +518,152 @@ public class BrowserControlService implements BrowserEventListener {
     /** 必须持有 state 锁，保证订阅切换和控制命令的顺序一致。 */
     private void controlCapture(State state) {
         boolean capture = state.capturing();
+        String target = state.activeLane;
         if (!capture) {
             state.frame = null;
+            state.laneFrames.remove(target);
         }
         controls.execute(() -> {
             if (capture) {
-                runtime.mirrorControl(state.id, true, maxWidth, quality);
+                runtime.mirrorControl(target, true, maxWidth, quality);
             } else {
-                runtime.mirrorCapture(state.id, false, maxWidth, quality);
+                runtime.mirrorCapture(target, false, maxWidth, quality);
             }
         });
     }
 
+    private void onHandoffEvent(BrowserHandoffBroker.PendingHandoffEvent event) {
+        BrowserHandoffBroker.PendingHandoff handoff = event.handoff();
+        String sessionId = handoff.sessionId();
+        String target = handoff.browserSessionId();
+        if (event.eventKind() == BrowserHandoffBroker.EventKind.REQUESTED) {
+            runtime.setInteractionsPaused(target, true);
+            controls.execute(() -> runtime.clearOverlay(target));
+            State state = states.get(sessionId);
+            if (state != null) {
+                synchronized (state) {
+                    if (!target.equals(state.activeLane)) {
+                        String previous = state.activeLane;
+                        state.activeLane = target;
+                        if (state.capturing()) {
+                            controls.execute(() -> {
+                                runtime.mirrorControl(previous, false, maxWidth, quality);
+                                runtime.mirrorControl(target, true, maxWidth, quality);
+                            });
+                        }
+                    }
+                }
+            }
+        } else {
+            if (handoffs == null || handoffs.pendingForBrowser(target).isEmpty()) {
+                runtime.setInteractionsPaused(target, false);
+                controls.execute(() -> runtime.setAgentControl(target, false, "", true));
+            }
+        }
+        State state = states.get(sessionId);
+        if (state != null) {
+            String eventType = switch (event.eventKind()) {
+                case REQUESTED -> "requested";
+                case RESUMED -> "resumed";
+                case CANCELLED -> "cancelled";
+            };
+            broadcast(state, "handoff", handoffSnapshotJson(sessionId, eventType, handoff, event.note()));
+            broadcast(state, "state", statePayload(sessionId));
+        }
+    }
+
+    private void onEvidenceRecord(BrowserEvidenceRecord record) {
+        State state = states.get(record.sessionId());
+        if (state != null) {
+            broadcast(state, "evidence", mapper.writeValueAsString(record));
+        }
+    }
+
+    private String resolveTargetBrowserSession(String sessionId, String requestedBrowserSessionId) {
+        if (requestedBrowserSessionId == null || requestedBrowserSessionId.isBlank()) {
+            return activeLaneOf(sessionId);
+        }
+        String candidate = requestedBrowserSessionId.strip();
+        if (candidate.equals(sessionId) || sessionId.equals(runtime.parentSessionOf(candidate))) {
+            return candidate;
+        }
+        return null;
+    }
+
+    private String activeLaneOf(String sessionId) {
+        State state = states.get(sessionId);
+        if (state == null) {
+            return sessionId;
+        }
+        synchronized (state) {
+            return state.activeLane == null || state.activeLane.isBlank() ? sessionId : state.activeLane;
+        }
+    }
+
+    private JsonNode withBrowserSessionId(JsonNode payload, String browserSessionId) {
+        if (payload instanceof ObjectNode object && !object.has("browserSessionId")) {
+            ObjectNode copy = object.deepCopy();
+            copy.put("browserSessionId", browserSessionId);
+            return copy;
+        }
+        return payload;
+    }
+
+    private String handoffSnapshotJson(String sessionId, String eventType, BrowserHandoffBroker.PendingHandoff handoff,
+        String note) {
+        List<BrowserHandoffBroker.PendingHandoff> pending = handoffs == null ? List.of() : handoffs.pending(sessionId);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("event", eventType);
+        body.put("handoff", handoff);
+        body.put("note", note == null ? "" : note);
+        body.put("pending", pending);
+        return mapper.writeValueAsString(body);
+    }
+
     private String statePayload(String sessionId) {
-        return mapper.writeValueAsString(Map.of("sessionId", sessionId, "paused", runtime.interactionsPaused(sessionId),
-            "available", runtime.availability().available(), "headless", runtime.headless()));
+        String activeLane = activeLaneOf(sessionId);
+        boolean controlled = runtime.agentControlled(activeLane)
+            || (!activeLane.equals(sessionId) && runtime.agentControlled(sessionId));
+        List<BrowserHandoffBroker.PendingHandoff> pending = handoffs == null ? List.of() : handoffs.pending(sessionId);
+        List<BrowserRuntime.LaneInfo> lanes = runtime.activeLanes(sessionId);
+        Map<String, Object> state = new LinkedHashMap<>();
+        state.put("sessionId", sessionId);
+        state.put("paused", runtime.interactionsPaused(sessionId) || runtime.interactionsPaused(activeLane));
+        state.put("agentControlled", controlled);
+        state.put("controlStatus", currentControlStatus(sessionId, activeLane));
+        state.put("available", runtime.availability().available());
+        state.put("headless", runtime.headless());
+        state.put("activeLane", activeLane);
+        state.put("lanes", lanes);
+        state.put("handoffs", pending);
+        if (evidence != null) {
+            state.put("evidenceCount",
+                evidence.list(sessionId, "", BrowserEvidenceService.MAX_RECORDS_PER_SESSION).size());
+        }
+        return mapper.writeValueAsString(state);
+    }
+
+    private String currentControlStatus(String sessionId, String activeLane) {
+        String activeStatus = runtime.agentControlStatus(activeLane);
+        if (activeStatus != null && !activeStatus.isEmpty()) {
+            return activeStatus;
+        }
+        String parentStatus = activeLane.equals(sessionId) ? "" : runtime.agentControlStatus(sessionId);
+        return parentStatus == null ? "" : parentStatus;
     }
 
     private static int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
     }
 
-    /** 每个会话的镜像状态：最新一帧 + 订阅者表。 */
+    /** 每个会话的镜像状态：最新一帧 + 订阅者表 + 子泳道缓存。 */
     private static final class State {
         final String id;
         final Map<SseEmitter, Boolean> subscribers = new LinkedHashMap<>();
+        final Map<String, JsonNode> laneFrames = new LinkedHashMap<>();
+        final Map<String, JsonNode> laneNavs = new LinkedHashMap<>();
+        final Map<String, JsonNode> laneActions = new LinkedHashMap<>();
+        String activeLane;
         JsonNode frame;
         JsonNode navigation;
         boolean captureEnabled = true;
@@ -347,6 +674,7 @@ public class BrowserControlService implements BrowserEventListener {
 
         State(String id) {
             this.id = id;
+            this.activeLane = id;
         }
     }
 }

@@ -15,12 +15,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.pilot.core.browser.BrowserEvidenceRecord;
 import com.pilot.core.project.InMemoryProjectRepository;
 import com.pilot.core.project.ProjectRepository;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.InMemoryConversationRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.server.browser.BrowserEvidenceService;
 import com.pilot.server.run.TaskControlService;
 import com.pilot.server.run.TaskControlStatus;
 import com.pilot.server.store.PilotDataDir;
@@ -162,6 +164,23 @@ class CompletionBundleAndCapsuleTest {
         assertEquals(capsule.completion().goal(), parsed.completion().goal());
         assertEquals(capsule.completion().evidence().getFirst().checks(),
             parsed.completion().evidence().getFirst().checks());
+    }
+
+    @Test
+    void includesRecordedBrowserEvidenceInBundleAndMarkdown() {
+        BrowserEvidenceService evidenceService =
+            new BrowserEvidenceService(temp.resolve("browser-evidence"), new ObjectMapper());
+        completion.setBrowserEvidence(evidenceService);
+        evidenceService.record(
+            new BrowserEvidenceRecord("ev_b1", session.id(), session.id(), "run_1", "", Instant.now(), "screenshot",
+                "ok", "http://127.0.0.1:5173/", "首页", "完成桌面截图验收", "", "", "", "", 0L, List.of(), 0, 1, ""));
+
+        var bundle = completion.build(session.id());
+        assertEquals(1, bundle.browserEvidence().size());
+        assertEquals("ev_b1", bundle.browserEvidence().getFirst().id());
+        String md = completion.markdown(bundle);
+        assertTrue(md.contains("## 浏览器验证证据"), md);
+        assertTrue(md.contains("完成桌面截图验收"), md);
     }
 
     private void recordEvidence(String check) {

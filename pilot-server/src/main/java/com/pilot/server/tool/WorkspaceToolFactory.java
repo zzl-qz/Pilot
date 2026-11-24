@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.browser.BrowserBackend;
+import com.pilot.core.browser.BrowserHandoffBroker;
 import com.pilot.core.browser.BrowserTool;
 import com.pilot.core.exec.ExecutionBackends.Selection;
 import com.pilot.core.mcp.McpCallTool;
@@ -59,6 +60,7 @@ import com.pilot.core.workspace.AgentScope;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.attachment.AttachmentReferences;
 import com.pilot.server.attachment.ReadAttachmentTool;
+import com.pilot.server.browser.BrowserEvidenceService;
 import com.pilot.server.capability.LocalResourcesTool;
 import com.pilot.server.compat.WorkspaceToolLookup;
 import com.pilot.server.config.AgentProperties;
@@ -94,6 +96,8 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
     private ObjectProvider<AttachmentReferences> attachmentReferences;
     private QuestionBroker questions;
     private PilotDataDir dataDir;
+    private BrowserEvidenceService browserEvidence;
+    private BrowserHandoffBroker browserHandoffs;
     /** 建工具表时读取已经落库的计划，避免把完成的步骤退回去。 */
     private final ThreadLocal<Supplier<List<PlanItem>>> plans = ThreadLocal.withInitial(() -> List::of);
     /** 建工具表时绑定当前会话，让 ask_user 记录等待归属。 */
@@ -134,6 +138,16 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
         this.attachmentReferences = attachmentReferences;
     }
 
+    @Autowired(required = false)
+    public void setBrowserEvidence(BrowserEvidenceService browserEvidence) {
+        this.browserEvidence = browserEvidence;
+    }
+
+    @Autowired(required = false)
+    public void setBrowserHandoffs(BrowserHandoffBroker browserHandoffs) {
+        this.browserHandoffs = browserHandoffs;
+    }
+
     /**
      * 只在「某个会话的某次运行」里才有意义的外部能力：浏览器按会话隔离，MCP 按工作区查配置。
      * 工具本身始终注册，是否对模型可见由各自的 {@code availability()} 在运行时决定——
@@ -143,7 +157,14 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
         List<Tool> extras = new ArrayList<>();
         Path root = resolve(workspace);
         if (browser != null) {
-            extras.add(new BrowserTool(browser, sessionId, new PathValidator(root)));
+            BrowserTool tool = new BrowserTool(browser, sessionId, new PathValidator(root));
+            if (browserEvidence != null) {
+                tool.withEvidenceRecorder(browserEvidence);
+            }
+            if (browserHandoffs != null) {
+                tool.withHandoffBroker(browserHandoffs);
+            }
+            extras.add(tool);
         }
         if (mcp != null) {
             extras.add(new McpToolsTool(mcp, root));

@@ -1,9 +1,11 @@
 package com.pilot.server.session;
 
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.browser.BrowserBackend;
+import com.pilot.core.browser.BrowserHandoffBroker;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.PlanRepository;
 import com.pilot.core.session.RunCheckpointRepository;
@@ -13,6 +15,7 @@ import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.server.attachment.AttachmentReferences;
 import com.pilot.server.attachment.AttachmentService;
+import com.pilot.server.browser.BrowserEvidenceService;
 import com.pilot.server.multi.SandboxStore;
 import com.pilot.server.run.RunStarter;
 import com.pilot.server.run.TaskControlService;
@@ -57,6 +60,14 @@ public class SessionCleanupService {
     private final SessionNotes notes;
     private final DataMaintenance maintenance;
     private final StorageHealthService storageHealth;
+    private BrowserHandoffBroker browserHandoffs;
+    private BrowserEvidenceService browserEvidence;
+
+    @Autowired(required = false)
+    public void setBrowserServices(BrowserHandoffBroker browserHandoffs, BrowserEvidenceService browserEvidence) {
+        this.browserHandoffs = browserHandoffs;
+        this.browserEvidence = browserEvidence;
+    }
 
     public SessionCleanupService(SessionService sessions, ConversationRepository conversations, PlanRepository plans,
         RunRepository runs, SandboxStore sandboxes, RunStarter runStarter, TaskControlService taskControls,
@@ -115,9 +126,15 @@ public class SessionCleanupService {
             }
         }
         commandTasks.stopSession(sessionId);
+        if (browserHandoffs != null) {
+            browserHandoffs.cancelBySession(sessionId, "会话已关闭");
+        }
         BrowserBackend backend = browser.getIfAvailable();
         if (backend != null) {
-            backend.closeSession(sessionId);
+            backend.closeSessionTree(sessionId);
+        }
+        if (browserEvidence != null) {
+            browserEvidence.deleteBySession(sessionId);
         }
         runStarter.activeRun(sessionId).ifPresent(runStarter::cancel);
         products.deleteBySession(sessionId);

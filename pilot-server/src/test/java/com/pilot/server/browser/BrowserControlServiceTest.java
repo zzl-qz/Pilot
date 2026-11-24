@@ -14,13 +14,22 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import com.pilot.core.browser.BrowserEvidenceRecord;
+import com.pilot.core.browser.BrowserHandoffBroker;
 import com.pilot.core.tool.Availability;
 
 import tools.jackson.databind.JsonNode;
@@ -231,5 +240,100 @@ class BrowserControlServiceTest {
 
         // 没人看着页面就不算接管中：订阅清空即复位，下个订阅者拿到干净状态
         verify(runtime, timeout(2000)).setInteractionsPaused("s1", false);
+    }
+
+    @Test
+    void handoffAutoPausesClearsOverlayAndEvidenceEmitsToSubscribers(@TempDir Path temp) throws IOException {
+        BrowserHandoffBroker broker = new BrowserHandoffBroker();
+        BrowserEvidenceService evidence = new BrowserEvidenceService(temp.resolve("ev"), MAPPER);
+        service.setHandoffs(broker);
+        service.setEvidence(evidence);
+
+        SseEmitter emitter = mock(SseEmitter.class);
+        service.subscribe("s1", emitter);
+        clearInvocations(emitter);
+
+        when(runtime.parentSessionOf("s1::browser::b1")).thenReturn("s1");
+        var future = broker.request(new BrowserHandoffBroker.PendingHandoff("h1", "s1", "s1::browser::b1", "b1", "auth",
+            "请登录", "https://accounts.example/login", Instant.now(), null), Duration.ofSeconds(5));
+
+        verify(runtime).setInteractionsPaused("s1::browser::b1", true);
+        verify(runtime, timeout(2000)).clearOverlay("s1::browser::b1");
+        verify(emitter, timeout(2000).atLeast(2)).send(any(SseEmitter.SseEventBuilder.class));
+
+        Map<String, Object> resumed = service.resumeHandoff("s1", "s1::browser::b1", "已登录");
+        Assertions.assertEquals(true, resumed.get("ok"));
+        Assertions.assertEquals(true, future.join().completed());
+        verify(runtime).setInteractionsPaused("s1::browser::b1", false);
+
+        evidence.record(new BrowserEvidenceRecord("ev_1", "s1", "s1", "r1", "", Instant.now(), "navigate", "ok",
+            "http://127.0.0.1:5173/", "Demo", "已打开", "", "", "", "", 0L, List.of(), 0, 0, ""));
+        verify(emitter, timeout(2000).atLeast(3)).send(any(SseEmitter.SseEventBuilder.class));
+
+        Assertions.assertEquals(true, service.selectLane("s1", "s1").get("ok"));
+        Assertions.assertEquals(false, service.selectLane("s1", "other-session").get("ok"));
+    }
+
+    @Test
+    void controlEventsAndStopControlSyncStateAndResume() throws IOException {
+        SseEmitter emitter = mock(SseEmitter.class);
+        service.subscribe("s1", emitter);
+        clearInvocations(emitter);
+
+        service.onEvent("s1", "control-state",
+            MAPPER.readTree("{\"event\":\"control-state\",\"agentControlled\":true,\"controlStatus\":\"填写 e3\"}"));
+        verify(runtime).recordControlState("s1", true, "填写 e3");
+        verify(emitter, timeout(2000).atLeast(2)).send(any(SseEmitter.SseEventBuilder.class));
+
+        when(runtime.agentControlled("s1")).thenReturn(true);
+        when(runtime.agentControlStatus("s1")).thenReturn("填写 e3");
+        var status = service.status("s1");
+        Assertions.assertEquals(true, status.get("agentControlled"));
+        Assertions.assertEquals("填写 e3", status.get("controlStatus"));
+
+        var stopped = service.stopControl("s1", "s1");
+        Assertions.assertEquals(true, stopped.get("ok"));
+        Assertions.assertEquals(true, stopped.get("paused"));
+        Assertions.assertEquals(false, stopped.get("agentControlled"));
+        verify(runtime).stopControl("s1");
+
+        clearInvocations(emitter);
+        service.onEvent("s1", "control-stopped",
+            MAPPER.readTree("{\"event\":\"control-stopped\",\"agentControlled\":false,\"source\":\"page\"}"));
+        verify(runtime).recordControlState("s1", false, "");
+        verify(runtime).setInteractionsPaused("s1", true);
+        verify(emitter, timeout(2000).atLeast(2)).send(any(SseEmitter.SseEventBuilder.class));
+
+        service.setPaused("s1", false);
+        verify(runtime).setInteractionsPaused("s1", false);
+        verify(runtime, timeout(2000)).setAgentControl("s1", false, "", true);
+    }
+
+    @Test
+    void resolvesEvidenceRecordingUnderManagedRootAndSummarizesCount(@TempDir Path temp) throws IOException {
+        Path evRoot = temp.resolve("ev");
+        BrowserEvidenceService evidence = new BrowserEvidenceService(evRoot, MAPPER);
+        service.setEvidence(evidence);
+
+        Path recDir = Files.createDirectories(evRoot.resolve("recordings"));
+        Path recFile = Files.writeString(recDir.resolve("run-1.replay.json"),
+            "{\"version\":1,\"frames\":[],\"actions\":[]}");
+        Path outsideFile = Files.writeString(temp.resolve("escape.replay.json"), "{}");
+
+        evidence.record(new BrowserEvidenceRecord("ev_rec", "s1", "s1", "r1", "ba_1", Instant.now(),
+            "record", "ok", "http://127.0.0.1:5173/", "Demo", "已录制", "", "", "", "", 0L, List.of(),
+            0, 0, "", recFile.toString()));
+        evidence.record(new BrowserEvidenceRecord("ev_escape", "s1", "s1", "r1", "ba_1", Instant.now(),
+            "record", "ok", "http://127.0.0.1:5173/", "Demo", "越界路径", "", "", "", "", 0L, List.of(),
+            0, 0, "", outsideFile.toString()));
+
+        Assertions.assertEquals(recFile.toAbsolutePath().normalize(),
+            service.resolveEvidenceRecording("s1", "ev_rec").orElseThrow());
+        Assertions.assertTrue(service.resolveEvidenceRecording("s1", "ev_escape").isEmpty(),
+            "受控根目录之外的录像路径必须拒绝读取");
+        Map<String, Object> resp = service.evidence("s1", "", 20);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> summary = (Map<String, Object>) resp.get("summary");
+        Assertions.assertEquals(2, summary.get("recordings"));
     }
 }

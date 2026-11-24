@@ -182,6 +182,7 @@ public class AgentRunService implements RunStarter {
 
     private volatile QuestionBroker questions;
     private volatile com.pilot.server.interaction.InteractionHub interactionHub;
+    private volatile com.pilot.core.browser.BrowserHandoffBroker browserHandoffs;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setQuestions(QuestionBroker questions) {
@@ -191,6 +192,11 @@ public class AgentRunService implements RunStarter {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setInteractionHub(com.pilot.server.interaction.InteractionHub interactionHub) {
         this.interactionHub = interactionHub;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setBrowserHandoffs(com.pilot.core.browser.BrowserHandoffBroker browserHandoffs) {
+        this.browserHandoffs = browserHandoffs;
     }
 
     /** 可恢复调度状态；为空时（测试构造）不做检查点，也不影响执行。 */
@@ -1230,6 +1236,9 @@ public class AgentRunService implements RunStarter {
         }
         handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
         handle.pendingQuestions.forEach(this::cancelQuestion);
+        if (browserHandoffs != null) {
+            browserHandoffs.cancelBySession(handle.sessionId, "运行已取消");
+        }
         log.info("Run {} cancel requested", runId);
         return true;
     }
