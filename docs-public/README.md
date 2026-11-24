@@ -7,13 +7,15 @@
 | 想了解 | 文档 |
 | --- | --- |
 | 首次启动、选择工作区、配置模型 | [首次启动指南](getting-started.md) |
-| 工作台流程、任务控制、成果与常用配置 | [功能与配置参考](user-guide.md) |
-| 权限、模型数据流、本机存储与远程访问 | [安全与隐私](security.md) |
+| 工作台流程、浏览器自动化、任务控制、成果与常用配置 | [功能与配置参考](user-guide.md) |
+| 权限、高危命令红线、浏览器隐私、模型数据流与远程访问 | [安全与隐私](security.md) |
+| MCP 启动命令信任与工具定义钉住 | [MCP 信任模型](design-mcp-trust.md) |
 | 我们不做什么：用户范围、不承诺项与不覆盖项 | [范围与边界](scope.md) |
 | 插件如何声明依赖、为什么升级不会打掉整个生态 | [插件契约](plugin-contracts.md) |
 | 与验证类工具的差异，以及证据在运行时里的位置 | [与验证类工具的差异](verification-approach.md) |
 | 完成凭证、验证策略即代码与任务交接 | [完成凭证与交接](completion-capsule.md) |
 | 桌面端与 Electron 验收 | [桌面端指南](../pilot-desktop/README.md) |
+| 基于 `jlink` 最小 JRE 的三平台自包含发行包 | [自包含发行包构建指南](../pilot-desktop/RELEASE_PACKAGING.md) |
 | Android 客户端与移动连接 | [Android 指南](../pilot-mobile/README.md) |
 | 手机连电脑的延迟怎么测、三组数字怎么比 | [手机延迟测量](mobile-latency-measurement.md) |
 | 手机审批端到端（含断网重连）怎么演示 | [手机审批演示](mobile-approval-demo.md) |

@@ -1,12 +1,12 @@
 # Pilot 项目模块与技术导览
 
-更新日期 2026-10-28。
+更新日期 2026-11-24。
 
-本指南面向第一次接触 Coding Agent 的开发者，解释 Pilot 的模块和技术分别解决什么问题，以及它们如何组成一条完整的开发任务执行链。先理解任务如何运行，再沿源码入口深入，比从目录和类名逐个阅读更容易建立整体认识。
+本指南面向第一次接触 Coding Agent 的开发者，解释 Pilot 的模块和技术分别解决什么问题，以及它们如何组成一条完整的任务执行链。先理解任务如何运行，再沿源码入口深入，比从目录和类名逐个阅读更容易建立整体认识。
 
-Pilot 把用户需求交给大模型分析，再由本地程序检查权限、读取代码、修改文件、执行命令并将结果送回模型。大模型提供下一步建议，Pilot 负责把建议变成受控操作、保存状态和向用户展示结果。两者共同构成编码代理。
+Pilot 把用户需求交给大模型分析，再由本地程序检查权限、读取代码、修改文件、执行命令或操作受控浏览器，并将结果送回模型。大模型提供下一步建议，Pilot 负责把建议变成受控操作、保存状态和向用户展示可复核的证据。两者共同构成任务执行与编码代理。
 
-本指南对应仓库提交 `14c6816732a61ea6f8f6f4031bd466e533853784` 的实现，重点包括该版本新增的后台命令任务。文中将能力分为“已实现”“已有机制但存在缺口”“讨论中的方案”，避免把开发规划当成现有功能。
+文中明确区分“已实现”“已有机制但存在缺口”“未覆盖或待实机验证的范围”，避免把规划或单平台测试当成全平台能力承诺。
 
 ## 1 先建立整体认识
 
@@ -169,25 +169,23 @@ AgentLoop 负责“接下来还要不要继续”，不是“这些业务代码�
 
 **要解决的问题：**不能让主循环到处关心 HTTP 地址、JSON 字段和模型服务配置。
 
-`ModelClient` 定义主循环需要的接口，`OpenAiCompatibleModelClient` 把消息和工具定义转成兼容 Chat Completions 的请求，并把文字及 `tool_calls` 转回项目对象。实现同时包含普通响应和流式响应；流式调用会拼接工具参数片段并将文字预览向上交付。
+`ModelClient` 定义主循环需要的接口，当前提供 `OpenAiCompatibleModelClient`（Chat Completions）、`OpenAiResponsesModelClient`（Responses API）与 `AnthropicMessagesModelClient`（原生 SSE 流式解析与 Prompt Caching 断点），并由 `MeteredModelClient`、`ModelUsageParser` 与 `ModelPricing` 汇总 token 用量与费用。流式调用会拼接工具参数片段并将文字与推理预览向上交付。
 
-`ModelClientProvider` 根据当前模型配置创建或复用实际客户端。用户在界面修改模型或端点后，后续请求使用新配置，不需要把整个主循环重写。
+`ModelClientProvider` 根据当前模型配置创建或复用实际客户端。用户在界面修改模型、端点、超时或计价后，后续请求使用新配置，不需要把整个主循环重写；没有模型密钥时可在模型设置中选择 Mock 模式体验界面流程（不代表真实模型能力测试）。
 
-兼容这里指请求响应的接口形状，不要求模型一定来自某一家。实际能否正确调用工具、理解图片和完成开发任务，仍要针对所选服务测试。当前服务端没有独立的无密钥 Mock Agent 实现；界面可以先配置，真实任务需要可用的模型服务及该服务要求的鉴权。
+源码：[ModelClient](pilot-core/src/main/java/com/pilot/core/model/ModelClient.java)、[OpenAiCompatibleModelClient](pilot-core/src/main/java/com/pilot/core/model/OpenAiCompatibleModelClient.java)、[AnthropicMessagesModelClient](pilot-core/src/main/java/com/pilot/core/model/AnthropicMessagesModelClient.java)、[ModelClientProvider](pilot-server/src/main/java/com/pilot/server/model/ModelClientProvider.java)、[ModelSettings](pilot-server/src/main/java/com/pilot/server/model/ModelSettings.java)。
 
-源码：[ModelClient](pilot-core/src/main/java/com/pilot/core/model/ModelClient.java)、[OpenAiCompatibleModelClient](pilot-core/src/main/java/com/pilot/core/model/OpenAiCompatibleModelClient.java)、[ModelClientProvider](pilot-server/src/main/java/com/pilot/server/model/ModelClientProvider.java)、[ModelSettings](pilot-server/src/main/java/com/pilot/server/model/ModelSettings.java)。
+### PromptLibrary、项目规则与长期记忆
 
-### PromptLibrary 提供工作规则
+**要解决的问题：**相同的工具能力，如果没有任务规则、项目约定和历史经验，模型仍可能做错方向。
 
-**要解决的问题：**相同的工具能力，如果没有任务规则和项目信息，模型仍可能做错方向。
+系统提示由身份、流程、工具策略、浏览器/审查协议、多智能体规则和输出要求等 Markdown 模板组成。运行时注入仓库快照、Git 状态、构建线索和项目约定：支持工作区根目录的 `AGENTS.md` 以及 `.pilot/rules` 目录下的标准 Glob 路径匹配规则（由 `ProjectRuleLoader` 归一化解析）。外置长期记忆由 `MemoryStore` 管理，正式索引 `MEMORY.md` 经预算裁剪后注入，`remember` 仅写入待审草稿、`read_memory` 按需检索，用户在设置页审阅发布。
 
-系统提示由身份、流程、工具策略、多智能体规则和输出要求等 Markdown 模板组成。运行时再注入仓库顶层结构、Git 状态、构建线索和项目约定。当前项目约定只读取工作区根目录的 `AGENTS.md`。这一处没有文件就不算有约定。上层目录、`~/.pilot/AGENTS.md`、`PILOT.md` 和 `CLAUDE.md` 都不读。
+提示词可通过 `PILOT_PROMPTS_DIR` 覆盖，减少调试时重新打包的成本。模板使用 `{{name}}` 变量，缺少变量就报错，避免把未渲染的提示词交给模型。
 
-提示词可通过外部目录覆盖，减少调试时重新打包的成本。模板使用 `{{name}}` 变量，缺少变量就报错，避免把未渲染的提示词交给模型。
+提示词能告诉模型“不要越权”“先运行测试”。真正是否允许执行，还要由工具权限、高危命令红线和沙箱边界决定。
 
-提示词能告诉模型“不要越权”“先运行测试”。真正是否允许执行，还要由工具权限和代码检查决定。
-
-源码：[PromptLibrary](pilot-core/src/main/java/com/pilot/core/prompt/PromptLibrary.java)、[提示词目录](pilot-core/src/main/resources/prompts)、[运行时提示装配](pilot-server/src/main/java/com/pilot/server/agent/AgentRunService.java)。
+源码：[PromptLibrary](pilot-core/src/main/java/com/pilot/core/prompt/PromptLibrary.java)、[MemoryStore](pilot-core/src/main/java/com/pilot/core/memory/MemoryStore.java)、[提示词目录](pilot-core/src/main/resources/prompts)、[运行时提示装配](pilot-server/src/main/java/com/pilot/server/agent/AgentRunService.java)。
 
 ### ToolRegistry 和 ToolExecutor 执行明确能力
 
@@ -200,7 +198,9 @@ ToolRegistry 是工具目录；ToolExecutor 是单次调用的执行流程。执
 | `list_dir`、`glob_files`、`search_text`、`read_file` | 查文件、按名字找文件、找调用、按范围读取源码；`read_file` 还能读图片，并对 PDF 抽取文本（扫描件渲染为图片） | 返回所见内容；图片以图片消息交给模型 |
 | `edit_file`、`create_file`、`apply_patch` | 精确替换、创建文件，或用一份补丁跨文件修改（含重命名、删除） | 主会话直接写工作区，补丁要么全部生效要么全部不落盘；调度子任务使用另外的沙箱版本 |
 | `run_command` | 编译、测试、lint、启动服务或检查 Git；支持 `&& \|\| ; \|` 串联，每一段独立校验 | 查看类命令只读放行，构建与写入类按权限档位审批；启动真实进程 |
-| `browser` | 在隔离浏览器里验证本机 Web 应用：快照、点击、输入、上传、截图、控制台与网络记录 | 浏览器握手成功后才对模型声明；点击等本机交互在 AUTO_EDIT 放行，执行任意脚本需审批 |
+| `browser`、`browser_agent` | 在隔离浏览器或独立浏览器子代理中验证网页：支持多层同源 `iframe`/Shadow DOM 穿透、防偏遮挡校验、`drag`/`dialog`/`batch`/`record`、坐标兜底、常驻 Take Control 与 Stop 即时抢占、接管唤醒及交互式录像回放 | `browser_agent` 禁用 `evaluate` 与文件/Shell 工具；本机交互在 AUTO_EDIT 放行，支付页自动交互硬拦截，宿主机证据自动写入 `BrowserEvidenceService` |
+| `remember`、`read_memory` | 写入长期记忆待审草稿与按关键词/类型按需检索正式记忆 | 候选草稿隔离在 `drafts.json`，需用户审阅后发布至 `MEMORY.md` |
+| `office` | 创建与检查 XLSX、PPTX、DOCX、PDF 及逐页渲染 | 工作区受控写路径，配合内置通用文件预览器检查 |
 | `mcp_tools`、`mcp_call` | 按需发现并调用 `.mcp.json` 里配置的 MCP 服务器工具 | 每次请求只带这两个定义；未信任服务器启动需审批，已信任服务器按配置哈希与工具哈希钉住，声明 `readOnlyHint` 的工具只有在钉住记录匹配时才免审批。见 [MCP 信任模型](docs-public/design-mcp-trust.md) |
 | `command_status`、`command_logs`、`stop_command` | 跟踪已经启动的长命令 | 查询状态、增量日志或发出终止请求 |
 | `update_plan` | 保存步骤和完成状态 | 更新计划并发出事件 |
@@ -224,11 +224,11 @@ ToolRegistry 是工具目录；ToolExecutor 是单次调用的执行流程。执
 | 权限模式 | 文件读取 | 文件写入 | 命令 |
 | --- | --- | --- | --- |
 | READ_ONLY | 放行只读工具 | 拒绝 | 拒绝 |
-| ASK | 放行只读工具 | 等待审批 | 等待审批 |
+| ASK | 放行只读工具 | 等待审批（含改动 Diff 预览） | 等待审批 |
 | AUTO_EDIT | 放行只读工具 | 实现 WritesFiles 的文件工具直接执行 | 等待审批 |
-| AUTO | 已注册工具范围内放行 | 放行 | 放行 |
+| AUTO（默认） | 已注册工具范围内放行 | 放行 | 常规放行；`CommandRiskGuard` 强制阻断删根/家/工作区目录，强推受保护分支与敏感凭证外发强制二次确认 |
 
-判断以工具实际类型和 `readOnly()` 属性为准，不能只看工具名字。`spawn_agent` 已按只读处理：子代理工具表在构造时就被裁剪成父级只读工具，READ_ONLY 会话可以派只读探索；`dispatch_agents` 会产生沙箱改动，仍按写操作走当前档位的审批。
+消息级 `plan` 分析模式和 `/review` 只读审查模式会在 `AgentRunPreparation` 阶段直接剥离所有写入与副作用工具，并强制 `READ_ONLY` 权限门。判断以工具实际类型和 `readOnly()`/`confirm()` 属性为准，不能只看工具名字。`spawn_agent` 已按只读处理：子代理工具表在构造时就被裁剪成父级只读工具，READ_ONLY 会话可以派只读探索；`dispatch_agents` 会产生沙箱改动，仍按写操作走当前档位的审批。
 
 审批请求通过 callId 登记，执行线程等待 CompletableFuture；界面批准或拒绝后完成该等待。超时按拒绝处理。审批当前在内存中，重启后不能把旧请求当成仍已获准。
 
@@ -250,9 +250,9 @@ PathValidator 把路径规范化，比较工作区真实路径，并检查目标
 
 | 隔离层次 | 具体作用 | 当前状态 |
 | --- | --- | --- |
-| 上下文独立 | 子 Agent 读过的大量内容不直接塞进父模型上下文 | 已实现基本机制 |
-| 改动提案隔离 | 子任务文件修改先形成 diff 和目标内容，等接受后写入 | 已实现提案机制，文件视图一致性仍有缺口 |
-| 系统进程隔离 | 操作系统限制命令实际能访问的文件、网络、凭据和资源 | 尚未实现完整后端 |
+| 上下文独立 | 子 Agent 与浏览器子代理读过的大量内容不直接塞进父模型上下文 | 已实现（`spawn_agent`、`dispatch_agents`、`browser_agent`） |
+| 改动提案隔离 | 子任务文件修改先形成 diff 和目标内容，等接受后写入 | 已实现提案与清单验证机制，部分重启恢复边界见第 11 节 |
+| 系统进程隔离 | 操作系统限制命令实际能访问的文件、网络、凭据和资源 | macOS（Seatbelt）与 Linux（bubblewrap）已默认接入 `OsSandbox`，容器后端覆盖校验命令；Windows 受限运行器需独立配置与实机验收 |
 
 后续可以自研统一执行层，并接入 Windows 原生限制或容器等后端。容器是实现进程边界和固定环境的一种选择，不是 Agent 多轮执行、多任务并行和持久化的前提。第 13 节说明讨论中的方案。
 
@@ -345,7 +345,7 @@ ContextBudget 在采样前检查预算，逐步减少旧工具输出、截短超
 
 会话级任务要求也由 TaskControlService 保存在数据目录的独立 JSON 中。具体子路径和覆盖项以配置及实现为准，修改 `PILOT_DATA_DIR` 会改变默认数据根目录。
 
-数据目录可能包含代码、会话、命令输出和模型凭据。模型设置接口使用掩码展示密钥，不代表 SQLite 中保存的凭据已经加密。命令日志脱敏也不等于所有 trace 和存储都自动脱敏。
+数据目录可能包含代码、会话、命令输出、浏览器证据和模型凭据。`SecretScrubber` 对错误摘要、命令输出、请求诊断落盘及一键导出脱敏诊断包（`GET /api/diagnostics/export`）做全链路密钥脱敏；POSIX 文件系统上 `.pilot/pilot.db` 与请求落盘文件默认收紧为 `0600`（仅当前用户可读写），但 SQLite 内部仍非全库加密存储，不应随意公开或上传 `.pilot/` 目录。
 
 ## 9 事件流如何把后端过程还原到界面
 
@@ -357,7 +357,7 @@ SSE 是服务端向浏览器推送的通道；提交消息、批准工具和停�
 
 模型服务向 Pilot 的文字流与 Pilot 向浏览器的会话事件流属于两条链路。前者是模型协议，后者还要传工具、审批、计划和状态，不能简单转发模型原始数据代替。
 
-界面是 React + TypeScript 单页应用，入口 `pilot-web/frontend/src/main.tsx`；状态集中在 `src/store/` 的 Zustand store，纯逻辑放在 `src/lib/`（如事件合并、附件、草稿、队列），组件在 `src/components/`。构建用 Vite（`pilot-web/frontend/package.json` 的 `build` 脚本），产物由 Maven 打进服务端静态资源，运行时只启动一个后端进程。开发期可用 `pnpm --dir pilot-web/frontend dev` 起前端开发服务器并代理到后端。
+界面是 React + TypeScript 单页应用，入口 `pilot-web/frontend/src/main.tsx`；状态集中在 `src/store/` 的 Zustand store，纯逻辑放在 `src/lib/`（如事件合并、附件、草稿、队列、浏览器镜像与提醒分发），组件在 `src/components/`。构建用 Vite（`pilot-web/frontend/package.json` 的 `build` 脚本），产物由 Maven 打进服务端静态资源，运行时只启动一个后端进程。开发期可用 `npm --prefix pilot-web/frontend run dev` 起前端开发服务器并代理到后端。
 
 源码：[EventEnvelope](pilot-core/src/main/java/com/pilot/core/event/EventEnvelope.java)、[SessionService](pilot-core/src/main/java/com/pilot/core/session/SessionService.java)、[事件类型](pilot-core/src/main/java/com/pilot/core/event/EventType.java)、[SessionHistoryController](pilot-server/src/main/java/com/pilot/server/session/history/SessionHistoryController.java)、[前端入口](pilot-web/frontend/src/main.tsx)、[状态与事件流](pilot-web/frontend/src/store/run-state.ts)、[前端事件处理](pilot-web/frontend/src/lib/workbench-sync.ts)。
 
@@ -417,7 +417,7 @@ WebSearchTool 请求 SearXNG 搜索服务，返回资料线索；WebFetchTool �
 
 本地搜索服务本身当前不依赖 Docker；搜索引擎仍可能向外部来源请求结果。本地部署搜索服务不意味着搜索和模型调用都离线。
 
-AttachmentService 将可解码文本内联到消息，图片保存后由模型客户端按图片内容传递，其他二进制保存并提供引用。保存 PDF 或 Office 文件不代表已经内置完整文档解析器；如何进一步读取，要看可用工具和模型能力。
+AttachmentService 将可解码文本内联到消息（默认保留 20,000 字符头尾），图片保存后由模型客户端按图片内容传递，其他二进制保存完整原件并支持通过 `read_attachment` 按需读取。工作区文件预览由 `UniversalFilePreviewService`（零外部进程依赖）提供 DOCX/XLSX/PPTX 结构化解析、压缩包目录清单及图片/PDF/音视频流式预览；Office 生成与读回校验由 `OfficeTool` 提供。
 
 源码：[WebSearchTool](pilot-core/src/main/java/com/pilot/core/tool/WebSearchTool.java)、[WebFetchTool](pilot-core/src/main/java/com/pilot/core/tool/WebFetchTool.java)、[LocalSearchRuntime](pilot-server/src/main/java/com/pilot/server/search/LocalSearchRuntime.java)、[AttachmentService](pilot-server/src/main/java/com/pilot/server/attachment/AttachmentService.java)。
 
@@ -441,16 +441,16 @@ RetentionService 根据保留天数清理旧的事件、快照和 trace 等材�
 
 ## 13 已实现机制和未来执行后端的分界
 
-统一执行层已落地第一版：`com.pilot.core.exec` 定义 `ExecutionBackend` 契约，提供本地后端与容器后端，并由 `ExecutionBackends.select` 按配置选择。容器不可用时不静默降级，`Selection.degraded()` 与 `/api/maintenance/status` 会给出原因。Windows 原生后端（受限令牌、Job Objects、AppContainer）仍未实现。
+统一执行层与命令文件系统沙箱均已落地：`com.pilot.core.exec` 定义 `ExecutionBackend` 契约，提供本地后端与容器后端（容器不可用时不静默降级，`Selection.degraded()` 与 `/api/maintenance/status` 给出原因）；主会话 `run_command` 通过 `OsSandbox` 在 macOS（Seatbelt）与 Linux（bubblewrap）默认启用文件系统沙箱（默认拒写工作区外路径并保护 `.git` 关键元数据，可按 `PILOT_EXECUTION_COMMAND_NETWORK=false` 禁网），Windows 侧已定义受限令牌运行器协议（`scripts/build-windows-sandbox.ps1`），未配置运行器时回退宿主进程并明确标注未隔离。
 
 | 方案或机制 | 解决什么问题 | 当前状态 |
 | --- | --- | --- |
-| PathValidator、PermissionGate、审批 | 控制经过 Pilot 工具入口的文件和操作 | 已实现 |
+| PathValidator、PermissionGate、`CommandRiskGuard` | 控制文件边界、权限审批与 `AUTO` 高危命令硬红线/二次确认 | 已实现 |
+| `OsSandbox`（Seatbelt / bubblewrap / Windows 运行器协议） | 限制主会话命令写入工作区外目录与篡改 `.git` 元数据 | macOS/Linux 已默认启用；Windows 需独立配置运行器并待实机全量验收 |
 | CommandTaskManager | 命令状态、输出、超时、取消和恢复记录 | 已实现；进程追踪有平台与脱离子进程的限制 |
 | diff 提案和 Git worktree 验证 | 暂存子任务改动，尝试在副本构建 | 已有机制但存在缺口 |
 | 统一执行层 `ExecutionBackend` | 把工作区、策略、进程和系统限制放到统一契约下 | 已实现（本地/容器两种后端） |
-| 容器校验执行 | 为编译/测试命令提供独立文件系统、网络与资源上限 | 已接入校验门；`run_command` 仍是宿主进程 |
-| Windows 原生后端 | 在 Windows 上限制真实子进程的权限和资源 | 待验证、待实现 |
+| 容器校验执行 | 为编译/测试命令提供独立文件系统、网络与资源上限 | 已接入校验门；主会话命令另由 `OsSandbox` 提供本机文件系统隔离 |
 | 不可变产物清单与依赖传播 | 让上游输出、集成验证和最终接受精确对应 | 已实现（清单历史、差异、依赖失效） |
 
 Windows 原生方案可评估受限令牌、文件 ACL、Job Objects 和 AppContainer。它们的职责不同：Job Objects 主要管理一组进程及资源，文件和网络访问还需要另外的系统机制。原生辅助程序可以随 Pilot 打包，由 Java 调用；编译工具和运行时的兼容性需要实际验证。
@@ -524,12 +524,13 @@ Windows 原生方案可评估受限令牌、文件 ACL、Job Objects 和 AppCont
 | 可恢复调度状态 | `RunCheckpoint`、`RunCheckpointRepository`、`JdbcRunCheckpointRepository`、`RunStateTracker` | 事件回答「发生过什么」，检查点回答「下一步做什么」；每次工具开始/结束、审批、重试都推进检查点 |
 | 租约与安全接管 | `RunStateTracker.begin/claimLease/heartbeat/recoverAfterRestart` | 同一会话同一时刻只允许一个实例推进；租约过期或释放后才能接管；启动恢复只收敛为中断，不自动重放工具 |
 | 工具调用幂等 | `ToolCallJournal`、`JdbcToolCallJournal`、`ToolExecutor.withJournal` | 只对写文件重放，且要求文件现状与写入后指纹一致；命令重跑是预期行为，永不重放 |
-| 执行隔离 | `com.pilot.core.exec` 下的 `ExecutionBackend`、`LocalExecutionBackend`、`ContainerExecutionBackend`、`ExecutionBackends` | 容器请求不支持静默降级；`run_command` 仍走宿主进程，容器只覆盖校验命令 |
+| 执行隔离 | `com.pilot.core.exec` 下的 `OsSandbox`、`ExecutionBackend`、`LocalExecutionBackend`、`ContainerExecutionBackend` | macOS/Linux 主会话命令默认走 Seatbelt/bubblewrap；容器校验不支持静默降级；Windows 受限运行器需显式配置 |
+| 浏览器自动化与证据 | `BrowserTool`、`BrowserSubagentTool`、`BrowserEvidenceService`、`browser-sidecar.mjs` | 支持同源 `iframe`/Shadow DOM 穿透、Take Control 蓝框与 Stop 即时抢占、跨平台 `.replay.json` 录像回放及完成凭证归档 |
 | 产物版本 | `ArtifactManifest`、`ArtifactFile`、`InputBundle`、`SandboxStore.manifestHistory/manifestDiff/linkDependency` | 清单只读、按修订递增；候选指纹包含依赖指纹；上游变化使下游校验失效 |
 | 校验与完成声明绑定 | `ValidationLedger`、`ValidationEvidence`、`WorkspaceFingerprint`、`/api/sessions/{id}/validation` | 证据绑定候选指纹、命令、环境和运行；产物变化后旧证据不再支撑完成 |
-| 重试治理 | `RetryBudget`、`AgentLoop.withRetryBudget`、`RunRetrying` | 指数退避 + 抖动 + 次数/时长预算 + 熔断；余额与鉴权错误仍立即失败 |
-| 模型兼容契约 | `pilot-core/src/test/resources/model-contract/`、`ModelContractTest` | 脱敏样本覆盖鉴权、余额、限流、网关错误、流式中断、结构异常 |
-| 诊断与脱敏 | `TaskDiagnosticsService`、`Redaction`、`/api/sessions/{id}/diagnostics` | 只读汇总；密钥类文本在输出前脱敏；存储降级会显示原因 |
+| 重试与长任务韧性 | `RetryBudget`、`AgentLoop`、`RunRetrying`、`AgentRunService` | HTTP 429/5xx 分级退避与 `Retry-After` 识别、跨平台休眠唤醒补偿与自持租约续认、瞬态断网有界自动重连；余额与鉴权错误立即失败 |
+| 模型兼容契约 | `pilot-core/src/test/resources/model-contract/`、`ModelContractTest` | 脱敏样本覆盖 OpenAI/Anthropic 鉴权、余额、限流、网关错误、流式中断、结构异常 |
+| 诊断与脱敏 | `TaskDiagnosticsService`、`DiagnosticsExportService`、`SecretScrubber`、`/api/diagnostics/export` | 只读汇总与一键导出 `sanitized=true` 诊断包；全链路密钥脱敏；POSIX 下数据库与请求落盘默认 `0600` |
 | 数据生命周期 | `BackupService`、`RetentionService`、`StorageHealth`、`/api/maintenance/*` | 备份用 `VACUUM INTO`；恢复只能停服务后整体覆盖；写盘失败降级但继续任务 |
 | 远程访问边界 | `SecurityProperties`、`AccessControl`、`RemoteAccessFilter`、`AccessAudit` | 默认仅回环；令牌模式需显式配置；来源校验与限流；拒绝写审计 |
 | 跨平台与窄屏 | `.github/workflows/ci.yml`、`CrossPlatformPathTest`、`pilot-web/src/test/viewport/check-viewports.mjs` | 三平台跑完整测试；固定视口检查横向溢出与关键控件可见性 |
@@ -538,6 +539,6 @@ Windows 原生方案可评估受限令牌、文件 ACL、Job Objects 和 AppCont
 仍然明确没有做到的：
 
 1. 多实例集群调度：租约依赖共享 SQLite，跨机器部署没有协调层。
-2. Windows 原生沙箱与 `run_command` 的容器化：需要路径映射、工具链镜像、停止语义与后代进程归属。
+2. Windows 原生沙箱的全量实机验收与主会话 `run_command` 的容器化：需要路径映射、工具链镜像、停止语义与后代进程归属。
 3. 远程访问的多用户与权限模型：只有单一共享令牌。
 4. 真实任务集的 fixture 仓库与实测数据：harness 已可运行，但 fixtures 需要按任务补充后才能给出能力结论。
