@@ -243,7 +243,20 @@ test('浏览器订阅轻量状态流，忽略截图及旧会话的迟到事件',
     assert.equal(first.listeners.has('frame'), false);
     first.emit('state', { headless: false });
     first.emit('nav', { url: 'https://first.test' });
-    assert.deepEqual(useStore.getState().ui.mirror, { mode: 'live', url: 'https://first.test', headless: false });
+    assert.deepEqual(useStore.getState().ui.mirror, {
+      mode: 'live',
+      url: 'https://first.test',
+      headless: false,
+      paused: false,
+      agentControlled: false,
+      controlStatus: '',
+      activeLane: '',
+      lanes: [],
+      handoffs: [],
+      lastAction: null,
+      evidenceCount: 0,
+      evidenceVersion: 0
+    });
     first.listeners.get('state')({ data: '{invalid' });
     assert.equal(useStore.getState().ui.mirror.headless, false);
     useStore.getState().startNewSession();
@@ -253,7 +266,20 @@ test('浏览器订阅轻量状态流，忽略截图及旧会话的迟到事件',
     second.emit('nav', { url: 'https://second.test' });
     second.emit('frame', { url: 'https://ignored.test', frame: 'not retained' });
     first.emit('nav', { url: 'https://stale.test' }); first.emit('closed'); first.emit('state', { headless: true });
-    assert.deepEqual(useStore.getState().ui.mirror, { mode: 'live', url: 'https://second.test', headless: false });
+    assert.deepEqual(useStore.getState().ui.mirror, {
+      mode: 'live',
+      url: 'https://second.test',
+      headless: false,
+      paused: false,
+      agentControlled: false,
+      controlStatus: '',
+      activeLane: '',
+      lanes: [],
+      handoffs: [],
+      lastAction: null,
+      evidenceCount: 0,
+      evidenceVersion: 0
+    });
     second.emit('closed'); assert.equal(useStore.getState().ui.mirror.mode, 'closed');
   } finally { closeStreams(); globalThis.EventSource = saved; }
 });

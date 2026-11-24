@@ -37,7 +37,7 @@ test('command_input 只显示任务短 ID，不甩出要写入的正文', () => 
 
 test('浏览器 summary 里的 action 译成中文', () => {
   assert.equal(toolArgsText('browser', 'click'), '点击');
-  assert.equal(toolArgsText('browser', 'inspect'), '检查');
+  assert.equal(toolArgsText('browser', 'inspect'), '检查布局');
   assert.match(toolArgsText('browser', 'action=navigate,url=https://example.com/path'), /打开 example.com/);
 });
 
