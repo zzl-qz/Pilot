@@ -322,6 +322,11 @@ export interface ApiResults {
   modelRuntime: S.ModelRuntimeSettingsView;
   saveModelRuntime: S.ModelRuntimeSettingsView;
   probeModels: S.SettingsControllerModelsResponse;
+  webSearchSettings: WebSearchSettingsView;
+  saveWebSearchSettings: WebSearchSettingsView;
+  clearWebSearchApiKey: WebSearchSettingsView;
+  testWebSearch: WebSearchTestResponse;
+  restartLocalWebSearch: WebSearchSettingsView;
   skills: S.SkillsControllerSkillsResponse;
   skillsPreview: S.SkillsControllerPreviewResponse;
   skillsInstall: S.SkillsControllerInstallResponse;
@@ -405,4 +410,72 @@ export interface MemoryImportResult {
   imported: number;
   skipped: number;
   sourceFound: boolean;
+}
+
+export interface WebSearchProviderView {
+  id: string;
+  label: string;
+  description: string;
+  requiresApiKey: boolean;
+  defaultEndpoint: string;
+  apiKeySet: boolean;
+  apiKeyMasked: string;
+}
+
+export interface WebSearchSettingsView {
+  provider: string;
+  effectiveProvider: string;
+  apiEndpoint: string;
+  apiKeySet: boolean;
+  apiKeyMasked: string;
+  searxngEndpoint: string;
+  fallbackEnabled: boolean;
+  proxy: string;
+  requestTimeoutSeconds: number;
+  localEnabled: boolean;
+  localManaged: boolean;
+  localRunning: boolean;
+  localPortOpen: boolean;
+  localSettingsUpToDate?: boolean;
+  localSettingsPath: string;
+  localLogPath: string;
+  localMessage: string;
+  providers: WebSearchProviderView[];
+}
+
+export interface WebSearchSettingsUpdate {
+  provider?: string;
+  apiKey?: string;
+  clearApiKey?: boolean;
+  apiEndpoint?: string;
+  searxngEndpoint?: string;
+  fallbackEnabled?: boolean;
+  proxy?: string;
+}
+
+export interface WebSearchHit {
+  title: string;
+  url: string;
+  snippet: string;
+  publishedDate: string;
+  engines: string[];
+  score: number;
+}
+
+export interface WebSearchTestRequest extends WebSearchSettingsUpdate {
+  query?: string;
+  count?: number;
+  category?: string;
+}
+
+export interface WebSearchTestResponse {
+  ok: boolean;
+  sourceId: string;
+  sourceLabel: string;
+  triedSources: string[];
+  hits: WebSearchHit[];
+  answers: string[];
+  warnings: string[];
+  error?: string | null;
+  elapsedMs: number;
 }

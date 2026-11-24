@@ -18,6 +18,7 @@ import { AlertSettings } from "./settings/AlertSettings.js";
 import { SkillsSettings } from "./settings/SkillsSettings.js";
 import { MemorySettings } from "./settings/MemorySettings.js";
 import { McpSettings } from "./settings/McpSettings.js";
+import { WebSearchSettings } from "./settings/WebSearchSettings.js";
 import { UsageSettings } from "./settings/UsageSettings.js";
 import { DiagnosticsSettings } from "./settings/DiagnosticsSettings.js";
 import "./settings.css";
@@ -25,6 +26,7 @@ import "./settings.css";
 const SECTIONS = [
   { id: 'appearance', label: '外观', icon: 'sun', description: '调整工作区主题与强调色，更改即时生效。', Content: AppearanceSettings },
   { id: 'model', label: '模型', icon: 'model', description: '配置聊天模型、语音输入，以及请求计价与缓存。', Content: ModelSettings },
+  { id: 'search', label: '搜索', icon: 'search', description: '配置联网搜索提供商、API 密钥、本机 SearXNG 与自动回退。', Content: WebSearchSettings },
   { id: 'permission', label: '权限', icon: 'shield', description: '决定 Pilot 写入文件和执行命令前何时需要批准。', Content: PermissionSettings },
   { id: 'alerts', label: '提醒', icon: 'bell', description: '管理完成提示音、窗口外悬浮提醒、系统通知与任务栏提示。', Content: AlertSettings },
   { id: 'skills', label: '技能', icon: 'skill', description: '管理项目级和用户级技能。', Content: SkillsSettings },

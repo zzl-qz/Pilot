@@ -1,4 +1,4 @@
-import type { ActionResponse, ApiResults, BrowserRecordingReplay, InputMessage, SubmissionResult, Update, ScheduleDraft, ScheduleInput } from './types/api.js';
+import type { ActionResponse, ApiResults, BrowserRecordingReplay, InputMessage, SubmissionResult, Update, ScheduleDraft, ScheduleInput, WebSearchSettingsUpdate, WebSearchTestRequest } from './types/api.js';
 import type * as S from './types/server.js';
 import { errorInfo } from './lib/errors.js';
 import { voiceFilename } from './lib/voice-input.js';
@@ -329,6 +329,12 @@ export const api = {
   modelRuntime: () => apiJson<ApiResults['modelRuntime']>('/api/settings/model/runtime'),
   saveModelRuntime: (body: Update<S.ModelRuntimeControllerUpdate>) => apiJson<ApiResults['saveModelRuntime']>('/api/settings/model/runtime', jsonBody('PUT', body)),
   probeModels: (body: Update<S.SettingsControllerModelsRequest>) => apiJson<ApiResults['probeModels']>('/api/settings/model/models', jsonBody('POST', body)),
+  webSearchSettings: (signal?: AbortSignal) => apiJson<ApiResults['webSearchSettings']>('/api/settings/web-search', { signal }),
+  saveWebSearchSettings: (body: WebSearchSettingsUpdate) => apiJson<ApiResults['saveWebSearchSettings']>('/api/settings/web-search', jsonBody('PUT', body)),
+  clearWebSearchApiKey: (provider?: string) =>
+    apiJson<ApiResults['clearWebSearchApiKey']>(`/api/settings/web-search/api-key${provider ? `?provider=${encodeURIComponent(provider)}` : ''}`, { method: 'DELETE' }),
+  testWebSearch: (body: WebSearchTestRequest) => apiJson<ApiResults['testWebSearch']>('/api/settings/web-search/test', jsonBody('POST', body), 35000),
+  restartLocalWebSearch: () => apiJson<ApiResults['restartLocalWebSearch']>('/api/settings/web-search/restart-local', { method: 'POST' }, 70000),
   skills: (sessionId?: string) => apiJson<ApiResults['skills']>(`/api/skills${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''}`),
   skillsPreview: (body: Update<S.SkillsControllerPreviewRequest>) => apiJson<ApiResults['skillsPreview']>('/api/skills/preview', jsonBody('POST', body), 150000),
   skillsInstall: (body: Update<S.SkillsControllerInstallRequest>) => apiJson<ApiResults['skillsInstall']>('/api/skills/install', jsonBody('POST', body)),

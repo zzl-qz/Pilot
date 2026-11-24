@@ -44,7 +44,7 @@ Pilot 会读取工作区内容、向模型端点发送请求，并可能在本�
 
 默认数据目录是仓库根目录下的 `.pilot/`，可能包含 SQLite 会话数据库、附件、文件快照、成果、浏览器证据与录像、命令日志、访问审计记录和 trace。可以通过 `PILOT_DATA_DIR` 指向独立目录。
 
-- **密钥与落盘脱敏**：共享 `SecretScrubber` 覆盖 Bearer/Basic、主流服务商前缀（`sk-`/`ghp_`/`AKIA`/`AIza`/`xox`/`glpat`/`hf_`）、PEM 私钥块与 URL 内嵌口令，统一应用于模型错误摘要、命令输出、诊断导出与请求诊断落盘；`ModelSettings`/`ModelProperties` 不输出明文密钥。在 POSIX 文件系统上，`.pilot/pilot.db` 与请求诊断落盘文件默认收紧为 `0600`（仅当前用户可读写），非 POSIX 平台安全降级跳过。需要分享排障信息时，请使用「设置 → 诊断」导出标记 `sanitized=true` 的脱敏诊断包。
+- **密钥与落盘脱敏**：共享 `SecretScrubber` 覆盖 Bearer/Basic、主流服务商前缀（`sk-`/`ghp_`/`AKIA`/`AIza`/`xox`/`glpat`/`hf_`）、PEM 私钥块与 URL 内嵌口令，统一应用于模型与搜索错误摘要、命令输出、诊断导出与请求诊断落盘；`ModelSettings`/`ModelProperties` 及 `WebSearchSettings`/`WebSearchProperties` 均不输出明文密钥（只返回掩码）。`web_fetch` 跟随公网重定向（上限 5 跳）时会在每一跳发请求前重新校验公网地址并阻断本机、私网、链路本地、CGNAT 与 IPv6 ULA 目标。在 POSIX 文件系统上，`.pilot/pilot.db` 与请求诊断落盘文件默认收紧为 `0600`（仅当前用户可读写），非 POSIX 平台安全降级跳过。需要分享排障信息时，请使用「设置 → 诊断」导出标记 `sanitized=true` 的脱敏诊断包。
 - **数据保留**：事件、快照和 trace 默认不自动清理。配置正数的 `PILOT_RETENTION_DAYS` 后，服务按保留期限清理相应旧记录；这不等同于安全擦除，也不会删除会话本身。`.pilot/` 被 Git 忽略并不意味着可以公开上传或任意共享。
 
 ## 远程访问

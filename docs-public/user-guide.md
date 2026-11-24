@@ -60,6 +60,11 @@ Pilot 以项目组织工作区目录和对话。一个项目可以关联多个�
 - **过程录像与交互式回放**：支持跨平台无外部二进制依赖的过程录像 `record`（产出 `.replay.json`，自动跳过敏感支付/认证页画面帧）。证据面板支持对截图或录像任意暂停帧拖拽框选并插入带像素坐标与比例的定位反馈到对话输入框，录像弹窗还提供倍速播放（`0.5x`/`1x`/`2x`）、进度条拖动、步骤时间轴点击跳帧与目标高亮盒/光标同步叠加。
 - **边界提示**：访问公开网站、登录页面或提交表单涉及外部副作用，操作前应审阅审批请求与目标站点；下载与上传受大小、路径与危险内容检查约束（详见[安全与隐私](security.md#浏览器隐私与安全边界)）。浏览器能力不可用时，不要把无截图或无响应当作操作成功。
 
+- **联网搜索与网页读取（`web_search` / `web_fetch`）**：
+  - `web_search` 支持多搜索源协同与自动回退：可在「设置 → 搜索」或环境变量中配置 **博查 Bocha**（国内直连）、**Tavily**、**Brave Search**、**Serper (Google)**、**Exa** 等搜索 API，或使用本机/自建 **SearXNG**（托管配置升级至 v3 引擎池，覆盖 `bing`/`360search`/`yahoo`/`duckduckgo`/`brave`/`quark`/`startpage`/`mojeek`/`google`/`wikipedia`/`github`/`stackoverflow`/`mdn`/`pypi`/`npm`/`arxiv` 及多新闻源，旧版 Pilot 托管配置会在重启时自动备份并升级，自定义配置不受影响）；开启自动回退后，主源失败、0 结果或 SearXNG 命中偏少时会自动回退/补齐免密钥官方公开只读 API（Wikipedia 中/英、GitHub、StackOverflow、arXiv）。支持 `category`（`general`/`news`/`it`/`science`）、`time_range`（`day`/`week`/`month`/`year`）、`language`、`site`（严格站点域名过滤）、`page` 与 `count` 参数，自动对 URL 去重、结合查询词相关性重排并透出上游引擎异常诊断。
+  - 在「设置 → 搜索」可直接切换提供商、保存或清除 API 密钥（只写不读）、配置出网代理（本机回环自动直连）、同步配置并重启本机 SearXNG，以及不落盘发起实时测试搜索。
+  - `web_fetch` 支持读取 HTML、纯文本、Markdown、JSON 与 XML，自动识别 UTF-8 / GBK / GB18030 等编码并优先提取 `<article>`/`<main>` 正文，最多安全跟随 5 次公网重定向（每一跳都重新执行本机/内网/保留地址 SSRF 校验并拦截重定向循环）。
+
 MCP 使用本机 `stdio` 启动配置中的服务器进程；添加服务器即允许 Pilot 尝试启动该命令，应检查命令来源与参数。未信任的服务器首次启动会请求批准；审批卡上的「批准并信任服务器」会记住当前命令，之后启动不再逐次询问，服务器启动后还会钉住它声明的工具定义，工具定义变化会重新要求审批。设置 → MCP 可以查看来源、信任状态，添加或删除用户级服务器，也可以撤销信任。详细的信任边界见[设计说明](design-mcp-trust.md)。
 
 ## 定时任务与结果通知
@@ -89,6 +94,10 @@ MCP 使用本机 `stdio` 启动配置中的服务器进程；添加服务器即�
 | `PILOT_BROWSER_SENSITIVE_HOSTS` / `PILOT_BROWSER_SENSITIVE_ALLOW_HOSTS` | 浏览器额外敏感认证域名与例外放行清单（支付页不可例外放行） | 留空（内置常见认证/支付规则） |
 | `PILOT_BROWSER_MAX_DOWNLOAD_BYTES` | 浏览器单文件下载上限（字节） | `0`（沿用默认 50 MiB） |
 | `PILOT_BROWSER_CDP` | 接入用户已启动调试端口的本地 Chrome 回环地址 | 空（使用内置 Chromium 或桌面壳） |
+| `PILOT_WEB_SEARCH_PROVIDER` | 联网搜索提供商（`auto`/`bocha`/`tavily`/`brave`/`serper`/`exa`/`searxng`/`public`） | `auto`（API 优先 → SearXNG → 公开只读源） |
+| `PILOT_WEB_SEARCH_API_KEY` / `PILOT_WEB_SEARCH_<PROVIDER>_API_KEY` | 搜索提供商 API 密钥（支持按博查/Tavily/Brave/Serper/Exa 分项配置） | 空（回落本机 SearXNG 与公开只读源） |
+| `PILOT_WEB_SEARCH_PROXY` | 联网搜索与本机 SearXNG 出网代理（如 `http://127.0.0.1:7890`） | 空（直连；本机回环始终不走代理） |
+| `PILOT_WEB_SEARCH_FALLBACK_ENABLED` | 主搜索源失败或 0 结果时是否自动回退到 SearXNG 与公开只读源 | `true` |
 | `PILOT_DATA_DIR` | 会话与运行数据目录 | 仓库根目录下 `.pilot/` |
 | `PILOT_RETENTION_DAYS` | 事件、快照和 trace 保留天数 | `0`，即不自动清理 |
 | `PILOT_SECURITY_MODE` | 本机或令牌远程访问模式 | `local`，只允许本机回环访问 |
@@ -103,7 +112,7 @@ MCP 使用本机 `stdio` 启动配置中的服务器进程；添加服务器即�
 
 服务端默认值仍可通过 `PILOT_MODEL_TIMEOUT_SECONDS` 和 `PILOT_MODEL_IDLE_TIMEOUT_SECONDS` 设置，修改环境变量后需要重启；已有模型专属设置优先。超时走现有的有界重试流程，用户仍可取消。较短时限可以更早发现无响应，应根据端点的实际耗时设置，不能把正常长推理误当故障。
 
-模型普通 JSON 响应上限为 32 MiB，流式累计响应为 64 MiB，单条 SSE 行为 1,048,576 个字符。错误正文只读取前 64 KiB 后关闭连接；超大成功响应明确报错，不当作完整结果使用。模型列表和网页搜索响应上限各为 4 MiB，网页读取仍为 512 KiB。
+模型普通 JSON 响应上限为 32 MiB，流式累计响应为 64 MiB，单条 SSE 行为 1,048,576 个字符。错误正文只读取前 64 KiB 后关闭连接；超大成功响应明确报错，不当作完整结果使用。模型列表和网页搜索响应上限各为 4 MiB，网页读取上限为 2 MiB。
 
 ## 数据备份、诊断与恢复
 
