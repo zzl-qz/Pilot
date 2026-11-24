@@ -156,6 +156,50 @@ class VoiceServiceTest {
         }
     }
 
+    @Test
+    void supportsZeroKeyLocalWhisperInferenceAndVoiceModeSelection() throws Exception {
+        assertEquals("http://127.0.0.1:8080/inference",
+            VoiceService.transcriptionEndpoint("http://127.0.0.1:8080/inference").toString());
+        assertTrue(VoiceService.isLoopbackEndpoint("http://127.0.0.1:8080/inference"));
+        assertTrue(VoiceService.isLoopbackEndpoint("http://localhost:8000/v1/audio/transcriptions"));
+        assertFalse(VoiceService.isLoopbackEndpoint("https://api.openai.com/v1/audio/transcriptions"));
+
+        try (Fixture f = new Fixture()) {
+            assertEquals("auto", f.service.settings().mode());
+            assertTrue(f.service.settings().localEndpoint());
+
+            var browserMode = f.service.update(new VoiceService.Update(null, null, null, null, "browser"));
+            assertEquals("browser", browserMode.mode());
+
+            // 独立本机 whisper.cpp /inference 端点免 Key 转写
+            HttpServer whisper = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            AtomicReference<String> whisperAuth = new AtomicReference<>();
+            whisper.createContext("/inference", exchange -> {
+                whisperAuth.set(exchange.getRequestHeaders().getFirst("Authorization"));
+                byte[] out = "{\"text\":\"本地离线转写成功\"}".getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type", "application/json");
+                exchange.sendResponseHeaders(200, out.length);
+                exchange.getResponseBody().write(out);
+                exchange.close();
+            });
+            whisper.start();
+            try {
+                String url = "http://127.0.0.1:" + whisper.getAddress().getPort() + "/inference";
+                var saved = f.service.update(new VoiceService.Update(url, "whisper-1", null, null, "server"));
+                assertEquals(url, saved.effectiveEndpoint());
+                assertTrue(saved.localEndpoint());
+                assertEquals("server", saved.mode());
+                assertEquals("本地离线转写成功", f.service.transcribe(new byte[] {1, 2}, "audio/wav"));
+                assertNull(whisperAuth.get(), "本机免 Key Whisper 端点不应发送 Authorization 头");
+            } finally {
+                whisper.stop(0);
+            }
+
+            assertThrows(IllegalArgumentException.class,
+                () -> f.service.update(new VoiceService.Update(null, null, null, null, "invalid-mode")));
+        }
+    }
+
     static final class Fixture implements AutoCloseable {
         final HttpServer server;
         final AtomicReference<String> body = new AtomicReference<>();

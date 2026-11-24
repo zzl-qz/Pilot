@@ -4,6 +4,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { errorInfo } from "../lib/errors.js";
+import { browserSpeechSupported } from "../lib/voice-input.js";
 import { shortcut } from "../lib/interaction.js";
 import { permissionLabel } from "../lib/permission.js";
 import { useStore } from "../store.js";
@@ -202,7 +203,9 @@ function VoiceSettings() {
     setBusy(true);
     setStatus(null);
     try {
-      const data = await api.saveVoiceSettings(clear ? { clearApiKey: true } : { endpoint: value.endpoint, model: value.model, apiKey: key });
+      const data = await api.saveVoiceSettings(clear
+        ? { clearApiKey: true }
+        : { endpoint: value.endpoint, model: value.model, apiKey: key, mode: value.mode || 'auto' });
       if (!data || typeof data.model !== 'string') throw new Error('无法确认语音配置，请重试。');
       setValue(data);
       setKey('');
@@ -214,25 +217,52 @@ function VoiceSettings() {
     }
   }
 
+  const speechAvailable = browserSpeechSupported();
+  const voiceMode = value?.mode === 'browser' || value?.mode === 'server' ? value.mode : 'auto';
+
   return <details className="settings-group settings-disclosure voice-settings" onToggle={event => setOpen(event.currentTarget.open)}>
     <summary>语音输入</summary>
     <div className="settings-form">
-      <p className="settings-status">录音会发送到语音服务，转写文字加入草稿。默认沿用聊天服务的端点和 Key，也可以填写支持音频转写的独立端点。</p>
+      <p className="settings-status">支持免密钥的「浏览器原生语音识别」或「本机 Whisper 服务」（whisper.cpp / faster-whisper），也可沿用 OpenAI 兼容转写端点。</p>
       {loadError && <div className="settings-inline-actions">
         <p className="settings-status" role="alert">读取语音设置失败。{loadError}</p>
         <Button label="重新加载语音设置" onClick={() => { setLoadError(''); setRefresh(count => count + 1); }} />
       </div>}
       {!value && !loadError && <p className="settings-status" role="status">正在读取语音设置…</p>}
       {value && <>
+        <div className="settings-row">
+          <div>
+            <strong>识别方式</strong>
+            <p className="settings-status">
+              {speechAvailable
+                ? '当前浏览器支持 Web Speech 原生识别（免密钥）。'
+                : '当前浏览器/桌面端未暴露 Web Speech 接口，免密钥使用请填下方本机 Whisper 地址。'}
+            </p>
+          </div>
+          <SegmentedControl id="settings-voice-mode" label="语音识别方式" value={voiceMode}
+            onChange={mode => setValue({ ...value, mode })}>
+            <SegmentedControlItem value="auto" label="自动" />
+            <SegmentedControlItem value="browser" label="浏览器免密钥" />
+            <SegmentedControlItem value="server" label="转写接口" />
+          </SegmentedControl>
+        </div>
         <div className="settings-field-grid">
-          <TextInput label="语音模型" size="lg" width="100%" placeholder="填写服务支持的转写模型" value={value.model || ''}
+          <TextInput label="语音模型" size="lg" width="100%" placeholder="填写服务支持的转写模型（如 whisper-1）" value={value.model || ''}
             isDisabled={busy} onChange={model => setValue({ ...value, model })} />
-          <TextInput label="独立语音端点（可选）" size="lg" width="100%" inputMode="url" placeholder="留空沿用聊天服务" value={value.endpoint || ''}
+          <TextInput label="独立语音端点（可选）" size="lg" width="100%" inputMode="url" placeholder="留空沿用聊天服务；本地可填 http://127.0.0.1:8080/inference" value={value.endpoint || ''}
             isDisabled={busy} onChange={endpoint => setValue({ ...value, endpoint })} />
         </div>
-        {value.effectiveEndpoint && <p className="settings-status">当前请求端点 {value.effectiveEndpoint}</p>}
+        <div className="settings-inline-actions">
+          <Button size="sm" variant="ghost" label="填入本机 whisper.cpp（免密钥）" isDisabled={busy}
+            onClick={() => setValue({ ...value, endpoint: 'http://127.0.0.1:8080/inference', model: value.model || 'whisper-1', mode: 'server' })} />
+          <Button size="sm" variant="ghost" label="填入本机 faster-whisper（免密钥）" isDisabled={busy}
+            onClick={() => setValue({ ...value, endpoint: 'http://127.0.0.1:8000/v1', model: 'Systran/faster-whisper-small', mode: 'server' })} />
+        </div>
+        {value.effectiveEndpoint && <p className="settings-status">
+          当前请求端点 {value.effectiveEndpoint}{value.localEndpoint ? '（本机回环端点，可免 Key 使用）' : ''}
+        </p>}
         <TextInput label="语音 API Key（可选）" size="lg" width="100%" type="password" value={key} autoComplete="new-password"
-          isDisabled={busy} placeholder={value.apiKeySet ? '已保存（不填沿用）' : '独立服务请填写对应 Key'} onChange={setKey} />
+          isDisabled={busy} placeholder={value.apiKeySet ? '已保存（不填沿用）' : value.localEndpoint ? '本机 Whisper 端点无需填写 Key' : '独立云端服务请填写对应 Key'} onChange={setKey} />
         <div className="settings-form-actions">
           {value.apiKeySet && <Button label="清除语音 Key" variant="ghost" className="settings-danger" isDisabled={busy}
             onClick={() => useStore.getState().askConfirm({

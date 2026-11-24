@@ -52,16 +52,28 @@ public class VoiceService {
         return limits;
     }
 
-    /** effectiveEndpoint：实际会请求的转写地址，界面直接显示，避免「配了却不知道打到哪」。 */
-    public record Settings(String endpoint, String model, boolean apiKeySet, String effectiveEndpoint) {
+    /**
+     * @param effectiveEndpoint 实际会请求的转写地址，界面直接显示，避免「配了却不知道打到哪」
+     * @param mode              识别方式：{@code auto}（默认，接口优先）/ {@code browser}（浏览器原生免密钥）/ {@code server}（仅转写接口）
+     * @param localEndpoint     当前转写端点是否指向本机回环（如本地 whisper.cpp / faster-whisper，无需 API Key）
+     */
+    public record Settings(String endpoint, String model, boolean apiKeySet, String effectiveEndpoint, String mode,
+        boolean localEndpoint) {
+        public Settings(String endpoint, String model, boolean apiKeySet, String effectiveEndpoint) {
+            this(endpoint, model, apiKeySet, effectiveEndpoint, "auto", isLoopbackEndpoint(effectiveEndpoint));
+        }
     }
 
-    public record Update(String endpoint, String model, String apiKey, Boolean clearApiKey) {
+    public record Update(String endpoint, String model, String apiKey, Boolean clearApiKey, String mode) {
+        public Update(String endpoint, String model, String apiKey, Boolean clearApiKey) {
+            this(endpoint, model, apiKey, clearApiKey, null);
+        }
     }
 
     public synchronized Settings settings() {
         String configured = store.find("voice.endpoint").orElse("");
-        return new Settings(configured, model(), !key().isBlank(), effectiveEndpoint(configured));
+        String effective = effectiveEndpoint(configured);
+        return new Settings(configured, model(), !key().isBlank(), effective, mode(), isLoopbackEndpoint(effective));
     }
 
     /** 留空时沿用聊天端点，把 /chat/completions 换成 /audio/transcriptions。 */
@@ -86,9 +98,11 @@ public class VoiceService {
         if (!model.matches("[\\w./:@-]{1,200}")) {
             throw new IllegalArgumentException("语音模型名称格式不正确");
         }
+        String mode = normalizeMode(update.mode() == null || update.mode().isBlank() ? mode() : update.mode());
         String key = Boolean.TRUE.equals(update.clearApiKey()) ? ""
             : update.apiKey() == null || update.apiKey().isBlank() ? key() : update.apiKey().strip();
-        store.saveAll(Map.of("voice.endpoint", endpoint, "voice.model", model, "voice.api-key", key));
+        store.saveAll(Map.of("voice.endpoint", endpoint, "voice.model", model, "voice.api-key", key, "voice.mode",
+            mode));
         return settings();
     }
 
@@ -100,7 +114,37 @@ public class VoiceService {
         return store.find("voice.api-key").orElse("");
     }
 
-    /** 同一提供商内解析，不把聊天模型的凭据转发到另一家服务。 */
+    private String mode() {
+        String raw = store.find("voice.mode").orElse("auto").strip().toLowerCase(Locale.ROOT);
+        return ("browser".equals(raw) || "server".equals(raw)) ? raw : "auto";
+    }
+
+    private static String normalizeMode(String raw) {
+        String value = raw == null ? "auto" : raw.strip().toLowerCase(Locale.ROOT);
+        if ("auto".equals(value) || "browser".equals(value) || "server".equals(value)) {
+            return value;
+        }
+        throw new IllegalArgumentException("语音识别方式只支持 auto / browser / server：" + raw);
+    }
+
+    public static boolean isLoopbackEndpoint(String endpoint) {
+        if (endpoint == null || endpoint.isBlank()) {
+            return false;
+        }
+        try {
+            String host = URI.create(endpoint.strip()).getHost();
+            if (host == null) {
+                return false;
+            }
+            String lower = host.toLowerCase(Locale.ROOT);
+            return "localhost".equals(lower) || "127.0.0.1".equals(lower) || "::1".equals(lower)
+                || "[::1]".equals(lower);
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    /** 同一提供商内解析，不把聊天模型的凭据转发到另一家服务；兼容本地 whisper.cpp 的 /inference 路由。 */
     public static URI transcriptionEndpoint(String value) {
         URI uri;
         try {
@@ -114,7 +158,7 @@ public class VoiceService {
             throw new IllegalArgumentException("语音端点应为不含凭据、查询参数的 HTTP/HTTPS 地址");
         }
         String path = uri.getRawPath().replaceAll("/+$", "");
-        if (!path.endsWith("/audio/transcriptions")) {
+        if (!path.endsWith("/audio/transcriptions") && !path.endsWith("/inference")) {
             path = path.replaceFirst("/(chat/completions|responses)$", "");
             if (path.isEmpty()) {
                 path = "/v1";

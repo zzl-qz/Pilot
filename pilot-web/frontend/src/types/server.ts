@@ -1567,14 +1567,17 @@ export interface VoiceServiceSettings {
   model: string;
   apiKeySet: boolean;
   effectiveEndpoint: string;
+  mode?: 'auto' | 'browser' | 'server' | string;
+  localEndpoint?: boolean;
 }
 
 /** VoiceService.java / Update */
 export interface VoiceServiceUpdate {
-  endpoint: string;
-  model: string;
-  apiKey: string;
-  clearApiKey: boolean;
+  endpoint?: string;
+  model?: string;
+  apiKey?: string;
+  clearApiKey?: boolean;
+  mode?: string;
 }
 
 /** WorkProductService.java / Preview */

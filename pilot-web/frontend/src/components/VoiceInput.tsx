@@ -30,6 +30,15 @@ export function VoiceInput({ ownerKey, disabled, feedbackRef, onBusy, onText }: 
   useLayoutEffect(() => {
     const input = createVoiceInput({
       loadLimits: async signal => (await api.settings(signal))?.voiceLimits,
+      loadMode: async () => {
+        try {
+          const settings = await api.voiceSettings();
+          const mode = settings?.mode;
+          return mode === 'browser' || mode === 'server' || mode === 'auto' ? mode : 'auto';
+        } catch {
+          return 'auto';
+        }
+      },
       transcribe: (...args) => api.transcribeVoice(...args),
       onState: next => {
         setState(next);
@@ -99,7 +108,11 @@ export function VoiceInput({ ownerKey, disabled, feedbackRef, onBusy, onText }: 
             <span className="voice-status" role={failed ? 'alert' : 'status'}>{status}</span>
             {recording && <span className="voice-timer" aria-hidden="true">{clock(elapsed)}</span>}
           </div>
-          {recording && <p className="voice-hint">最长 {clock((state.maxSeconds ?? 0) * 1000)} · 转写后可编辑再发送</p>}
+          {recording && <p className="voice-hint">
+            {state.engine === 'browser'
+              ? (state.interim ? `实时识别：${state.interim}` : '浏览器原生免密钥识别中 · 说完点「完成并转写」')
+              : `最长 ${clock((state.maxSeconds ?? 0) * 1000)} · 转写后可编辑再发送`}
+          </p>}
         </div>
         <div className="voice-panel-actions">
           {recording && <Button size="sm" label="完成并转写" onClick={() => {
@@ -109,6 +122,10 @@ export function VoiceInput({ ownerKey, disabled, feedbackRef, onBusy, onText }: 
           {state.retry && <Button size="sm" label="重试转写" onClick={() => {
             trigger.current?.focus({ preventScroll: true });
             voice.current?.retry();
+          }} />}
+          {failed && state.browserFallback && <Button size="sm" label="改用浏览器免密钥识别" onClick={() => {
+            trigger.current?.focus({ preventScroll: true });
+            voice.current?.startBrowserFallback();
           }} />}
           <Button size="sm" variant="ghost" label={failed ? '关闭' : '取消'} onClick={dismiss} />
         </div>

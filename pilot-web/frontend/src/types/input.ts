@@ -31,19 +31,51 @@ export interface BuiltinCommand extends CommandFields { kind?: 'builtin'; prompt
 export interface SkillCommand extends CommandFields { kind: 'skill'; prompt: null; skill: string }
 export type QuickCommand = BuiltinCommand | SkillCommand;
 export type VoicePhase = 'idle' | 'loading' | 'requesting' | 'recording' | 'finishing' | 'transcribing' | 'error';
-export interface VoiceState { phase: VoicePhase; elapsed?: number; maxSeconds?: number; error?: string; retry?: boolean }
+export type VoiceMode = 'auto' | 'browser' | 'server';
+export interface VoiceState {
+  phase: VoicePhase;
+  elapsed?: number;
+  maxSeconds?: number;
+  error?: string;
+  retry?: boolean;
+  interim?: string;
+  engine?: 'browser' | 'server';
+  browserFallback?: boolean;
+}
+export interface SpeechRecognitionAlternativeLike { transcript: string }
+export interface SpeechRecognitionResultLike { isFinal: boolean; [index: number]: SpeechRecognitionAlternativeLike }
+export interface SpeechRecognitionEventLike {
+  resultIndex?: number;
+  results: ArrayLike<SpeechRecognitionResultLike>;
+}
+export interface SpeechRecognitionLike {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onstart: (() => void) | null;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: { error?: string; message?: string }) => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  stop(): void;
+  abort(): void;
+}
+export type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
 export interface VoiceEnvironment {
   AudioContext?: typeof AudioContext;
   webkitAudioContext?: typeof AudioContext;
   OfflineAudioContext?: typeof OfflineAudioContext;
   webkitOfflineAudioContext?: typeof OfflineAudioContext;
   MediaRecorder?: typeof MediaRecorder;
-  navigator?: { mediaDevices?: Pick<MediaDevices, 'getUserMedia'> };
+  SpeechRecognition?: SpeechRecognitionCtor;
+  webkitSpeechRecognition?: SpeechRecognitionCtor;
+  navigator?: { mediaDevices?: Pick<MediaDevices, 'getUserMedia'>; language?: string };
   isSecureContext?: boolean;
 }
 export interface VoiceOptions {
   environment?: VoiceEnvironment;
   loadLimits: (signal: AbortSignal) => Promise<VoiceLimitsBudget | null | undefined>;
+  loadMode?: (signal: AbortSignal) => Promise<VoiceMode | null | undefined>;
   transcribe: (audio: Blob, signal: AbortSignal) => Promise<{ text?: string | null } | null>;
   onState: (state: VoiceState) => void;
   onText: (text: string) => void;
