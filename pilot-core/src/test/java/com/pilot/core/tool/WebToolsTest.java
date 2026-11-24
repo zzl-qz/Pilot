@@ -152,6 +152,7 @@ class WebToolsTest {
             assertTrue(report.formattedText().contains("知识摘要:"));
             assertTrue(report.formattedText().contains("相关搜索建议: spring boot 3 migration"));
             assertTrue(report.formattedText().contains("baidu(parsing error)"));
+            assertTrue(report.formattedText().contains("[Spring Boot Official Docs](https://docs.spring.io/boot)"));
         } finally {
             server.stop(0);
         }
@@ -425,6 +426,107 @@ class WebToolsTest {
     }
 
     @Test
+    void searchAutoFailsOverAcrossMultipleApiKeysUsesShortCooldownAndDetectsGithubRateLimitAndArxivTerms()
+        throws Exception {
+        AtomicInteger bochaCalls = new AtomicInteger();
+        AtomicInteger tavilyCalls = new AtomicInteger();
+        AtomicReference<String> arxivQuery = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/bocha-429", exchange -> {
+            bochaCalls.incrementAndGet();
+            byte[] body = "rate limited".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(429, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.createContext("/tavily-ok", exchange -> {
+            tavilyCalls.incrementAndGet();
+            byte[] body = """
+                {"results":[{"title":"Tavily Backup Hit","url":"https://tavily.example/ok","content":"Backup success","score":0.9}]}
+                """.getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.createContext("/github-403", exchange -> {
+            exchange.getResponseHeaders().set("X-RateLimit-Remaining", "0");
+            byte[] body = "{\"message\":\"API rate limit exceeded\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(403, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.createContext("/arxiv", exchange -> {
+            arxivQuery.set(exchange.getRequestURI().getRawQuery());
+            byte[] xml = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <feed xmlns="http://www.w3.org/2005/Atom">
+                  <entry>
+                    <id>http://arxiv.org/abs/2602.00001v1</id>
+                    <published>2026-02-01T00:00:00Z</published>
+                    <title>Mixture of Experts Survey</title>
+                    <summary>Survey abstract.</summary>
+                  </entry>
+                </feed>
+                """.getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, xml.length);
+            exchange.getResponseBody().write(xml);
+            exchange.close();
+        });
+        server.createContext("/empty", exchange -> {
+            byte[] body = "{\"items\":[],\"query\":{\"search\":[]}}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+        URI base = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
+        var publicSources = new WebSearchConfig.PublicSources(base.resolve("/empty"), base.resolve("/empty"),
+            base.resolve("/github-403"), base.resolve("/empty"), base.resolve("/arxiv"));
+        try (HttpClient client = HttpClient.newHttpClient()) {
+            // 1. AUTO mode tries Bocha (429 -> enters cooldown), fails over to Tavily using isolated endpoint
+            WebSearchConfig cfg = new WebSearchConfig(WebSearchProvider.AUTO, "", null, base, Duration.ofSeconds(5),
+                true, Map.of(WebSearchProvider.BOCHA, "k-bocha", WebSearchProvider.TAVILY, "k-tavily"), publicSources,
+                Map.of(WebSearchProvider.BOCHA, base.resolve("/bocha-429"),
+                    WebSearchProvider.TAVILY, base.resolve("/tavily-ok")));
+            WebSearchTool tool = new WebSearchTool(client, mapper, cfg);
+
+            WebSearchTool.SearchReport first = tool.executeDetailed(Map.of("query", "backup"));
+            assertTrue(first.ok());
+            assertEquals("tavily", first.sourceId());
+            assertEquals(List.of("bocha", "tavily"), first.triedSources());
+            assertEquals(1, bochaCalls.get());
+            assertEquals(1, tavilyCalls.get());
+
+            // 2. Second call skips cooling Bocha (no extra network hit)
+            WebSearchTool.SearchReport second = tool.executeDetailed(Map.of("query", "backup"));
+            assertTrue(second.ok());
+            assertEquals("tavily", second.sourceId());
+            assertEquals(1, bochaCalls.get(), "冷却期内不应重复打 429 的博查端点");
+            assertEquals(2, tavilyCalls.get());
+            assertTrue(second.formattedText().contains("冷却中"));
+
+            // 3. bypassCooldown=true (Settings live test) still probes Bocha directly
+            WebSearchTool.SearchReport liveProbe = tool.executeDetailed(Map.of("query", "backup"), true);
+            assertTrue(liveProbe.ok());
+            assertEquals(2, bochaCalls.get());
+
+            // 4. GitHub rate limit emits readable Chinese warning & arXiv builds multi-term AND query
+            WebSearchTool pubTool = new WebSearchTool(client, mapper, new WebSearchConfig(WebSearchProvider.PUBLIC, "",
+                null, base, Duration.ofSeconds(5), false, Map.of(), publicSources, Map.of()));
+            WebSearchTool.SearchReport ghRate = pubTool.executeDetailed(Map.of("query", "spring", "site", "github.com"));
+            assertFalse(ghRate.ok());
+            assertTrue(ghRate.error().contains("每分钟限流"), ghRate.error());
+
+            WebSearchTool.SearchReport arxivRes = pubTool.executeDetailed(
+                Map.of("query", "Mixture of Experts", "category", "science"));
+            assertTrue(arxivRes.ok());
+            assertTrue(arxivQuery.get().contains("all:Mixture+AND+all:of+AND+all:Experts"), arxivQuery.get());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void fetchRejectsLocalAndNonHttpUrls() {
         WebFetchTool tool = new WebFetchTool(HttpClient.newHttpClient());
         assertTrue(tool.execute(Map.of("url", "http://127.0.0.1/secret")).startsWith("ERROR:"));
@@ -542,6 +644,78 @@ class WebToolsTest {
             });
             String blocked = ssrfCheckOnRedirect.execute(Map.of("url", base + "/to-private"));
             assertTrue(blocked.startsWith("ERROR: 重定向目标被拒绝"), blocked);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void fetchHandlesNestedArticleBlocksSpaHintSharedRedirectTimeoutAndParsesFinalUrl() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/nested", exchange -> {
+            String tail = "这是嵌套卡片之后仍然属于主文章的正文尾部关键内容，绝对不能被非贪婪正则截断。".repeat(6);
+            String html = "<html><head><title>嵌套文章</title></head><body><nav><nav>多层导航噪声</nav></nav>"
+                + "<article><p>文章开头段落。</p><article><p>内嵌引用卡片</p></article><p>" + tail + "</p></article>"
+                + "<footer>底部版权</footer></body></html>";
+            byte[] bytes = html.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.createContext("/spa", exchange -> {
+            String html = "<html><head><title>SPA</title><script>" + "var x=1;".repeat(200)
+                + "</script></head><body><div id=\"root\"></div></body></html>";
+            byte[] bytes = html.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.createContext("/slow-1", exchange -> {
+            try {
+                Thread.sleep(260L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            exchange.getResponseHeaders().set("Location", "/slow-2");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+        server.createContext("/slow-2", exchange -> {
+            try {
+                Thread.sleep(300L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            byte[] bytes = "too late".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "text/plain");
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+        String base = "http://127.0.0.1:" + server.getAddress().getPort();
+        try (HttpClient client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build()) {
+            WebFetchTool tool = new WebFetchTool(client, uri -> {
+            });
+            String nested = tool.execute(Map.of("url", base + "/nested"));
+            assertTrue(nested.contains("文章开头段落"), nested);
+            assertTrue(nested.contains("绝对不能被非贪婪正则截断"), nested);
+            assertFalse(nested.contains("多层导航噪声"), nested);
+
+            String spa = tool.execute(Map.of("url", base + "/spa"));
+            assertTrue(spa.contains("JavaScript 动态渲染"), spa);
+
+            // 共享总预算 400ms：两跳合计 > 500ms 应超时而非每跳重算
+            WebFetchTool bounded = new WebFetchTool(client, uri -> {
+            }, Duration.ofMillis(400));
+            String timedOut = bounded.execute(Map.of("url", base + "/slow-1"));
+            assertTrue(timedOut.contains("超时"), timedOut);
+
+            assertEquals("https://spring.io/blog/post/",
+                WebFetchTool.parseFetchedSourceUrl(
+                    "来源: https://spring.io/blog/post/（由 https://spring.io/blog/post 重定向）\n标题: Hi"));
         } finally {
             server.stop(0);
         }

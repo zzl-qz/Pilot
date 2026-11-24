@@ -244,8 +244,7 @@ public final class WebSearchClients {
                 .build();
             HttpText response = sendTextWithTransientRetry(client, httpRequest, config.timeout());
             if (response.statusCode() != 200) {
-                return ProviderOutcome.failure(provider.id(), provider.label(),
-                    "博查 API 返回 HTTP " + response.statusCode() + detailSnippet(response.body(), apiKey), false, false);
+                return apiStatusFailure(provider, "博查 API", response, apiKey);
             }
             JsonNode root = mapper.readTree(response.body());
             JsonNode values = root.path("data").path("webPages").path("value");
@@ -317,9 +316,7 @@ public final class WebSearchClients {
                 .build();
             HttpText response = sendTextWithTransientRetry(client, httpRequest, config.timeout());
             if (response.statusCode() != 200) {
-                return ProviderOutcome.failure(provider.id(), provider.label(),
-                    "Tavily API 返回 HTTP " + response.statusCode() + detailSnippet(response.body(), apiKey),
-                    false, false);
+                return apiStatusFailure(provider, "Tavily API", response, apiKey);
             }
             JsonNode root = mapper.readTree(response.body());
             List<String> answers = new ArrayList<>();
@@ -393,9 +390,7 @@ public final class WebSearchClients {
                 .build();
             HttpText response = sendTextWithTransientRetry(client, httpRequest, config.timeout());
             if (response.statusCode() != 200) {
-                return ProviderOutcome.failure(provider.id(), provider.label(),
-                    "Brave API 返回 HTTP " + response.statusCode() + detailSnippet(response.body(), apiKey),
-                    false, false);
+                return apiStatusFailure(provider, "Brave API", response, apiKey);
             }
             JsonNode root = mapper.readTree(response.body());
             List<SearchHit> hits = new ArrayList<>();
@@ -478,9 +473,7 @@ public final class WebSearchClients {
                 .build();
             HttpText response = sendTextWithTransientRetry(client, httpRequest, config.timeout());
             if (response.statusCode() != 200) {
-                return ProviderOutcome.failure(provider.id(), provider.label(),
-                    "Serper API 返回 HTTP " + response.statusCode() + detailSnippet(response.body(), apiKey),
-                    false, false);
+                return apiStatusFailure(provider, "Serper API", response, apiKey);
             }
             JsonNode root = mapper.readTree(response.body());
             List<String> answers = new ArrayList<>();
@@ -576,9 +569,7 @@ public final class WebSearchClients {
                 .build();
             HttpText response = sendTextWithTransientRetry(client, httpRequest, config.timeout());
             if (response.statusCode() != 200) {
-                return ProviderOutcome.failure(provider.id(), provider.label(),
-                    "Exa API 返回 HTTP " + response.statusCode() + detailSnippet(response.body(), apiKey),
-                    false, false);
+                return apiStatusFailure(provider, "Exa API", response, apiKey);
             }
             JsonNode root = mapper.readTree(response.body());
             List<SearchHit> hits = new ArrayList<>();
@@ -734,6 +725,12 @@ public final class WebSearchClients {
                 .build();
             HttpText response = sendText(client, request, timeout);
             if (response.statusCode() != 200) {
+                if ((response.statusCode() == 403 || response.statusCode() == 429)
+                    && ("0".equals(response.rateLimitRemaining())
+                        || response.body().toLowerCase(Locale.ROOT).contains("rate limit"))) {
+                    return new SubSourceResult(source, List.of(),
+                        "github".equals(source) ? "匿名搜索触发每分钟限流（10 次/分）" : "触发公开接口限流");
+                }
                 return new SubSourceResult(source, List.of(), "HTTP " + response.statusCode());
             }
             JsonNode list = mapper.readTree(response.body()).path("query").path("search");
@@ -779,6 +776,12 @@ public final class WebSearchClients {
                 .build();
             HttpText response = sendText(client, request, timeout);
             if (response.statusCode() != 200) {
+                if ((response.statusCode() == 403 || response.statusCode() == 429)
+                    && ("0".equals(response.rateLimitRemaining())
+                        || response.body().toLowerCase(Locale.ROOT).contains("rate limit"))) {
+                    return new SubSourceResult(source, List.of(),
+                        "github".equals(source) ? "匿名搜索触发每分钟限流（10 次/分）" : "触发公开接口限流");
+                }
                 return new SubSourceResult(source, List.of(), "HTTP " + response.statusCode());
             }
             JsonNode items = mapper.readTree(response.body()).path("items");
@@ -841,6 +844,12 @@ public final class WebSearchClients {
                 .build();
             HttpText response = sendText(client, request, timeout);
             if (response.statusCode() != 200) {
+                if ((response.statusCode() == 403 || response.statusCode() == 429)
+                    && ("0".equals(response.rateLimitRemaining())
+                        || response.body().toLowerCase(Locale.ROOT).contains("rate limit"))) {
+                    return new SubSourceResult(source, List.of(),
+                        "github".equals(source) ? "匿名搜索触发每分钟限流（10 次/分）" : "触发公开接口限流");
+                }
                 return new SubSourceResult(source, List.of(), "HTTP " + response.statusCode());
             }
             JsonNode items = mapper.readTree(response.body()).path("items");
@@ -892,7 +901,7 @@ public final class WebSearchClients {
             return new SubSourceResult(source, List.of(), "未配置地址");
         }
         try {
-            String url = endpoint + "?search_query=all:" + encode(query) + "&start=0&max_results=" + limit;
+            String url = endpoint + "?search_query=" + buildArxivQuery(query) + "&start=0&max_results=" + limit;
             HttpRequest request = HttpRequest.newBuilder(URI.create(url))
                 .timeout(timeout)
                 .header("Accept", "application/atom+xml,application/xml")
@@ -901,6 +910,12 @@ public final class WebSearchClients {
                 .build();
             HttpText response = sendText(client, request, timeout);
             if (response.statusCode() != 200) {
+                if ((response.statusCode() == 403 || response.statusCode() == 429)
+                    && ("0".equals(response.rateLimitRemaining())
+                        || response.body().toLowerCase(Locale.ROOT).contains("rate limit"))) {
+                    return new SubSourceResult(source, List.of(),
+                        "github".equals(source) ? "匿名搜索触发每分钟限流（10 次/分）" : "触发公开接口限流");
+                }
                 return new SubSourceResult(source, List.of(), "HTTP " + response.statusCode());
             }
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
@@ -972,6 +987,38 @@ public final class WebSearchClients {
         return List.of();
     }
 
+    private static ProviderOutcome apiStatusFailure(WebSearchProvider provider, String apiName, HttpText response,
+        String apiKey) {
+        int status = response.statusCode();
+        String msg = apiName + " 返回 HTTP " + status + detailSnippet(response.body(), apiKey);
+        if (status == 401 || status == 403 || status == 429) {
+            return ProviderOutcome.hardFailure(provider.id(), provider.label(), msg);
+        }
+        return ProviderOutcome.failure(provider.id(), provider.label(), msg, false, false);
+    }
+
+    static String buildArxivQuery(String query) {
+        String cleaned = query == null ? "" : query.strip();
+        if (cleaned.isEmpty()) {
+            return "all:";
+        }
+        String[] parts = cleaned.split("\\s+");
+        List<String> terms = new ArrayList<>();
+        for (String part : parts) {
+            String token = part.replaceAll("[\"'()\\[\\]:]+", "").strip();
+            if (!token.isEmpty()) {
+                terms.add("all:" + encode(token));
+                if (terms.size() >= 6) {
+                    break;
+                }
+            }
+        }
+        if (terms.isEmpty()) {
+            return "all:" + encode(cleaned);
+        }
+        return String.join("+AND+", terms);
+    }
+
     private static HttpText sendText(HttpClient client, HttpRequest request, Duration timeout)
         throws IOException, InterruptedException {
         try (BoundedHttp.Exchange exchange = BoundedHttp.open(client, request, timeout, MAX_RESPONSE_BYTES)) {
@@ -979,9 +1026,10 @@ public final class WebSearchClients {
                 ? MAX_RESPONSE_BYTES : BoundedHttp.ERROR_BYTES;
             boolean gzip = exchange.headers().firstValue("content-encoding")
                 .map(v -> v.toLowerCase(Locale.ROOT).contains("gzip")).orElse(false);
+            String rateLimitRemaining = exchange.headers().firstValue("x-ratelimit-remaining").orElse("");
             byte[] raw = exchange.body().readNBytes(limit);
             byte[] decoded = gzip ? gunzipBounded(raw, limit) : raw;
-            return new HttpText(exchange.statusCode(), new String(decoded, StandardCharsets.UTF_8));
+            return new HttpText(exchange.statusCode(), new String(decoded, StandardCharsets.UTF_8), rateLimitRemaining);
         }
     }
 
@@ -1162,7 +1210,7 @@ public final class WebSearchClients {
         return false;
     }
 
-    private record HttpText(int statusCode, String body) {
+    private record HttpText(int statusCode, String body, String rateLimitRemaining) {
     }
 
     private record SubSourceResult(String name, List<SearchHit> hits, String error) {

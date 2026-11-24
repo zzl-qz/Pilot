@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 import com.pilot.core.message.ToolNames;
@@ -30,10 +31,16 @@ import tools.jackson.databind.ObjectMapper;
 public final class WebSearchTool implements Tool {
     public static final URI DEFAULT_ENDPOINT = URI.create("http://127.0.0.1:8888");
     public static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(20);
+    private static final Duration COOLDOWN_DURATION = Duration.ofSeconds(45);
+    private static final int MAX_COOLDOWN_ENTRIES = 64;
 
     private final Supplier<HttpClient> clientSupplier;
     private final ObjectMapper mapper;
     private final Supplier<WebSearchConfig> configSupplier;
+    private final ConcurrentHashMap<String, CooldownEntry> cooldowns = new ConcurrentHashMap<>();
+
+    private record CooldownEntry(long expiresAtNanos, String reason) {
+    }
 
     public WebSearchTool(HttpClient client, ObjectMapper mapper) {
         this(client, mapper, DEFAULT_ENDPOINT);
@@ -96,10 +103,15 @@ public final class WebSearchTool implements Tool {
 
     @Override
     public String execute(Map<String, Object> args) {
-        return executeDetailed(args).formattedText();
+        return executeDetailed(args, false).formattedText();
     }
 
     public SearchReport executeDetailed(Map<String, Object> args) {
+        return executeDetailed(args, false);
+    }
+
+    /** @param bypassCooldown 为 true 时忽略短时熔断冷却，用于设置页实时探测。 */
+    public SearchReport executeDetailed(Map<String, Object> args, boolean bypassCooldown) {
         long startNanos = System.nanoTime();
         String query = ToolSupport.stringArg(args, "query");
         if (query == null || query.isBlank()) {
@@ -119,9 +131,19 @@ public final class WebSearchTool implements Tool {
         try {
             for (int i = 0; i < plan.size(); i++) {
                 WebSearchProvider current = plan.get(i);
+                String fp = config.fingerprintFor(current);
+                if (!bypassCooldown && hasActiveFallback(plan, i, config)) {
+                    CooldownEntry cooling = activeCooldown(fp);
+                    if (cooling != null) {
+                        failedOrEmpty.add(ProviderOutcome.failure(current.id(), current.label(),
+                            "短时冷却中（" + cooling.reason() + "），已自动跳过", false, false));
+                        continue;
+                    }
+                }
                 tried.add(current.id());
                 ProviderOutcome outcome = WebSearchClients.execute(client, mapper, config, current, request);
                 if (outcome.hasContent()) {
+                    cooldowns.remove(fp);
                     boolean augmented = false;
                     if (current == WebSearchProvider.SEARXNG && config.fallbackEnabled()
                         && outcome.hits().size() < Math.min(3, request.count())
@@ -135,14 +157,17 @@ public final class WebSearchTool implements Tool {
                         }
                     }
                     List<String> warnings = new ArrayList<>();
-                    if (i > 0 && !failedOrEmpty.isEmpty()) {
+                    if (!failedOrEmpty.isEmpty()) {
                         warnings.add(buildFallbackNotice(outcome.sourceLabel(), failedOrEmpty));
                     }
                     warnings.addAll(outcome.warnings());
-                    String text = formatSuccess(outcome, warnings, i > 0 && !augmented);
+                    String text = formatSuccess(outcome, warnings, !failedOrEmpty.isEmpty() && !augmented);
                     return new SearchReport(true, outcome.sourceId(), outcome.sourceLabel(), List.copyOf(tried),
                         outcome.hits(), outcome.answers(), outcome.infoboxes(), outcome.suggestions(),
                         List.copyOf(warnings), null, text, elapsedMs(startNanos));
+                }
+                if (!bypassCooldown && outcome.hardFailure() && outcome.error() != null) {
+                    recordCooldown(fp, outcome.error());
                 }
                 failedOrEmpty.add(outcome);
             }
@@ -152,6 +177,38 @@ public final class WebSearchTool implements Tool {
                 List.of(), "搜索请求被中断", "ERROR: 搜索请求被中断", elapsedMs(startNanos));
         }
         return buildNoResultReport(plan, tried, failedOrEmpty, config, elapsedMs(startNanos));
+    }
+
+    private boolean hasActiveFallback(List<WebSearchProvider> plan, int index, WebSearchConfig config) {
+        for (int j = index + 1; j < plan.size(); j++) {
+            if (activeCooldown(config.fingerprintFor(plan.get(j))) == null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private CooldownEntry activeCooldown(String fingerprint) {
+        CooldownEntry entry = cooldowns.get(fingerprint);
+        if (entry == null) {
+            return null;
+        }
+        if (System.nanoTime() >= entry.expiresAtNanos()) {
+            cooldowns.remove(fingerprint, entry);
+            return null;
+        }
+        return entry;
+    }
+
+    private void recordCooldown(String fingerprint, String reason) {
+        if (cooldowns.size() >= MAX_COOLDOWN_ENTRIES) {
+            long now = System.nanoTime();
+            cooldowns.entrySet().removeIf(e -> now >= e.getValue().expiresAtNanos());
+            if (cooldowns.size() >= MAX_COOLDOWN_ENTRIES) {
+                cooldowns.clear();
+            }
+        }
+        cooldowns.put(fingerprint, new CooldownEntry(System.nanoTime() + COOLDOWN_DURATION.toNanos(), reason));
     }
 
     private static ProviderOutcome mergeSupplementalOutcome(ProviderOutcome primary, ProviderOutcome supplement,
@@ -172,10 +229,7 @@ public final class WebSearchTool implements Tool {
         List<WebSearchProvider> plan = new ArrayList<>();
         WebSearchProvider selected = config.provider();
         if (selected == WebSearchProvider.AUTO) {
-            WebSearchProvider api = config.resolveAutoApiProvider();
-            if (api != null) {
-                plan.add(api);
-            }
+            plan.addAll(config.configuredApiProviders());
             plan.add(WebSearchProvider.SEARXNG);
             if (config.fallbackEnabled()) {
                 plan.add(WebSearchProvider.PUBLIC);
@@ -190,6 +244,11 @@ public final class WebSearchTool implements Tool {
         } else {
             plan.add(selected);
             if (config.fallbackEnabled()) {
+                for (WebSearchProvider backup : config.configuredApiProviders()) {
+                    if (backup != selected) {
+                        plan.add(backup);
+                    }
+                }
                 plan.add(WebSearchProvider.SEARXNG);
                 plan.add(WebSearchProvider.PUBLIC);
             }
@@ -212,23 +271,32 @@ public final class WebSearchTool implements Tool {
         if (fallbackUsed) {
             out.append("（自动回退）");
         }
-        out.append('\n');
+        out.append("\n\n");
         if (!outcome.answers().isEmpty()) {
             out.append("直接回答:\n");
             for (String answer : outcome.answers()) {
                 out.append("- ").append(answer).append('\n');
             }
+            out.append('\n');
         }
         if (!outcome.infoboxes().isEmpty()) {
             out.append("知识摘要:\n");
             for (String box : outcome.infoboxes()) {
                 out.append("- ").append(box).append('\n');
             }
+            out.append('\n');
         }
         List<SearchHit> hits = outcome.hits();
         for (int i = 0; i < hits.size(); i++) {
             SearchHit hit = hits.get(i);
-            out.append(i + 1).append(". ").append(hit.title().isEmpty() ? "(无标题)" : hit.title());
+            String title = hit.title().isEmpty() ? "(无标题)" : hit.title();
+            out.append(i + 1).append(". ");
+            if (!hit.url().isEmpty()) {
+                out.append('[').append(escapeMarkdownText(title)).append("](")
+                    .append(escapeMarkdownUrl(hit.url())).append(')');
+            } else {
+                out.append(title);
+            }
             StringBuilder meta = new StringBuilder();
             if (!hit.publishedDate().isEmpty()) {
                 meta.append(hit.publishedDate());
@@ -240,15 +308,13 @@ public final class WebSearchTool implements Tool {
                 meta.append(String.join(", ", hit.engines()));
             }
             if (!meta.isEmpty()) {
-                out.append(" [").append(meta).append(']');
+                out.append(" · ").append(meta);
             }
             out.append('\n');
-            if (!hit.url().isEmpty()) {
-                out.append("   URL: ").append(hit.url()).append('\n');
-            }
             if (!hit.snippet().isEmpty()) {
                 out.append("   ").append(hit.snippet()).append('\n');
             }
+            out.append('\n');
         }
         if (!outcome.suggestions().isEmpty()) {
             out.append("相关搜索建议: ").append(String.join(" / ", outcome.suggestions())).append('\n');
@@ -257,6 +323,14 @@ public final class WebSearchTool implements Tool {
             out.append("诊断提示: ").append(String.join("；", warnings)).append('\n');
         }
         return out.toString().stripTrailing();
+    }
+
+    private static String escapeMarkdownText(String text) {
+        return text.replace("[", "\\[").replace("]", "\\]");
+    }
+
+    private static String escapeMarkdownUrl(String url) {
+        return url.replace(" ", "%20").replace("(", "%28").replace(")", "%29");
     }
 
     private static SearchReport buildNoResultReport(List<WebSearchProvider> plan, List<String> tried,
@@ -306,7 +380,7 @@ public final class WebSearchTool implements Tool {
             if (!suggestions.isEmpty()) {
                 text.append("\n相关搜索建议: ").append(String.join(" / ", suggestions));
             }
-            if (!config.hasApiKey(config.provider()) && config.resolveAutoApiProvider() == null) {
+            if (!config.hasApiKey(config.provider()) && config.configuredApiProviders().isEmpty()) {
                 text.append('\n').append(hint);
             }
             return new SearchReport(true, "", "", List.copyOf(tried), List.of(), List.of(), List.of(), suggestions,

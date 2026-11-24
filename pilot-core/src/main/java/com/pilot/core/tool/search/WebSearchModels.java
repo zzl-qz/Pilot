@@ -162,7 +162,13 @@ public final class WebSearchModels {
 
     public record ProviderOutcome(String sourceId, String sourceLabel, List<SearchHit> hits, List<String> answers,
         List<String> infoboxes, List<String> suggestions, List<String> warnings, String error, boolean down,
-        boolean timeout) {
+        boolean timeout, boolean hardFailure) {
+
+        public ProviderOutcome(String sourceId, String sourceLabel, List<SearchHit> hits, List<String> answers,
+            List<String> infoboxes, List<String> suggestions, List<String> warnings, String error, boolean down,
+            boolean timeout) {
+            this(sourceId, sourceLabel, hits, answers, infoboxes, suggestions, warnings, error, down, timeout, down);
+        }
 
         public ProviderOutcome {
             hits = hits == null ? List.of() : List.copyOf(hits);
@@ -179,7 +185,12 @@ public final class WebSearchModels {
         public static ProviderOutcome failure(String sourceId, String sourceLabel, String error, boolean down,
             boolean timeout) {
             return new ProviderOutcome(sourceId, sourceLabel, List.of(), List.of(), List.of(), List.of(), List.of(),
-                error, down, timeout);
+                error, down, timeout, down);
+        }
+
+        public static ProviderOutcome hardFailure(String sourceId, String sourceLabel, String error) {
+            return new ProviderOutcome(sourceId, sourceLabel, List.of(), List.of(), List.of(), List.of(), List.of(),
+                error, false, false, true);
         }
     }
 
@@ -380,7 +391,7 @@ public final class WebSearchModels {
             if (other.title().length() > title.length()) {
                 title = other.title();
             }
-            if (url.isEmpty() && !other.url().isEmpty()) {
+            if (url.isEmpty() || (!other.url().isEmpty() && other.url().length() < url.length())) {
                 url = other.url();
             }
             if (other.snippet().length() > snippet.length()) {

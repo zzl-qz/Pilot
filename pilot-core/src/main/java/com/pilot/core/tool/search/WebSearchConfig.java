@@ -2,7 +2,9 @@ package com.pilot.core.tool.search;
 
 import java.net.URI;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -16,7 +18,7 @@ import com.pilot.core.tool.WebSearchTool;
  */
 public record WebSearchConfig(WebSearchProvider provider, String apiKey, URI apiEndpoint, URI searxngEndpoint,
     Duration timeout, boolean fallbackEnabled, Map<WebSearchProvider, String> providerKeys,
-    PublicSources publicSources) {
+    PublicSources publicSources, Map<WebSearchProvider, URI> providerEndpoints) {
 
     /** 免密钥公开只读官方 API 的基址集合；测试可替换为本机模拟服务。 */
     public record PublicSources(URI wikipediaZh, URI wikipediaEn, URI github, URI stackExchange, URI arxiv) {
@@ -26,6 +28,13 @@ public record WebSearchConfig(WebSearchProvider provider, String apiKey, URI api
             URI.create("https://api.github.com/search/repositories"),
             URI.create("https://api.stackexchange.com/2.3/search/advanced"),
             URI.create("https://export.arxiv.org/api/query"));
+    }
+
+    public WebSearchConfig(WebSearchProvider provider, String apiKey, URI apiEndpoint, URI searxngEndpoint,
+        Duration timeout, boolean fallbackEnabled, Map<WebSearchProvider, String> providerKeys,
+        PublicSources publicSources) {
+        this(provider, apiKey, apiEndpoint, searxngEndpoint, timeout, fallbackEnabled, providerKeys, publicSources,
+            Map.of());
     }
 
     public WebSearchConfig {
@@ -38,23 +47,32 @@ public record WebSearchConfig(WebSearchProvider provider, String apiKey, URI api
         if (timeout.isZero() || timeout.isNegative()) {
             throw new IllegalArgumentException("搜索请求超时必须为正数");
         }
-        Map<WebSearchProvider, String> cleaned = new EnumMap<>(WebSearchProvider.class);
+        Map<WebSearchProvider, String> cleanedKeys = new EnumMap<>(WebSearchProvider.class);
         if (providerKeys != null) {
             for (Map.Entry<WebSearchProvider, String> entry : providerKeys.entrySet()) {
                 if (entry.getKey() != null && entry.getKey().requiresApiKey()
                     && entry.getValue() != null && !entry.getValue().isBlank()) {
-                    cleaned.put(entry.getKey(), entry.getValue().strip());
+                    cleanedKeys.put(entry.getKey(), entry.getValue().strip());
                 }
             }
         }
-        providerKeys = Map.copyOf(cleaned);
+        providerKeys = Map.copyOf(cleanedKeys);
         publicSources = publicSources == null ? PublicSources.DEFAULT : publicSources;
+        Map<WebSearchProvider, URI> cleanedEndpoints = new EnumMap<>(WebSearchProvider.class);
+        if (providerEndpoints != null) {
+            for (Map.Entry<WebSearchProvider, URI> entry : providerEndpoints.entrySet()) {
+                if (entry.getKey() != null && entry.getKey().requiresApiKey() && entry.getValue() != null) {
+                    cleanedEndpoints.put(entry.getKey(), stripTrailingSlash(entry.getValue()));
+                }
+            }
+        }
+        providerEndpoints = Map.copyOf(cleanedEndpoints);
     }
 
     /** 兼容旧单端点 SearXNG 构造器：不自动回退外部公开源，确保离线与单元测试行为确定。 */
     public static WebSearchConfig searxngOnly(URI endpoint, Duration timeout) {
         return new WebSearchConfig(WebSearchProvider.SEARXNG, "", null, endpoint, timeout, false, Map.of(),
-            PublicSources.DEFAULT);
+            PublicSources.DEFAULT, Map.of());
     }
 
     public String resolveApiKey(WebSearchProvider target) {
@@ -78,31 +96,52 @@ public record WebSearchConfig(WebSearchProvider provider, String apiKey, URI api
         return !resolveApiKey(target).isBlank();
     }
 
-    /** AUTO 模式下按固定顺序挑选首个已配置密钥的搜索 API。 */
-    public WebSearchProvider resolveAutoApiProvider() {
+    /** 按优先级列出所有已配置密钥的商用搜索提供商，供 AUTO 模式逐个故障转移。 */
+    public List<WebSearchProvider> configuredApiProviders() {
+        List<WebSearchProvider> list = new ArrayList<>();
         for (WebSearchProvider candidate : WebSearchProvider.apiProviders()) {
             String specific = providerKeys.get(candidate);
             if (specific != null && !specific.isBlank()) {
-                return candidate;
+                list.add(candidate);
             }
         }
         if (!apiKey.isBlank()) {
-            return inferGenericApiProvider();
+            WebSearchProvider inferred = inferGenericApiProvider();
+            if (inferred != null && !list.contains(inferred)) {
+                list.add(inferred);
+            }
         }
-        return null;
+        return List.copyOf(list);
+    }
+
+    /** AUTO 模式下按固定顺序挑选首个已配置密钥的搜索 API。 */
+    public WebSearchProvider resolveAutoApiProvider() {
+        List<WebSearchProvider> list = configuredApiProviders();
+        return list.isEmpty() ? null : list.get(0);
     }
 
     public URI resolveEndpoint(WebSearchProvider target) {
         if (target == WebSearchProvider.SEARXNG) {
             return searxngEndpoint;
         }
-        if (apiEndpoint != null && (target == provider || provider == WebSearchProvider.AUTO)) {
+        if (target != null && providerEndpoints.containsKey(target)) {
+            return providerEndpoints.get(target);
+        }
+        if (apiEndpoint != null && (target == provider
+            || (provider == WebSearchProvider.AUTO && inferGenericApiProvider() == target))) {
             return apiEndpoint;
         }
         if (target != null && !target.defaultEndpoint().isBlank()) {
             return URI.create(target.defaultEndpoint());
         }
         return searxngEndpoint;
+    }
+
+    /** 用于短时熔断冷却键的不含明文密钥指纹：换 Key 或换端点后立即失效。 */
+    public String fingerprintFor(WebSearchProvider target) {
+        URI endpoint = resolveEndpoint(target);
+        String key = resolveApiKey(target);
+        return target.id() + "|" + (endpoint == null ? "" : endpoint) + "|" + key.hashCode() + ":" + key.length();
     }
 
     private WebSearchProvider inferGenericApiProvider() {
@@ -153,8 +192,8 @@ public record WebSearchConfig(WebSearchProvider provider, String apiKey, URI api
     @Override
     public String toString() {
         return "WebSearchConfig[provider=" + provider + ", apiKey=" + maskSecret(apiKey)
-            + ", apiEndpoint=" + apiEndpoint + ", searxngEndpoint=" + searxngEndpoint
-            + ", timeout=" + timeout + ", fallbackEnabled=" + fallbackEnabled
-            + ", providerKeys=" + providerKeys.keySet() + "]";
+            + ", apiEndpoint=" + apiEndpoint + ", providerEndpoints=" + providerEndpoints.keySet()
+            + ", searxngEndpoint=" + searxngEndpoint + ", timeout=" + timeout
+            + ", fallbackEnabled=" + fallbackEnabled + ", providerKeys=" + providerKeys.keySet() + "]";
     }
 }

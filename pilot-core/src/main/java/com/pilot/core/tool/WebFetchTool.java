@@ -6,9 +6,11 @@ import java.net.InetAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -26,7 +28,7 @@ import com.pilot.core.tool.search.WebSearchClients;
 /**
  * 读取公开 HTTP(S) 网页正文（HTML/纯文本/JSON/Markdown/XML）。
  *
- * <p>最多跟随 5 次重定向，且每一跳都在发请求前重新执行公网地址与 SSRF 校验。
+ * <p>最多跟随 5 次重定向（共享总超时预算），且每一跳都在发请求前重新执行公网地址与 SSRF 校验。
  */
 public final class WebFetchTool implements Tool {
     private static final int MAX_BYTES = 2 * 1024 * 1024;
@@ -35,7 +37,7 @@ public final class WebFetchTool implements Tool {
     private static final int MAX_MAX_CHARS = 40_000;
     private static final int MAX_REDIRECTS = 5;
     private static final int MIN_MAIN_BLOCK_CHARS = 200;
-    /** 整个请求的上限，也是中途没有数据时的断开时间。 */
+    /** 整个抓取流程（含全部重定向跳数）的总时限。 */
     private static final Duration FETCH_TIMEOUT = Duration.ofSeconds(15);
     private static final String USER_AGENT = "Pilot-WebFetch/2.0";
 
@@ -48,19 +50,18 @@ public final class WebFetchTool implements Tool {
     private static final Pattern OG_TITLE_REVERSED = Pattern.compile(
         "(?is)<meta[^>]+content\\s*=\\s*[\"']([^\"']+)[\"'][^>]+(?:property|name)\\s*=\\s*[\"'](?:og:title|twitter:title)[\"']");
     private static final Pattern H1_PATTERN = Pattern.compile("(?is)<h1\\b[^>]*>(.*?)</h1>");
-    private static final Pattern ARTICLE_PATTERN = Pattern.compile("(?is)<article\\b[^>]*>(.*?)</article>");
-    private static final Pattern MAIN_PATTERN = Pattern.compile("(?is)<main\\b[^>]*>(.*?)</main>");
     private static final Pattern STRIP_NOISE =
         Pattern.compile("(?is)<(script|style|noscript|svg|iframe|template)\\b[^>]*>.*?</\\1>");
-    private static final Pattern STRIP_CHROME =
-        Pattern.compile("(?is)<(nav|footer|aside|header|form)\\b[^>]*>.*?</\\1>");
     private static final Pattern HTML_COMMENT = Pattern.compile("(?s)<!--.*?-->");
     private static final Pattern BLOCK_BREAK =
         Pattern.compile("(?i)</?(?:p|div|section|article|main|h[1-6]|li|tr|blockquote|pre|hr|br)\\b[^>]*>");
     private static final Pattern ANY_TAG = Pattern.compile("(?s)<[^>]+>");
+    private static final Pattern TAG_TOKEN = Pattern.compile("(?is)<(/?)([a-zA-Z][a-zA-Z0-9]*)\\b([^>]*)>");
+    private static final Set<String> CHROME_TAGS = Set.of("nav", "footer", "aside", "header", "form");
 
     private final HttpClient client;
     private final UriValidator validator;
+    private final Duration fetchTimeout;
 
     @FunctionalInterface
     interface UriValidator {
@@ -68,12 +69,17 @@ public final class WebFetchTool implements Tool {
     }
 
     public WebFetchTool(HttpClient client) {
-        this(client, WebFetchTool::validate);
+        this(client, WebFetchTool::validate, FETCH_TIMEOUT);
     }
 
     WebFetchTool(HttpClient client, UriValidator validator) {
+        this(client, validator, FETCH_TIMEOUT);
+    }
+
+    WebFetchTool(HttpClient client, UriValidator validator, Duration fetchTimeout) {
         this.client = Objects.requireNonNull(client);
         this.validator = Objects.requireNonNull(validator);
+        this.fetchTimeout = Objects.requireNonNull(fetchTimeout);
     }
 
     @Override
@@ -101,6 +107,7 @@ public final class WebFetchTool implements Tool {
             return "ERROR: 缺少参数 url";
         }
         int maxChars = parseMaxChars(args);
+        long deadlineNanos = System.nanoTime() + fetchTimeout.toNanos();
         try {
             URI initialUri = URI.create(raw.strip()).normalize();
             validator.validate(initialUri);
@@ -109,8 +116,13 @@ public final class WebFetchTool implements Tool {
             visited.add(current.toString());
 
             for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
+                long remainingNanos = deadlineNanos - System.nanoTime();
+                if (remainingNanos <= 0L) {
+                    return "ERROR: 网页请求超时";
+                }
+                Duration hopTimeout = Duration.ofNanos(Math.max(1_000_000L, remainingNanos));
                 HttpRequest request = HttpRequest.newBuilder(current)
-                    .timeout(FETCH_TIMEOUT)
+                    .timeout(hopTimeout)
                     .header("User-Agent", USER_AGENT)
                     .header("Accept",
                         "text/html,application/xhtml+xml,text/plain,text/markdown,application/json,application/xml;q=0.9")
@@ -118,7 +130,7 @@ public final class WebFetchTool implements Tool {
                     .header("Accept-Encoding", "gzip")
                     .GET()
                     .build();
-                try (var response = BoundedHttp.open(client, request, FETCH_TIMEOUT, MAX_BYTES)) {
+                try (var response = BoundedHttp.open(client, request, hopTimeout, MAX_BYTES)) {
                     int status = response.statusCode();
                     if (isRedirect(status)) {
                         String location = response.headers().firstValue("location").orElse("").strip();
@@ -165,6 +177,10 @@ public final class WebFetchTool implements Tool {
                     String decoded = stripBom(new String(body, charset));
                     String title = html ? extractTitle(decoded) : "";
                     String text = html ? extractHtmlText(decoded) : normalizePlainText(decoded);
+                    if (html && looksLikeEmptySpa(decoded, text)) {
+                        text = (text.isEmpty() ? "" : text + "\n")
+                            + "[静态拉取未提取到有效正文：页面主体可能依赖前端 JavaScript 动态渲染或存在访问限制；可尝试其他搜索来源。]";
+                    }
                     if (text.length() > maxChars) {
                         text = text.substring(0, maxChars) + "\n[内容已截断]";
                     }
@@ -181,6 +197,8 @@ public final class WebFetchTool implements Tool {
                 }
             }
             return "ERROR: 网页重定向次数超过 " + MAX_REDIRECTS + " 次上限";
+        } catch (HttpTimeoutException e) {
+            return "ERROR: 网页请求超时";
         } catch (BoundedHttp.ResponseLimitException e) {
             return "ERROR: 网页响应超过 2 MiB 上限";
         } catch (InterruptedException e) {
@@ -189,6 +207,27 @@ public final class WebFetchTool implements Tool {
         } catch (Exception e) {
             return "ERROR: 无法读取网页: " + e.getClass().getSimpleName();
         }
+    }
+
+    /** 从 web_fetch 成功输出首行解析最终落地 URL（兼容带「（由 ... 重定向）」后缀）。 */
+    public static String parseFetchedSourceUrl(String output) {
+        if (output == null || !output.startsWith("来源: ")) {
+            return "";
+        }
+        int nl = output.indexOf('\n');
+        String line = (nl < 0 ? output.substring(4) : output.substring(4, nl)).strip();
+        int redirectIdx = line.indexOf("（由 ");
+        if (redirectIdx > 0) {
+            line = line.substring(0, redirectIdx).strip();
+        }
+        return line;
+    }
+
+    private static boolean looksLikeEmptySpa(String rawHtml, String extractedText) {
+        if (!extractedText.isEmpty() && extractedText.length() >= 40) {
+            return false;
+        }
+        return rawHtml.length() >= 1_024 && rawHtml.toLowerCase(Locale.ROOT).contains("<script");
     }
 
     private static String stripBom(String text) {
@@ -268,7 +307,7 @@ public final class WebFetchTool implements Tool {
         if (preferred != null) {
             return preferred;
         }
-        String withoutChrome = htmlFragmentToText(STRIP_CHROME.matcher(cleaned).replaceAll(" "));
+        String withoutChrome = htmlFragmentToText(stripTagBlocks(cleaned, CHROME_TAGS));
         if (withoutChrome.length() >= MIN_MAIN_BLOCK_CHARS) {
             return withoutChrome;
         }
@@ -277,10 +316,9 @@ public final class WebFetchTool implements Tool {
 
     private static String extractMainBlock(String cleanedHtml) {
         String best = "";
-        for (Pattern pattern : List.of(ARTICLE_PATTERN, MAIN_PATTERN)) {
-            Matcher matcher = pattern.matcher(cleanedHtml);
-            while (matcher.find()) {
-                String candidate = htmlFragmentToText(STRIP_CHROME.matcher(matcher.group(1)).replaceAll(" "));
+        for (String tag : List.of("article", "main")) {
+            for (String block : extractTagBlocks(cleanedHtml, tag)) {
+                String candidate = htmlFragmentToText(stripTagBlocks(block, CHROME_TAGS));
                 if (candidate.length() > best.length()) {
                     best = candidate;
                 }
@@ -290,6 +328,79 @@ public final class WebFetchTool implements Tool {
             }
         }
         return null;
+    }
+
+    /** 支持嵌套同名标签的块内容提取，避免非贪婪正则在内层闭合标签处提前截断正文。 */
+    static List<String> extractTagBlocks(String html, String targetTag) {
+        List<String> blocks = new ArrayList<>();
+        Matcher matcher = TAG_TOKEN.matcher(html);
+        int depth = 0;
+        int contentStart = -1;
+        while (matcher.find()) {
+            String tagName = matcher.group(2).toLowerCase(Locale.ROOT);
+            if (!targetTag.equals(tagName)) {
+                continue;
+            }
+            boolean closing = "/".equals(matcher.group(1));
+            boolean selfClosing = !closing && matcher.group(3).stripTrailing().endsWith("/");
+            if (selfClosing) {
+                continue;
+            }
+            if (!closing) {
+                if (depth == 0) {
+                    contentStart = matcher.end();
+                }
+                depth++;
+            } else if (depth > 0) {
+                depth--;
+                if (depth == 0 && contentStart >= 0) {
+                    blocks.add(html.substring(contentStart, matcher.start()));
+                    contentStart = -1;
+                }
+            }
+        }
+        return blocks;
+    }
+
+    /** 支持嵌套同名标签的噪声区段剔除（如嵌套 nav / header / footer / aside / form）。 */
+    static String stripTagBlocks(String html, Set<String> stripTags) {
+        Matcher matcher = TAG_TOKEN.matcher(html);
+        StringBuilder out = new StringBuilder(html.length());
+        int cursor = 0;
+        String activeTag = null;
+        int depth = 0;
+        while (matcher.find()) {
+            String tagName = matcher.group(2).toLowerCase(Locale.ROOT);
+            if (!stripTags.contains(tagName)) {
+                continue;
+            }
+            boolean closing = "/".equals(matcher.group(1));
+            boolean selfClosing = !closing && matcher.group(3).stripTrailing().endsWith("/");
+            if (selfClosing) {
+                continue;
+            }
+            if (activeTag == null) {
+                if (!closing) {
+                    out.append(html, cursor, matcher.start()).append(' ');
+                    activeTag = tagName;
+                    depth = 1;
+                }
+            } else if (activeTag.equals(tagName)) {
+                if (!closing) {
+                    depth++;
+                } else {
+                    depth--;
+                    if (depth == 0) {
+                        cursor = matcher.end();
+                        activeTag = null;
+                    }
+                }
+            }
+        }
+        if (activeTag == null && cursor < html.length()) {
+            out.append(html, cursor, html.length());
+        }
+        return out.toString();
     }
 
     private static String htmlFragmentToText(String fragment) {
