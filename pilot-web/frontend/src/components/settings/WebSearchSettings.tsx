@@ -21,6 +21,7 @@ export function WebSearchSettings() {
   const [apiEndpoint, setApiEndpoint] = useState('');
   const [searxngEndpoint, setSearxngEndpoint] = useState('');
   const [fallbackEnabled, setFallbackEnabled] = useState(true);
+  const [preferPilotSearch, setPreferPilotSearch] = useState(false);
   const [proxy, setProxy] = useState('');
 
   const [testQuery, setTestQuery] = useState('Spring Boot 3');
@@ -31,10 +32,13 @@ export function WebSearchSettings() {
 
   const applyView = useCallback((data: WebSearchSettingsView) => {
     setView(data);
-    setProvider(data.provider || 'auto');
-    setApiEndpoint(data.apiEndpoint || '');
+    const nextProvider = data.provider || 'auto';
+    const matched = (data.providers || []).find(item => item.id === nextProvider);
+    setProvider(nextProvider);
+    setApiEndpoint(matched?.requiresApiKey ? (matched.apiEndpoint || '') : (data.apiEndpoint || ''));
     setSearxngEndpoint(data.searxngEndpoint || '');
     setFallbackEnabled(Boolean(data.fallbackEnabled));
+    setPreferPilotSearch(Boolean(data.preferPilotSearch));
     setProxy(data.proxy || '');
     setApiKey('');
   }, []);
@@ -69,21 +73,51 @@ export function WebSearchSettings() {
     ? (view.localSettingsUpToDate === false ? '配置可升级' : (view.localRunning ? '运行中' : '外部进程'))
     : '未运行';
 
+  const savedEndpointForSelected = selectedProvider?.requiresApiKey
+    ? (selectedProvider.apiEndpoint || '')
+    : (view?.apiEndpoint || '');
+  const isDirty = Boolean(view) && (
+    provider !== (view?.provider || 'auto')
+    || apiKey.trim().length > 0
+    || apiEndpoint.trim() !== savedEndpointForSelected
+    || searxngEndpoint.trim() !== (view?.searxngEndpoint || '')
+    || fallbackEnabled !== Boolean(view?.fallbackEnabled)
+    || preferPilotSearch !== Boolean(view?.preferPilotSearch)
+    || proxy.trim() !== (view?.proxy || '')
+  );
+  const liveProxyNotice = /^socks5h?:\/\//i.test(proxy.trim())
+    ? 'SOCKS5 代理当前仅作用于本机 SearXNG，云端搜索 API 与公开只读源将直连；建议改用 http://host:port 以同时覆盖全部搜索源。'
+    : (view?.proxyNotice || '');
+
+  function selectProvider(id: string) {
+    const target = providers.find(item => item.id === id);
+    setProvider(id);
+    setApiKey('');
+    setApiEndpoint(target?.requiresApiKey ? (target.apiEndpoint || '') : (view?.apiEndpoint || ''));
+  }
+
   async function save() {
     if (saving) return;
+    const proxyChanged = view != null && proxy.trim() !== (view.proxy || '');
+    const localWasUp = Boolean(view?.localPortOpen);
     setSaving(true);
     setFeedback(null);
     try {
       const saved = await api.saveWebSearchSettings({
         provider,
         apiKey: apiKey.trim() || undefined,
-        apiEndpoint,
+        apiEndpoint: needsKey ? apiEndpoint : undefined,
         searxngEndpoint,
         fallbackEnabled,
+        preferPilotSearch,
         proxy
       });
       if (saved) applyView(saved);
-      setFeedback({ text: '联网搜索设置已保存，下一次搜索立即生效。' });
+      setFeedback({
+        text: proxyChanged && localWasUp
+          ? '联网搜索设置已保存。出网代理已立即生效于云端与公开搜索；若需本机 SearXNG 也应用新代理，请点击下方「同步配置并重启本机 SearXNG」。'
+          : '联网搜索设置已保存，下一次搜索立即生效。'
+      });
     } catch (failure) {
       setFeedback({ text: errorInfo(failure).message || '保存失败，请检查地址与参数格式。', isError: true });
     } finally {
@@ -133,7 +167,7 @@ export function WebSearchSettings() {
         category: testCategory,
         provider,
         apiKey: apiKey.trim() || undefined,
-        apiEndpoint,
+        apiEndpoint: needsKey ? apiEndpoint : undefined,
         searxngEndpoint,
         fallbackEnabled,
         proxy
@@ -161,19 +195,26 @@ export function WebSearchSettings() {
   }
 
   return <>
+    {view?.nativeWebSearchSummary && (
+      <div className="alert-env-note" role="status">
+        <strong>{view.nativeWebSearchActive ? '当前模型正在使用模型商内置搜索' : '联网搜索路由状态'}</strong>
+        <p>{view.nativeWebSearchSummary}</p>
+      </div>
+    )}
+
     <section className="settings-group">
       <div className="settings-group-heading">
         <h3>搜索提供商</h3>
         <p>
           当前策略：<strong>{selectedProvider?.label || provider}</strong>
           {view?.effectiveProvider && provider === 'auto' ? `（当前优先命中：${view.effectiveProvider}）` : ''}。
-          推荐在「设置 → 搜索」配置博查（国内直连）或 Tavily / Brave / Serper / Exa 密钥，可大幅提高检索命中率。
+          支持按提供商分别保存密钥与自定义端点；自动模式下若配置了多个商用 API 密钥将依次故障转移。
         </p>
       </div>
       <div className="settings-choices" id="web-search-providers" role="group" aria-label="搜索提供商">
         {providers.map(item => (
           <button key={item.id} type="button" aria-pressed={provider === item.id} disabled={saving}
-            className="settings-choice" onClick={() => { setProvider(item.id); setApiKey(''); }}>
+            className="settings-choice" onClick={() => selectProvider(item.id)}>
             <span>
               <strong>
                 {item.label}
@@ -195,7 +236,7 @@ export function WebSearchSettings() {
     <section className="settings-group">
       <div className="settings-group-heading">
         <h3>密钥、端点与回退策略</h3>
-        <p>密钥只写不读，留空提交会保留已保存密钥；所有设置保存后立即对后续搜索生效。</p>
+        <p>密钥只写不读，留空提交会保留已保存密钥；自定义端点按提供商独立保存，切换提供商互不串扰。</p>
       </div>
       <form className="settings-form" onSubmit={event => { event.preventDefault(); void save(); }}>
         {needsKey && (
@@ -215,15 +256,16 @@ export function WebSearchSettings() {
             size="lg" width="100%" value={searxngEndpoint} onChange={setSearxngEndpoint}
             isDisabled={saving} inputMode="url" hasSpellCheck={false} autoComplete="off"
             placeholder="http://127.0.0.1:8888" />
-          <TextInput id="web-search-proxy" label="出网代理（可选）"
+          <TextInput id="web-search-proxy" label="出网代理（可选，不含账号密码）"
             size="lg" width="100%" value={proxy} onChange={setProxy}
             isDisabled={saving} hasSpellCheck={false} autoComplete="off"
             placeholder="例如 http://127.0.0.1:7890" />
         </div>
+        {liveProxyNotice && <p className="settings-status" role="status">{liveProxyNotice}</p>}
         <div className="settings-row">
           <div>
             <h3>自动回退兜底</h3>
-            <p>主搜索源失败或返回 0 条结果时，自动依次回退到本机 SearXNG 与免密钥官方公开只读源（Wikipedia / GitHub / StackOverflow / arXiv）。</p>
+            <p>主搜索源失败或返回 0 条结果时，自动依次回退到其他已配密钥的商用 API、本机 SearXNG 与免密钥官方公开只读源。</p>
           </div>
           <SegmentedControl id="web-search-fallback" label="自动回退兜底"
             value={fallbackEnabled ? 'on' : 'off'}
@@ -232,11 +274,24 @@ export function WebSearchSettings() {
             <SegmentedControlItem value="off" label="关闭" />
           </SegmentedControl>
         </div>
+        <div className="settings-row">
+          <div>
+            <h3>优先使用 Pilot 自配置搜索</h3>
+            <p>开启后，即使当前模型支持服务商原生联网搜索，也会统一改走此处配置的搜索源（如博查 / Tavily / SearXNG）。</p>
+          </div>
+          <SegmentedControl id="web-search-prefer-pilot" label="优先使用 Pilot 自配置搜索"
+            value={preferPilotSearch ? 'on' : 'off'}
+            onChange={value => setPreferPilotSearch(value === 'on')}>
+            <SegmentedControlItem value="off" label="跟随模型" />
+            <SegmentedControlItem value="on" label="强制自配" />
+          </SegmentedControl>
+        </div>
         <div className="settings-form-actions">
           {needsKey && selectedKeySet && (
             <Button label="清除密钥" variant="ghost" className="settings-danger"
               isDisabled={saving} onClick={() => void clearKey()} />
           )}
+          {isDirty && <span className="settings-status">有未保存修改</span>}
           <Button type="submit" variant="primary" label={saving ? '保存中…' : '保存设置'} isDisabled={saving} />
         </div>
         {feedback && (
@@ -269,7 +324,7 @@ export function WebSearchSettings() {
     <section className="settings-group">
       <div className="settings-group-heading">
         <h3>实时搜索测试</h3>
-        <p>使用当前表单中的设置发起一次只读测试查询（不会自动保存），可用于核验密钥、代理与回退链路。</p>
+        <p>使用当前表单中的设置发起一次只读测试查询（不会自动保存，绕过短时熔断冷却），可用于核验密钥、代理与回退链路。</p>
       </div>
       <form className="settings-source-row" onSubmit={event => { event.preventDefault(); void runTest(); }}>
         <TextInput id="web-search-test-query" label="测试关键词" size="lg" width="100%"

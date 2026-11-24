@@ -164,7 +164,20 @@ function toolArgsText(name: string, args: unknown) {
     if (BROWSER_ACTIONS[raw]) return BROWSER_ACTIONS[raw];
     return label || raw.replace(/^\{|\}$/g, '');
   }
-  if (name === 'web_search') return valueField('query') || raw;
+  if (name === 'web_search') {
+    const query = valueField('query') || raw;
+    const site = field('site');
+    const category = field('category');
+    const timeRange = field('time_range');
+    const categoryLabel: Record<string, string> = { news: '新闻', it: '技术', science: '学术' };
+    const rangeLabel: Record<string, string> = { day: '近 1 天', week: '近 1 周', month: '近 1 月', year: '近 1 年' };
+    const tags = [
+      site ? `site:${site}` : '',
+      categoryLabel[category] || '',
+      rangeLabel[timeRange] || ''
+    ].filter(Boolean);
+    return tags.length ? `${query} · ${tags.join(' · ')}` : query;
+  }
   if (name === 'web_fetch') return (valueField('url') || raw).replace(/^https?:\/\//, '');
   if (name === 'read_file' || name === 'edit_file' || name === 'create_file' || name === 'list_dir' || name === 'search_text' || name === 'glob_files') {
     return valueField('path') || valueField('query') || raw;

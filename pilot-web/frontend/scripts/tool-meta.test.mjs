@@ -41,6 +41,14 @@ test('浏览器 summary 里的 action 译成中文', () => {
   assert.match(toolArgsText('browser', 'action=navigate,url=https://example.com/path'), /打开 example.com/);
 });
 
+test('web_search 折叠摘要带上 site、分类与时间筛选条件', () => {
+  assert.equal(
+    toolArgsText('web_search', { query: 'virtual threads', site: 'spring.io', category: 'news', time_range: 'week' }),
+    'virtual threads · site:spring.io · 新闻 · 近 1 周'
+  );
+  assert.equal(toolArgsText('web_search', { query: 'Spring Boot 3' }), 'Spring Boot 3');
+});
+
 test('formatProcessDuration 与 computeToolSpanSeconds 格式化过程耗时', () => {
   assert.equal(formatProcessDuration(0), '0s');
   assert.equal(formatProcessDuration(45), '45s');

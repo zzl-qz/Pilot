@@ -418,6 +418,7 @@ export interface WebSearchProviderView {
   description: string;
   requiresApiKey: boolean;
   defaultEndpoint: string;
+  apiEndpoint?: string;
   apiKeySet: boolean;
   apiKeyMasked: string;
 }
@@ -430,7 +431,9 @@ export interface WebSearchSettingsView {
   apiKeyMasked: string;
   searxngEndpoint: string;
   fallbackEnabled: boolean;
+  preferPilotSearch?: boolean;
   proxy: string;
+  proxyNotice?: string;
   requestTimeoutSeconds: number;
   localEnabled: boolean;
   localManaged: boolean;
@@ -440,6 +443,8 @@ export interface WebSearchSettingsView {
   localSettingsPath: string;
   localLogPath: string;
   localMessage: string;
+  nativeWebSearchActive?: boolean;
+  nativeWebSearchSummary?: string;
   providers: WebSearchProviderView[];
 }
 
@@ -450,6 +455,7 @@ export interface WebSearchSettingsUpdate {
   apiEndpoint?: string;
   searxngEndpoint?: string;
   fallbackEnabled?: boolean;
+  preferPilotSearch?: boolean;
   proxy?: string;
 }
 

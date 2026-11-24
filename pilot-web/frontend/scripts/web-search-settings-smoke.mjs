@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { artifactDirectory, browserOptions } from './browser-options.mjs';
 
-// 联网搜索设置页：提供商切换、保存与清除密钥（不回显明文）、实时搜索测试与本机 SearXNG 重启。
+// 联网搜索设置页：提供商切换、分商端点隔离、SOCKS5 代理提示、优先自配开关、未保存提示、实时搜索与本机重启。
 const root = fileURLToPath(new URL('..', import.meta.url));
 const output = await mkdtemp(join(artifactDirectory(), 'pilot-web-search-ui-'));
 const entry = `.web-search-ui-${process.pid}.html`, file = join(root, entry);
@@ -32,7 +32,9 @@ const state = {
   apiKeyMasked: '',
   searxngEndpoint: 'http://127.0.0.1:8888',
   fallbackEnabled: true,
+  preferPilotSearch: false,
   proxy: '',
+  proxyNotice: '',
   requestTimeoutSeconds: 20,
   localEnabled: true,
   localManaged: true,
@@ -42,15 +44,17 @@ const state = {
   localSettingsPath: '/tmp/.pilot/searxng/settings.yml',
   localLogPath: '/tmp/.pilot/searxng/searxng.log',
   localMessage: '端口由外部 SearXNG 进程占用，且托管配置为旧版',
+  nativeWebSearchActive: true,
+  nativeWebSearchSummary: '当前模型（gpt-4o）默认启用了模型商内置搜索；如需改用下方博查/Tavily/SearXNG，请开启「优先使用 Pilot 自配置搜索」。',
   providers: [
-    { id: 'auto', label: '自动选择', description: '自动优先 API → SearXNG → 公开源', requiresApiKey: false, defaultEndpoint: '', apiKeySet: false, apiKeyMasked: '' },
-    { id: 'bocha', label: '博查 Bocha（国内直连）', description: '中文网页与时效检索质量高', requiresApiKey: true, defaultEndpoint: 'https://api.bochaai.com/v1/web-search', apiKeySet: false, apiKeyMasked: '' },
-    { id: 'tavily', label: 'Tavily', description: '面向 Agent 的网页搜索', requiresApiKey: true, defaultEndpoint: 'https://api.tavily.com/search', apiKeySet: false, apiKeyMasked: '' },
-    { id: 'brave', label: 'Brave Search', description: '独立网页索引', requiresApiKey: true, defaultEndpoint: 'https://api.search.brave.com/res/v1/web/search', apiKeySet: false, apiKeyMasked: '' },
-    { id: 'serper', label: 'Serper (Google)', description: 'Google JSON API', requiresApiKey: true, defaultEndpoint: 'https://google.serper.dev/search', apiKeySet: false, apiKeyMasked: '' },
-    { id: 'exa', label: 'Exa', description: '语义与技术资料检索', requiresApiKey: true, defaultEndpoint: 'https://api.exa.ai/search', apiKeySet: false, apiKeyMasked: '' },
-    { id: 'searxng', label: '本机 / 自建 SearXNG', description: '免密钥元搜索', requiresApiKey: false, defaultEndpoint: 'http://127.0.0.1:8888', apiKeySet: false, apiKeyMasked: '' },
-    { id: 'public', label: '公开只读知识源', description: 'Wikipedia / GitHub / StackOverflow / arXiv', requiresApiKey: false, defaultEndpoint: '', apiKeySet: false, apiKeyMasked: '' }
+    { id: 'auto', label: '自动选择', description: '自动优先 API → SearXNG → 公开源', requiresApiKey: false, defaultEndpoint: '', apiEndpoint: '', apiKeySet: false, apiKeyMasked: '' },
+    { id: 'bocha', label: '博查 Bocha（国内直连）', description: '中文网页与时效检索质量高', requiresApiKey: true, defaultEndpoint: 'https://api.bochaai.com/v1/web-search', apiEndpoint: '', apiKeySet: false, apiKeyMasked: '' },
+    { id: 'tavily', label: 'Tavily', description: '面向 Agent 的网页搜索', requiresApiKey: true, defaultEndpoint: 'https://api.tavily.com/search', apiEndpoint: '', apiKeySet: false, apiKeyMasked: '' },
+    { id: 'brave', label: 'Brave Search', description: '独立网页索引', requiresApiKey: true, defaultEndpoint: 'https://api.search.brave.com/res/v1/web/search', apiEndpoint: '', apiKeySet: false, apiKeyMasked: '' },
+    { id: 'serper', label: 'Serper (Google)', description: 'Google JSON API', requiresApiKey: true, defaultEndpoint: 'https://google.serper.dev/search', apiEndpoint: '', apiKeySet: false, apiKeyMasked: '' },
+    { id: 'exa', label: 'Exa', description: '语义与技术资料检索', requiresApiKey: true, defaultEndpoint: 'https://api.exa.ai/search', apiEndpoint: '', apiKeySet: false, apiKeyMasked: '' },
+    { id: 'searxng', label: '本机 / 自建 SearXNG', description: '免密钥元搜索', requiresApiKey: false, defaultEndpoint: 'http://127.0.0.1:8888', apiEndpoint: '', apiKeySet: false, apiKeyMasked: '' },
+    { id: 'public', label: '公开只读知识源', description: 'Wikipedia / GitHub / StackOverflow / arXiv', requiresApiKey: false, defaultEndpoint: '', apiEndpoint: '', apiKeySet: false, apiKeyMasked: '' }
   ]
 };
 const clone = () => JSON.parse(JSON.stringify(state));
@@ -60,10 +64,25 @@ api.saveWebSearchSettings = async body => {
   window.calls.push(['save', body]);
   if (body.provider) state.provider = body.provider;
   if (typeof body.fallbackEnabled === 'boolean') state.fallbackEnabled = body.fallbackEnabled;
-  if (typeof body.proxy === 'string') state.proxy = body.proxy;
-  if (body.apiKey) {
-    const p = state.providers.find(x => x.id === state.provider);
-    if (p) { p.apiKeySet = true; p.apiKeyMasked = 'sk-boc…9999'; }
+  if (typeof body.preferPilotSearch === 'boolean') {
+    state.preferPilotSearch = body.preferPilotSearch;
+    state.nativeWebSearchActive = !body.preferPilotSearch;
+    state.nativeWebSearchSummary = body.preferPilotSearch
+      ? '已开启「优先使用 Pilot 自配置搜索」：当前模型（gpt-4o）将统一调用下方配置的搜索源。'
+      : state.nativeWebSearchSummary;
+  }
+  if (typeof body.proxy === 'string') {
+    state.proxy = body.proxy;
+    state.proxyNotice = /^socks5/i.test(body.proxy) ? 'SOCKS5 代理当前仅作用于本机 SearXNG' : '';
+  }
+  const p = state.providers.find(x => x.id === state.provider);
+  if (p && p.requiresApiKey && typeof body.apiEndpoint === 'string') {
+    p.apiEndpoint = body.apiEndpoint;
+    state.apiEndpoint = body.apiEndpoint;
+  }
+  if (body.apiKey && p) {
+    p.apiKeySet = true;
+    p.apiKeyMasked = 'sk-boc…9999';
     state.apiKeySet = true;
     state.apiKeyMasked = 'sk-boc…9999';
   }
@@ -122,19 +141,30 @@ try {
   await page.locator('#web-search-providers').waitFor();
 
   assert.equal(await page.locator('#web-search-providers button').count(), 8, '应展示全部 8 个搜索提供商');
+  await page.getByText('当前模型正在使用模型商内置搜索').waitFor();
   await page.getByText('配置可升级').waitFor();
 
-  // 选择博查，填写 API Key 和代理并保存
+  // 选择博查，填写 API Key、自定义端点、SOCKS5 代理并开启强制自配
   await page.getByRole('button', { name: /博查 Bocha/ }).click();
+  await page.getByText('有未保存修改').waitFor();
   await page.locator('#web-search-api-key').fill('sk-bocha-live-secret-9999');
-  await page.locator('#web-search-proxy').fill('http://127.0.0.1:7890');
+  await page.locator('#web-search-api-endpoint').fill('https://proxy.corp/bocha');
+  await page.locator('#web-search-proxy').fill('socks5://127.0.0.1:1080');
+  await page.getByText(/SOCKS5 代理当前仅作用于本机 SearXNG/).waitFor();
+  await page.locator('#web-search-prefer-pilot').getByText('强制自配').click();
   await page.getByRole('button', { name: '保存设置' }).click();
-  await page.getByText('联网搜索设置已保存，下一次搜索立即生效。').waitFor();
+  await page.getByText(/出网代理已立即生效于云端与公开搜索/).waitFor();
 
   assert.equal(await page.locator('#web-search-api-key').inputValue(), '', '保存后必须清空明文密钥输入框');
   const placeholder = await page.locator('#web-search-api-key').getAttribute('placeholder');
   assert.match(placeholder || '', /sk-boc…9999/);
   await page.locator('#web-search-providers .web-search-badge', { hasText: '已配密钥' }).waitFor();
+
+  // 切到 Tavily，确认博查的自定义端点不会串到 Tavily
+  await page.getByRole('button', { name: /Tavily/ }).click();
+  assert.equal(await page.locator('#web-search-api-endpoint').inputValue(), '', '切换提供商后不应沿用另一商的自定义端点');
+  await page.getByRole('button', { name: /博查 Bocha/ }).click();
+  assert.equal(await page.locator('#web-search-api-endpoint').inputValue(), 'https://proxy.corp/bocha');
 
   // 实时测试搜索（回车提交）
   await page.locator('#web-search-test-query').fill('Spring Boot 3');
@@ -153,7 +183,7 @@ try {
   await page.getByText('运行中').first().waitFor();
 
   assert.deepEqual(pageErrors, [], '页面不应有未捕获异常');
-  console.log('联网搜索设置页 Playwright UI 验收全部通过。');
+  console.log('联网搜索设置页 Playwright UI 全量细节验收通过。');
 } finally {
   await browser?.close();
   await new Promise(resolve => server.httpServer.close(resolve));
