@@ -119,3 +119,60 @@ test('敏感表单值和 agent 动作提示不会进入快照', () => {
   assert.match(text, /value=\[已遮挡\]/);
   assert.doesNotMatch(text, /token-value-must-not-leak|184203|csrf-token-must-not-leak|private-note-must-not-leak|正在填写/);
 });
+
+test('支持开放 Shadow DOM、常见表单属性扩展，并忽略覆盖层内部停止按钮', () => {
+  const shadowBtn = node('button', { text: '阴影保存', rect: { width: 80, height: 30 } });
+  const host = node('div', { rect: { width: 100, height: 40 } });
+  host.shadowRoot = { children: [shadowBtn] };
+
+  const roInput = node('input', { type: 'text', value: 'locked', attrs: {} });
+  roInput.readOnly = true;
+  roInput.required = true;
+
+  const stopBtn = node('button', { text: '停止控制 (Stop)', rect: { width: 90, height: 28 }, attrs: { 'data-pilot-stop-btn': 'true' } });
+  const overlay = node('div', { children: [stopBtn], attrs: { 'data-pilot-agent-overlay': 'true' } });
+  stopBtn.closest = (sel) => (sel === '[data-pilot-agent-overlay]' ? overlay : null);
+  overlay.closest = (sel) => (sel === '[data-pilot-agent-overlay]' ? overlay : null);
+
+  mount(node('body', { children: [host, roInput, overlay] }));
+
+  const result = snapshot({ nodes: 200, chars: 20_000 });
+  const text = result.lines.join('\n');
+
+  assert.match(text, /阴影保存/);
+  assert.match(text, /readonly/);
+  assert.match(text, /required/);
+  assert.doesNotMatch(text, /停止控制/);
+});
+
+test('快照深入可访问同源 iframe 并标记 frame 链路，跨域 iframe 安全跳过', () => {
+  const innerBtn = node('button', { text: '帧内保存', rect: { width: 88, height: 30 } });
+  const innerBody = node('body', { children: [innerBtn] });
+  const sameOriginFrame = node('iframe', {
+    attrs: { title: '内嵌表单' },
+    rect: { width: 320, height: 180 }
+  });
+  sameOriginFrame.contentDocument = { body: innerBody };
+
+  const blockedFrame = node('iframe', {
+    attrs: { title: '外部支付页' },
+    rect: { width: 320, height: 120 }
+  });
+  Object.defineProperty(blockedFrame, 'contentDocument', {
+    get() {
+      throw new Error('Blocked a frame with origin');
+    }
+  });
+
+  mount(node('body', { children: [sameOriginFrame, blockedFrame] }));
+
+  const result = snapshot({ nodes: 200, chars: 20_000 });
+  const text = result.lines.join('\n');
+
+  assert.equal(sameOriginFrame.attrs['data-pilot-frame'], 'f1');
+  assert.equal(innerBtn.attrs['data-pilot-ref'], 'e1');
+  assert.deepEqual(result.refFrames.e1, ['f1']);
+  assert.match(text, /iframe "内嵌表单" \[frame=f1\]/);
+  assert.match(text, /button "帧内保存" \[ref=e1\]/);
+  assert.match(text, /iframe（跨域或未加载，内容不在快照内） "外部支付页"/);
+});

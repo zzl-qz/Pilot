@@ -1,5 +1,6 @@
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import { extname } from 'node:path';
 
 export function publicAddress(address) {
   const ip = address.toLowerCase();
@@ -126,30 +127,185 @@ export function sanitizeDiagnosticUrl(value) {
     for (const key of [...url.searchParams.keys()]) {
       if (SENSITIVE_QUERY_KEY.test(key)) url.searchParams.set(key, '[已遮挡]');
     }
-    if (url.hash && SENSITIVE_QUERY_KEY.test(url.hash)) url.hash = '#[已遮挡]';
+    if (url.hash && url.hash.length > 1) {
+      const rawHash = url.hash.slice(1);
+      const parts = rawHash.split('&').map((part) => {
+        const eq = part.indexOf('=');
+        if (eq < 0) return SENSITIVE_QUERY_KEY.test(part) ? '[已遮挡]' : part;
+        const key = part.slice(0, eq);
+        return SENSITIVE_QUERY_KEY.test(key) ? `${key}=[已遮挡]` : part;
+      });
+      url.hash = '#' + parts.join('&');
+    }
     return sanitizeDiagnosticText(url.toString());
   } catch {
     return sanitizeDiagnosticText(value);
   }
 }
 
-/** Identity, payment, and authentication pages are withheld from model-readable page output. */
-export function sensitivePageUrl(value) {
+const KNOWN_PAYMENT_HOSTS = ['checkout.stripe.com', 'paypal.com', 'www.paypal.com'];
+const KNOWN_AUTH_HOSTS = ['accounts.google.com', 'login.microsoftonline.com', 'login.live.com',
+  'appleid.apple.com', 'idmsa.apple.com'];
+
+/** 从环境变量读取敏感主机补充与例外清单（例外仅对非支付页生效）。 */
+export function sensitiveRulesFromEnv(env = process.env) {
+  return {
+    extra: parseHosts(env.PILOT_BROWSER_SENSITIVE_HOSTS),
+    allow: parseHosts(env.PILOT_BROWSER_SENSITIVE_ALLOW_HOSTS)
+  };
+}
+
+/**
+ * 识别敏感支付页（payment）或认证/登录页（auth）；普通页面返回 null。
+ * 支付页始终优先拦截，不受 sensitiveAllow 例外放行。
+ */
+export function classifySensitivePage(value, rules = null) {
   try {
     const url = new URL(String(value));
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
     const host = url.hostname.toLowerCase();
-    const knownHosts = ['accounts.google.com', 'login.microsoftonline.com', 'login.live.com', 'appleid.apple.com',
-      'idmsa.apple.com', 'checkout.stripe.com', 'paypal.com', 'www.paypal.com'];
-    return knownHosts.includes(host) || /(^|\.)(?:accounts?|auth|identity|login|signin|checkout|payments?)\./.test(host)
-      || /\/(?:login|log-in|sign-?in|oauth|authorize|checkout|payment|billing)(?:\/|$)/i.test(url.pathname);
+    if (KNOWN_PAYMENT_HOSTS.includes(host)
+      || /(^|\.)(?:checkout|payments?)\./.test(host)
+      || /\/(?:checkout|payment|billing)(?:\/|$)/i.test(url.pathname)) {
+      return 'payment';
+    }
+    const allow = Array.isArray(rules?.allow) ? rules.allow : [];
+    if (allow.some((pattern) => hostMatches(pattern, host))) return null;
+    const extra = Array.isArray(rules?.extra) ? rules.extra : [];
+    if (KNOWN_AUTH_HOSTS.includes(host)
+      || /(^|\.)(?:accounts?|auth|identity|login|signin)\./.test(host)
+      || /\/(?:login|log-in|sign-?in|oauth|authorize)(?:\/|$)/i.test(url.pathname)
+      || extra.some((pattern) => hostMatches(pattern, host))) {
+      return 'auth';
+    }
+    return null;
   } catch {
-    return false;
+    return null;
   }
 }
 
+/** Identity, payment, and authentication pages are withheld from model-readable page output. */
+export function sensitivePageUrl(value, rules = null) {
+  return classifySensitivePage(value, rules) !== null;
+}
+
+/** 返回规范化的本机回环 origin（含端口），非回环地址返回 null。 */
+export function loopbackOrigin(value) {
+  try {
+    const url = new URL(String(value));
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    const loopback = host === 'localhost' || host.endsWith('.localhost') || host === '::1'
+      || host === '127.0.0.1' || /^127\.\d+\.\d+\.\d+$/.test(host);
+    return loopback ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
+export const DEFAULT_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024;
+
+export function maxDownloadBytesFromEnv(env = process.env) {
+  const parsed = Number(env.PILOT_BROWSER_MAX_DOWNLOAD_BYTES);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_DOWNLOAD_BYTES;
+}
+
+const DANGEROUS_DOWNLOAD_EXTENSIONS = new Set([
+  '.app', '.appx', '.apk', '.applescript', '.bat', '.cmd', '.com', '.command', '.cpl', '.deb',
+  '.dll', '.dmg', '.exe', '.gadget', '.hta', '.img', '.iso', '.jar', '.js', '.jse', '.lnk',
+  '.msi', '.msp', '.pkg', '.ps1', '.psm1', '.reg', '.rpm', '.scf', '.scpt', '.scr', '.sh',
+  '.sys', '.vb', '.vbe', '.vbs', '.workflow', '.wsf'
+]);
+
+const DANGEROUS_DOWNLOAD_MIMES = new Set([
+  'application/x-msdownload', 'application/x-executable', 'application/x-mach-binary',
+  'application/x-sh', 'application/x-bat', 'application/x-csh', 'application/java-archive',
+  'application/vnd.microsoft.portable-executable', 'application/x-dosexec', 'application/x-msi',
+  'application/x-apple-diskimage', 'text/javascript', 'application/javascript',
+  'application/x-javascript', 'text/vbscript'
+]);
+
+function detectBinarySignature(headBytes) {
+  if (!headBytes || headBytes.length < 2) return '';
+  const b = headBytes instanceof Uint8Array ? headBytes : Uint8Array.from(headBytes);
+  if (b[0] === 0x4d && b[1] === 0x5a) return 'PE executable (MZ)';
+  if (b[0] === 0x23 && b[1] === 0x21) return 'Shell/script shebang (#!)';
+  if (b.length >= 4) {
+    if (b[0] === 0x7f && b[1] === 0x45 && b[2] === 0x4c && b[3] === 0x46) return 'ELF executable';
+    const isMachO = (b[0] === 0xfe && b[1] === 0xed && b[2] === 0xfa && (b[3] === 0xce || b[3] === 0xcf))
+      || ((b[0] === 0xce || b[0] === 0xcf) && b[1] === 0xfa && b[2] === 0xed && b[3] === 0xfe)
+      || (b[0] === 0xca && b[1] === 0xfe && b[2] === 0xba && b[3] === 0xbe);
+    if (isMachO) return 'Mach-O executable';
+  }
+  if (b.length >= 8 && b[0] === 0x4c && b[1] === 0x00 && b[2] === 0x00 && b[3] === 0x00
+    && b[4] === 0x01 && b[5] === 0x14 && b[6] === 0x02 && b[7] === 0x00) {
+    return 'Windows shortcut (.lnk)';
+  }
+  return '';
+}
+
+/**
+ * 综合审查下载文件安全性：文件大小上限、扩展名、响应 MIME 与文件头魔数/内容签名。
+ */
+export function inspectDownloadSafety({
+  filename = '',
+  mimeType = '',
+  headBytes = null,
+  sizeBytes = null,
+  maxBytes = DEFAULT_MAX_DOWNLOAD_BYTES
+} = {}) {
+  const cleanName = String(filename || 'download');
+  const extension = extname(cleanName).toLowerCase();
+  const normalizedMime = String(mimeType || '').split(';')[0].trim().toLowerCase();
+  const signature = detectBinarySignature(headBytes);
+  const basis = `扩展名=${extension || '无'}，MIME=${normalizedMime || '未知'}，内容签名=${signature || '未命中危险魔数'}`;
+
+  if (Number.isFinite(sizeBytes) && maxBytes > 0 && sizeBytes > maxBytes) {
+    return {
+      allowed: false,
+      extension,
+      mimeType: normalizedMime,
+      signature,
+      basis,
+      reason: `下载文件超过大小上限（${sizeBytes} 字节 > ${maxBytes} 字节）：${cleanName}`
+    };
+  }
+  if (DANGEROUS_DOWNLOAD_EXTENSIONS.has(extension)) {
+    return {
+      allowed: false,
+      extension,
+      mimeType: normalizedMime,
+      signature,
+      basis,
+      reason: `已阻止下载危险文件类型：${cleanName}（${extension}）。请由用户在浏览器中自行检查并下载。`
+    };
+  }
+  if (normalizedMime && DANGEROUS_DOWNLOAD_MIMES.has(normalizedMime)) {
+    return {
+      allowed: false,
+      extension,
+      mimeType: normalizedMime,
+      signature,
+      basis,
+      reason: `已阻止下载危险 MIME 类型：${cleanName}（${normalizedMime}）。请由用户在浏览器中自行检查并下载。`
+    };
+  }
+  if (signature) {
+    return {
+      allowed: false,
+      extension,
+      mimeType: normalizedMime,
+      signature,
+      basis,
+      reason: `已阻止下载伪装或可执行内容：${cleanName}（命中内容签名 ${signature}）。请由用户在浏览器中自行检查并下载。`
+    };
+  }
+  return { allowed: true, extension, mimeType: normalizedMime, signature, basis, reason: '' };
+}
+
 export const externalMutations = new Set(['click', 'dblclick', 'right_click', 'hover', 'fill', 'type', 'press',
-  'select', 'upload', 'download', 'evaluate', 'reload', 'back', 'forward']);
+  'select', 'check', 'uncheck', 'scroll', 'drag', 'dialog', 'batch', 'upload', 'download', 'evaluate', 'reload',
+  'back', 'forward']);
 
 export function requireExternalApproval(request, currentUrl) {
   if (!request.approvedExternal || request.expected_url !== currentUrl) {

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { cdpEndpoint, externalAgentHostAllowed, hostDecision, hostRulesFromEnv, parseHosts,
-  publicHttps, sanitizeDiagnosticText, sanitizeDiagnosticUrl, sensitivePageUrl } from '../../main/resources/browser/browser-policy.mjs';
+import { cdpEndpoint, classifySensitivePage, externalAgentHostAllowed, hostDecision, hostRulesFromEnv,
+  inspectDownloadSafety, loopbackOrigin, parseHosts, publicHttps, sanitizeDiagnosticText, sanitizeDiagnosticUrl,
+  sensitivePageUrl, sensitiveRulesFromEnv } from '../../main/resources/browser/browser-policy.mjs';
 
 test('parseHosts 接受逗号与空白两种分隔，并统一小写去空白', () => {
   assert.deepEqual(parseHosts('a.com, b.com  c.com'), ['a.com', 'b.com', 'c.com']);
@@ -107,4 +108,35 @@ test('敏感登录和支付页面不向模型返回页面内容', () => {
   assert.equal(sensitivePageUrl('https://shop.example/checkout/order'), true);
   assert.equal(sensitivePageUrl('http://localhost:5173/dashboard'), false);
   assert.equal(sensitivePageUrl('file:///checkout'), false);
+  assert.equal(classifySensitivePage('https://checkout.stripe.com/pay/cs_123'), 'payment');
+  assert.equal(classifySensitivePage('https://accounts.google.com/o/oauth2/auth'), 'auth');
+  const rules = sensitiveRulesFromEnv({
+    PILOT_BROWSER_SENSITIVE_HOSTS: 'vault.internal',
+    PILOT_BROWSER_SENSITIVE_ALLOW_HOSTS: 'dev.local'
+  });
+  assert.equal(classifySensitivePage('https://vault.internal/home', rules), 'auth');
+  // sensitive_allow 可放行本地测试 auth，但始终不放行 payment
+  assert.equal(sensitivePageUrl('http://dev.local/signin', rules), false);
+  assert.equal(classifySensitivePage('http://dev.local/checkout', rules), 'payment');
+});
+
+test('loopbackOrigin 严格按协议、回环主机名和端口隔离', () => {
+  assert.equal(loopbackOrigin('http://localhost:5173/app'), 'http://localhost:5173');
+  assert.equal(loopbackOrigin('http://127.0.0.1:8080/a'), 'http://127.0.0.1:8080');
+  assert.equal(loopbackOrigin('https://example.com/a'), null);
+});
+
+test('inspectDownloadSafety 校验扩展名、危险 MIME、魔数签名与大小上限', () => {
+  assert.equal(inspectDownloadSafety({ filename: 'report.txt', headBytes: Buffer.from('hello'), mimeType: 'text/plain' }).allowed, true);
+  assert.equal(inspectDownloadSafety({ filename: 'run.exe', headBytes: Buffer.from('hello') }).allowed, false);
+  assert.equal(inspectDownloadSafety({ filename: 'doc.txt', headBytes: Buffer.from('hello'), mimeType: 'application/x-msdownload' }).allowed, false);
+  // 伪装成 .txt 的 Windows PE 可执行头（MZ）
+  assert.equal(inspectDownloadSafety({ filename: 'fake.txt', headBytes: Buffer.from([0x4d, 0x5a, 0x90, 0x00]) }).allowed, false);
+  // ELF 可执行头
+  assert.equal(inspectDownloadSafety({ filename: 'bin.dat', headBytes: Buffer.from([0x7f, 0x45, 0x4c, 0x46]) }).allowed, false);
+  // Mach-O 与 shebang
+  assert.equal(inspectDownloadSafety({ filename: 'macho.bin', headBytes: Buffer.from([0xcf, 0xfa, 0xed, 0xfe]) }).allowed, false);
+  assert.equal(inspectDownloadSafety({ filename: 'run.txt', headBytes: Buffer.from('#!/bin/sh\nrm -rf /') }).allowed, false);
+  // 超出大小上限
+  assert.equal(inspectDownloadSafety({ filename: 'big.zip', sizeBytes: 200, maxBytes: 100 }).allowed, false);
 });
