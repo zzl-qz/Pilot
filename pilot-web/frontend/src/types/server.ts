@@ -145,6 +145,34 @@ export interface CapabilitiesControllerCapabilitiesResponse {
   pluginReport: string;
 }
 
+/** AgentProfilesController.java / ProfilesResponse */
+export interface AgentProfilesControllerProblemPayload {
+  name: string;
+  file: string;
+  reason: string;
+}
+
+export interface AgentProfilesControllerProfilesResponse {
+  available: AgentProfilesControllerProfilePayload[];
+  invalid?: AgentProfilesControllerProblemPayload[];
+  projectRoot: string;
+  userRoot: string;
+}
+
+export interface AgentProfilesControllerProfilePayload {
+  name: string;
+  description: string;
+  tools: string[];
+  files: string[];
+  denyFiles: string[];
+  commands: string[];
+  denyCommands: string[];
+  writable: boolean;
+  source: 'project' | 'user' | 'builtin';
+  content: string;
+  hasUserOverride?: boolean;
+}
+
 /** CapabilitiesController.java / McpServerPayload */
 export interface CapabilitiesControllerMcpServerPayload {
   name: string;

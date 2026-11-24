@@ -26,10 +26,10 @@ import java.util.stream.Stream;
  */
 public final class AgentProfileCatalog {
 
-    private static final Pattern VALID_NAME = Pattern.compile("^[a-z][a-z0-9-]{0,63}$");
+    public static final Pattern VALID_NAME = Pattern.compile("^[a-z][a-z0-9-]{0,63}$");
     private static final int MAX_PROFILES = 32;
     /** 角色提示词长度上限（对齐技能正文）：代理身份声明不该比技能指引更长。 */
-    private static final int MAX_PROMPT_LINES = 300;
+    public static final int MAX_PROMPT_LINES = 300;
     private static final String BUILTIN_INDEX = "agents/index.txt";
     private static final String BUILTIN_PREFIX = "agents/";
 
@@ -116,6 +116,15 @@ public final class AgentProfileCatalog {
         }
     }
 
+    /** 读取随包内置角色的原始 Markdown 定义；不存在或名称不合法时返回空串。 */
+    public static String readBuiltinContent(String name) {
+        if (name == null || !VALID_NAME.matcher(name).matches()) {
+            return "";
+        }
+        String content = readResource(AgentProfileCatalog.class.getClassLoader(), BUILTIN_PREFIX + name + ".md");
+        return content == null ? "" : content;
+    }
+
     private static String readResource(ClassLoader loader, String path) {
         try (InputStream stream = loader.getResourceAsStream(path)) {
             return stream == null ? null : new String(stream.readAllBytes(), StandardCharsets.UTF_8);
@@ -149,37 +158,36 @@ public final class AgentProfileCatalog {
         parseAndStore(name, file.toString(), text, byName, problems);
     }
 
+    /** 解析并校验单个代理定义（名称、frontmatter、正文非空与行数上限），作为扫描与写接口的单一事实来源。 */
+    public static AgentProfile parseProfile(String name, String text) {
+        if (name == null || !VALID_NAME.matcher(name).matches()) {
+            throw new IllegalArgumentException("文件名必须匹配 ^[a-z][a-z0-9-]{0,63}$");
+        }
+        AgentFrontmatter.Parsed parsed = AgentFrontmatter.parse(text);
+        if (parsed.name() != null && !parsed.name().equals(name)) {
+            throw new IllegalArgumentException("name 声明（" + parsed.name() + "）与文件名不一致；文件名是真源名");
+        }
+        if (parsed.body().isEmpty()) {
+            throw new IllegalArgumentException("正文为空：代理定义只有 frontmatter，没有角色提示词");
+        }
+        if (parsed.body().lines().count() > MAX_PROMPT_LINES) {
+            throw new IllegalArgumentException("角色提示词超过 " + MAX_PROMPT_LINES + " 行上限");
+        }
+        return new AgentProfile(name, parsed.description(), parsed.tools(), parsed.files(), parsed.denyFiles(),
+            parsed.commands(), parsed.denyCommands(), parsed.writable(), parsed.body());
+    }
+
     private static void parseAndStore(String name, String source, String text, Map<String, AgentProfile> byName,
         List<AgentProblem> problems) {
         if (byName.size() >= MAX_PROFILES) {
             problems.add(new AgentProblem(name, source, "有效代理数已达上限 " + MAX_PROFILES + "，本代理被跳过"));
             return;
         }
-        if (!VALID_NAME.matcher(name).matches()) {
-            problems.add(new AgentProblem(name, source, "文件名必须匹配 ^[a-z][a-z0-9-]{0,63}$"));
-            return;
-        }
-        AgentFrontmatter.Parsed parsed;
         try {
-            parsed = AgentFrontmatter.parse(text);
+            byName.put(name, parseProfile(name, text));
         } catch (IllegalArgumentException e) {
             problems.add(new AgentProblem(name, source, e.getMessage()));
-            return;
         }
-        if (parsed.name() != null && !parsed.name().equals(name)) {
-            problems.add(new AgentProblem(name, source, "name 声明（" + parsed.name() + "）与文件名不一致；文件名是真源名"));
-            return;
-        }
-        if (parsed.body().isEmpty()) {
-            problems.add(new AgentProblem(name, source, "正文为空：代理定义只有 frontmatter，没有角色提示词"));
-            return;
-        }
-        if (parsed.body().lines().count() > MAX_PROMPT_LINES) {
-            problems.add(new AgentProblem(name, source, "角色提示词超过 " + MAX_PROMPT_LINES + " 行上限"));
-            return;
-        }
-        byName.put(name, new AgentProfile(name, parsed.description(), parsed.tools(), parsed.files(),
-            parsed.denyFiles(), parsed.commands(), parsed.denyCommands(), parsed.writable(), parsed.body()));
     }
 
     /** @return 按名查找；不存在返回空。 */

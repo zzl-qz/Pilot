@@ -95,6 +95,8 @@ export interface StoreData extends Omit<ReducerState, 'ui'> {
   contextStatus: ContextStatus | null; compactingContext: boolean; queueEntries: QueueEntry[];
   taskDirty: boolean; taskBusy: boolean; taskDraftRevision: number; planItems: PlanItem[];
   skills: (S.SkillsControllerSkillPayload & { id?: string })[]; skillsMeta: { projectRoot: string; userRoot: string; invalid: S.SkillProblem[] };
+  agentProfiles: S.AgentProfilesControllerProfilePayload[];
+  agentProfilesMeta: { projectRoot: string; userRoot: string; invalid: S.AgentProfilesControllerProblemPayload[] };
   pendingMemoryDrafts: number;
   quickCommands: (BuiltinCommand | SkillCommand)[]; modelOptions: string[]; remoteModels: string[];
   settingsData: S.SettingsControllerSettingsResponse | null; modelSave: { busy: boolean; message: string; error: boolean };
@@ -168,7 +170,7 @@ export interface StoreActions {
   clearModelKey(): Promise<boolean>; resetModelFeedback(): void;
   saveModel(body: Parameters<ApiClient['saveModel']>[0], options?: { clearKey?: boolean }): Promise<boolean>;
   probeModels(body: Parameters<ApiClient['probeModels']>[0]): ReturnType<ApiClient['probeModels']>;
-  loadSkills(): Promise<void>; refreshMemoryDraftCount(workspace?: string): Promise<void>; loadCapabilities(): Promise<ApiResults['capabilities'] | null>;
+  loadSkills(): Promise<void>; refreshMemoryDraftCount(workspace?: string): Promise<void>; loadCapabilities(): Promise<ApiResults['capabilities'] | null>; loadAgentProfiles(): Promise<void>;
   loadValidation(): Promise<void>;
   loadBrowserStatus(): Promise<BrowserStatus | null>;
   selectBrowserLane(browserSessionId: string): Promise<boolean>;

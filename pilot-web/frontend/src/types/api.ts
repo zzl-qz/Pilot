@@ -338,6 +338,7 @@ export interface ApiResults {
   gitDraftMessage: GitDraftMessageResult;
   gitCommit: GitCommitResult;
   capabilities: S.CapabilitiesControllerCapabilitiesResponse;
+  agentProfiles: S.AgentProfilesControllerProfilesResponse;
   mcpServers: S.McpConfigControllerServerPayload[];
   mcpAddServer: S.McpConfigControllerServerPayload;
   mcpImportServers: S.McpConfigControllerImportResponse;

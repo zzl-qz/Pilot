@@ -4,6 +4,7 @@ import { useStore } from '../../store.js';
 import { MCP_TRUST_LABELS, mcpSourceLabel } from '../../lib/mcp.js';
 import { pluginStatusDetail, pluginStatusLabel, pluginStatusTone, pluginSummary } from '../../lib/plugin-status.js';
 import { toolLabel } from '../../lib/tool-meta.js';
+import { agentSourceLabel } from '../settings/agent-profiles-state.js';
 
 /* ---------- 能力清单 ---------- */
 
@@ -26,11 +27,13 @@ export function CapabilitiesPanel() {
   const data = useStore((state) => state.capabilities);
   const state = useStore((state) => state.capabilitiesState);
   const skills = useStore((state) => state.skills || NO_TASKS);
+  const agentProfiles = useStore((state) => state.agentProfiles);
+  useEffect(() => {
+    if (sessionId) useStore.getState().loadAgentProfiles();
+  }, [sessionId]);
 
   useEffect(() => {
-    if (sessionId) {
-      useStore.getState().loadCapabilities();
-    }
+    if (sessionId) useStore.getState().loadCapabilities();
   }, [sessionId]);
 
   // 可用的排前面：不可用的一多，最该看到的东西会被挤到列表底部
@@ -52,7 +55,10 @@ export function CapabilitiesPanel() {
         <span className="commands-state">
           {state === 'loading' ? '读取中…' : `${available} / ${tools.length} 个工具可用`}
         </span>
-        <button type="button" className="btn" onClick={() => useStore.getState().loadCapabilities()}>刷新</button>
+        <button type="button" className="btn" onClick={() => {
+          void useStore.getState().loadCapabilities();
+          void useStore.getState().loadAgentProfiles();
+        }}>刷新</button>
       </div>
       <div className="cap-scroll">
         <section className="cap-section">
@@ -169,6 +175,26 @@ export function CapabilitiesPanel() {
               ))}
             </ul>
           ) : <p className="panel-empty">还没有安装技能。在设置 → 技能里可以从 git 仓库安装。</p>}
+        </section>
+        <section className="cap-section">
+          <h3>子代理角色<span className="cap-count">{agentProfiles.length}</span></h3>
+          {agentProfiles.length ? <ul className="cap-list">
+            {agentProfiles.map((profile) => (
+              <li key={profile.name} className="cap-item">
+                <div className="cap-item-head">
+                  <code className="cap-name">{profile.name}</code>
+                  <span className="cap-tag">{agentSourceLabel(profile.source)}</span>
+                  <span className={`cap-tag${profile.writable ? '' : ' is-readonly'}`}>{profile.writable ? '可写' : '只读'}</span>
+                </div>
+                <p className="cap-desc">{profile.description}</p>
+                {!!profile.tools.length && <p className="cap-desc cap-mono">工具：{profile.tools.join('、')}</p>}
+                {!!profile.files.length && <p className="cap-desc cap-mono">文件白名单：{profile.files.join('、')}</p>}
+                {!!profile.denyFiles.length && <p className="cap-desc cap-mono">文件黑名单：{profile.denyFiles.join('、')}</p>}
+                {!!profile.commands.length && <p className="cap-desc cap-mono">命令白名单：{profile.commands.join('、')}</p>}
+                {!!profile.denyCommands.length && <p className="cap-desc cap-mono">命令黑名单：{profile.denyCommands.join('、')}</p>}
+              </li>
+            ))}
+          </ul> : <p className="panel-empty">没有可用子代理角色。</p>}
         </section>
         <section className="cap-section">
           <h3>钩子<span className="cap-count">{hooks.length}</span></h3>

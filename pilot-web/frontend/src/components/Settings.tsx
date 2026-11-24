@@ -18,6 +18,7 @@ import { ModelRuntimeSettings } from "./model/ModelRuntimeSettings.jsx";
 import { PermissionSettings } from "./settings/PermissionSettings.js";
 import { AlertSettings } from "./settings/AlertSettings.js";
 import { SkillsSettings } from "./settings/SkillsSettings.js";
+import { AgentProfilesSettings } from "./settings/AgentProfilesSettings.js";
 import { MemorySettings } from "./settings/MemorySettings.js";
 import { McpSettings } from "./settings/McpSettings.js";
 import { WebSearchSettings } from "./settings/WebSearchSettings.js";
@@ -32,6 +33,7 @@ const SECTIONS = [
   { id: 'permission', label: '权限', icon: 'shield', description: '决定 Pilot 写入文件和执行命令前何时需要批准。', Content: PermissionSettings },
   { id: 'alerts', label: '提醒', icon: 'bell', description: '管理完成提示音、窗口外悬浮提醒、系统通知与任务栏提示。', Content: AlertSettings },
   { id: 'skills', label: '技能', icon: 'skill', description: '管理项目级和用户级技能。', Content: SkillsSettings },
+  { id: 'agents', label: '子代理', icon: 'agents', description: '查看内置、项目级与用户级子代理角色。', Content: AgentProfilesSettings },
   { id: 'memory', label: '记忆', icon: 'note', description: '审阅候选记忆，管理当前项目与个人全局记忆。', Content: MemorySettings },
   { id: 'mcp', label: 'MCP', icon: 'plug', description: '管理 MCP 服务器与信任关系，接入外部工具。', Content: McpSettings },
   { id: 'usage', label: '用量', icon: 'chart', description: '查看模型请求、Token 和可估算的费用。', Content: UsageSettings },

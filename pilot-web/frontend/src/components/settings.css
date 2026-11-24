@@ -518,3 +518,60 @@
   overflow-wrap: anywhere;
 }
 .model-profile-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+
+/* ---------- 子代理角色页签 ---------- */
+#settings .agent-profile-list { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 8px; }
+#settings .agent-profile-item {
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel);
+  display: grid;
+  gap: 6px;
+}
+#settings .agent-profile-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+#settings .agent-profile-name { font: 600 13px/1.4 var(--mono); color: var(--ink); }
+#settings .agent-profile-actions { margin-left: auto; display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+#settings .agent-profile-desc { margin: 0; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+#settings .agent-profile-boundaries { display: grid; gap: 2px; font-size: 11.5px; color: var(--muted); overflow-wrap: anywhere; }
+#settings .agent-profile-preview {
+  margin: 4px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  color: var(--ink);
+  font: 12px/1.5 var(--mono);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+#settings .agent-profile-form {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--bg-soft);
+}
+#settings .agent-profile-editor {
+  width: 100%;
+  min-height: 220px;
+  resize: vertical;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  appearance: none;
+  background: var(--panel);
+  color: var(--ink);
+  font: 12.5px/1.55 var(--mono);
+  overflow-wrap: anywhere;
+  tab-size: 2;
+}
+#settings .agent-profile-editor:focus {
+  outline: none;
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+#settings .agent-profile-editor:disabled { opacity: 0.66; }
+#settings .agent-profile-invalid { margin: 8px 0; }
+#settings .agent-profile-invalid ul { margin: 4px 0 0; padding-left: 18px; font-size: 12px; color: var(--err); }

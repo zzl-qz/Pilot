@@ -198,6 +198,8 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   skills: [],
   /** 技能安装位置与无效项（设置页用来告诉用户「装到哪」以及哪些没通过校验）。 */
   skillsMeta: { projectRoot: '', userRoot: '', invalid: [] },
+  agentProfiles: [],
+  agentProfilesMeta: { projectRoot: '', userRoot: '', invalid: [] },
   pendingMemoryDrafts: 0,
   /** 内置 / 快捷指令：先用 QUICK_COMMANDS 兜底，loadSkills 成功后合并技能指令。 */
   quickCommands: mergeCommands(QUICK_COMMANDS, []),
@@ -813,6 +815,29 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       set((draft) => { draft.capabilitiesState = 'error'; });
       get().showNotice('读取能力清单失败：' + errorInfo(error).message);
       return null;
+    }
+  },
+  async loadAgentProfiles() {
+    const sessionId = get().sessionId;
+    try {
+      const data = await api.agentProfiles(sessionId || undefined);
+      if (get().sessionId !== sessionId) return;
+      set((draft) => {
+        draft.agentProfiles = Array.isArray(data?.available) ? data.available : [];
+        draft.agentProfilesMeta = {
+          projectRoot: data?.projectRoot || '',
+          userRoot: data?.userRoot || '',
+          invalid: Array.isArray(data?.invalid) ? data.invalid : []
+        };
+      });
+    } catch (error) {
+      if (get().sessionId === sessionId) {
+        get().showNotice('读取子代理角色失败：' + errorInfo(error).message);
+        set((draft) => {
+          draft.agentProfiles = [];
+          draft.agentProfilesMeta = { projectRoot: '', userRoot: '', invalid: [] };
+        });
+      }
     }
   },
   /**
