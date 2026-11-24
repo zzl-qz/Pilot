@@ -85,6 +85,54 @@ class GitCommitWorkflowTest {
         assertTrue(emptySelection.error().contains("至少一个"));
     }
 
+    @Test
+    void supportsDiscardStashBranchesAndReportsSwitchConflicts() throws Exception {
+        git("init", "-b", "main");
+        git("config", "user.name", "Pilot Tester");
+        git("config", "user.email", "tester@pilot.local");
+        Files.writeString(repo.resolve("file.txt"), "base\n", StandardCharsets.UTF_8);
+        git("add", "file.txt");
+        git("commit", "-m", "base");
+        git("switch", "-c", "feature");
+        Files.writeString(repo.resolve("file.txt"), "feature\n", StandardCharsets.UTF_8);
+        git("add", "file.txt");
+        git("commit", "-m", "feature");
+        git("switch", "main");
+
+        assertTrue(service.branches(repo).branches().containsAll(List.of("main", "feature")));
+        // 已暂存 + 未暂存并存时，放弃未暂存只回退工作区到暂存区内容，不抹掉暂存区
+        Files.writeString(repo.resolve("file.txt"), "staged\n", StandardCharsets.UTF_8);
+        git("add", "file.txt");
+        assertFalse(service.discardUnstaged(repo, "file.txt").ok(), "仅暂存无未暂存修改时应拒绝");
+        Files.writeString(repo.resolve("file.txt"), "unstaged edit\n", StandardCharsets.UTF_8);
+        assertTrue(service.discardUnstaged(repo, "file.txt").ok());
+        assertEquals("staged\n", Files.readString(repo.resolve("file.txt")));
+        git("reset", "--hard", "HEAD");
+
+        Files.writeString(repo.resolve("untracked.txt"), "new\n", StandardCharsets.UTF_8);
+        assertFalse(service.discardUnstaged(repo, "untracked.txt").ok());
+        Files.deleteIfExists(repo.resolve("untracked.txt"));
+        assertFalse(service.discardUnstaged(repo, "../outside").ok());
+        assertFalse(service.stashPush(repo, "empty").ok(), "干净工作区不应伪造 stash 成功");
+
+        Files.writeString(repo.resolve("file.txt"), "stashed\n", StandardCharsets.UTF_8);
+        assertTrue(service.stashPush(repo, "work in progress").ok());
+        assertEquals("base\n", Files.readString(repo.resolve("file.txt")));
+        assertEquals("stash@{0}", service.stashes(repo).stashes().getFirst().reference());
+        assertFalse(service.stashPop(repo, "--index").ok());
+        assertTrue(service.stashPop(repo, "stash@{0}").ok());
+        assertEquals("stashed\n", Files.readString(repo.resolve("file.txt")));
+
+        Files.writeString(repo.resolve("file.txt"), "main conflicting edit\n", StandardCharsets.UTF_8);
+        ChangeService.GitOperationResult conflict = service.switchBranch(repo, "feature");
+        assertFalse(conflict.ok());
+        assertTrue(conflict.error().toLowerCase().contains("local changes") || conflict.error().contains("覆盖"), conflict.error());
+        assertEquals("main", service.branches(repo).current());
+        assertFalse(service.switchBranch(repo, "--help").ok());
+        assertFalse(service.switchBranch(repo, "nonexistent-branch").ok());
+        assertFalse(service.switchBranch(repo, "main\r\nfeature").ok());
+    }
+
     private void git(String... args) throws Exception {
         List<String> cmd = new java.util.ArrayList<>();
         cmd.add("git");

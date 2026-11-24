@@ -88,6 +88,40 @@ public class ChangeController {
         return changes.commit(workspace(id), request.paths(), Boolean.TRUE.equals(request.all()), request.message());
     }
 
+    @PostMapping("/diff/discard-unstaged")
+    public ChangeService.GitOperationResult discardUnstaged(@PathVariable String id,
+        @RequestBody(required = false) PathRequest request) {
+        return changes.discardUnstaged(workspace(id), request == null ? null : request.path());
+    }
+
+    @GetMapping("/git/branches")
+    public ChangeService.GitBranchReport branches(@PathVariable String id) {
+        return changes.branches(workspace(id));
+    }
+
+    @PostMapping("/git/switch")
+    public ChangeService.GitOperationResult switchBranch(@PathVariable String id,
+        @RequestBody(required = false) BranchRequest request) {
+        return changes.switchBranch(workspace(id), request == null ? null : request.branch());
+    }
+
+    @GetMapping("/git/stash")
+    public ChangeService.GitStashReport stashes(@PathVariable String id) {
+        return changes.stashes(workspace(id));
+    }
+
+    @PostMapping("/git/stash/push")
+    public ChangeService.GitOperationResult stashPush(@PathVariable String id,
+        @RequestBody(required = false) StashPushRequest request) {
+        return changes.stashPush(workspace(id), request == null ? null : request.message());
+    }
+
+    @PostMapping("/git/stash/pop")
+    public ChangeService.GitOperationResult stashPop(@PathVariable String id,
+        @RequestBody(required = false) StashPopRequest request) {
+        return changes.stashPop(workspace(id), request == null ? null : request.reference());
+    }
+
     private Path workspace(String id) {
         Session session = SessionLookup.require(sessions, id);
         String workspace =
@@ -107,4 +141,9 @@ public class ChangeController {
 
     public record CommitRequest(List<String> paths, Boolean all, String message) {
     }
+
+    public record PathRequest(String path) { }
+    public record BranchRequest(String branch) { }
+    public record StashPushRequest(String message) { }
+    public record StashPopRequest(String reference) { }
 }

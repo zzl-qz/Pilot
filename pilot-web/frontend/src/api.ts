@@ -220,6 +220,12 @@ export const api = {
   restoreChanges: (id: string, body: { paths?: string[]; all?: boolean }) => apiJson<ApiResults['restoreChanges']>(`/api/sessions/${encodeURIComponent(id)}/diff/restore`, jsonBody('POST', body || {})),
   gitLog: (id: string, limit = 15, signal?: AbortSignal) =>
     apiJson<ApiResults['gitLog']>(`/api/sessions/${encodeURIComponent(id)}/git/log?limit=${limit}`, { signal }),
+  gitBranches: (id: string) => apiJson<ApiResults['gitBranches']>(`/api/sessions/${encodeURIComponent(id)}/git/branches`),
+  gitSwitch: (id: string, branch: string) => apiJson<ApiResults['gitOperation']>(`/api/sessions/${encodeURIComponent(id)}/git/switch`, jsonBody('POST', { branch })),
+  gitStashes: (id: string) => apiJson<ApiResults['gitStashes']>(`/api/sessions/${encodeURIComponent(id)}/git/stash`),
+  gitStashPush: (id: string, message: string) => apiJson<ApiResults['gitOperation']>(`/api/sessions/${encodeURIComponent(id)}/git/stash/push`, jsonBody('POST', { message })),
+  gitStashPop: (id: string, reference: string) => apiJson<ApiResults['gitOperation']>(`/api/sessions/${encodeURIComponent(id)}/git/stash/pop`, jsonBody('POST', { reference })),
+  discardUnstaged: (id: string, path: string) => apiJson<ApiResults['gitOperation']>(`/api/sessions/${encodeURIComponent(id)}/diff/discard-unstaged`, jsonBody('POST', { path })),
   gitDraftMessage: (id: string, body: { paths: string[]; all?: boolean }) =>
     apiJson<ApiResults['gitDraftMessage']>(`/api/sessions/${encodeURIComponent(id)}/git/commit-message`, jsonBody('POST', body)),
   gitCommit: (id: string, body: { paths: string[]; all?: boolean; message: string }) =>

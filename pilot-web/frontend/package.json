@@ -7,6 +7,7 @@
     "test:models": "node --import ./scripts/register-typescript.mjs --test scripts/model-picker.test.mjs && node scripts/model-discovery-smoke.mjs",
     "test:refresh": "node scripts/workbench-refresh-smoke.mjs",
     "test:mobile": "node scripts/mobile-connection-smoke.mjs",
+    "test:git-changes": "node scripts/git-changes-smoke.mjs",
     "test:usage": "node --import ./scripts/register-typescript.mjs --test scripts/request-usage.test.mjs && node scripts/request-usage-smoke.mjs",
     "test:agents": "node --import ./scripts/register-typescript.mjs --test scripts/agent-events.test.mjs && node scripts/agent-usage-smoke.mjs",
     "test:agent-profiles": "node --import ./scripts/register-typescript.mjs --test scripts/agent-profiles-ui.test.mjs && node scripts/agent-profiles-smoke.mjs",

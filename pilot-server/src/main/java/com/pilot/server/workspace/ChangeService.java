@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -117,6 +118,18 @@ public class ChangeService {
 
     /** 近期提交历史查询结果。 */
     public record CommitLogReport(boolean gitRepository, String branch, List<CommitEntry> commits, String error) {
+    }
+
+    public record GitBranchReport(boolean gitRepository, String current, List<String> branches, String error) {
+    }
+
+    public record GitStashEntry(String reference, String message) {
+    }
+
+    public record GitStashReport(boolean gitRepository, List<GitStashEntry> stashes, String error) {
+    }
+
+    public record GitOperationResult(boolean ok, String error) {
     }
 
     /** 变更提交结果。 */
@@ -452,6 +465,35 @@ public class ChangeService {
         return new RestoreReport(List.copyOf(restored), List.copyOf(deleted), List.copyOf(failed), null);
     }
 
+    /** 丢弃单个已跟踪文件的未暂存改动，不触碰暂存区。 */
+    public GitOperationResult discardUnstaged(Path workspace, String rawPath) {
+        Path root = workspace.toAbsolutePath().normalize();
+        if (!hasGitMetadata(root)) {
+            return new GitOperationResult(false, "当前工作区不是 Git 仓库");
+        }
+        String path = safeRelative(rawPath);
+        if (path == null) {
+            return new GitOperationResult(false, "路径不在工作区内，已拒绝");
+        }
+        String code = statuses(root).codes().get(path);
+        if (code == null) {
+            return new GitOperationResult(false, "该文件没有未提交改动");
+        }
+        if ("??".equals(code)) {
+            return new GitOperationResult(false, "未跟踪的新文件不支持放弃未暂存改动");
+        }
+        if (run(root, List.of("git", "diff", "--quiet", "--", ":(literal)" + path)).exitCode() == 0) {
+            return new GitOperationResult(false, "该文件没有未暂存改动");
+        }
+        CommandResult result = run(root, List.of("git", "restore", "--worktree", "--", ":(literal)" + path));
+        if (result.exitCode() != 0) {
+            // 兼容 git 2.23 之前无 restore 子命令的环境
+            result = run(root, List.of("git", "checkout", "--", ":(literal)" + path));
+        }
+        return result.exitCode() == 0 ? new GitOperationResult(true, null)
+            : new GitOperationResult(false, firstUsefulError(result.output(), "放弃文件改动失败"));
+    }
+
     /** git 输出可能有很多行，界面上的失败原因只留第一行有用信息。 */
     private static String firstLine(String output) {
         if (output == null || output.isBlank()) {
@@ -768,6 +810,103 @@ public class ChangeService {
             out.append(line);
         }
         return out.toString();
+    }
+
+    /** 读取本地分支。 */
+    public GitBranchReport branches(Path workspace) {
+        Path root = workspace.toAbsolutePath().normalize();
+        if (!hasGitMetadata(root)) {
+            return new GitBranchReport(false, "", List.of(), null);
+        }
+        CommandResult currentResult = run(root, List.of("git", "branch", "--show-current"));
+        CommandResult branchResult = run(root, List.of("git", "for-each-ref", "--format=%(refname:short)", "refs/heads"));
+        if (currentResult.exitCode() != 0 || branchResult.exitCode() != 0) {
+            return new GitBranchReport(true, "", List.of(), firstUsefulError(branchResult.output(), currentResult.output()));
+        }
+        String current = currentResult.output().strip();
+        String output = branchResult.output();
+        return new GitBranchReport(true, current, output.lines().filter(line -> !line.isBlank()).toList(), null);
+    }
+
+    /** 切换至现有本地分支，分支名经白名单校验并作为独立参数传递，避免参数注入或 shell 解析。 */
+    public GitOperationResult switchBranch(Path workspace, String branch) {
+        if (branch == null) {
+            return new GitOperationResult(false, "分支名无效");
+        }
+        String target = branch.strip();
+        if (target.isEmpty() || target.startsWith("-") || target.indexOf('\n') >= 0 || target.indexOf('\r') >= 0
+            || target.indexOf('\0') >= 0) {
+            return new GitOperationResult(false, "分支名无效");
+        }
+        GitBranchReport report = branches(workspace);
+        if (!report.gitRepository()) {
+            return new GitOperationResult(false, "当前工作区不是 Git 仓库");
+        }
+        if (report.error() != null) {
+            return new GitOperationResult(false, report.error());
+        }
+        if (!report.branches().contains(target)) {
+            return new GitOperationResult(false, "本地分支不存在：" + target);
+        }
+        return gitOperation(workspace, List.of("git", "switch", "--", target));
+    }
+
+    /** 列出工作区 stash。 */
+    public GitStashReport stashes(Path workspace) {
+        Path root = workspace.toAbsolutePath().normalize();
+        if (!hasGitMetadata(root)) {
+            return new GitStashReport(false, List.of(), null);
+        }
+        CommandResult result = run(root, List.of("git", "stash", "list", "--format=%gd%x09%gs"));
+        if (result.exitCode() != 0) {
+            return new GitStashReport(true, List.of(), firstUsefulError(result.output(), "读取 stash 失败"));
+        }
+        String output = result.output();
+        List<GitStashEntry> entries = output.lines().filter(line -> !line.isBlank()).map(line -> {
+            String[] parts = line.split("\t", 2);
+            return new GitStashEntry(parts[0], parts.length > 1 ? parts[1] : "");
+        }).toList();
+        return new GitStashReport(true, entries, null);
+    }
+
+    public GitOperationResult stashPush(Path workspace, String message) {
+        Path root = workspace.toAbsolutePath().normalize();
+        if (!hasGitMetadata(root)) {
+            return new GitOperationResult(false, "当前工作区不是 Git 仓库");
+        }
+        List<String> command = new ArrayList<>(List.of("git", "stash", "push"));
+        if (message != null && !message.isBlank()) {
+            String cleaned = message.replace('\r', ' ').replace('\n', ' ').strip();
+            if (!cleaned.isEmpty()) {
+                command.addAll(List.of("-m", cleaned));
+            }
+        }
+        CommandResult result = run(root, command);
+        if (result.exitCode() != 0) {
+            return new GitOperationResult(false,
+                firstUsefulError(result.output(), "保存 stash 失败（退出码 " + result.exitCode() + "）"));
+        }
+        if (result.output() != null && result.output().toLowerCase(Locale.ROOT).contains("no local changes to save")) {
+            return new GitOperationResult(false, "当前没有可暂存的本地改动");
+        }
+        return new GitOperationResult(true, null);
+    }
+
+    public GitOperationResult stashPop(Path workspace, String reference) {
+        if (reference == null || !reference.matches("stash@\\{[0-9]+\\}")) {
+            return new GitOperationResult(false, "stash 引用无效");
+        }
+        return gitOperation(workspace, List.of("git", "stash", "pop", reference));
+    }
+
+    private GitOperationResult gitOperation(Path workspace, List<String> command) {
+        Path root = workspace.toAbsolutePath().normalize();
+        if (!hasGitMetadata(root)) {
+            return new GitOperationResult(false, "当前工作区不是 Git 仓库");
+        }
+        CommandResult result = run(root, command);
+        return result.exitCode() == 0 ? new GitOperationResult(true, null)
+            : new GitOperationResult(false, firstUsefulError(result.output(), "Git 操作失败（退出码 " + result.exitCode() + "）"));
     }
 
     /** 读取近期提交历史与当前分支名。非 Git 仓库或尚无提交时返回空列表而非报错。 */

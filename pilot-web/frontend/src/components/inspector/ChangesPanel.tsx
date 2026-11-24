@@ -1,6 +1,6 @@
 import { statusLetter } from './diff-format.js';
 import type { ChangeFile, ChangeReport, DiffFile } from '../../types/core.js';
-import type { GitCommitLogReport } from '../../types/api.js';
+import type { GitBranchReport, GitCommitLogReport, GitStashReport } from '../../types/api.js';
 import { reviewQuote } from '../../lib/interaction.js';
 import { errorInfo } from '../../lib/errors.js';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -29,6 +29,7 @@ export function ChangesPanel() {
   const [runReview, setRunReview] = useState<{ runId: string; epoch: number; report?: ReviewReport; error?: string } | null>(null);
   const [refresh, setRefresh] = useState(0);
   const state = useStore((state) => state.changesState);
+  const running = useStore((state) => state.running);
   const sessionId = useStore((state) => state.sessionId);
   const view = useStore((state) => state.ui.changeView);
   const sessionEpoch = useStore(state => state.sessionEpoch);
@@ -49,8 +50,15 @@ export function ChangesPanel() {
   const [drafting, setDrafting] = useState(false);
   const [commitFeedback, setCommitFeedback] = useState<{ text: string; error?: boolean } | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [gitToolsOpen, setGitToolsOpen] = useState(false);
   const [gitLog, setGitLog] = useState<GitCommitLogReport | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [branches, setBranches] = useState<GitBranchReport | null>(null);
+  const [stashes, setStashes] = useState<GitStashReport | null>(null);
+  const [gitBusy, setGitBusy] = useState(false);
+  const [gitError, setGitError] = useState('');
+  const [gitFeedback, setGitFeedback] = useState('');
+  const [stashMessage, setStashMessage] = useState('');
 
   /*
    * 后端 /diff 的 files 是数组、没有顶层 totals：增删行要从每个文件累加，
@@ -188,10 +196,64 @@ export function ChangesPanel() {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [view, viewIndex, trackedPaths, confirm]);
 
-  const restore = async (paths: string[], all: boolean) => {
+  const loadGitTools = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      const [branchReport, stashReport] = await Promise.all([api.gitBranches(sessionId), api.gitStashes(sessionId)]);
+      setBranches(branchReport);
+      setStashes(stashReport);
+      const err = branchReport?.error || stashReport?.error || '';
+      if (err) setGitError(err);
+    } catch (error) { setGitError(errorInfo(error).message || '读取 Git 状态失败'); }
+  }, [sessionId]);
+
+  useEffect(() => {
+    setBranches(null);
+    setStashes(null);
+    setGitError('');
+    setGitFeedback('');
+    setStashMessage('');
+  }, [sessionId, workspace]);
+
+  const runGitAction = async (action: () => Promise<{ ok: boolean; error: string | null } | null>, successText?: string) => {
+    if (gitBusy || useStore.getState().running) return false;
+    setGitBusy(true); setGitError(''); setGitFeedback('');
+    try {
+      const result = await action();
+      if (!result?.ok) { setGitError(result?.error || 'Git 操作失败'); return false; }
+      if (successText) setGitFeedback(successText);
+      await useStore.getState().loadChanges();
+      await loadGitTools();
+      if (historyOpen) void loadGitLog();
+      return true;
+    } catch (error) {
+      setGitError(errorInfo(error).message || 'Git 操作失败');
+      return false;
+    } finally { setGitBusy(false); }
+  };
+
+  const restoreOne = async (path: string) => {
     setConfirm(null);
-    if (!canUndo || restoring || useStore.getState().running) return;
-    await useStore.getState().restoreChanges(paths, all);
+    if (!canUndo || restoring || useStore.getState().running) return false;
+    setGitError(''); setGitFeedback('');
+    await useStore.getState().restoreChanges([path], false);
+    return true;
+  };
+
+  const discardOne = async (path: string) => {
+    if (!sessionId || !canUndo || restoring || gitBusy || useStore.getState().running) return false;
+    setGitBusy(true); setGitError(''); setGitFeedback('');
+    try {
+      const result = await api.discardUnstaged(sessionId, path);
+      if (!result?.ok) { setGitError(result?.error || '放弃未暂存改动失败'); return false; }
+      setConfirm(null);
+      setGitFeedback(`已放弃 ${path} 的未暂存改动`);
+      await useStore.getState().loadChanges();
+      return true;
+    } catch (error) {
+      setGitError(errorInfo(error).message || '放弃未暂存改动失败');
+      return false;
+    } finally { setGitBusy(false); }
   };
 
   const toggleSelected = (filePath: string) => {
@@ -304,9 +366,45 @@ export function ChangesPanel() {
           key={`${sessionId}:${sessionEpoch}:${workspace}:${scope}`}
           files={files} isGit={isGit} canUndo={canUndo}
           loading={loading} restoring={restoring}
-          onRefresh={() => { useStore.getState().loadChanges(); setRefresh(value => value + 1); }}
+          onRefresh={() => { useStore.getState().loadChanges(); setRefresh(value => value + 1); void loadGitTools(); }}
         />
       </div>
+      {!scoped && isGit && <details className="git-history-box" open={gitToolsOpen} onToggle={event => { setGitToolsOpen(event.currentTarget.open); if (event.currentTarget.open) void loadGitTools(); }}>
+        <summary>本地 Git 工具{branches?.current ? ` · ${branches.current}` : ''}</summary>
+        <div className="git-history-list git-tools-body">
+          <label className="git-tools-branch">
+            <span>切换分支</span>
+            <select aria-label="切换本地分支" disabled={gitBusy || running || !branches?.branches?.length} value={branches?.current || ''}
+              onChange={event => {
+                const target = event.target.value;
+                if (!target || target === branches?.current) return;
+                void runGitAction(() => api.gitSwitch(sessionId, target), `已切换到分支 ${target}`);
+              }}>
+              {!branches?.current && <option value="" disabled>游离 HEAD</option>}
+              {(branches?.branches || []).map(branch => <option key={branch} value={branch}>{branch}</option>)}
+            </select>
+          </label>
+          <form className="git-tools-stash-form" onSubmit={event => {
+            event.preventDefault();
+            void runGitAction(async () => {
+              const result = await api.gitStashPush(sessionId, stashMessage);
+              if (result?.ok) setStashMessage('');
+              return result;
+            }, '已保存本地暂存（stash）');
+          }}>
+            <input aria-label="stash 说明" placeholder="可选：输入 stash 说明" value={stashMessage} onChange={event => setStashMessage(event.target.value)} disabled={gitBusy || running} />
+            <button type="submit" className="btn btn-xs" disabled={gitBusy || running}>保存 stash</button>
+          </form>
+          {stashes && !stashes.stashes.length && <p className="git-history-empty">暂无本地暂存（stash）。</p>}
+          {(stashes?.stashes || []).map(stash => <div key={stash.reference} className="git-history-item git-tools-stash-row">
+            <code className="git-history-hash">{stash.reference}</code>
+            <span className="git-history-subject" title={stash.message}>{stash.message}</span>
+            <button type="button" className="btn btn-xs" disabled={gitBusy || running} onClick={() => void runGitAction(() => api.gitStashPop(sessionId, stash.reference), `已弹出 ${stash.reference}`)}>弹出</button>
+          </div>)}
+        </div>
+      </details>}
+      {gitError && <p role="alert" className="changes-progress git-tools-error">{gitError}</p>}
+      {!gitError && gitFeedback && <p role="status" className="changes-progress">{gitFeedback}</p>}
       {restoring && <p className="changes-progress">撤销中…</p>}
       {state === 'error' && scope === 'workspace' && <p className="changes-progress" role="alert">读取失败，请刷新重试。{!empty && '当前显示上次读取的改动。'}</p>}
       {canCommit && (
@@ -397,10 +495,10 @@ export function ChangesPanel() {
                 onToggleSelect={() => toggleSelected(file.path)}
                 confirming={confirm?.type === 'one' && confirm.path === file.path}
                 canUndo={canUndo}
-                busy={restoring || committing}
+                busy={restoring || committing || gitBusy}
                 onAskUndo={() => setConfirm({ type: 'one', path: file.path })}
                 onCancelUndo={() => setConfirm(null)}
-                onUndo={() => restore([file.path], false)}
+                onUndo={() => discardOne(file.path)}
               />
             ))}
             {keyword && !visibleTracked.length && <p className="change-more">没有匹配「{query}」的文件。</p>}
@@ -429,10 +527,10 @@ export function ChangesPanel() {
                 onToggleSelect={() => toggleSelected(file.path)}
                 confirming={confirm?.type === 'one' && confirm.path === file.path}
                 canUndo={canUndo}
-                busy={restoring || committing}
+                busy={restoring || committing || gitBusy}
                 onAskUndo={() => setConfirm({ type: 'one', path: file.path })}
                 onCancelUndo={() => setConfirm(null)}
-                onUndo={() => restore([file.path], false)}
+                onUndo={() => restoreOne(file.path)}
               />
             ))}
             {showUntracked && visibleUntracked.length > UNTRACKED_LIMIT && (
@@ -456,8 +554,11 @@ export function ChangesPanel() {
               index={viewIndex >= 0 ? viewIndex + 1 : 0}
               total={trackedPaths.length}
               canUndo={canUndo}
-              busy={restoring}
-              onUndo={() => restore([view], false)}
+              busy={restoring || gitBusy}
+              onUndo={() => {
+                const target = files.find((file) => file.path === view);
+                return target?.status === '??' ? restoreOne(view) : discardOne(view);
+              }}
             />
           )
           : (!empty && <p className="panel-empty change-empty">选一个文件看差异。</p>)}
@@ -523,7 +624,7 @@ function ChangeRow({ file, active, untracked, selectable, selected, onToggleSele
           <span className="change-row-confirm">
             撤销 <b>{name}</b> 的改动？
           </span>
-          <span className="change-row-dir">{untracked ? '未跟踪文件会被删除' : '内容会恢复成 HEAD 的样子'}</span>
+          <span className="change-row-dir">{untracked ? '未跟踪文件会被删除' : '放弃工作区未暂存改动（不影响已暂存内容）'}</span>
         </span>
         <span className="change-row-actions">
           <button type="button" className="btn btn-danger" disabled={busy} onClick={onUndo}>撤销</button>
@@ -575,7 +676,7 @@ const DIFF_LINE_LIMIT = 4000;
 
 /** git 状态码 → 一个字母的徽标。 */
 
-function DiffView({ report, scoped, path, change, prevPath, nextPath, index, total, canUndo, busy, onUndo }: { report: ReviewReport | null; scoped: boolean; path: string; change?: ChangeFile; prevPath: string | null; nextPath: string | null; index: number; total: number; canUndo: boolean; busy: boolean; onUndo: () => void }) {
+function DiffView({ report, scoped, path, change, prevPath, nextPath, index, total, canUndo, busy, onUndo }: { report: ReviewReport | null; scoped: boolean; path: string; change?: ChangeFile; prevPath: string | null; nextPath: string | null; index: number; total: number; canUndo: boolean; busy: boolean; onUndo: () => void | Promise<boolean> }) {
   const sessionId = useStore((state) => state.sessionId);
   const untracked = change?.status === '??';
   /*
@@ -683,8 +784,8 @@ function DiffView({ report, scoped, path, change, prevPath, nextPath, index, tot
         >›</button>
         {canUndo && (confirming ? (
           <>
-            <span className="change-view-confirm">撤销这个文件？</span>
-            <button type="button" className="btn btn-danger" disabled={busy} onClick={onUndo}>确认</button>
+            <span className="change-view-confirm">{untracked ? '删除这个未跟踪文件？' : '放弃未暂存改动？'}</span>
+            <button type="button" className="btn btn-danger" disabled={busy} onClick={() => void Promise.resolve(onUndo()).then(ok => { if (ok) setConfirming(false); })}>确认</button>
             <button type="button" className="btn" onClick={() => setConfirming(false)}>取消</button>
           </>
         ) : (

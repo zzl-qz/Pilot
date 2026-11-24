@@ -233,6 +233,10 @@ export interface GitCommitLogReport {
   commits: GitCommitEntry[];
   error: string | null;
 }
+export interface GitBranchReport { gitRepository: boolean; current: string; branches: string[]; error: string | null }
+export interface GitStashEntry { reference: string; message: string }
+export interface GitStashReport { gitRepository: boolean; stashes: GitStashEntry[]; error: string | null }
+export interface GitOperationResult { ok: boolean; error: string | null }
 export interface GitCommitResult {
   ok: boolean;
   hash: string;
@@ -335,6 +339,9 @@ export interface ApiResults {
   fileDiff: S.ChangeServiceFilePatch;
   restoreChanges: S.ChangeServiceRestoreReport;
   gitLog: GitCommitLogReport;
+  gitBranches: GitBranchReport;
+  gitStashes: GitStashReport;
+  gitOperation: GitOperationResult;
   gitDraftMessage: GitDraftMessageResult;
   gitCommit: GitCommitResult;
   capabilities: S.CapabilitiesControllerCapabilitiesResponse;

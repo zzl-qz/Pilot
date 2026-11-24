@@ -303,6 +303,31 @@ html[data-theme] .change-row-name { font-size: 13px; }
 .git-history-hash { font-family: var(--mono); font-size: 11px; color: var(--accent); flex: none; }
 .git-history-subject { flex: 1; min-width: 0; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .git-history-meta { flex: none; font-size: 11px; color: var(--muted); }
+.git-tools-body { gap: 8px; }
+.git-tools-branch { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-2); }
+.git-tools-branch select {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 12px;
+}
+.git-tools-stash-form { display: flex; align-items: center; gap: 6px; }
+.git-tools-stash-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 12px;
+}
+.git-tools-stash-row { align-items: center; }
+.git-tools-error { color: var(--err); }
 html[data-theme] .event { background: transparent; border: 0; border-bottom: 1px solid var(--line-soft); border-radius: 0; padding: 12px 4px; }
 html[data-theme] .event-title { font-size: 13px; }
 html[data-theme] .event-detail { font-size: 12px; line-height: 1.65; }
