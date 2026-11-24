@@ -1322,8 +1322,10 @@ public class AgentRunService implements RunStarter {
             }
         };
         ModelClient measuredMain = preparation.meteredMainClient(prepared, modelClient, sessionId, runId, reports);
+        ModelClient runChildBase = modelClient instanceof com.pilot.server.model.ModelClientProvider provider
+            ? provider.forRun() : modelClient;
         ModelClient measuredChild =
-            new MeteredModelClient(modelClient, sessionId + ":subagent", "subagent", List.of(), reports)
+            new MeteredModelClient(runChildBase, sessionId + ":subagent", "subagent", List.of(), reports)
                 .withRunContext(sessionId, runId);
         // 子代理切换模型时也走同一记账边界，不再返回裸客户端
         java.util.function.Function<String, ModelClient> routedChild =

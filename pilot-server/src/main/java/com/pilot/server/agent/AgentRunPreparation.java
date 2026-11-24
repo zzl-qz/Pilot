@@ -197,7 +197,8 @@ public final class AgentRunPreparation {
 
     public ModelClient meteredMainClient(PreparedRun prepared, ModelClient delegate, String sessionId, String runId,
         Consumer<RequestReport> reports) {
-        return new MeteredModelClient(delegate, sessionId, "main", prepared.promptSources(), reports)
+        ModelClient runScoped = delegate instanceof ModelClientProvider provider ? provider.forRun() : delegate;
+        return new MeteredModelClient(runScoped, sessionId, "main", prepared.promptSources(), reports)
             .withRunContext(sessionId, runId);
     }
 

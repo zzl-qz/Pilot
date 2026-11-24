@@ -1801,12 +1801,30 @@ public final class AgentLoop {
                     kind = ModelFailureKind.TRANSIENT;
                 }
                 String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-                // 永久错误（鉴权、余额、模型不支持、结构非法）重试不会变好，立刻失败
+                // 永久错误（鉴权、余额、模型不支持、结构非法）重试不会变好；如配了备用预设且符合故障转移条件，先切备用继续
                 if (!kind.retryable()) {
+                    if (tryFailover(e, events, reasoningPreviewVisible)) {
+                        attempt = 0;
+                        continue;
+                    }
                     throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_ERROR, "模型调用失败：" + Texts.oneLine(reason, 300));
                 }
+                // 主模型重试一次仍失败时优先切备用预设，避免免费端点限流或本机停服让用户长时间干等
+                if (attempt >= 1 && tryFailover(e, events, reasoningPreviewVisible)) {
+                    attempt = 0;
+                    continue;
+                }
                 boolean wokeFromSleep = compensateWakeupIfDetected(clockMark, -1L, events);
-                RetryBudget.Decision decision = nextRetryDecision(e, reason, wokeFromSleep);
+                RetryBudget.Decision decision;
+                try {
+                    decision = nextRetryDecision(e, reason, wokeFromSleep);
+                } catch (ExecutionPolicy.Stop stop) {
+                    if (tryFailover(e, events, reasoningPreviewVisible)) {
+                        attempt = 0;
+                        continue;
+                    }
+                    throw stop;
+                }
                 attempt = decision.attempt();
                 events.accept(new RunRetrying(attempt, decision.delayMs(), Texts.oneLine(reason, 300),
                     decision.elapsedMs(), decision.remainingMs(), retryBudget.maxAttempts()));
@@ -1817,6 +1835,22 @@ public final class AgentLoop {
                 }
             }
         }
+    }
+
+    private boolean tryFailover(Throwable failure, Consumer<SessionEvent> events,
+        AtomicBoolean reasoningPreviewVisible) {
+        String switched = client.failover(failure);
+        if (switched == null || switched.isBlank()) {
+            return false;
+        }
+        retryBudget.reset();
+        connectionFailures = 0;
+        events.accept(AssistantPreview.discarded());
+        if (reasoningPreviewVisible.getAndSet(false)) {
+            events.accept(AssistantReasoning.discarded());
+        }
+        events.accept(new RunContinued(1, 1, "主模型不可用，已自动切换备用预设：" + switched));
+        return true;
     }
 
     private RetryBudget.Decision nextRetryDecision(RuntimeException error, String reason, boolean wokeFromSleep) {

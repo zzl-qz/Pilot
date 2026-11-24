@@ -65,4 +65,16 @@ public final class ModelProfilesController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         }
     }
+
+    @PutMapping("/fallback")
+    public ModelProfileStore.ProfilesView setFallback(@RequestBody(required = false) FallbackRequest request) {
+        try {
+            return profiles.setFallback(request == null ? "" : request.profileId());
+        } catch (ModelProfileStore.NotFoundException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        }
+    }
+
+    public record FallbackRequest(String profileId) {
+    }
 }

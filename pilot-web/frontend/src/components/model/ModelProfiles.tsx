@@ -83,6 +83,26 @@ export function ModelProfiles({ draft, onActivated }: {
     }
   }
 
+  async function toggleFallback(profile: ModelProfileView) {
+    if (busy) return;
+    setBusy(true);
+    setStatus(null);
+    const clearing = Boolean(profile.fallback);
+    try {
+      const updated = await api.setFallbackModelProfile(clearing ? '' : profile.id);
+      setData(updated);
+      setStatus({
+        message: clearing
+          ? `已取消「${profile.name}」的故障转移备用身份`
+          : `已将「${profile.name}」设为故障转移备用：主模型限流、额度耗尽或断连时本次运行将自动切换`
+      });
+    } catch (error) {
+      setStatus({ message: errorInfo(error).message || '设置备用预设失败', error: true });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function deleteProfile(profile: ModelProfileView) {
     if (busy) return;
     setBusy(true);
@@ -133,6 +153,7 @@ export function ModelProfiles({ draft, onActivated }: {
                 <div className="model-profile-title">
                   <strong>{profile.name}</strong>
                   {profile.active && <span className="model-profile-badge">当前</span>}
+                  {profile.fallback && <span className="model-profile-badge is-fallback">备用</span>}
                   <span className="model-profile-key">{profile.apiKeySet ? `Key ${profile.apiKeyMasked}` : '免密钥'}</span>
                 </div>
                 <p className="model-profile-detail">{profile.model} · {profile.endpoint}</p>
@@ -143,6 +164,12 @@ export function ModelProfiles({ draft, onActivated }: {
                   variant={profile.active ? 'ghost' : 'primary'}
                   isDisabled={busy || profile.active}
                   onClick={() => void activateProfile(profile)}
+                />
+                <Button
+                  label={profile.fallback ? '取消备用' : '设为备用'}
+                  variant="ghost"
+                  isDisabled={busy}
+                  onClick={() => void toggleFallback(profile)}
                 />
                 <Button
                   label="删除"

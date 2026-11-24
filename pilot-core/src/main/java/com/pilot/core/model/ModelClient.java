@@ -31,6 +31,15 @@ public interface ModelClient {
         return false;
     }
 
+    /**
+     * 主模型因限流、额度耗尽、服务端故障或连接断连无法继续时，尝试切换到备用模型预设。
+     *
+     * @return 非空说明（如备用预设与模型名）表示已切换成功，调用方可立即重试；空字符串表示未切换
+     */
+    default String failover(Throwable failure) {
+        return "";
+    }
+
     ModelResponse chat(List<Message> messages, List<ToolDefinition> tools);
 
     default ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> textDelta) {

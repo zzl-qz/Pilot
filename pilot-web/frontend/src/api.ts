@@ -340,6 +340,8 @@ export const api = {
     apiJson<ApiResults['deleteModelProfile']>(`/api/settings/model/profiles/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   activateModelProfile: (id: string) =>
     apiJson<ApiResults['activateModelProfile']>(`/api/settings/model/profiles/${encodeURIComponent(id)}/activate`, { method: 'POST' }),
+  setFallbackModelProfile: (profileId: string) =>
+    apiJson<ApiResults['setFallbackModelProfile']>('/api/settings/model/profiles/fallback', jsonBody('PUT', { profileId })),
   modelRuntime: () => apiJson<ApiResults['modelRuntime']>('/api/settings/model/runtime'),
   saveModelRuntime: (body: Update<S.ModelRuntimeControllerUpdate>) => apiJson<ApiResults['saveModelRuntime']>('/api/settings/model/runtime', jsonBody('PUT', body)),
   probeModels: (body: Update<S.SettingsControllerModelsRequest>) => apiJson<ApiResults['probeModels']>('/api/settings/model/models', jsonBody('POST', body)),

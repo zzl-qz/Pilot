@@ -106,9 +106,20 @@ class ModelProfilesControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.profiles[0].apiKeySet").value(false));
 
-        // 删除预设 & 删除不存在预设返回 404
+        // 设置与清除自动故障转移备用预设，以及删除备用预设时自动清空引用
+        mvc.perform(put("/api/settings/model/profiles/fallback").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"profileId\":\"" + localId + "\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.fallbackProfileId").value(localId))
+            .andExpect(jsonPath("$.profiles[1].fallback").value(true));
+        mvc.perform(put("/api/settings/model/profiles/fallback").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"profileId\":\"prof_missing\"}"))
+            .andExpect(status().isNotFound());
+
+        // 删除预设 & 删除不存在预设返回 404（删除备用预设时自动清理 fallbackProfileId）
         mvc.perform(delete("/api/settings/model/profiles/" + localId))
             .andExpect(status().isOk())
+            .andExpect(jsonPath("$.fallbackProfileId").value(""))
             .andExpect(jsonPath("$.profiles.length()").value(1));
         mvc.perform(delete("/api/settings/model/profiles/prof_nonexistent"))
             .andExpect(status().isNotFound());

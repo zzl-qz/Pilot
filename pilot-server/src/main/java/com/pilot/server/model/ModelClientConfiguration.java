@@ -24,9 +24,20 @@ public class ModelClientConfiguration {
      * 配置变化时在下一次请求前重建对应客户端。
      */
     @Bean
-    ModelClient modelClient(ModelSettings settings, ObjectMapper objectMapper, ModelRuntimeSettings runtime,
-        @Value("${pilot.model.prompt-caching:false}") boolean promptCaching,
+    ModelClient modelClient(ModelSettings settings, ModelProfileStore profiles, ObjectMapper objectMapper,
+        ModelRuntimeSettings runtime, @Value("${pilot.model.prompt-caching:false}") boolean promptCaching,
         @Qualifier("modelHttpClient") HttpClient httpClient) {
+        return modelClientProvider(settings, objectMapper, runtime, promptCaching, httpClient)
+            .withFallback(profiles::fallbackTarget);
+    }
+
+    ModelClient modelClient(ModelSettings settings, ObjectMapper objectMapper, ModelRuntimeSettings runtime,
+        boolean promptCaching, HttpClient httpClient) {
+        return modelClientProvider(settings, objectMapper, runtime, promptCaching, httpClient);
+    }
+
+    private ModelClientProvider modelClientProvider(ModelSettings settings, ObjectMapper objectMapper,
+        ModelRuntimeSettings runtime, boolean promptCaching, HttpClient httpClient) {
         // 显式缓存标记只给支持 cache_control 的端点；OpenAI 官方端点自动缓存，保持默认关闭
         return new ModelClientProvider(settings, snapshot -> {
             var limits = runtime.timeouts(snapshot);

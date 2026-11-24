@@ -40,4 +40,9 @@ public abstract class DelegatingModelClient implements ModelClient {
     public boolean disableRejectedNativeTools(Throwable failure) {
         return delegate.disableRejectedNativeTools(failure);
     }
+
+    @Override
+    public String failover(Throwable failure) {
+        return delegate.failover(failure);
+    }
 }

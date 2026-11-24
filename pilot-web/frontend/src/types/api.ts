@@ -200,9 +200,11 @@ export interface ModelProfileView {
   maxOutputTokens: number | null;
   childModel: string;
   active: boolean;
+  fallback?: boolean;
 }
 export interface ModelProfilesView {
   activeProfileId: string;
+  fallbackProfileId?: string;
   profiles: ModelProfileView[];
 }
 export interface ModelProfileSaveRequest {
@@ -382,6 +384,7 @@ export interface ApiResults {
   updateModelProfile: ModelProfilesView;
   deleteModelProfile: ModelProfilesView;
   activateModelProfile: ModelProfilesView;
+  setFallbackModelProfile: ModelProfilesView;
   modelRuntime: S.ModelRuntimeSettingsView;
   saveModelRuntime: S.ModelRuntimeSettingsView;
   probeModels: S.SettingsControllerModelsResponse;

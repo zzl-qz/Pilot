@@ -4,6 +4,7 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.stereotype.Component;
@@ -25,6 +26,7 @@ import tools.jackson.databind.ObjectMapper;
 public class ModelProfileStore {
     private static final String KEY_PROFILES = "model.profiles";
     private static final String KEY_ACTIVE = "model.active-profile";
+    private static final String KEY_FALLBACK = "model.fallback-profile";
     private static final int MAX_PROFILES = 30;
     private static final int MAX_NAME_LENGTH = 60;
 
@@ -33,6 +35,7 @@ public class ModelProfileStore {
     private final ObjectMapper mapper;
     private final List<StoredProfile> profiles = new ArrayList<>();
     private String activeProfileId = "";
+    private String fallbackProfileId = "";
 
     public ModelProfileStore(SettingsStore store, ModelSettings models, ObjectMapper mapper) {
         this.store = store;
@@ -44,10 +47,11 @@ public class ModelProfileStore {
     public synchronized ProfilesView list() {
         ModelSettings.Snapshot current = models.snapshot();
         String effectiveActive = resolveEffectiveActive(current);
+        String effectiveFallback = resolveEffectiveFallback();
         List<ProfileView> views = profiles.stream()
-            .map(profile -> toView(profile, profile.id().equals(effectiveActive)))
+            .map(profile -> toView(profile, profile.id().equals(effectiveActive), profile.id().equals(effectiveFallback)))
             .toList();
-        return new ProfilesView(effectiveActive, views);
+        return new ProfilesView(effectiveActive, effectiveFallback, views);
     }
 
     public synchronized ProfilesView create(SaveRequest request) {
@@ -122,6 +126,9 @@ public class ModelProfileStore {
         if (id.equals(activeProfileId)) {
             activeProfileId = "";
         }
+        if (id.equals(fallbackProfileId)) {
+            fallbackProfileId = "";
+        }
         persist();
         return list();
     }
@@ -136,6 +143,39 @@ public class ModelProfileStore {
         activeProfileId = target.id();
         persist();
         return list();
+    }
+
+    /** 指定或清除主模型失败时自动切换的备用预设；传空或空白表示取消自动故障转移。 */
+    public synchronized ProfilesView setFallback(String id) {
+        if (blank(id)) {
+            fallbackProfileId = "";
+            persist();
+            return list();
+        }
+        int index = findIndex(id);
+        if (index < 0) {
+            throw new NotFoundException("未找到指定的模型预设: " + id);
+        }
+        fallbackProfileId = profiles.get(index).id();
+        persist();
+        return list();
+    }
+
+    /** 解析当前配置对应的自动故障转移目标；未配置、已删除或与当前模型/端点一致时返回空。 */
+    public synchronized Optional<FallbackTarget> fallbackTarget(ModelSettings.Snapshot current) {
+        if (blank(fallbackProfileId)) {
+            return Optional.empty();
+        }
+        int index = findIndex(fallbackProfileId);
+        if (index < 0) {
+            return Optional.empty();
+        }
+        StoredProfile target = profiles.get(index);
+        if (current != null && target.endpoint().equals(trimToEmpty(current.endpoint()))
+            && target.model().equals(trimToEmpty(current.model()))) {
+            return Optional.empty();
+        }
+        return Optional.of(new FallbackTarget(target.id(), target.name(), toSnapshot(target)));
     }
 
     private String resolveCreateKey(SaveRequest request) {
@@ -166,6 +206,10 @@ public class ModelProfileStore {
         return "";
     }
 
+    private String resolveEffectiveFallback() {
+        return findIndex(fallbackProfileId) >= 0 ? fallbackProfileId : "";
+    }
+
     private int findIndex(String id) {
         if (blank(id)) {
             return -1;
@@ -192,6 +236,7 @@ public class ModelProfileStore {
 
     private void restore() {
         activeProfileId = store.find(KEY_ACTIVE).orElse("").strip();
+        fallbackProfileId = store.find(KEY_FALLBACK).orElse("").strip();
         String raw = store.find(KEY_PROFILES).orElse("");
         if (raw.isBlank()) {
             return;
@@ -218,6 +263,7 @@ public class ModelProfileStore {
         try {
             store.save(KEY_PROFILES, mapper.writeValueAsString(profiles));
             store.save(KEY_ACTIVE, activeProfileId == null ? "" : activeProfileId);
+            store.save(KEY_FALLBACK, fallbackProfileId == null ? "" : fallbackProfileId);
         } catch (RuntimeException e) {
             throw new IllegalStateException("保存模型预设失败", e);
         }
@@ -228,10 +274,11 @@ public class ModelProfileStore {
             profile.contextTokens(), profile.maxOutputTokens(), profile.childModel());
     }
 
-    private static ProfileView toView(StoredProfile profile, boolean active) {
+    private static ProfileView toView(StoredProfile profile, boolean active, boolean fallback) {
         ModelSettings.Snapshot snap = toSnapshot(profile);
         return new ProfileView(profile.id(), profile.name(), profile.endpoint(), profile.model(), snap.hasApiKey(),
-            snap.maskedApiKey(), profile.contextTokens(), profile.maxOutputTokens(), profile.childModel(), active);
+            snap.maskedApiKey(), profile.contextTokens(), profile.maxOutputTokens(), profile.childModel(), active,
+            fallback);
     }
 
     private static String requireValidName(String name) {
@@ -286,15 +333,27 @@ public class ModelProfileStore {
         }
     }
 
+    public record FallbackTarget(String id, String name, ModelSettings.Snapshot snapshot) {
+    }
+
     public record SaveRequest(String name, String endpoint, String model, String apiKey, Boolean clearApiKey,
         Boolean inheritCurrentKey, Long contextTokens, Integer maxOutputTokens, String childModel, Boolean activate) {
     }
 
     public record ProfileView(String id, String name, String endpoint, String model, boolean apiKeySet,
-        String apiKeyMasked, Long contextTokens, Integer maxOutputTokens, String childModel, boolean active) {
+        String apiKeyMasked, Long contextTokens, Integer maxOutputTokens, String childModel, boolean active,
+        boolean fallback) {
+        public ProfileView(String id, String name, String endpoint, String model, boolean apiKeySet,
+            String apiKeyMasked, Long contextTokens, Integer maxOutputTokens, String childModel, boolean active) {
+            this(id, name, endpoint, model, apiKeySet, apiKeyMasked, contextTokens, maxOutputTokens, childModel, active,
+                false);
+        }
     }
 
-    public record ProfilesView(String activeProfileId, List<ProfileView> profiles) {
+    public record ProfilesView(String activeProfileId, String fallbackProfileId, List<ProfileView> profiles) {
+        public ProfilesView(String activeProfileId, List<ProfileView> profiles) {
+            this(activeProfileId, "", profiles);
+        }
     }
 
     private record StoredProfile(String id, String name, String endpoint, String model, String apiKey,
