@@ -218,6 +218,12 @@ export const api = {
   /** 单文件补丁：整份 diff 被截断时按需再取一次。 */
   fileDiff: (id: string, path: string) => apiJson<ApiResults['fileDiff']>(`/api/sessions/${encodeURIComponent(id)}/diff/file?path=${encodeURIComponent(path)}`),
   restoreChanges: (id: string, body: { paths?: string[]; all?: boolean }) => apiJson<ApiResults['restoreChanges']>(`/api/sessions/${encodeURIComponent(id)}/diff/restore`, jsonBody('POST', body || {})),
+  gitLog: (id: string, limit = 15, signal?: AbortSignal) =>
+    apiJson<ApiResults['gitLog']>(`/api/sessions/${encodeURIComponent(id)}/git/log?limit=${limit}`, { signal }),
+  gitDraftMessage: (id: string, body: { paths: string[]; all?: boolean }) =>
+    apiJson<ApiResults['gitDraftMessage']>(`/api/sessions/${encodeURIComponent(id)}/git/commit-message`, jsonBody('POST', body)),
+  gitCommit: (id: string, body: { paths: string[]; all?: boolean; message: string }) =>
+    apiJson<ApiResults['gitCommit']>(`/api/sessions/${encodeURIComponent(id)}/git/commit`, jsonBody('POST', body)),
   capabilities: (id: string) => apiJson<ApiResults['capabilities']>(`/api/sessions/${encodeURIComponent(id)}/capabilities`),
   /** MCP：合并视图只读、写用户级配置、信任管理。 */
   mcpServers: (id: string) => apiJson<ApiResults['mcpServers']>(`/api/sessions/${encodeURIComponent(id)}/mcp/servers`),

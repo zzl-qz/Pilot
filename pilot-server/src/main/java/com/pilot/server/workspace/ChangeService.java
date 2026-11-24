@@ -1,7 +1,9 @@
 package com.pilot.server.workspace;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -13,6 +15,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Stream;
 
@@ -106,6 +109,23 @@ public class ChangeService {
      */
     public record RestoreReport(List<String> restored, List<String> deleted, List<RestoreFailure> failed,
         String error) {
+    }
+
+    /** 近期单条 Git 提交摘要。 */
+    public record CommitEntry(String hash, String shortHash, String subject, String author, String date) {
+    }
+
+    /** 近期提交历史查询结果。 */
+    public record CommitLogReport(boolean gitRepository, String branch, List<CommitEntry> commits, String error) {
+    }
+
+    /** 变更提交结果。 */
+    public record CommitResult(boolean ok, String hash, String shortHash, String subject, List<String> committedPaths,
+        String error) {
+    }
+
+    /** 自动草拟的提交说明。 */
+    public record DraftMessageResult(String message, int fileCount) {
     }
 
     public ChangeReport inspect(Path workspace) {
@@ -748,6 +768,227 @@ public class ChangeService {
             out.append(line);
         }
         return out.toString();
+    }
+
+    /** 读取近期提交历史与当前分支名。非 Git 仓库或尚无提交时返回空列表而非报错。 */
+    public CommitLogReport log(Path workspace, int limit) {
+        Path root = workspace.toAbsolutePath().normalize();
+        if (!hasGitMetadata(root)) {
+            return new CommitLogReport(false, "", List.of(), null);
+        }
+        int clamped = Math.max(1, Math.min(50, limit <= 0 ? 15 : limit));
+        String branch = "";
+        CommandResult branchRes = run(root, List.of("git", "symbolic-ref", "--short", "HEAD"));
+        if (branchRes.exitCode() == 0 && !branchRes.output().isBlank()) {
+            branch = branchRes.output().strip();
+        } else {
+            CommandResult headRef = run(root, List.of("git", "rev-parse", "--abbrev-ref", "HEAD"));
+            if (headRef.exitCode() == 0 && !headRef.output().isBlank()) {
+                branch = headRef.output().strip();
+            }
+        }
+        if (!hasHead(root)) {
+            return new CommitLogReport(true, branch, List.of(), null);
+        }
+        CommandResult logRes = run(root, List.of("git", "-c", "core.quotePath=false", "log", "-n",
+            Integer.toString(clamped), "--pretty=format:%H%x1f%h%x1f%s%x1f%an%x1f%aI"));
+        if (logRes.exitCode() != 0) {
+            return new CommitLogReport(true, branch, List.of(),
+                logRes.output().isBlank() ? "读取提交历史失败" : logRes.output().strip());
+        }
+        List<CommitEntry> entries = new ArrayList<>();
+        for (String line : logRes.output().lines().toList()) {
+            if (line.isBlank()) {
+                continue;
+            }
+            String[] parts = line.split("\u001f", -1);
+            if (parts.length >= 5) {
+                entries.add(new CommitEntry(parts[0], parts[1], parts[2], parts[3], parts[4]));
+            }
+        }
+        return new CommitLogReport(true, branch, List.copyOf(entries), null);
+    }
+
+    /** 根据选中改动在本地确定性草拟简洁中文提交说明（无需模型 API Key）。 */
+    public DraftMessageResult draftCommitMessage(Path workspace, List<String> rawPaths, boolean all) {
+        ChangeReport report = inspect(workspace);
+        if (!report.gitRepository() || report.files().isEmpty()) {
+            return new DraftMessageResult("", 0);
+        }
+        Set<String> filter = new LinkedHashSet<>();
+        if (!all && rawPaths != null) {
+            for (String raw : rawPaths) {
+                String safe = safeRelative(raw);
+                if (safe != null) {
+                    filter.add(safe);
+                }
+            }
+        }
+        List<FileChange> selected = all || filter.isEmpty() ? report.files()
+            : report.files().stream().filter(file -> filter.contains(file.path())).toList();
+        if (selected.isEmpty()) {
+            return new DraftMessageResult("", 0);
+        }
+        long added = selected.stream().filter(f -> f.status().contains("?") || f.status().contains("A")).count();
+        long deleted = selected.stream().filter(f -> f.status().contains("D")).count();
+        String verb = added == selected.size() ? "新增" : (deleted == selected.size() ? "移除" : "更新");
+        String title;
+        if (selected.size() == 1) {
+            title = verb + " " + fileNameOf(selected.getFirst().path());
+        } else {
+            String area = commonArea(selected);
+            title = area.isEmpty() ? verb + " " + selected.size() + " 个文件改动"
+                : verb + " " + area + " 中的 " + selected.size() + " 个文件";
+        }
+        StringBuilder body = new StringBuilder(title);
+        if (selected.size() > 1) {
+            body.append("\n");
+            int shown = Math.min(6, selected.size());
+            for (int i = 0; i < shown; i++) {
+                FileChange file = selected.get(i);
+                body.append("\n- ").append(file.path());
+            }
+            if (selected.size() > shown) {
+                body.append("\n- 其余 ").append(selected.size() - shown).append(" 个文件");
+            }
+        }
+        return new DraftMessageResult(body.toString(), selected.size());
+    }
+
+    /**
+     * 暂存并提交选中文件或全部改动。
+     *
+     * <p>提交信息通过 stdin 传给 {@code git commit -F -}，避免跨平台命令行转义与注入风险；
+     * 绝不跳过钩子（无 {@code --no-verify}），也不覆盖已有提交（无 {@code --amend}）。
+     */
+    public CommitResult commit(Path workspace, List<String> rawPaths, boolean all, String message) {
+        Path root = workspace.toAbsolutePath().normalize();
+        if (!hasGitMetadata(root)) {
+            return new CommitResult(false, "", "", "", List.of(), "当前工作区不是 Git 仓库");
+        }
+        String cleanMessage = message == null ? "" : message.strip();
+        if (cleanMessage.isEmpty()) {
+            return new CommitResult(false, "", "", "", List.of(), "提交说明不能为空");
+        }
+        if (cleanMessage.length() > 4000) {
+            return new CommitResult(false, "", "", "", List.of(), "提交说明不能超过 4000 个字符");
+        }
+        List<String> targetPaths = new ArrayList<>();
+        if (!all) {
+            Set<String> seen = new LinkedHashSet<>();
+            for (String raw : rawPaths == null ? List.<String>of() : rawPaths) {
+                String safe = safeRelative(raw);
+                if (safe == null) {
+                    return new CommitResult(false, "", "", "", List.of(), "路径不在工作区内：" + raw);
+                }
+                if (seen.add(safe)) {
+                    targetPaths.add(safe);
+                }
+            }
+            if (targetPaths.isEmpty()) {
+                return new CommitResult(false, "", "", "", List.of(), "请先选择至少一个要提交的文件");
+            }
+        }
+
+        List<String> addCmd = all ? List.of("git", "add", "-A")
+            : withPathspec(List.of("git", "add", "-A"), targetPaths);
+        CommandResult addRes = run(root, addCmd);
+        if (addRes.exitCode() != 0) {
+            return new CommitResult(false, "", "", "", List.of(),
+                "暂存文件失败：" + firstUsefulError(addRes.output(), "git add 退出码 " + addRes.exitCode()));
+        }
+
+        List<String> commitCmd = all
+            ? List.of("git", "commit", "-F", "-")
+            : withPathspec(List.of("git", "commit", "--only", "-F", "-"), targetPaths);
+        CommandResult commitRes = runWithStdin(root, commitCmd, cleanMessage + "\n");
+        if (commitRes.exitCode() != 0) {
+            String reason = firstUsefulError(commitRes.output(), "git commit 退出码 " + commitRes.exitCode());
+            return new CommitResult(false, "", "", "", List.of(), "提交失败：" + reason);
+        }
+
+        String hash = exec(root, List.of("git", "rev-parse", "HEAD")).strip();
+        String shortHash = exec(root, List.of("git", "rev-parse", "--short", "HEAD")).strip();
+        String subject = cleanMessage.lines().findFirst().orElse(cleanMessage);
+        return new CommitResult(true, hash, shortHash, subject, List.copyOf(targetPaths), null);
+    }
+
+    private static String fileNameOf(String path) {
+        int slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+        return slash >= 0 ? path.substring(slash + 1) : path;
+    }
+
+    private static String commonArea(List<FileChange> files) {
+        String first = topSegment(files.getFirst().path());
+        if (first.isEmpty()) {
+            return "";
+        }
+        for (int i = 1; i < files.size(); i++) {
+            if (!first.equals(topSegment(files.get(i).path()))) {
+                return "";
+            }
+        }
+        return first;
+    }
+
+    private static String topSegment(String path) {
+        int slash = path.indexOf('/');
+        return slash > 0 ? path.substring(0, slash) : "";
+    }
+
+    private static String firstUsefulError(String output, String fallback) {
+        if (output == null || output.isBlank()) {
+            return fallback;
+        }
+        List<String> lines = output.lines().map(String::strip).filter(l -> !l.isEmpty()).limit(4).toList();
+        return lines.isEmpty() ? fallback : String.join("；", lines);
+    }
+
+    private static CommandResult runWithStdin(Path workspace, List<String> command, String stdinText) {
+        Process process = null;
+        try {
+            process = new ProcessBuilder(command)
+                .directory(workspace.toFile())
+                .redirectErrorStream(true)
+                .start();
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            InputStream stream = process.getInputStream();
+            Thread drainer = Thread.ofVirtual().start(() -> {
+                byte[] chunk = new byte[4096];
+                int remaining = MAX_OUTPUT_BYTES;
+                try {
+                    int n;
+                    while ((n = stream.read(chunk)) != -1) {
+                        if (remaining > 0) {
+                            int write = Math.min(n, remaining);
+                            buffer.write(chunk, 0, write);
+                            remaining -= write;
+                        }
+                    }
+                } catch (IOException ignored) {
+                    // 进程结束时流关闭
+                }
+            });
+            try (OutputStream out = process.getOutputStream()) {
+                out.write(stdinText.getBytes(StandardCharsets.UTF_8));
+                out.flush();
+            }
+            if (!process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                drainer.join(1000);
+                return new CommandResult(-1, "Git 命令执行超时");
+            }
+            drainer.join(2000);
+            return new CommandResult(process.exitValue(), buffer.toString(StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            return new CommandResult(-1, e.getMessage() == null ? "无法启动 git" : e.getMessage());
+        } catch (InterruptedException e) {
+            if (process != null) {
+                process.destroyForcibly();
+            }
+            Thread.currentThread().interrupt();
+            return new CommandResult(-1, "操作被中断");
+        }
     }
 
     /** @param exitCode 超时或启动失败时为 -1，{@code output} 可能为空 */

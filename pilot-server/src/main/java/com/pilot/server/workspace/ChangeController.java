@@ -63,6 +63,31 @@ public class ChangeController {
             request != null && Boolean.TRUE.equals(request.all()));
     }
 
+    /** 读取当前工作区近期提交历史与当前分支名。 */
+    @GetMapping("/git/log")
+    public ChangeService.CommitLogReport gitLog(@PathVariable String id,
+        @RequestParam(defaultValue = "15") int limit) {
+        return changes.log(workspace(id), limit);
+    }
+
+    /** 基于选中改动生成本地中文提交说明草稿（无需模型 Key）。 */
+    @PostMapping("/git/commit-message")
+    public ChangeService.DraftMessageResult draftCommitMessage(@PathVariable String id,
+        @RequestBody(required = false) CommitMessageRequest request) {
+        return changes.draftCommitMessage(workspace(id), request == null ? List.of() : request.paths(),
+            request == null || Boolean.TRUE.equals(request.all()));
+    }
+
+    /** 暂存并提交选中文件或全部改动。 */
+    @PostMapping("/git/commit")
+    public ChangeService.CommitResult commit(@PathVariable String id,
+        @RequestBody(required = false) CommitRequest request) {
+        if (request == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请求体不能为空");
+        }
+        return changes.commit(workspace(id), request.paths(), Boolean.TRUE.equals(request.all()), request.message());
+    }
+
     private Path workspace(String id) {
         Session session = SessionLookup.require(sessions, id);
         String workspace =
@@ -75,5 +100,11 @@ public class ChangeController {
      *            用包装类型：缺省字段按 null 反序列化，primitive 会直接 400。
      */
     public record RestoreRequest(List<String> paths, Boolean all) {
+    }
+
+    public record CommitMessageRequest(List<String> paths, Boolean all) {
+    }
+
+    public record CommitRequest(List<String> paths, Boolean all, String message) {
     }
 }

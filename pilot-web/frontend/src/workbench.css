@@ -254,6 +254,55 @@ html[data-theme] .changes-actions > .icon-btn svg { width: 16px; height: 16px; }
 @media (pointer: coarse) { html[data-theme] .changes-actions > .icon-btn { width: 36px; height: 36px; } }
 html[data-theme] .change-row { min-height: 36px; }
 html[data-theme] .change-row-name { font-size: 13px; }
+.change-select-cell { display: inline-flex; align-items: center; padding: 0 2px 0 8px; flex: none; cursor: pointer; }
+.change-select-cell input { margin: 0; cursor: pointer; accent-color: var(--accent); }
+.git-commit-bar {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--bg-soft);
+}
+.git-commit-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.git-commit-select-actions { display: inline-flex; align-items: center; gap: 4px; }
+.git-commit-input {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--ui-field, var(--panel));
+  color: var(--ink);
+  font: 12.5px/1.5 var(--sans);
+  resize: vertical;
+}
+.git-commit-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.git-commit-feedback { flex: 1; min-width: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.git-commit-feedback.is-error { color: var(--err); }
+.git-history-box { border-top: 1px solid var(--line-soft); padding: 8px 12px; background: var(--bg-soft); }
+.git-history-box summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+.git-history-empty { margin: 8px 0 2px; font-size: 12px; color: var(--muted); }
+.git-history-list { display: grid; gap: 6px; margin: 8px 0 2px; padding: 0; list-style: none; }
+.git-history-item { display: flex; align-items: baseline; gap: 8px; font-size: 12px; min-width: 0; }
+.git-history-hash { font-family: var(--mono); font-size: 11px; color: var(--accent); flex: none; }
+.git-history-subject { flex: 1; min-width: 0; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.git-history-meta { flex: none; font-size: 11px; color: var(--muted); }
 html[data-theme] .event { background: transparent; border: 0; border-bottom: 1px solid var(--line-soft); border-radius: 0; padding: 12px 4px; }
 html[data-theme] .event-title { font-size: 13px; }
 html[data-theme] .event-detail { font-size: 12px; line-height: 1.65; }

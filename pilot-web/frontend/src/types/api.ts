@@ -218,6 +218,32 @@ export interface ModelProfileSaveRequest {
   activate?: boolean;
 }
 
+export interface GitCommitEntry {
+  hash: string;
+  shortHash: string;
+  subject: string;
+  author: string;
+  date: string;
+}
+export interface GitCommitLogReport {
+  gitRepository: boolean;
+  branch: string;
+  commits: GitCommitEntry[];
+  error: string | null;
+}
+export interface GitCommitResult {
+  ok: boolean;
+  hash: string;
+  shortHash: string;
+  subject: string;
+  committedPaths: string[];
+  error: string | null;
+}
+export interface GitDraftMessageResult {
+  message: string;
+  fileCount: number;
+}
+
 export interface ApiResults {
   workProducts: S.WorkProductServiceProduct[];
   workbenchFiles: WorkbenchFile[];
@@ -306,6 +332,9 @@ export interface ApiResults {
   diff: S.ChangeServiceChangeReport;
   fileDiff: S.ChangeServiceFilePatch;
   restoreChanges: S.ChangeServiceRestoreReport;
+  gitLog: GitCommitLogReport;
+  gitDraftMessage: GitDraftMessageResult;
+  gitCommit: GitCommitResult;
   capabilities: S.CapabilitiesControllerCapabilitiesResponse;
   mcpServers: S.McpConfigControllerServerPayload[];
   mcpAddServer: S.McpConfigControllerServerPayload;

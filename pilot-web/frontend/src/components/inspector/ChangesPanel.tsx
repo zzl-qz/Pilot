@@ -1,7 +1,9 @@
 import { statusLetter } from './diff-format.js';
 import type { ChangeFile, ChangeReport, DiffFile } from '../../types/core.js';
+import type { GitCommitLogReport } from '../../types/api.js';
 import { reviewQuote } from '../../lib/interaction.js';
-import { useEffect, useMemo, useState } from 'react';
+import { errorInfo } from '../../lib/errors.js';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useStore } from '../../store.js';
 import { api } from '../../api.js';
 import { ReviewActions } from '../ReviewActions.jsx';
@@ -40,6 +42,15 @@ export function ChangesPanel() {
   const [query, setQuery] = useState('');
   /** 单文件撤销的行内确认。 */
   const [confirm, setConfirm] = useState<{ type: 'one'; path: string } | null>(null);
+  const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+  const [selectionTouched, setSelectionTouched] = useState(false);
+  const [commitMessage, setCommitMessage] = useState('');
+  const [committing, setCommitting] = useState(false);
+  const [drafting, setDrafting] = useState(false);
+  const [commitFeedback, setCommitFeedback] = useState<{ text: string; error?: boolean } | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [gitLog, setGitLog] = useState<GitCommitLogReport | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   /*
    * 后端 /diff 的 files 是数组、没有顶层 totals：增删行要从每个文件累加，
@@ -70,7 +81,44 @@ export function ChangesPanel() {
     ? untracked.filter((file) => file.path.toLowerCase().includes(keyword))
     : untracked;
   const trackedPaths = useMemo(() => tracked.map((file) => file.path), [tracked]);
+  const allPaths = useMemo(() => files.map((file) => file.path), [files]);
   const viewIndex = trackedPaths.indexOf(view || '');
+  const canCommit = !scoped && isGit && !empty && state !== 'error';
+
+  // 同步待提交文件勾选集合：首次自动全选已跟踪改动，文件列表刷新时自动剔除已消失的文件
+  useEffect(() => {
+    if (!canCommit) {
+      setSelectedPaths([]);
+      setSelectionTouched(false);
+      return;
+    }
+    const existing = new Set(allPaths);
+    setSelectedPaths((prev) => {
+      if (!selectionTouched) {
+        return trackedPaths.length ? trackedPaths : allPaths;
+      }
+      return prev.filter((item) => existing.has(item));
+    });
+  }, [canCommit, allPaths, trackedPaths, selectionTouched]);
+
+  const loadGitLog = useCallback(async () => {
+    if (!sessionId || !isGit) return;
+    setHistoryLoading(true);
+    try {
+      const data = await api.gitLog(sessionId, 15);
+      setGitLog(data);
+    } catch {
+      /* 历史读取失败不阻塞变更审阅 */
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [sessionId, isGit]);
+
+  useEffect(() => {
+    if (historyOpen && !scoped && isGit && sessionId) {
+      void loadGitLog();
+    }
+  }, [historyOpen, scoped, isGit, sessionId, loadGitLog]);
 
   useEffect(() => {
     if (sessionId) {
@@ -80,6 +128,7 @@ export function ChangesPanel() {
 
   useEffect(() => {
     setPreferredScope('workspace'); setRunReview(null); setQuery(''); setConfirm(null);
+    setCommitMessage(''); setCommitFeedback(null); setSelectionTouched(false); setGitLog(null);
   }, [sessionId]);
   useEffect(() => {
     if (!scoped || !runId || runActive) return;
@@ -143,6 +192,57 @@ export function ChangesPanel() {
     setConfirm(null);
     if (!canUndo || restoring || useStore.getState().running) return;
     await useStore.getState().restoreChanges(paths, all);
+  };
+
+  const toggleSelected = (filePath: string) => {
+    setSelectionTouched(true);
+    setSelectedPaths((prev) => prev.includes(filePath) ? prev.filter((item) => item !== filePath) : [...prev, filePath]);
+  };
+
+  const generateDraft = async () => {
+    if (!sessionId || !canCommit || drafting || !selectedPaths.length) return;
+    setDrafting(true);
+    setCommitFeedback(null);
+    try {
+      const res = await api.gitDraftMessage(sessionId, { paths: selectedPaths, all: false });
+      if (res?.message) setCommitMessage(res.message);
+    } catch (error) {
+      setCommitFeedback({ text: errorInfo(error).message || '生成草稿失败', error: true });
+    } finally {
+      setDrafting(false);
+    }
+  };
+
+  const submitCommit = async () => {
+    if (!sessionId || !canCommit || committing || useStore.getState().running) return;
+    const message = commitMessage.trim();
+    if (!selectedPaths.length) {
+      setCommitFeedback({ text: '请先勾选至少一个要提交的文件。', error: true });
+      return;
+    }
+    if (!message) {
+      setCommitFeedback({ text: '请填写提交说明。', error: true });
+      return;
+    }
+    setCommitting(true);
+    setCommitFeedback(null);
+    try {
+      const res = await api.gitCommit(sessionId, { paths: selectedPaths, all: false, message });
+      if (!res?.ok) {
+        setCommitFeedback({ text: res?.error || '提交失败', error: true });
+        return;
+      }
+      setCommitMessage('');
+      setSelectionTouched(false);
+      setCommitFeedback({ text: `已提交 ${res.shortHash || ''}：${res.subject || message.split('\n')[0]}` });
+      useStore.getState().showNotice(`Git 提交成功（${res.shortHash || 'HEAD'}）`);
+      await useStore.getState().loadChanges();
+      if (historyOpen) void loadGitLog();
+    } catch (error) {
+      setCommitFeedback({ text: errorInfo(error).message || '提交失败', error: true });
+    } finally {
+      setCommitting(false);
+    }
   };
 
   // 还没开始任务时没有会话，也就没有工作区可读；给一句明确的话，别显示「没有改动」
@@ -209,6 +309,50 @@ export function ChangesPanel() {
       </div>
       {restoring && <p className="changes-progress">撤销中…</p>}
       {state === 'error' && scope === 'workspace' && <p className="changes-progress" role="alert">读取失败，请刷新重试。{!empty && '当前显示上次读取的改动。'}</p>}
+      {canCommit && (
+        <div className="git-commit-bar" id="git-commit-panel">
+          <div className="git-commit-head">
+            <span>已选 {selectedPaths.length} / {files.length} 个文件</span>
+            <div className="git-commit-select-actions">
+              <button type="button" className="btn btn-xs" disabled={committing} onClick={() => { setSelectionTouched(true); setSelectedPaths(allPaths); }}>全选</button>
+              <button type="button" className="btn btn-xs" disabled={committing} onClick={() => { setSelectionTouched(true); setSelectedPaths([]); }}>清空</button>
+              <button type="button" className="btn btn-xs" disabled={committing || drafting || !selectedPaths.length} onClick={() => void generateDraft()}>
+                {drafting ? '生成中…' : '生成草稿'}
+              </button>
+            </div>
+          </div>
+          <textarea
+            className="git-commit-input"
+            rows={2}
+            aria-label="Git 提交说明"
+            placeholder="输入提交说明（Ctrl/Cmd+Enter 提交选中文件）"
+            disabled={committing}
+            value={commitMessage}
+            onChange={(event) => setCommitMessage(event.target.value)}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                event.preventDefault();
+                void submitCommit();
+              }
+            }}
+          />
+          <div className="git-commit-foot">
+            {commitFeedback && (
+              <span className={`git-commit-feedback${commitFeedback.error ? ' is-error' : ''}`} role={commitFeedback.error ? 'alert' : 'status'}>
+                {commitFeedback.text}
+              </span>
+            )}
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={committing || !selectedPaths.length || !commitMessage.trim()}
+              onClick={() => void submitCommit()}
+            >
+              {committing ? '提交中…' : `提交选中 (${selectedPaths.length})`}
+            </button>
+          </div>
+        </div>
+      )}
       {tracked.length > 5 && (
         <div className="changes-filter">
           <input
@@ -248,9 +392,12 @@ export function ChangesPanel() {
                 key={file.path}
                 file={file}
                 active={view === file.path}
+                selectable={canCommit}
+                selected={selectedPaths.includes(file.path)}
+                onToggleSelect={() => toggleSelected(file.path)}
                 confirming={confirm?.type === 'one' && confirm.path === file.path}
                 canUndo={canUndo}
-                busy={restoring}
+                busy={restoring || committing}
                 onAskUndo={() => setConfirm({ type: 'one', path: file.path })}
                 onCancelUndo={() => setConfirm(null)}
                 onUndo={() => restore([file.path], false)}
@@ -277,9 +424,12 @@ export function ChangesPanel() {
                 file={file}
                 active={view === file.path}
                 untracked
+                selectable={canCommit}
+                selected={selectedPaths.includes(file.path)}
+                onToggleSelect={() => toggleSelected(file.path)}
                 confirming={confirm?.type === 'one' && confirm.path === file.path}
                 canUndo={canUndo}
-                busy={restoring}
+                busy={restoring || committing}
                 onAskUndo={() => setConfirm({ type: 'one', path: file.path })}
                 onCancelUndo={() => setConfirm(null)}
                 onUndo={() => restore([file.path], false)}
@@ -312,6 +462,27 @@ export function ChangesPanel() {
           )
           : (!empty && <p className="panel-empty change-empty">选一个文件看差异。</p>)}
       </div>
+      {!scoped && isGit && (
+        <details className="git-history-box" open={historyOpen} onToggle={(event) => setHistoryOpen(event.currentTarget.open)}>
+          <summary>
+            <span>近期提交{gitLog?.branch ? ` · ${gitLog.branch}` : ''}</span>
+            {historyOpen && <button type="button" className="btn btn-xs" disabled={historyLoading} onClick={(event) => { event.preventDefault(); void loadGitLog(); }}>刷新</button>}
+          </summary>
+          {historyLoading && !gitLog && <p className="git-history-empty">读取提交历史中…</p>}
+          {gitLog && !gitLog.commits.length && <p className="git-history-empty">当前仓库尚无提交记录。</p>}
+          {gitLog && gitLog.commits.length > 0 && (
+            <ul className="git-history-list">
+              {gitLog.commits.map((entry) => (
+                <li key={entry.hash} className="git-history-item" title={`${entry.hash} · ${entry.author} · ${entry.date}`}>
+                  <code className="git-history-hash">{entry.shortHash}</code>
+                  <span className="git-history-subject">{entry.subject}</span>
+                  <span className="git-history-meta">{entry.author}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </details>
+      )}
     </div>
   );
 }
@@ -341,8 +512,8 @@ function lineStat(file: ChangeFile, className: string) {
   );
 }
 
-/** 变更列表的一行：状态徽标 + 文件名（目录弱化）+ 增删行，悬停露出撤销。 */
-function ChangeRow({ file, active, untracked, confirming, canUndo, busy, onAskUndo, onCancelUndo, onUndo }: { file: ChangeFile; active: boolean; untracked?: boolean; confirming?: boolean; canUndo: boolean; busy: boolean; onAskUndo: () => void; onCancelUndo: () => void; onUndo: () => void }) {
+/** 变更列表的一行：可选复选框 + 状态徽标 + 文件名（目录弱化）+ 增删行，悬停露出撤销。 */
+function ChangeRow({ file, active, untracked, selectable, selected, onToggleSelect, confirming, canUndo, busy, onAskUndo, onCancelUndo, onUndo }: { file: ChangeFile; active: boolean; untracked?: boolean; selectable?: boolean; selected?: boolean; onToggleSelect?: () => void; confirming?: boolean; canUndo: boolean; busy: boolean; onAskUndo: () => void; onCancelUndo: () => void; onUndo: () => void }) {
   const { name, dir } = splitPath(file.path);
   if (confirming && canUndo) {
     return (
@@ -363,6 +534,17 @@ function ChangeRow({ file, active, untracked, confirming, canUndo, busy, onAskUn
   }
   return (
     <div className={`change-row-wrap${active ? ' is-active' : ''}`}>
+      {selectable && (
+        <label className="change-select-cell" title={`勾选 ${file.path} 参与提交`}>
+          <input
+            type="checkbox"
+            checked={Boolean(selected)}
+            disabled={busy}
+            aria-label={`选择提交 ${file.path}`}
+            onChange={() => onToggleSelect?.()}
+          />
+        </label>
+      )}
       <button
         type="button"
         className={`change-row${active ? ' is-active' : ''}`}
