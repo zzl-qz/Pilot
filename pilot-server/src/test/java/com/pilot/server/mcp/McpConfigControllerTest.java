@@ -260,7 +260,17 @@ class McpConfigControllerTest {
             null, null, null, "http", "https://mcp.example.com/v1", Map.of("Authorization", "Bearer top-secret")));
         assertTrue(added.usable());
         assertEquals("HTTP https://mcp.example.com/v1", added.command());
+        assertEquals("http", added.transport());
+        assertEquals("https://mcp.example.com/v1", added.url());
+        assertEquals(List.of("Authorization"), added.headerKeys());
         assertFalse(added.toString().contains("top-secret"), "返回给界面的视图不得泄露认证头");
+
+        // 编辑时传 preserveExistingSecrets=true 且留空原 header 值，应保留既有密钥而不丢失
+        controller.add(sessionId, new McpConfigController.AddRequest("docs", null, null, null, "http",
+            "https://mcp.example.com/v2", Map.of("Authorization", ""), true));
+        McpServerConfig edited = manager.servers(workspace).get("docs");
+        assertEquals("https://mcp.example.com/v2", edited.url());
+        assertEquals("Bearer top-secret", edited.headers().get("Authorization"));
 
         McpConfigController.ImportResponse imported = controller.importServers(sessionId,
             new McpConfigController.ImportRequest(

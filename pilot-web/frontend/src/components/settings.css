@@ -493,6 +493,23 @@
   color: var(--ink);
   border: 1px solid var(--border);
 }
+.model-profile-item.is-editing {
+  display: block;
+}
+.model-profile-edit-form {
+  width: 100%;
+}
+.settings-template-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.settings-template-label {
+  font-size: 12.5px;
+  color: var(--ink-soft, var(--muted));
+}
 .model-profile-key { font-size: 11.5px; color: var(--muted); }
 .model-profile-detail {
   margin: 0;

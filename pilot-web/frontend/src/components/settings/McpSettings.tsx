@@ -21,6 +21,7 @@ export function McpSettings() {
   const [hint, setHint] = useState('');
   const [hasError, setHasError] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<S.McpConfigControllerServerPayload | null>(null);
   const [busy, setBusy] = useState('');
   const [probes, setProbes] = useState<Record<string, McpProbeState>>({});
   const sequence = useRef(0);
@@ -136,7 +137,7 @@ export function McpSettings() {
     {!sessionId && <p className="settings-status" role="status">开始一个对话后即可管理当前工作区的 MCP 服务器。</p>}
     {sessionId && <div className="settings-inline-actions">
       <Button id="mcp-add-open" variant="primary" label={adding ? '收起表单' : '添加服务器…'} aria-expanded={adding}
-        aria-controls={adding ? 'mcp-add-form' : undefined} onClick={() => setAdding(open => !open)} />
+        aria-controls={adding ? 'mcp-add-form' : undefined} onClick={() => { setEditing(null); setAdding(open => !open); }} />
       <Button label="刷新" isDisabled={loading || Boolean(busy)} onClick={() => void load()} />
     </div>}
     {sessionId && loading && <p className="settings-status" role="status">正在读取 MCP 服务器…</p>}
@@ -169,6 +170,10 @@ export function McpSettings() {
                 label={busy === server.name ? '处理中…' : '撤销信任'} size="sm" variant="ghost" className="settings-danger"
                 isDisabled={Boolean(busy)} onClick={() => void revoke(server.name)} />}
               {server.source === 'user' && <Button
+                label="编辑" size="sm" variant="ghost"
+                isDisabled={Boolean(busy)}
+                onClick={() => { setAdding(false); setEditing(server); }} />}
+              {server.source === 'user' && <Button
                 label={busy === server.name ? '处理中…' : '删除'} size="sm" variant="ghost"
                 isDisabled={Boolean(busy)}
                 onClick={() => useStore.getState().askConfirm({
@@ -197,6 +202,11 @@ export function McpSettings() {
       {!servers.length && <li className="panel-empty">还没有配置 MCP 服务器。点「添加服务器」接入外部工具，或在项目根放一个 .mcp.json。</li>}
     </ul>}
     {sessionId && adding && <McpAddServer onDone={(message) => { setAdding(false); if (message) { setHint(message); setHasError(false); } void load(); }} />}
+    {sessionId && editing && <div className="mcp-add-wrap" id="mcp-edit-form">
+      <p className="mcp-env-label">编辑用户级 MCP 服务器：<code>{editing.name}</code></p>
+      <McpAddForm key={editing.name} initial={editing} onCancel={() => setEditing(null)}
+        onDone={(message) => { setEditing(null); if (message) { setHint(message); setHasError(false); } void load(); }} />
+    </div>}
     {hint && <p className="settings-status" role={hasError ? 'alert' : 'status'}>{hint}</p>}
   </section>;
 }
@@ -224,20 +234,67 @@ function McpAddServer({ onDone }: { onDone: (message?: string) => void }) {
   </div>;
 }
 
+const ZERO_KEY_MCP_TEMPLATES: ReadonlyArray<{
+  label: string;
+  desc: string;
+  name: string;
+  transport: 'stdio' | 'http' | 'sse';
+  command: string;
+  args: string;
+}> = [
+  { label: 'Filesystem', desc: '本地目录读写', name: 'filesystem', transport: 'stdio', command: 'npx', args: '-y @modelcontextprotocol/server-filesystem .' },
+  { label: 'Fetch', desc: '免 Key 网页抓取', name: 'fetch', transport: 'stdio', command: 'uvx', args: 'mcp-server-fetch' },
+  { label: 'Git', desc: 'Git 仓库分析', name: 'git', transport: 'stdio', command: 'uvx', args: 'mcp-server-git --repository .' },
+  { label: 'Memory', desc: '本地知识图谱记忆', name: 'memory', transport: 'stdio', command: 'npx', args: '-y @modelcontextprotocol/server-memory' },
+  { label: 'Thinking', desc: '分步结构化推理', name: 'sequential-thinking', transport: 'stdio', command: 'npx', args: '-y @modelcontextprotocol/server-sequential-thinking' },
+  { label: 'Context7', desc: '开源库最新文档', name: 'context7', transport: 'stdio', command: 'npx', args: '-y @upstash/context7-mcp' }
+];
+
+function formatArgsForInput(args?: string[]): string {
+  if (!Array.isArray(args) || !args.length) return '';
+  return args.map(item => /[\s"']/.test(item) ? JSON.stringify(item) : item).join(' ');
+}
+
+function normalizeTransport(raw?: string): 'stdio' | 'http' | 'sse' {
+  if (raw === 'http' || raw === 'sse') return raw;
+  return 'stdio';
+}
+
 /** 表单模式：字段逐项填写，支持本地命令（stdio）与远程 Streamable HTTP / SSE，解析与校验在后端。 */
-function McpAddForm({ onDone }: { onDone: (message?: string) => void }) {
+function McpAddForm({ initial, onCancel, onDone }: {
+  initial?: S.McpConfigControllerServerPayload;
+  onCancel?: () => void;
+  onDone: (message?: string) => void;
+}) {
   const sessionId = useStore(state => state.sessionId);
-  const [transport, setTransport] = useState<'stdio' | 'http' | 'sse'>('stdio');
-  const [name, setName] = useState('');
-  const [command, setCommand] = useState('');
-  const [args, setArgs] = useState('');
-  const [url, setUrl] = useState('');
-  const [envRows, setEnvRows] = useState<Array<{ key: string; value: string }>>([]);
-  const [headerRows, setHeaderRows] = useState<Array<{ key: string; value: string }>>([]);
+  const isEdit = Boolean(initial);
+  const [transport, setTransport] = useState<'stdio' | 'http' | 'sse'>(() => normalizeTransport(initial?.transport));
+  const [name, setName] = useState(initial?.name || '');
+  const [command, setCommand] = useState(initial?.commandOnly || '');
+  const [args, setArgs] = useState(() => formatArgsForInput(initial?.args));
+  const [url, setUrl] = useState(initial?.url || '');
+  const [envRows, setEnvRows] = useState<Array<{ key: string; value: string; existing?: boolean }>>(() =>
+    (initial?.envKeys || []).map(key => ({ key, value: '', existing: true })));
+  const [headerRows, setHeaderRows] = useState<Array<{ key: string; value: string; existing?: boolean }>>(() =>
+    (initial?.headerKeys || []).map(key => ({ key, value: '', existing: true })));
   const [busy, setBusy] = useState(false);
-  const [hint, setHint] = useState('选择本地命令（stdio）或远程 HTTP / SSE 地址后保存。');
+  const [hint, setHint] = useState(isEdit
+    ? '修改后保存将覆盖原用户级配置；已保存的密钥/环境变量留空即保留原值。'
+    : '可点上方免 Key 模板快速填入，或自行填写本地命令（stdio）/ 远程 HTTP / SSE 地址后保存。');
   const [hasError, setHasError] = useState(false);
   const isRemote = transport !== 'stdio';
+
+  function applyTemplate(template: (typeof ZERO_KEY_MCP_TEMPLATES)[number]) {
+    setTransport(template.transport);
+    setName(template.name);
+    setCommand(template.command);
+    setArgs(template.args);
+    setUrl('');
+    setEnvRows([]);
+    setHeaderRows([]);
+    setHasError(false);
+    setHint(`已填入免 Key 模板「${template.label}」（${template.desc}），可按需微调参数后点「保存服务器」。`);
+  }
 
   async function submit() {
     if (!sessionId || busy) return;
@@ -249,22 +306,32 @@ function McpAddForm({ onDone }: { onDone: (message?: string) => void }) {
       if (isRemote) {
         const headers: Record<string, string> = {};
         for (const row of headerRows) {
-          if (row.key.trim() && row.value) headers[row.key.trim()] = row.value;
+          if (row.key.trim() && (row.value || row.existing)) headers[row.key.trim()] = row.value;
         }
         created = await api.mcpAddServer(sessionId, {
           name: name.trim(),
           transport,
           url: url.trim(),
-          headers
+          headers,
+          preserveExistingSecrets: isEdit || undefined
         });
       } else {
         const env: Record<string, string> = {};
         for (const row of envRows) {
-          if (row.key.trim() && row.value) env[row.key.trim()] = row.value;
+          if (row.key.trim() && (row.value || row.existing)) env[row.key.trim()] = row.value;
         }
-        created = await api.mcpAddServer(sessionId, { name: name.trim(), transport: 'stdio', command: command.trim(), args, env });
+        created = await api.mcpAddServer(sessionId, {
+          name: name.trim(),
+          transport: 'stdio',
+          command: command.trim(),
+          args,
+          env,
+          preserveExistingSecrets: isEdit || undefined
+        });
       }
-      setName(''); setCommand(''); setArgs(''); setUrl(''); setEnvRows([]); setHeaderRows([]);
+      if (!isEdit) {
+        setName(''); setCommand(''); setArgs(''); setUrl(''); setEnvRows([]); setHeaderRows([]);
+      }
       onDone(`已保存 ${created?.name || name.trim()}；先点「测试连接」验证，或在对话中首次使用时批准。`);
     } catch (failure) {
       setHasError(true);
@@ -276,12 +343,20 @@ function McpAddForm({ onDone }: { onDone: (message?: string) => void }) {
 
   const canSubmit = Boolean(name.trim() && (isRemote ? url.trim() : command.trim()) && !busy);
 
-  return <form className="settings-form mcp-add-form" aria-label="添加 MCP 服务器" onSubmit={event => {
+  return <form className="settings-form mcp-add-form" aria-label={isEdit ? '编辑 MCP 服务器' : '添加 MCP 服务器'} onSubmit={event => {
     event.preventDefault();
     if (canSubmit) void submit();
   }} onKeyDown={event => {
     if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.keyCode === 229)) event.preventDefault();
   }}>
+    {!isEdit && <div className="settings-template-bar" role="group" aria-label="免密钥常用 MCP 模板">
+      <span className="settings-template-label">免 Key 常用模板：</span>
+      {ZERO_KEY_MCP_TEMPLATES.map(template => (
+        <Button key={template.name} type="button" size="sm" variant="ghost"
+          label={`${template.label} · ${template.desc}`} isDisabled={busy}
+          onClick={() => applyTemplate(template)} />
+      ))}
+    </div>}
     <SegmentedControl id="mcp-add-transport" label="传输方式" value={transport}
       onChange={value => setTransport(value as 'stdio' | 'http' | 'sse')}>
       <SegmentedControlItem value="stdio" label="本地命令 (stdio)" />
@@ -290,7 +365,7 @@ function McpAddForm({ onDone }: { onDone: (message?: string) => void }) {
     </SegmentedControl>
     {!isRemote ? <>
       <div className="mcp-add-fields">
-        <TextInput id="mcp-add-name" label="名称" value={name} placeholder="filesystem" isDisabled={busy}
+        <TextInput id="mcp-add-name" label="名称" value={name} placeholder="filesystem" isDisabled={busy || isEdit}
           hasSpellCheck={false} onChange={setName} />
         <TextInput id="mcp-add-command" label="命令" value={command} placeholder="npx / node / uvx" isDisabled={busy}
           hasSpellCheck={false} onChange={setCommand} />
@@ -304,6 +379,7 @@ function McpAddForm({ onDone }: { onDone: (message?: string) => void }) {
           <TextInput label={`名称（变量 ${index + 1}）`} value={row.key} isDisabled={busy} hasSpellCheck={false}
             onChange={value => setEnvRows(rows => rows.map((item, i) => i === index ? { ...item, key: value } : item))} />
           <TextInput label={`值（变量 ${index + 1}）`} value={row.value} isDisabled={busy}
+            placeholder={row.existing ? '已保存（留空保留原值）' : ''}
             onChange={value => setEnvRows(rows => rows.map((item, i) => i === index ? { ...item, value } : item))} />
           <Button type="button" label={`移除变量 ${index + 1}`} variant="ghost" isDisabled={busy}
             onClick={() => setEnvRows(rows => rows.filter((_, i) => i !== index))} />
@@ -313,7 +389,7 @@ function McpAddForm({ onDone }: { onDone: (message?: string) => void }) {
       </div>
     </> : <>
       <div className="mcp-add-fields">
-        <TextInput id="mcp-add-name" label="名称" value={name} placeholder="remote-docs" isDisabled={busy}
+        <TextInput id="mcp-add-name" label="名称" value={name} placeholder="remote-docs" isDisabled={busy || isEdit}
           hasSpellCheck={false} onChange={setName} />
         <TextInput id="mcp-add-url" label="服务器 URL" value={url} inputMode="url"
           placeholder={transport === 'sse' ? 'https://example.com/sse' : 'https://example.com/mcp'} isDisabled={busy}
@@ -325,6 +401,7 @@ function McpAddForm({ onDone }: { onDone: (message?: string) => void }) {
           <TextInput label={`Header 名（${index + 1}）`} value={row.key} placeholder="Authorization" isDisabled={busy} hasSpellCheck={false}
             onChange={value => setHeaderRows(rows => rows.map((item, i) => i === index ? { ...item, key: value } : item))} />
           <TextInput label={`Header 值（${index + 1}）`} value={row.value} type="password" isDisabled={busy}
+            placeholder={row.existing ? '已保存（留空保留原值）' : ''}
             onChange={value => setHeaderRows(rows => rows.map((item, i) => i === index ? { ...item, value } : item))} />
           <Button type="button" label={`移除请求头 ${index + 1}`} variant="ghost" isDisabled={busy}
             onClick={() => setHeaderRows(rows => rows.filter((_, i) => i !== index))} />
@@ -334,8 +411,9 @@ function McpAddForm({ onDone }: { onDone: (message?: string) => void }) {
       </div>
     </>}
     <div className="settings-inline-actions">
-      <Button id="mcp-add-submit" variant="primary" label={busy ? '保存中…' : '保存服务器'}
+      <Button id="mcp-add-submit" variant="primary" label={busy ? '保存中…' : (isEdit ? '保存修改' : '保存服务器')}
         isDisabled={!canSubmit} onClick={() => void submit()} />
+      {onCancel && <Button type="button" variant="ghost" label="取消" isDisabled={busy} onClick={onCancel} />}
     </div>
     <p className="settings-status" role={hasError ? 'alert' : 'status'}>{hint}</p>
   </form>;

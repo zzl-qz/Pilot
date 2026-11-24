@@ -173,6 +173,11 @@ export interface McpConfigControllerServerPayload {
   trustState: string;
   trustNote: string;
   configHash: string;
+  transport?: 'stdio' | 'http' | 'sse' | string;
+  args?: string[];
+  url?: string;
+  envKeys?: string[];
+  headerKeys?: string[];
 }
 
 /** McpConfigController.java / AddRequest */
@@ -184,6 +189,7 @@ export interface McpConfigControllerAddRequest {
   transport?: 'stdio' | 'http' | 'sse' | string;
   url?: string;
   headers?: Record<string, string>;
+  preserveExistingSecrets?: boolean;
 }
 
 /** McpConfigController.java / ImportRequest */

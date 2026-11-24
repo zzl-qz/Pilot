@@ -86,12 +86,9 @@ public class McpConfigController {
         for (McpServerConfig config : manager.servers(workspace).values()) {
             List<McpToolInfo> known = manager.knownTools(workspace, config.name());
             String source = manager.definedInWorkspaceConfig(workspace, config.name()) ? "workspace" : "user";
-            result.add(new ServerPayload(config.name(), source, commandLine(config), config.command(), config.usable(),
-                manager.running(workspace, config.name()), manager.failure(workspace, config.name()),
-                config.unsupported(), known.size(),
-                known.stream().map(McpToolInfo::name).limit(MAX_LISTED_TOOLS).toList(),
-                manager.trustState(workspace, config.name()), manager.trustNote(workspace, config.name()),
-                McpTrustStore.hash(config)));
+            result.add(toPayload(config, source, manager.running(workspace, config.name()),
+                manager.failure(workspace, config.name()), known, manager.trustState(workspace, config.name()),
+                manager.trustNote(workspace, config.name())));
         }
         return List.copyOf(result);
     }
@@ -134,21 +131,31 @@ public class McpConfigController {
                     }
                 });
             }
+            boolean preserve = Boolean.TRUE.equals(request.preserveExistingSecrets());
             try {
                 manager.updateUserConfig(root -> {
                     ObjectNode servers = serversNode(root);
                     JsonNode existing = servers.path(name);
                     ObjectNode entry =
                         existing.isObject() ? ((ObjectNode)existing).deepCopy() : mapper.createObjectNode();
+                    JsonNode oldHeaders = existing.path("headers");
+                    Map<String, String> mergedHeaders = new LinkedHashMap<>();
+                    headers.forEach((key, value) -> {
+                        if (value.isEmpty() && preserve && oldHeaders.isObject() && oldHeaders.path(key).isTextual()) {
+                            mergedHeaders.put(key, oldHeaders.path(key).asString());
+                        } else {
+                            mergedHeaders.put(key, value);
+                        }
+                    });
                     entry.remove("command");
                     entry.remove("args");
                     entry.remove("env");
                     entry.put("type", normalizedType);
                     entry.put("url", url);
-                    if (headers.isEmpty()) {
+                    if (mergedHeaders.isEmpty()) {
                         entry.remove("headers");
                     } else {
-                        entry.set("headers", mapper.valueToTree(headers));
+                        entry.set("headers", mapper.valueToTree(mergedHeaders));
                     }
                     servers.set(name, entry);
                     return null;
@@ -180,6 +187,7 @@ public class McpConfigController {
                     }
                 });
             }
+            boolean preserve = Boolean.TRUE.equals(request.preserveExistingSecrets());
             try {
                 manager.updateUserConfig(root -> {
                     ObjectNode servers = serversNode(root);
@@ -188,6 +196,15 @@ public class McpConfigController {
                     // 旧的 url/headers/非 stdio type 不能和新命令混在一起
                     ObjectNode entry =
                         existing.isObject() ? ((ObjectNode)existing).deepCopy() : mapper.createObjectNode();
+                    JsonNode oldEnv = existing.path("env");
+                    Map<String, String> mergedEnv = new LinkedHashMap<>();
+                    env.forEach((key, value) -> {
+                        if (value.isEmpty() && preserve && oldEnv.isObject() && oldEnv.path(key).isTextual()) {
+                            mergedEnv.put(key, oldEnv.path(key).asString());
+                        } else {
+                            mergedEnv.put(key, value);
+                        }
+                    });
                     entry.remove("url");
                     entry.remove("headers");
                     if (!entry.path("type").isMissingNode() && !"stdio".equals(entry.path("type").asString())) {
@@ -199,10 +216,10 @@ public class McpConfigController {
                     } else {
                         entry.set("args", mapper.valueToTree(args));
                     }
-                    if (env.isEmpty()) {
+                    if (mergedEnv.isEmpty()) {
                         entry.remove("env");
                     } else {
-                        entry.set("env", mapper.valueToTree(env));
+                        entry.set("env", mapper.valueToTree(mergedEnv));
                     }
                     servers.set(name, entry);
                     return null;
@@ -217,9 +234,8 @@ public class McpConfigController {
         if (config == null) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "写入后读取不到配置，请检查数据目录");
         }
-        return new ServerPayload(config.name(), "user", commandLine(config), config.command(), config.usable(),
-            manager.running(workspace, config.name()), null, config.unsupported(), 0, List.of(),
-            manager.trustState(workspace, config.name()), null, McpTrustStore.hash(config));
+        return toPayload(config, "user", manager.running(workspace, config.name()), null, List.of(),
+            manager.trustState(workspace, config.name()), null);
     }
 
     /** 删除用户级条目；工作区条目提示手工处理，两边都没有则 404。删除后同时撤销信任。 */
@@ -468,10 +484,24 @@ public class McpConfigController {
         return config.args().isEmpty() ? config.command() : config.command() + " " + String.join(" ", config.args());
     }
 
+    private static ServerPayload toPayload(McpServerConfig config, String source, boolean running, String failure,
+        List<McpToolInfo> known, String trustState, String trustNote) {
+        return new ServerPayload(config.name(), source, commandLine(config), config.command(), config.usable(), running,
+            failure, config.unsupported(), known.size(),
+            known.stream().map(McpToolInfo::name).limit(MAX_LISTED_TOOLS).toList(), trustState, trustNote,
+            McpTrustStore.hash(config), config.transport(), config.args(), config.url() == null ? "" : config.url(),
+            List.copyOf(config.env().keySet()), List.copyOf(config.headers().keySet()));
+    }
+
     public record AddRequest(String name, String command, String args, Map<String, String> env, String transport,
-        String url, Map<String, String> headers) {
+        String url, Map<String, String> headers, Boolean preserveExistingSecrets) {
         public AddRequest(String name, String command, String args, Map<String, String> env) {
-            this(name, command, args, env, null, null, null);
+            this(name, command, args, env, null, null, null, null);
+        }
+
+        public AddRequest(String name, String command, String args, Map<String, String> env, String transport,
+            String url, Map<String, String> headers) {
+            this(name, command, args, env, transport, url, headers, null);
         }
     }
 
@@ -491,10 +521,20 @@ public class McpConfigController {
      * @param source     生效来源：workspace（工作区同名会覆盖用户级）或 user
      * @param trustState UNTRUSTED / TRUSTED_UNPINNED / TRUSTED / STALE
      * @param configHash 当前配置哈希；设置页「信任」按钮原样带回
+     * @param envKeys    仅暴露环境变量名（不暴露值），用于界面编辑回填
+     * @param headerKeys 仅暴露请求头名（不暴露值），用于界面编辑回填
      */
     public record ServerPayload(String name, String source, String command, String commandOnly, boolean usable,
         boolean running, String failure, String unsupported, int toolCount, List<String> tools, String trustState,
-        String trustNote, String configHash) {
+        String trustNote, String configHash, String transport, List<String> args, String url, List<String> envKeys,
+        List<String> headerKeys) {
+        public ServerPayload(String name, String source, String command, String commandOnly, boolean usable,
+            boolean running, String failure, String unsupported, int toolCount, List<String> tools, String trustState,
+            String trustNote, String configHash) {
+            this(name, source, command, commandOnly, usable, running, failure, unsupported, toolCount, tools,
+                trustState, trustNote, configHash, McpServerConfig.TRANSPORT_STDIO, List.of(), "", List.of(),
+                List.of());
+        }
     }
 
     /** 测试结果：ok=false 时 error 说明原因；tools 为启动后读到的工具清单（前 80 个）。 */

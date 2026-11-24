@@ -125,20 +125,42 @@ function isLocalEndpoint(endpoint: string): boolean {
   }
 }
 
+const LOCAL_MODEL_TEMPLATES = [
+  { label: 'Ollama (免密钥)', endpoint: 'http://127.0.0.1:11434/v1', model: 'qwen2.5-coder:14b' },
+  { label: 'LM Studio (免密钥)', endpoint: 'http://127.0.0.1:1234/v1', model: '' },
+  { label: 'llama.cpp (免密钥)', endpoint: 'http://127.0.0.1:8080/v1', model: '' },
+  { label: 'vLLM (免密钥)', endpoint: 'http://127.0.0.1:8000/v1', model: '' }
+] as const;
+
 function ModelSettings() {
   const settings = useStore(state => state.settingsData);
   const { name, endpoint, key, contextTokens, maxOutputTokens, childModel, setName, setEndpoint, setKey, setContextTokens, setMaxOutputTokens, setChildModel, saving, feedback, save, clearKey, resetFromSettings } = useModelForm({ model: settings?.model, endpoint: settings?.modelEndpoint, contextTokens: settings?.contextTokens, maxOutputTokens: settings?.maxOutputTokens, childModel: settings?.childModel });
   const discovery = useModelDiscovery({ endpoint, apiKey: key });
+  const [templateHint, setTemplateHint] = useState('');
   const probeStatus = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
     if (!discovery.probing && !discovery.models.length) probeStatus.current?.scrollIntoView({ block: 'nearest' });
   }, [discovery.hint, discovery.models.length, discovery.probing]);
+  function applyLocalTemplate(template: (typeof LOCAL_MODEL_TEMPLATES)[number]) {
+    setEndpoint(template.endpoint);
+    if (template.model && !name.trim()) setName(template.model);
+    setKey('');
+    setTemplateHint(`已填入 ${template.label} 端点（${template.endpoint}），点「探测可用模型」可直接拉取本机已加载模型。`);
+  }
   return <>
     <section className="settings-group">
       <div className="settings-group-heading">
         <h3>聊天服务</h3>
         <p>{settings?.model ? <>当前使用 <strong>{settings.model}</strong>，保存后应用于后续请求。</> : '填写模型名称和服务端点，保存后应用于后续请求。'}</p>
       </div>
+      <div className="settings-template-bar" role="group" aria-label="本机免密钥快捷模板">
+        <span className="settings-template-label">免密钥本机快捷填入：</span>
+        {LOCAL_MODEL_TEMPLATES.map(template => (
+          <Button key={template.endpoint} size="sm" variant="ghost" label={template.label} isDisabled={saving}
+            onClick={() => applyLocalTemplate(template)} />
+        ))}
+      </div>
+      {templateHint && <p className="settings-status" role="status">{templateHint}</p>}
       <form className="settings-form" onSubmit={event => {
         event.preventDefault();
         if (name.trim() && !saving) void save();
