@@ -10,6 +10,7 @@ import java.util.function.Consumer;
 
 import org.springframework.stereotype.Component;
 
+import com.pilot.core.browser.BrowserCommand;
 import com.pilot.core.model.ModelCapacity;
 import com.pilot.server.store.SettingsStore;
 
@@ -54,6 +55,19 @@ public class ModelSettings {
 
         public boolean hasApiKey() {
             return apiKey != null && !apiKey.isBlank();
+        }
+
+        /** 端点是否指向本机回环服务（如 Ollama / LM Studio / llama.cpp，通常免密钥）。 */
+        public boolean isLocalEndpoint() {
+            if (endpoint == null || endpoint.isBlank()) {
+                return false;
+            }
+            try {
+                String host = URI.create(endpoint.strip()).getHost();
+                return BrowserCommand.isLoopbackHost(host) || "0.0.0.0".equals(host);
+            } catch (IllegalArgumentException e) {
+                return false;
+            }
         }
 
         /** 只用于界面提示，不可反推原值。 */

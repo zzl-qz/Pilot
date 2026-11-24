@@ -57,6 +57,22 @@ final class ModelHttp {
             .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(ordered), StandardCharsets.UTF_8));
     }
 
+    /** 仅当密钥非空白时附加 Bearer 认证头，避免 Ollama / LM Studio 等免密钥本机服务收到空 Bearer 后返回 401。 */
+    static HttpRequest.Builder withBearerAuth(HttpRequest.Builder builder, String apiKey) {
+        if (apiKey != null && !apiKey.isBlank()) {
+            builder.header("Authorization", "Bearer " + apiKey.strip());
+        }
+        return builder;
+    }
+
+    /** 仅当请求头值非空白时附加该头，兼容免密钥本地网关。 */
+    static HttpRequest.Builder withHeaderIfPresent(HttpRequest.Builder builder, String name, String value) {
+        if (value != null && !value.isBlank()) {
+            builder.header(name, value.strip());
+        }
+        return builder;
+    }
+
     static JsonNode parseJson(ObjectMapper mapper, String body) {
         try {
             return mapper.readTree(body);

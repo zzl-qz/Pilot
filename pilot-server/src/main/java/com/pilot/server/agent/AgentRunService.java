@@ -1896,8 +1896,11 @@ public class AgentRunService implements RunStarter {
     @PostConstruct
     void logConfiguration() {
         ModelSettings.Snapshot snapshot = modelSettings.snapshot();
-        if (!snapshot.hasApiKey()) {
-            log.warn("模型 API Key 未配置，模型请求会失败；" + "可在界面「模型设置」里填写，或设置环境变量 PILOT_MODEL_API_KEY");
+        if (!snapshot.hasApiKey() && snapshot.isLocalEndpoint()) {
+            log.info("模型已配置（本机免密钥模式）：model={} endpoint={} workspace={}", snapshot.model(), snapshot.endpoint(),
+                properties.workspace());
+        } else if (!snapshot.hasApiKey()) {
+            log.warn("模型 API Key 未配置，非免密钥端点请求可能会失败；" + "可在界面「模型设置」里填写，或设置环境变量 PILOT_MODEL_API_KEY");
         } else {
             log.info("模型已配置：model={} endpoint={} workspace={}", snapshot.model(), snapshot.endpoint(),
                 properties.workspace());

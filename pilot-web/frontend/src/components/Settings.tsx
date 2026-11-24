@@ -113,6 +113,18 @@ function AppearanceSettings() {
   </>;
 }
 
+function isLocalEndpoint(endpoint: string): boolean {
+  const raw = endpoint.trim();
+  if (!raw) return false;
+  try {
+    const host = new URL(raw).hostname.toLowerCase();
+    return host === 'localhost' || host.endsWith('.localhost') || host === '127.0.0.1'
+      || host === '::1' || host === '[::1]' || host === '0.0.0.0' || /^127\.\d+\.\d+\.\d+$/.test(host);
+  } catch {
+    return false;
+  }
+}
+
 function ModelSettings() {
   const settings = useStore(state => state.settingsData);
   const { name, endpoint, key, contextTokens, maxOutputTokens, childModel, setName, setEndpoint, setKey, setContextTokens, setMaxOutputTokens, setChildModel, saving, feedback, save, clearKey, resetFromSettings } = useModelForm({ model: settings?.model, endpoint: settings?.modelEndpoint, contextTokens: settings?.contextTokens, maxOutputTokens: settings?.maxOutputTokens, childModel: settings?.childModel });
@@ -147,12 +159,16 @@ function ModelSettings() {
         </div>
         <TextInput id="settings-model-key" label="API Key" size="lg" width="100%" type="password"
           isDisabled={saving} value={key} onChange={setKey} autoComplete="new-password"
-          placeholder={settings?.modelApiKeySet ? `已保存 ${settings.modelApiKeyMasked || ''}（不填沿用）` : '尚未保存密钥'} />
+          placeholder={settings?.modelApiKeySet
+            ? `已保存 ${settings.modelApiKeyMasked || ''}（不填沿用）`
+            : isLocalEndpoint(endpoint) ? '本机服务可留空（免密钥）' : '尚未保存密钥（本地免密钥服务可留空）'} />
         <div className="settings-form-actions">
           <Button id="settings-model-clear-key" label="清除 Key" variant="ghost" className="settings-danger" isDisabled={saving || !settings?.modelApiKeySet}
             onClick={() => useStore.getState().askConfirm({
               title: '清除 API Key',
-              message: '清除后模型请求会失败，直到重新填写。确定清除吗？',
+              message: isLocalEndpoint(endpoint)
+                ? '清除后将不携带认证头，本机 Ollama / LM Studio 等免密钥服务仍可正常调用。确定清除吗？'
+                : '清除后需要鉴权的云端端点会请求失败；本机或免密钥服务仍可调用。确定清除吗？',
               confirmText: '清除',
               danger: true,
               onConfirm: clearKey

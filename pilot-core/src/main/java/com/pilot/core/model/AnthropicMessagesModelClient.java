@@ -124,8 +124,10 @@ public final class AnthropicMessagesModelClient implements ModelClient {
     }
 
     private HttpRequest.Builder messagesRequest(List<Message> messages, List<ToolDefinition> tools, boolean stream) {
-        return ModelHttp.jsonPost(endpoint, timeout, mapper, requestBody(messages, tools, stream))
-            .header("x-api-key", apiKey).header("anthropic-version", "2023-06-01");
+        return ModelHttp
+            .withHeaderIfPresent(ModelHttp.jsonPost(endpoint, timeout, mapper, requestBody(messages, tools, stream)),
+                "x-api-key", apiKey)
+            .header("anthropic-version", "2023-06-01");
     }
 
     private ModelResponse readStream(InputStream body, Consumer<String> textDelta, Consumer<String> reasoningDelta)

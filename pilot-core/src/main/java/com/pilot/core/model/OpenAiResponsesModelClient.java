@@ -91,8 +91,9 @@ public final class OpenAiResponsesModelClient implements ModelClient {
 
     @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
-        var request = ModelHttp.jsonPost(endpoint, timeout, mapper, requestBody(messages, tools))
-            .header("Authorization", "Bearer " + apiKey).build();
+        var request = ModelHttp
+            .withBearerAuth(ModelHttp.jsonPost(endpoint, timeout, mapper, requestBody(messages, tools)), apiKey)
+            .build();
         var response = ModelHttp.sendNative(httpClient, request, idleTimeout);
         JsonNode root = ModelHttp.parseJson(mapper, response.body());
         if (!root.path("output").isArray() && root.path("choices").isArray()) {

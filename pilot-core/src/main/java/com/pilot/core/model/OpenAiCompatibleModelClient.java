@@ -326,9 +326,9 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     @Override
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
         ReasoningReplay replay = reasoningReplay;
-        HttpRequest request =
-            ModelHttp.jsonPost(endpoint, requestTimeout, objectMapper, requestBody(messages, tools, false, replay))
-                .header("Authorization", "Bearer " + apiKey).build();
+        HttpRequest request = ModelHttp.withBearerAuth(
+            ModelHttp.jsonPost(endpoint, requestTimeout, objectMapper, requestBody(messages, tools, false, replay)),
+            apiKey).build();
 
         long startedAt = System.nanoTime();
         BoundedHttp.TextResponse response;
@@ -389,9 +389,9 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools, Consumer<String> textDelta,
         Consumer<String> reasoningDelta) {
         ReasoningReplay replay = reasoningReplay;
-        HttpRequest request =
-            ModelHttp.jsonPost(endpoint, requestTimeout, objectMapper, requestBody(messages, tools, true, replay))
-                .header("Authorization", "Bearer " + apiKey).header("Accept", "text/event-stream").build();
+        HttpRequest request = ModelHttp.withBearerAuth(
+            ModelHttp.jsonPost(endpoint, requestTimeout, objectMapper, requestBody(messages, tools, true, replay)),
+            apiKey).header("Accept", "text/event-stream").build();
 
         long startedAt = System.nanoTime();
         try (var response = BoundedHttp.open(httpClient, request, idleTimeout, BoundedHttp.STREAM_BYTES)) {
