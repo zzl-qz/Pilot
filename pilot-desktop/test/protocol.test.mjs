@@ -1,6 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { agentMayOperate, agentMayTouchPage, formatPageLogs, markerPath, partitionName, snapBounds, userPageUrl } from '../protocol.mjs';
+import { startBrowserControl } from '../browser-control.mjs';
+import {
+  agentMayOperate,
+  agentMayTouchPage,
+  formatPageLogs,
+  isDangerousDownloadExtension,
+  markerPath,
+  partitionName,
+  sanitizeDownloadFilename,
+  snapBounds,
+  userPageUrl
+} from '../protocol.mjs';
 
 test('人的地址栏：本机补 http，外网补 https，拒绝别的协议', () => {
   assert.equal(userPageUrl('localhost:5173'), 'http://localhost:5173/');
@@ -49,4 +60,65 @@ test('桌面页的控制台和网络记录按旧面板的句子排', () => {
 test('标签标记路径只含这个标签的 id', () => {
   assert.equal(markerPath('abc'), '/marker/abc');
   assert.equal(markerPath('a/b'), '/marker/a%2Fb');
+});
+
+test('下载文件名清理路径穿越并识别危险扩展名', () => {
+  assert.equal(sanitizeDownloadFilename('../../evil/setup.exe'), 'setup.exe');
+  assert.equal(sanitizeDownloadFilename('..'), 'download.bin');
+  assert.equal(isDangerousDownloadExtension('setup.EXE'), true);
+  assert.equal(isDangerousDownloadExtension('script.ps1'), true);
+  assert.equal(isDangerousDownloadExtension('report.pdf'), false);
+});
+
+test('桌面日志自动脱敏认证令牌和敏感查询参数', () => {
+  const net = formatPageLogs([{ method: 'GET', statusCode: 200, url: 'https://a.test/cb?access_token=topsecret#code=123456' }], 'network');
+  assert.doesNotMatch(net, /topsecret|123456/);
+  const con = formatPageLogs([{ level: 'warn', message: 'Authorization: Bearer my-jwt-secret-token' }], 'console');
+  assert.doesNotMatch(con, /my-jwt-secret-token/);
+});
+
+test('桌面控制端口支持 POST /control 令牌校验与控制态更新', async () => {
+  let server = null;
+  let lastControl = null;
+  const port = await startBrowserControl('secret-token', {
+    state: () => ({ tabs: [] }),
+    open: () => ({}),
+    select: () => ({}),
+    close: () => ({}),
+    emulate: () => ({}),
+    control: (body) => {
+      if (body.sessionId === 'missing') return null;
+      lastControl = body;
+      return { ok: true, agentControlled: Boolean(body.agentControlled), controlStatus: body.controlStatus || '' };
+    }
+  }, { onServer: (s) => { server = s; } });
+
+  try {
+    const unauth = await fetch(`http://127.0.0.1:${port}/control`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionId: 's1', agentControlled: true })
+    });
+    assert.equal(unauth.status, 401);
+
+    const missing = await fetch(`http://127.0.0.1:${port}/control`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-pilot-token': 'secret-token' },
+      body: JSON.stringify({ sessionId: 'missing', agentControlled: true })
+    });
+    assert.equal(missing.status, 404);
+
+    const ok = await fetch(`http://127.0.0.1:${port}/control`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-pilot-token': 'secret-token' },
+      body: JSON.stringify({ sessionId: 's1', agentControlled: true, controlStatus: '填写 e3' })
+    });
+    assert.equal(ok.status, 200);
+    const body = await ok.json();
+    assert.equal(body.agentControlled, true);
+    assert.equal(body.controlStatus, '填写 e3');
+    assert.equal(lastControl.sessionId, 's1');
+  } finally {
+    await new Promise((resolve) => server?.close(resolve));
+  }
 });

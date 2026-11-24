@@ -20,13 +20,14 @@ function readBody(request) {
 }
 
 /** 本机浏览器控制口。标签状态和副作用由桌面主进程提供。 */
-export function startBrowserControl(token, actions) {
+export function startBrowserControl(token, actions, options = {}) {
   const routes = new Map([
     ['GET /tabs', actions.state],
     ['POST /tabs', actions.open],
     ['POST /tabs/select', actions.select],
     ['POST /tabs/close', actions.close],
-    ['POST /emulate', actions.emulate]
+    ['POST /emulate', actions.emulate],
+    ['POST /control', actions.control]
   ]);
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1');
@@ -61,5 +62,8 @@ export function startBrowserControl(token, actions) {
       response.end(String(error.message || error));
     }
   });
-  return new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server.address().port)));
+  return new Promise(resolve => server.listen(0, '127.0.0.1', () => {
+    if (typeof options.onServer === 'function') options.onServer(server);
+    resolve(server.address().port);
+  }));
 }

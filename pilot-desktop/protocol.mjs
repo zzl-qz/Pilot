@@ -73,19 +73,65 @@ export function markerPath(tabId) {
   return `/marker/${encodeURIComponent(tabId)}`;
 }
 
+const DANGEROUS_DOWNLOAD_EXTENSIONS = new Set([
+  '.exe', '.bat', '.cmd', '.com', '.msi', '.scr', '.pif', '.vbs', '.vbe',
+  '.js', '.jse', '.wsf', '.wsh', '.ps1', '.psm1', '.sh', '.bash', '.zsh',
+  '.command', '.app', '.dmg', '.pkg', '.deb', '.rpm', '.appimage', '.run',
+  '.jar', '.lnk', '.reg', '.hta', '.cpl', '.msc'
+]);
+
+const SENSITIVE_PARAM_PATTERN = /([?&#])(token|access_token|id_token|refresh_token|auth|code|password|passwd|key|api_key|apikey|secret|sig|signature|session|sessionid|sid|jwt|credential|oauth_token)=([^&#\s]*)/gi;
+const BEARER_PATTERN = /(Bearer\s+)[A-Za-z0-9._~+/=-]{6,}/gi;
+
+export function sanitizeDownloadFilename(raw) {
+  const leaf = String(raw || '')
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter(Boolean)
+    .pop() || '';
+  const cleaned = leaf
+    .replace(/[\x00-\x1f<>:"|?*]/g, '_')
+    .replace(/^\.+/, '')
+    .trim();
+  if (!cleaned || cleaned === '.' || cleaned === '..') {
+    return 'download.bin';
+  }
+  if (cleaned.length <= 120) {
+    return cleaned;
+  }
+  const dot = cleaned.lastIndexOf('.');
+  if (dot > 0 && cleaned.length - dot <= 16) {
+    const ext = cleaned.slice(dot);
+    return cleaned.slice(0, 120 - ext.length) + ext;
+  }
+  return cleaned.slice(0, 120);
+}
+
+export function isDangerousDownloadExtension(filename) {
+  const clean = String(filename || '').trim().toLowerCase();
+  const dot = clean.lastIndexOf('.');
+  return dot >= 0 && DANGEROUS_DOWNLOAD_EXTENSIONS.has(clean.slice(dot));
+}
+
+function scrubLogText(text) {
+  return String(text || '')
+    .replace(SENSITIVE_PARAM_PATTERN, '$1$2=***')
+    .replace(BEARER_PATTERN, '$1***');
+}
+
 /** 桌面页自己的控制台 / 网络记录。空列表给一句固定说明，和旧面板同一句。 */
 export function formatPageLogs(entries, kind) {
   const list = Array.isArray(entries) ? entries : [];
   if (kind === 'network') {
     if (!list.length) return '没有网络记录';
     return list.map((item) => {
-      const status = item.statusCode || item.error || '';
-      return `${item.method || 'GET'} ${status} ${item.url || ''}`.trim();
+      const status = item.statusCode || scrubLogText(item.error || '');
+      return `${item.method || 'GET'} ${status} ${scrubLogText(item.url || '')}`.trim();
     }).join('\n');
   }
   if (!list.length) return '没有控制台记录';
   return list.map((item) => {
-    const where = item.sourceId ? ` @ ${item.sourceId}${item.lineNumber ? ':' + item.lineNumber : ''}` : '';
-    return `[${item.level || 'info'}] ${item.message || ''}${where}`;
+    const where = item.sourceId ? ` @ ${scrubLogText(item.sourceId)}${item.lineNumber ? ':' + item.lineNumber : ''}` : '';
+    return `[${item.level || 'info'}] ${scrubLogText(item.message || '')}${where}`;
   }).join('\n');
 }

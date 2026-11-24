@@ -12,7 +12,15 @@ import { readFile, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hostname } from 'node:os';
-import { formatPageLogs, markerPath, partitionName, snapBounds, userPageUrl } from './protocol.mjs';
+import {
+  formatPageLogs,
+  isDangerousDownloadExtension,
+  markerPath,
+  partitionName,
+  sanitizeDownloadFilename,
+  snapBounds,
+  userPageUrl
+} from './protocol.mjs';
 import { offlinePage } from './offline-page.mjs';
 import { windowSizeMenuItem, workbenchMenuItems, workbenchShortcut } from './platform-menu.mjs';
 
@@ -105,8 +113,13 @@ function state() {
       loading: tab.view.webContents.isLoading(),
       favicon: tab.favicon || '',
       sessionId: tab.sessionId || null,
+      ownerSessionId: tab.ownerSessionId || null,
+      agentId: tab.agentId || '',
+      label: tab.label || '',
       detached: Boolean(tab.detached),
-      emulated: tab.emulated || null
+      emulated: tab.emulated || null,
+      agentControlled: Boolean(tab.agentControlled),
+      controlStatus: tab.controlStatus || ''
     })),
     activeId,
     url: current ? current.view.webContents.getURL() : '',
@@ -225,11 +238,23 @@ function hookPageSession(ses) {
   ses.on('will-download', (_event, item) => {
     const dir = join(browserHome(), 'downloads');
     mkdirSync(dir, { recursive: true });
-    const name = item.getFilename() || 'download';
-    item.setSavePath(join(dir, `${Date.now()}-${name}`));
-    item.once('done', (_done, state) => {
+    const name = sanitizeDownloadFilename(item.getFilename());
+    if (isDangerousDownloadExtension(name)) {
+      item.cancel();
       if (shell && !shell.isDestroyed()) {
-        workbench.send('pilot-browser-download', { state, name, path: item.getSavePath() });
+        workbench.send('pilot-browser-download', {
+          state: 'blocked',
+          name,
+          error: `已阻止高风险可执行或脚本文件下载（${name}）`
+        });
+      }
+      return;
+    }
+    const savePath = join(dir, `${Date.now()}-${name}`);
+    item.setSavePath(savePath);
+    item.once('done', (_done, downloadState) => {
+      if (shell && !shell.isDestroyed()) {
+        workbench.send('pilot-browser-download', { state: downloadState, name, path: savePath });
       }
     });
   });
@@ -254,6 +279,11 @@ function wire(tab) {
   contents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
     if (!isMainFrame || code === -3) return;
     tab.loadError = description ? `${description}（${url || ''}）` : `页面没有打开（${code}）`;
+    refresh();
+  });
+  contents.on('render-process-gone', () => {
+    tab.agentControlled = false;
+    tab.controlStatus = '';
     refresh();
   });
   contents.on('page-favicon-updated', (_event, favicons) => {
@@ -311,7 +341,7 @@ function wire(tab) {
   });
 }
 
-function createTab({ url, sessionId }) {
+function createTab({ url, sessionId, ownerSessionId = null, agentId = '', label = '', background = false }) {
   if (!shell) throw new Error('窗口还没准备好');
   const id = randomBytes(8).toString('hex');
   const view = new WebContentsView({
@@ -328,8 +358,13 @@ function createTab({ url, sessionId }) {
   // 隐藏标签也保留有效布局；0×0 会使首次截图与 DOM 可见性检查失败。
   view.setBounds({ x: 0, y: 0, width: 1280, height: 800 });
   const tab = {
-    id, view, sessionId: sessionId || null, bounds: null, detached: false, window: null,
+    id, view, sessionId: sessionId || null,
+    ownerSessionId: ownerSessionId || sessionId || null,
+    agentId: agentId ? String(agentId) : '',
+    label: label ? String(label) : '',
+    bounds: null, detached: false, window: null,
     attached: false, cover: null, emulated: null, covering: false,
+    agentControlled: false, controlStatus: '',
     console: [], network: [], loadError: '', favicon: ''
   };
   tabs.set(id, tab);
@@ -338,7 +373,10 @@ function createTab({ url, sessionId }) {
   shell.contentView.addChildView(view);
   tab.attached = true;
   wire(tab);
-  activeId = id;
+  const keepCurrent = Boolean(background && activeId && tabs.has(activeId));
+  if (!keepCurrent) {
+    activeId = id;
+  }
   view.webContents.loadURL(`http://127.0.0.1:${controlPort}${markerPath(id)}`);
   if (url) {
     view.webContents.once('did-finish-load', () => {
@@ -346,7 +384,9 @@ function createTab({ url, sessionId }) {
       if (next) view.webContents.loadURL(next);
     });
   }
-  place(tab);
+  if (!keepCurrent) {
+    place(tab);
+  }
   broadcast();
   return tab;
 }
@@ -356,13 +396,24 @@ function ensureTab(sessionId, options = {}) {
     const existingId = sessionId ? sessionTabs.get(sessionId) : null;
     const existing = existingId ? tabs.get(existingId) : null;
     if (existing) {
-      activeId = existing.id;
-      place(existing);
+      if (options.agentId && !existing.agentId) existing.agentId = String(options.agentId);
+      if (options.label && !existing.label) existing.label = String(options.label);
+      if (!options.background) {
+        activeId = existing.id;
+        place(existing);
+      }
       broadcast();
       return existing;
     }
   }
-  return createTab({ url: options.url || null, sessionId: sessionId || null });
+  return createTab({
+    url: options.url || null,
+    sessionId: sessionId || null,
+    ownerSessionId: options.ownerSessionId || sessionId || null,
+    agentId: options.agentId || '',
+    label: options.label || '',
+    background: Boolean(options.background)
+  });
 }
 
 function emulate(tab, width, height) {
@@ -470,7 +521,14 @@ async function startControl() {
   controlPort = await startBrowserControl(token, {
     state,
     open(body) {
-      const tab = ensureTab(body.sessionId || null, { fresh: Boolean(body.fresh), url: body.url || null });
+      const tab = ensureTab(body.sessionId || null, {
+        fresh: Boolean(body.fresh),
+        url: body.url || null,
+        ownerSessionId: body.ownerSessionId || body.sessionId || null,
+        agentId: body.agentId || '',
+        label: body.label || '',
+        background: Boolean(body.background)
+      });
       return { tabId: tab.id, targetId: tab.view.webContents.getOrCreateDevToolsTargetId(), tabs: state().tabs };
     },
     select(body) {
@@ -490,6 +548,20 @@ async function startControl() {
       if (!targets.length) return null;
       for (const tab of targets) emulate(tab, Number(body.width) || 0, Number(body.height) || 0);
       return { ok: true, emulated: targets[0].emulated || null };
+    },
+    control(body) {
+      const matches = body.tabId ? [tabs.get(body.tabId)]
+        : body.sessionId ? [...tabs.values()].filter(tab => tab.sessionId === body.sessionId) : [activeTab()];
+      const targets = matches.filter(Boolean);
+      if (!targets.length) return null;
+      const active = Boolean(body.agentControlled);
+      const status = active ? String(body.controlStatus || '') : '';
+      for (const tab of targets) {
+        tab.agentControlled = active;
+        tab.controlStatus = status;
+      }
+      broadcast();
+      return { ok: true, agentControlled: active, controlStatus: status };
     }
   });
 }
