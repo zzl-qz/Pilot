@@ -69,16 +69,24 @@ public final class ModelCatalog {
      * @throws ModelClientException 网络失败、非 2xx 响应或响应结构不合法
      */
     public static List<String> fetch(HttpClient httpClient, ObjectMapper objectMapper, URI endpoint, String apiKey) {
+        return fetch(httpClient, objectMapper, endpoint, apiKey, REQUEST_TIMEOUT);
+    }
+
+    /** 拉取端点上的可用模型清单，支持指定更短的请求超时（用于本机多端口并发扫描）。 */
+    public static List<String> fetch(HttpClient httpClient, ObjectMapper objectMapper, URI endpoint, String apiKey,
+        Duration timeout) {
+        Duration effectiveTimeout = timeout == null || timeout.isNegative() || timeout.isZero()
+            ? REQUEST_TIMEOUT : timeout;
         URI modelsUri = resolveModelsUri(endpoint);
         HttpRequest.Builder request =
-            HttpRequest.newBuilder(modelsUri).timeout(REQUEST_TIMEOUT).header("Accept", "application/json").GET();
+            HttpRequest.newBuilder(modelsUri).timeout(effectiveTimeout).header("Accept", "application/json").GET();
         if (apiKey != null && !apiKey.isBlank()) {
             request.header("Authorization", "Bearer " + apiKey.strip());
         }
 
         BoundedHttp.TextResponse response;
         try {
-            response = BoundedHttp.text(httpClient, request.build(), REQUEST_TIMEOUT, 4 * 1024 * 1024);
+            response = BoundedHttp.text(httpClient, request.build(), effectiveTimeout, 4 * 1024 * 1024);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new ModelClientException("模型列表请求被中断", e);
@@ -99,7 +107,7 @@ public final class ModelCatalog {
             throw new ModelClientException("模型列表响应不是合法 JSON（" + modelsUri + "）：" + ModelHttp.snippet(body), e);
         }
 
-        // OpenAI 标准是 data[].id；个别网关返回 models[].id，兜一下
+        // OpenAI 标准是 data[].id；个别网关或 Ollama 返回 models[].id / models[].name，兜一下
         JsonNode items = root.path("data");
         if (!items.isArray()) {
             items = root.path("models");
@@ -111,6 +119,9 @@ public final class ModelCatalog {
         SortedSet<String> ids = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
         for (JsonNode item : items) {
             JsonNode id = item.get("id");
+            if (id == null || !id.isTextual() || id.asString().isBlank()) {
+                id = item.get("name");
+            }
             if (id != null && id.isTextual() && !id.asString().isBlank()) {
                 ids.add(id.asString());
             }

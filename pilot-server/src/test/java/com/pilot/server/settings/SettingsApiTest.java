@@ -225,6 +225,14 @@ class SettingsApiTest {
         }
     }
 
+    @Test
+    void scanLocalEndpointReturnsArrayQuicklyWithoutBlocking() throws Exception {
+        long started = System.nanoTime();
+        mvc.perform(post("/api/settings/model/scan-local")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.services").isArray());
+        org.junit.jupiter.api.Assertions.assertTrue(Duration.ofNanos(System.nanoTime() - started).toMillis() < 3000);
+    }
+
     private ResultActions listModels(String body) throws Exception {
         return mvc.perform(post("/api/settings/model/models").contentType(MediaType.APPLICATION_JSON).content(body));
     }

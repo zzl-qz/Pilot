@@ -1,4 +1,4 @@
-import type { ApiResults } from "../types/api.js";
+import type { ApiResults, LocalModelService } from "../types/api.js";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@astryxdesign/core/Button";
 import { TextInput } from "@astryxdesign/core/TextInput";
@@ -14,6 +14,7 @@ import { Modal } from "./Modal.jsx";
 import { ModelOptions, useModelDiscovery } from "./model/ModelDiscovery.jsx";
 import { ModelSaveFeedback, useModelForm } from "./model/ModelForm.jsx";
 import { ModelProfiles } from "./model/ModelProfiles.js";
+import { LocalServicesList } from "./model/LocalServicesList.js";
 import { ModelRuntimeSettings } from "./model/ModelRuntimeSettings.jsx";
 import { PermissionSettings } from "./settings/PermissionSettings.js";
 import { AlertSettings } from "./settings/AlertSettings.js";
@@ -139,6 +140,10 @@ function ModelSettings() {
   const { name, endpoint, key, contextTokens, maxOutputTokens, childModel, setName, setEndpoint, setKey, setContextTokens, setMaxOutputTokens, setChildModel, saving, feedback, save, clearKey, resetFromSettings } = useModelForm({ model: settings?.model, endpoint: settings?.modelEndpoint, contextTokens: settings?.contextTokens, maxOutputTokens: settings?.maxOutputTokens, childModel: settings?.childModel });
   const discovery = useModelDiscovery({ endpoint, apiKey: key });
   const [templateHint, setTemplateHint] = useState('');
+  const [templateError, setTemplateError] = useState(false);
+  const [localServices, setLocalServices] = useState<LocalModelService[] | null>(null);
+  const [scanningLocal, setScanningLocal] = useState(false);
+  const [profilesRevision, setProfilesRevision] = useState(0);
   const probeStatus = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
     if (!discovery.probing && !discovery.models.length) probeStatus.current?.scrollIntoView({ block: 'nearest' });
@@ -147,7 +152,26 @@ function ModelSettings() {
     setEndpoint(template.endpoint);
     if (template.model && !name.trim()) setName(template.model);
     setKey('');
+    setTemplateError(false);
     setTemplateHint(`已填入 ${template.label} 端点（${template.endpoint}），点「探测可用模型」可直接拉取本机已加载模型。`);
+  }
+  async function scanLocalServices() {
+    setScanningLocal(true);
+    setLocalServices(null);
+    setTemplateError(false);
+    try {
+      const result = await api.scanLocalModels();
+      const services = result?.services ?? [];
+      setLocalServices(services);
+      setTemplateHint(services.length
+        ? `发现 ${services.length} 个在线本机模型服务，可直接填入表单、存为预设或设为备用。`
+        : '未发现运行中的本机模型服务（已检测 Ollama 11434、LM Studio 1234、llama.cpp 8080、vLLM 8000）。');
+    } catch (error) {
+      setTemplateError(true);
+      setTemplateHint(`扫描本机服务失败：${errorInfo(error).message || '请稍后重试'}`);
+    } finally {
+      setScanningLocal(false);
+    }
   }
   return <>
     <section className="settings-group">
@@ -157,12 +181,26 @@ function ModelSettings() {
       </div>
       <div className="settings-template-bar" role="group" aria-label="本机免密钥快捷模板">
         <span className="settings-template-label">免密钥本机快捷填入：</span>
+        <Button id="settings-model-scan-local" size="sm" variant="primary" label={scanningLocal ? '扫描中…' : '扫描本机模型服务'} isDisabled={saving || scanningLocal} aria-busy={scanningLocal} onClick={() => void scanLocalServices()} />
         {LOCAL_MODEL_TEMPLATES.map(template => (
           <Button key={template.endpoint} size="sm" variant="ghost" label={template.label} isDisabled={saving}
             onClick={() => applyLocalTemplate(template)} />
         ))}
       </div>
-      {templateHint && <p className="settings-status" role="status">{templateHint}</p>}
+      {templateHint && <p id="settings-model-template-hint" className="settings-status" role={templateError ? 'alert' : 'status'}>{templateHint}</p>}
+      <LocalServicesList
+        services={localServices}
+        disabled={saving || scanningLocal}
+        onFill={(service, model) => {
+          setEndpoint(service.endpoint);
+          if (model) setName(model);
+          setKey('');
+          setTemplateError(false);
+          setTemplateHint(model ? `已填入 ${service.name} 的 ${model}（免密钥）。` : `已填入 ${service.name} 端点（${service.endpoint}）。`);
+        }}
+        onProfilesChanged={() => setProfilesRevision(value => value + 1)}
+        onHint={(text, isError) => { setTemplateError(Boolean(isError)); setTemplateHint(text); }}
+      />
       <form className="settings-form" onSubmit={event => {
         event.preventDefault();
         if (name.trim() && !saving) void save();
@@ -211,6 +249,7 @@ function ModelSettings() {
     </section>
     <ModelProfiles
       draft={{ model: name, endpoint, apiKey: key, contextTokens, maxOutputTokens, childModel }}
+      refreshKey={profilesRevision}
       onActivated={profile => resetFromSettings(profile)}
     />
     <VoiceSettings />

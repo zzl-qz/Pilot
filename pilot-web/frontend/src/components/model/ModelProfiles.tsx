@@ -32,9 +32,10 @@ function parsePositiveInt(value: string): number | null {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
 }
 
-export function ModelProfiles({ draft, onActivated }: {
+export function ModelProfiles({ draft, onActivated, refreshKey = 0 }: {
   draft: CurrentDraft;
   onActivated: (profile: ModelProfileView) => void;
+  refreshKey?: number;
 }) {
   const [data, setData] = useState<ModelProfilesView | null>(null);
   const [profileName, setProfileName] = useState('');
@@ -50,7 +51,7 @@ export function ModelProfiles({ draft, onActivated }: {
       if (!controller.signal.aborted) setStatus({ message: errorInfo(error).message || '读取模型预设失败', error: true });
     });
     return () => controller.abort();
-  }, []);
+  }, [refreshKey]);
 
   async function saveCurrentAsProfile() {
     const trimmedName = profileName.trim();

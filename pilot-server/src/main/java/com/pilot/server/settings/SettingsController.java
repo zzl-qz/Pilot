@@ -113,6 +113,11 @@ public class SettingsController {
         }
     }
 
+    @PostMapping("/model/scan-local")
+    public LocalModelsResponse scanLocalModels() {
+        return new LocalModelsResponse(catalog.scanLocalServices());
+    }
+
     private SettingsResponse current() {
         ModelSettings.Snapshot snapshot = models.snapshot();
         return new SettingsResponse(permissions.mode().name(),
@@ -147,5 +152,8 @@ public class SettingsController {
     }
 
     public record ModelsResponse(List<String> models) {
+    }
+
+    public record LocalModelsResponse(List<com.pilot.server.model.ModelCatalogService.LocalModelService> services) {
     }
 }

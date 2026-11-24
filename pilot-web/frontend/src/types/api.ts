@@ -202,6 +202,12 @@ export interface ModelProfileView {
   active: boolean;
   fallback?: boolean;
 }
+export interface LocalModelService {
+  name: string;
+  endpoint: string;
+  models: string[];
+}
+
 export interface ModelProfilesView {
   activeProfileId: string;
   fallbackProfileId?: string;
@@ -396,6 +402,7 @@ export interface ApiResults {
   modelRuntime: S.ModelRuntimeSettingsView;
   saveModelRuntime: S.ModelRuntimeSettingsView;
   probeModels: S.SettingsControllerModelsResponse;
+  scanLocalModels: { services: LocalModelService[] };
   webSearchSettings: WebSearchSettingsView;
   saveWebSearchSettings: WebSearchSettingsView;
   clearWebSearchApiKey: WebSearchSettingsView;

@@ -12,10 +12,10 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const desktopRoot = fileURLToPath(new URL('../../../pilot-desktop', import.meta.url));
 const output = await mkdtemp(join(tmpdir(), 'pilot-model-discovery-'));
-let mode = 'success', saveMode = 'success', probes = [], saves = [], held = [], heldSaves = [], heldSettings = [], holdSettings = false, saved, settingsReads = 0, clears = 0;
+let mode = 'success', saveMode = 'success', scanMode = 'online', probes = [], saves = [], held = [], heldSaves = [], heldSettings = [], holdSettings = false, saved, settingsReads = 0, clears = 0;
 const models = ['gpt-test-a', 'gpt-test-b', 'gpt-test-c', 'agent-test-d', 'agent-test-e', 'agent-test-f'];
 const reset = () => {
-  mode = 'success'; saveMode = 'success'; probes = []; saves = []; held = []; heldSaves = []; heldSettings = []; holdSettings = false; settingsReads = 0; clears = 0;
+  mode = 'success'; saveMode = 'success'; scanMode = 'online'; probes = []; saves = []; held = []; heldSaves = []; heldSettings = []; holdSettings = false; settingsReads = 0; clears = 0;
   saved = { model: 'configured-only', modelEndpoint: 'https://saved.example/v1', modelApiKeySet: true, modelApiKeyMasked: '已隐藏', modelOptions: ['configured-only'] };
 };
 reset();
@@ -30,19 +30,32 @@ const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="view
 import React from 'react';import {createRoot} from 'react-dom/client';import App from '/src/components/App.jsx';import {useStore} from '/src/store.js';import {api} from '/src/api.js'; import {installSubmissionFixture} from '/scripts/submission-fixture.mjs';
 import '/src/styles.css';import '/src/shell-vanilla.css';import '/src/styles-addendum.css';import '/src/workbench.css';
 document.documentElement.dataset.theme='dark';
-const real={settings:api.settings,saveModel:api.saveModel,clearModelKey:api.clearModelKey,probeModels:api.probeModels,modelProfiles:api.modelProfiles,activateModelProfile:api.activateModelProfile};
+const real={settings:api.settings,saveModel:api.saveModel,clearModelKey:api.clearModelKey,probeModels:api.probeModels,scanLocalModels:api.scanLocalModels,modelProfiles:api.modelProfiles,activateModelProfile:api.activateModelProfile};
 for(const name of Object.keys(api))if(typeof api[name]==='function')api[name]=async()=>({});Object.assign(api,real);
 for(const name of ['bookmarks','workProducts','skillDrafts','schedules'])api[name]=async()=>[];
 api.files=async()=>({entries:[]});api.filesFlat=async()=>({files:[]});
-api.modelProfiles=async()=>({activeProfileId:'p1',fallbackProfileId:'p2',profiles:[
- {id:'p1',name:'当前云端',endpoint:'https://cloud.example/v1',model:'cloud-model',apiKeySet:true,apiKeyMasked:'***',contextTokens:null,maxOutputTokens:null,childModel:'',active:true},
+const profileState={activeProfileId:'p1',fallbackProfileId:'p2',profiles:[
+ {id:'p1',name:'当前云端',endpoint:'https://cloud.example/v1',model:'cloud-model',apiKeySet:true,apiKeyMasked:'***',contextTokens:null,maxOutputTokens:null,childModel:'',active:true,fallback:false},
  {id:'p2',name:'本机备用',endpoint:'http://127.0.0.1:11434/v1',model:'local-model',apiKeySet:false,apiKeyMasked:'',contextTokens:null,maxOutputTokens:null,childModel:'',active:false,fallback:true}
-]});
+]};
+window.profileActions=[];
+api.modelProfiles=async()=>({...profileState,profiles:profileState.profiles.map(p=>({...p,fallback:p.id===profileState.fallbackProfileId}))});
+api.createModelProfile=async body=>{
+ const id='p'+(profileState.profiles.length+1);
+ window.profileActions.push(['create',body]);
+ profileState.profiles.push({id,name:body.name,endpoint:body.endpoint,model:body.model,apiKeySet:Boolean(body.apiKey),apiKeyMasked:'',contextTokens:null,maxOutputTokens:null,childModel:'',active:false,fallback:false});
+ return api.modelProfiles();
+};
+api.setFallbackModelProfile=async id=>{
+ window.profileActions.push(['fallback',id]);
+ profileState.fallbackProfileId=id;
+ return api.modelProfiles();
+};
 api.activateModelProfile=async id=>({id});
 window.submissions=[];installSubmissionFixture(api);
 api.sendMessage=async(id,body)=>{window.submissions.push({id,body,model:useStore.getState().settingsData.model});return {sessionId:id,runId:'r'};};
 const settings=await api.settings();useStore.setState({init:async()=>{},sessionId:'model-test',sessionTitle:'模型列表选择验收',settingsData:settings,modelOptions:settings.modelOptions,capabilities:{model:settings.model},projects:[],sessions:[]});
-window.store=useStore;createRoot(document.getElementById('root')).render(React.createElement(App));
+window.api=api;window.store=useStore;createRoot(document.getElementById('root')).render(React.createElement(App));
 </script></body></html>`;
 const server = await createServer({ root, publicDir: join(root, '../src/main/resources/static'), server: { host: '127.0.0.1', port: 0, proxy: {} }, plugins: [{
   name: 'model-discovery-fixture', configureServer(server) {
@@ -56,6 +69,10 @@ const server = await createServer({ root, publicDir: join(root, '../src/main/res
         const snapshot = { ...saved };
         if (holdSettings) await new Promise(resolve => heldSettings.push(resolve));
         res.end(JSON.stringify(snapshot)); return;
+      }
+      if (req.url === '/model/scan-local' && req.method === 'POST') {
+        const services = scanMode === 'empty' ? [] : [{ name: 'Ollama', endpoint: 'http://127.0.0.1:11434/v1', models: ['qwen-local', 'llama-local'] }];
+        res.end(JSON.stringify({ services })); return;
       }
       if (req.url === '/model/models') {
         probes.push(body);
@@ -90,8 +107,30 @@ async function run(page, name) {
   await openGlobalFunction(page, /^设置/);
   await page.locator('.settings-nav').getByRole('button', { name: '模型', exact: true }).click();
   const settings = page.locator('#settings'), fetch = settings.locator('#settings-model-fetch');
+  scanMode = 'empty';
+  await settings.locator('#settings-model-scan-local').click();
+  await settings.locator('#settings-model-template-hint').getByText(/未发现运行中的本机模型服务/).waitFor();
+  scanMode = 'online';
+  await settings.locator('#settings-model-scan-local').click();
+  const ollamaCard = settings.locator('.local-scan-card', { hasText: 'Ollama' });
+  await ollamaCard.waitFor();
+  const qwenRow = ollamaCard.locator('.local-scan-model-row', { hasText: 'qwen-local' });
+  await qwenRow.getByRole('button', { name: '填入表单', exact: true }).click();
+  assert.equal(await settings.locator('#settings-model-name').inputValue(), 'qwen-local');
+  assert.equal(await settings.locator('#settings-model-endpoint').inputValue(), 'http://127.0.0.1:11434/v1');
+  assert.equal(await settings.locator('#settings-model-key').inputValue(), '', '选中本机模型时清空未保存密钥');
+  await qwenRow.getByRole('button', { name: '存为预设', exact: true }).click();
+  await settings.locator('#settings-model-template-hint').getByText(/已保存为免密钥预设/).waitFor();
+  await qwenRow.getByRole('button', { name: '设为备用', exact: true }).click();
+  await settings.locator('#settings-model-template-hint').getByText(/设为免密钥故障转移备用/).waitFor();
+  const profileActions = await page.evaluate(() => window.profileActions);
+  assert.equal(profileActions[0][0], 'create');
+  assert.equal(profileActions[0][1].inheritCurrentKey, false, '本机免密钥预设不得继承云端密钥');
+  assert.equal(profileActions[1][0], 'fallback');
+  await page.evaluate(() => api.setFallbackModelProfile('p2'));
+  await settings.locator('#settings-model-endpoint').fill('https://saved.example/v1');
   await fetch.click(); await settings.getByRole('option', { name: models[0], exact: true }).waitFor();
-  assert.equal(await settings.getByRole('option').count(), 6, '有数量提示时必须真实渲染全部选项');
+  assert.equal(await settings.locator('.model-discovery').getByRole('option').count(), 6, '有数量提示时必须真实渲染全部选项');
   await settings.getByRole('option', { name: models[3], exact: true }).click();
   assert.equal(await settings.locator('#settings-model-name').inputValue(), models[3]);
   await settings.getByRole('option', { name: models[3], exact: true }).press('End');
@@ -106,7 +145,7 @@ async function run(page, name) {
   assert.equal(await settings.getByRole('button', { name: '保存中…', exact: true }).isDisabled(), true);
   assert.equal(await settings.locator('#settings-model-name').isDisabled(), true);
   assert.equal(await settings.locator('#settings-model-clear-key').isDisabled(), true);
-  assert.equal(await settings.getByRole('option').first().isDisabled(), true);
+  assert.equal(await settings.locator('.model-discovery').getByRole('option').first().isDisabled(), true);
   assert.deepEqual(await page.evaluate(() => Promise.all([store.getState().saveModel({ model: 'duplicate' }), store.getState().clearModelKey()])), [false, false]);
   assert.equal(saves.length, 1, '全局写入锁挡住重复保存和清除');
   assert.equal(clears, 0);
@@ -129,7 +168,7 @@ async function run(page, name) {
     await feedback.getByText(new RegExp(`已保存：模型「${models[0]}」`)).waitFor();
     assert.equal(await feedback.isVisible(), true, '保存结果必须位于弹窗内');
     assert.ok(await settings.locator('.settings-body').evaluate(el => el.scrollWidth <= el.clientWidth + 1));
-    const option = await settings.getByRole('listbox').getByRole('option').first().boundingBox(), body = await settings.locator('.settings-body').boundingBox();
+    const option = await settings.locator('.model-discovery').getByRole('option').first().boundingBox(), body = await settings.locator('.settings-body').boundingBox();
     assert.ok(option && body);
     assert.ok(option.y >= body.y && option.y + option.height <= body.y + body.height, '探测后首个选项应可见');
     await page.screenshot({ path: join(output, `${name}-${width}.png`), animations: 'disabled' });
@@ -220,8 +259,8 @@ async function run(page, name) {
   assert.equal(await settings.locator('#settings-model-endpoint').inputValue(), 'https://unsaved.example/v1');
   assert.equal(saved.model, 'reopened-model');
   mode = 'many'; await fetch.click(); await settings.getByRole('searchbox', { name: '筛选模型' }).waitFor();
-  assert.equal(await settings.getByRole('option').count(), 30, '第 12 个之后的模型也必须可选');
-  await settings.getByRole('option').first().focus();
+  assert.equal(await settings.locator('.model-discovery').getByRole('option').count(), 30, '第 12 个之后的模型也必须可选');
+  await settings.locator('.model-discovery').getByRole('option').first().focus();
   for (let i = 0; i < 20; i++) {
     await page.keyboard.press('Tab');
     assert.ok(await page.evaluate(() => Boolean(document.activeElement.closest('#settings'))), 'Tab 不应因未参与键盘顺序的模型选项而跳出设置弹窗');

@@ -8,6 +8,7 @@ import { voiceFilename } from './lib/voice-input.js';
  */
 const NATIVE_FETCH = window.fetch.bind(window);
 const REQUEST_TIMEOUT_MS = 20000;
+const MODEL_SCAN_TIMEOUT_MS = 5000;
 
 export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -351,6 +352,7 @@ export const api = {
   modelRuntime: () => apiJson<ApiResults['modelRuntime']>('/api/settings/model/runtime'),
   saveModelRuntime: (body: Update<S.ModelRuntimeControllerUpdate>) => apiJson<ApiResults['saveModelRuntime']>('/api/settings/model/runtime', jsonBody('PUT', body)),
   probeModels: (body: Update<S.SettingsControllerModelsRequest>) => apiJson<ApiResults['probeModels']>('/api/settings/model/models', jsonBody('POST', body)),
+  scanLocalModels: () => apiJson<ApiResults['scanLocalModels']>('/api/settings/model/scan-local', { method: 'POST' }, MODEL_SCAN_TIMEOUT_MS),
   webSearchSettings: (signal?: AbortSignal) => apiJson<ApiResults['webSearchSettings']>('/api/settings/web-search', { signal }),
   saveWebSearchSettings: (body: WebSearchSettingsUpdate) => apiJson<ApiResults['saveWebSearchSettings']>('/api/settings/web-search', jsonBody('PUT', body)),
   clearWebSearchApiKey: (provider?: string) =>
