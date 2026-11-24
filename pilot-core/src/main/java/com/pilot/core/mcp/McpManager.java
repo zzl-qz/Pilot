@@ -495,11 +495,33 @@ public final class McpManager implements AutoCloseable {
                 result.put(name, new McpServerConfig(name, null, List.of(), Map.of(), "已禁用"));
                 continue;
             }
-            String command = node.path("command").asString("");
-            if (command.isBlank()) {
-                String reason =
-                    node.has("url") ? "只配置了 url（HTTP / SSE 传输），Pilot 目前仅支持 stdio（command + args）" : "缺少 command";
-                result.put(name, new McpServerConfig(name, null, List.of(), Map.of(), reason));
+            String command = node.path("command").asString("").strip();
+            String url = node.path("url").asString("").strip();
+            String type = node.path("type").asString("").strip();
+            if (!url.isEmpty() && command.isEmpty()) {
+                String lowerType = type.toLowerCase(java.util.Locale.ROOT);
+                if (!lowerType.isEmpty() && !"http".equals(lowerType) && !"sse".equals(lowerType)
+                    && !"streamable-http".equals(lowerType) && !"streamable_http".equals(lowerType)
+                    && !"streamablehttp".equals(lowerType)) {
+                    result.put(name, McpServerConfig.remote(name, McpServerConfig.TRANSPORT_HTTP, url, Map.of(),
+                        "不支持的传输类型：" + type + "（支持 stdio / http / sse）"));
+                    continue;
+                }
+                String urlError = McpServerConfig.validateRemoteUrl(url);
+                Map<String, String> headers = new LinkedHashMap<>();
+                JsonNode headersNode = node.path("headers");
+                if (headersNode.isObject()) {
+                    for (String key : headersNode.propertyNames()) {
+                        headers.put(key, headersNode.path(key).asString(""));
+                    }
+                }
+                String normalizedTransport =
+                    "sse".equals(lowerType) ? McpServerConfig.TRANSPORT_SSE : McpServerConfig.TRANSPORT_HTTP;
+                result.put(name, McpServerConfig.remote(name, normalizedTransport, url, headers, urlError));
+                continue;
+            }
+            if (command.isEmpty()) {
+                result.put(name, new McpServerConfig(name, null, List.of(), Map.of(), "缺少 command 或 url"));
                 continue;
             }
             List<String> args = new ArrayList<>();

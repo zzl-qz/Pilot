@@ -83,7 +83,8 @@ class McpToolsTest {
     void discoversServersThenToolsThenSchemaOnDemand() {
         String servers = listing.execute(Map.of());
         assertTrue(servers.contains("- fake：未启动（未信任；首次使用会请求你批准）"), servers);
-        assertTrue(servers.contains("- remote：不可用：只配置了 url"), servers);
+        assertTrue(servers.contains("- remote：未启动（未信任；首次使用会请求你批准）"), servers);
+        assertTrue(servers.contains("- broken：不可用：远程 MCP url 只支持 http/https"), servers);
 
         String tools = discover("fake");
         assertTrue(tools.contains("- echo [服务器声明只读；未获本地信任]：Echo the given text back"), tools);
@@ -97,7 +98,7 @@ class McpToolsTest {
         assertTrue(schema.contains("\"required\":[\"text\"]"), schema);
         assertTrue(discover(Map.of("server", "fake", "tool", "nope")).startsWith("ERROR: 服务器 fake 没有工具 nope"));
         assertTrue(discover(Map.of("server", "ghost")).startsWith("ERROR: 没有名为 ghost"));
-        assertTrue(discover(Map.of("server", "remote")).startsWith("ERROR: MCP 服务器 remote 无法使用"));
+        assertTrue(discover(Map.of("server", "broken")).startsWith("ERROR: MCP 服务器 broken 无法使用"));
 
         String status = listing.execute(Map.of());
         assertTrue(status.contains("- fake：已启动，4 个工具，未信任"), status);
@@ -368,8 +369,10 @@ class McpToolsTest {
     }
 
     private void writeConfig(List<String> args) throws IOException {
-        String config = mapper.writeValueAsString(Map.of("mcpServers", Map.of("fake",
-            Map.of("command", node.toString(), "args", args), "remote", Map.of("url", "https://example.com/mcp"))));
+        String config = mapper.writeValueAsString(Map.of("mcpServers", Map.of(
+            "fake", Map.of("command", node.toString(), "args", args),
+            "remote", Map.of("url", "https://example.com/mcp"),
+            "broken", Map.of("url", "ftp://example.com/mcp"))));
         Files.writeString(workspace.resolve(".mcp.json"), config);
     }
 

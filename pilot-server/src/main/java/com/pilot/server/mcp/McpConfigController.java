@@ -5,6 +5,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -54,7 +55,9 @@ import tools.jackson.databind.node.ObjectNode;
 @RequestMapping("/api/sessions/{id}/mcp/servers")
 public class McpConfigController {
     private static final Pattern NAME = Pattern.compile("[A-Za-z0-9._-]{1,64}");
-    private static final Set<String> IMPORT_FIELDS = Set.of("command", "args", "env", "type");
+    private static final Set<String> IMPORT_FIELDS = Set.of("command", "args", "env", "type", "url", "headers");
+    private static final Set<String> REMOTE_TYPES = Set.of("http", "streamable-http", "streamable_http",
+        "streamablehttp", "sse");
     /** 与 McpToolsTool.MAX_LISTED 同一展示口径。 */
     private static final int MAX_LISTED_TOOLS = 80;
 
@@ -93,7 +96,7 @@ public class McpConfigController {
         return List.copyOf(result);
     }
 
-    /** 添加或覆盖用户级条目。args 支持空格简写或 JSON 数组（见 McpArgsParser）。 */
+    /** 添加或覆盖用户级条目。支持本地 stdio（command + args + env）及远程 HTTP / SSE（url + headers）。 */
     @PostMapping
     public ServerPayload add(@PathVariable String id, @RequestBody(required = false) AddRequest request) {
         if (request == null) {
@@ -104,62 +107,111 @@ public class McpConfigController {
         if (!NAME.matcher(name).matches()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "名称只能包含字母、数字、点、下划线和连字符，长度 1–64");
         }
+        String rawTransport = request.transport() == null ? "" : request.transport().strip().toLowerCase(Locale.ROOT);
+        String url = request.url() == null ? "" : request.url().strip();
         String command = request.command() == null ? "" : request.command().strip();
-        if (command.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "command 不能为空，例如 npx / node / uvx");
-        }
-        if (request.env() != null && request.env().values().stream().anyMatch(value -> value == null)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "env 的值不能为 null");
-        }
-        List<String> args;
-        try {
-            args = McpArgsParser.parse(request.args());
-        } catch (McpException e) {
-            // 解析错误直接把带示例的文案给用户
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
-        }
+        boolean remote = REMOTE_TYPES.contains(rawTransport) || (!url.isEmpty() && command.isEmpty());
         Path workspace = workspace(id);
         if (manager.definedInWorkspaceConfig(workspace, name)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                 "工作区 .mcp.json 里已有同名服务器 " + name + "（会覆盖用户级配置）；请改名或先从工作区配置中移除");
         }
-        Map<String, String> env = new LinkedHashMap<>();
-        if (request.env() != null) {
-            request.env().forEach((key, value) -> {
-                if (key != null && !key.isBlank() && value != null) {
-                    env.put(key.strip(), value);
-                }
-            });
-        }
-        try {
-            manager.updateUserConfig(root -> {
-                ObjectNode servers = serversNode(root);
-                JsonNode existing = servers.path(name);
-                // 覆盖时保留 pilotPermissions 等手写字段，只替换这次表单管理的 command/args/env；
-                // 旧的 url/非 stdio type 不能和新命令混在一起，否则服务器会变成不可用配置
-                ObjectNode entry = existing.isObject() ? ((ObjectNode)existing).deepCopy() : mapper.createObjectNode();
-                entry.remove("url");
-                if (!entry.path("type").isMissingNode() && !"stdio".equals(entry.path("type").asString())) {
-                    entry.remove("type");
-                }
-                entry.put("command", command);
-                if (args.isEmpty()) {
+        if (remote) {
+            String urlError = McpServerConfig.validateRemoteUrl(url);
+            if (urlError != null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, urlError);
+            }
+            if (request.headers() != null && request.headers().values().stream().anyMatch(value -> value == null)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "headers 的值不能为 null");
+            }
+            String normalizedType = "sse".equals(rawTransport) ? McpServerConfig.TRANSPORT_SSE
+                : McpServerConfig.TRANSPORT_HTTP;
+            Map<String, String> headers = new LinkedHashMap<>();
+            if (request.headers() != null) {
+                request.headers().forEach((key, value) -> {
+                    if (key != null && !key.isBlank() && value != null) {
+                        headers.put(key.strip(), value);
+                    }
+                });
+            }
+            try {
+                manager.updateUserConfig(root -> {
+                    ObjectNode servers = serversNode(root);
+                    JsonNode existing = servers.path(name);
+                    ObjectNode entry =
+                        existing.isObject() ? ((ObjectNode)existing).deepCopy() : mapper.createObjectNode();
+                    entry.remove("command");
                     entry.remove("args");
-                } else {
-                    entry.set("args", mapper.valueToTree(args));
-                }
-                if (env.isEmpty()) {
                     entry.remove("env");
-                } else {
-                    entry.set("env", mapper.valueToTree(env));
-                }
-                servers.set(name, entry);
-                return null;
-            });
-        } catch (McpException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
-        } catch (IOException e) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "写入用户级配置失败：" + e.getMessage());
+                    entry.put("type", normalizedType);
+                    entry.put("url", url);
+                    if (headers.isEmpty()) {
+                        entry.remove("headers");
+                    } else {
+                        entry.set("headers", mapper.valueToTree(headers));
+                    }
+                    servers.set(name, entry);
+                    return null;
+                });
+            } catch (McpException e) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+            } catch (IOException e) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "写入用户级配置失败：" + e.getMessage());
+            }
+        } else {
+            if (command.isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "command 不能为空，例如 npx / node / uvx");
+            }
+            if (request.env() != null && request.env().values().stream().anyMatch(value -> value == null)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "env 的值不能为 null");
+            }
+            List<String> args;
+            try {
+                args = McpArgsParser.parse(request.args());
+            } catch (McpException e) {
+                // 解析错误直接把带示例的文案给用户
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+            }
+            Map<String, String> env = new LinkedHashMap<>();
+            if (request.env() != null) {
+                request.env().forEach((key, value) -> {
+                    if (key != null && !key.isBlank() && value != null) {
+                        env.put(key.strip(), value);
+                    }
+                });
+            }
+            try {
+                manager.updateUserConfig(root -> {
+                    ObjectNode servers = serversNode(root);
+                    JsonNode existing = servers.path(name);
+                    // 覆盖时保留 pilotPermissions 等手写字段，只替换这次表单管理的 command/args/env；
+                    // 旧的 url/headers/非 stdio type 不能和新命令混在一起
+                    ObjectNode entry =
+                        existing.isObject() ? ((ObjectNode)existing).deepCopy() : mapper.createObjectNode();
+                    entry.remove("url");
+                    entry.remove("headers");
+                    if (!entry.path("type").isMissingNode() && !"stdio".equals(entry.path("type").asString())) {
+                        entry.remove("type");
+                    }
+                    entry.put("command", command);
+                    if (args.isEmpty()) {
+                        entry.remove("args");
+                    } else {
+                        entry.set("args", mapper.valueToTree(args));
+                    }
+                    if (env.isEmpty()) {
+                        entry.remove("env");
+                    } else {
+                        entry.set("env", mapper.valueToTree(env));
+                    }
+                    servers.set(name, entry);
+                    return null;
+                });
+            } catch (McpException e) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+            } catch (IOException e) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "写入用户级配置失败：" + e.getMessage());
+            }
         }
         McpServerConfig config = manager.servers(workspace).get(name);
         if (config == null) {
@@ -290,18 +342,64 @@ public class McpConfigController {
         return ApiErrors.message(failure.getStatusCode(), failure.getReason());
     }
 
-    /** 导入白名单：只接受 stdio 的 command/args/env/type，拒绝本地授权字段与未知字段。 */
+    /** 导入白名单：接受 stdio（command/args/env）与远程 HTTP/SSE（url/headers/type），拒绝本地授权字段与未知字段。 */
     private ObjectNode sanitizeImport(String name, JsonNode entry) {
         for (String field : entry.propertyNames()) {
             if (!IMPORT_FIELDS.contains(field)) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "服务器 " + name + " 含不允许导入的字段 " + field
-                    + "；只支持 command/args/env/type（stdio），pilotPermissions 等本地授权请手动配置");
+                    + "；只支持 command/args/env/url/headers/type，pilotPermissions 等本地授权请手动配置");
             }
         }
+        JsonNode typeNode = entry.path("type");
+        String type = "";
+        if (!typeNode.isMissingNode()) {
+            if (!typeNode.isTextual()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "服务器 " + name + " 的 type 必须是字符串");
+            }
+            type = typeNode.asString("").strip().toLowerCase(Locale.ROOT);
+            if (!"stdio".equals(type) && !REMOTE_TYPES.contains(type)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "服务器 " + name + " 的传输类型 " + typeNode.asString() + " 不支持（仅支持 stdio / http / sse）");
+            }
+        }
+        JsonNode urlNode = entry.path("url");
         JsonNode commandNode = entry.path("command");
+        boolean remote = REMOTE_TYPES.contains(type)
+            || (!urlNode.isMissingNode() && (commandNode.isMissingNode() || commandNode.asString("").isBlank()));
+        if (remote) {
+            if (!commandNode.isMissingNode()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "服务器 " + name + " 不能同时配置 command 与远程 url");
+            }
+            if (!urlNode.isTextual() || urlNode.asString("").isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "服务器 " + name + " 缺少远程 url");
+            }
+            String url = urlNode.asString().strip();
+            String urlError = McpServerConfig.validateRemoteUrl(url);
+            if (urlError != null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "服务器 " + name + "：" + urlError);
+            }
+            ObjectNode clean = mapper.createObjectNode();
+            clean.put("type", "sse".equals(type) ? McpServerConfig.TRANSPORT_SSE : McpServerConfig.TRANSPORT_HTTP);
+            clean.put("url", url);
+            JsonNode headers = entry.path("headers");
+            if (!headers.isMissingNode()) {
+                if (!headers.isObject()) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "服务器 " + name + " 的 headers 必须是字符串映射");
+                }
+                for (String key : headers.propertyNames()) {
+                    if (!headers.path(key).isTextual()) {
+                        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                            "服务器 " + name + " 的 headers 值必须是字符串");
+                    }
+                }
+                clean.set("headers", headers.deepCopy());
+            }
+            return clean;
+        }
         if (!commandNode.isTextual() || commandNode.asString("").strip().isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                "服务器 " + name + " 缺少 command；示例：{\"" + name + "\": {\"command\": \"npx\", \"args\": []}}");
+                "服务器 " + name + " 缺少 command 或 url；示例：{\"" + name + "\": {\"command\": \"npx\", \"args\": []}}");
         }
         ObjectNode clean = mapper.createObjectNode();
         clean.put("command", commandNode.asString().strip());
@@ -329,12 +427,7 @@ public class McpConfigController {
             }
             clean.set("env", env.deepCopy());
         }
-        JsonNode type = entry.path("type");
-        if (!type.isMissingNode()) {
-            if (!type.isTextual() || !"stdio".equals(type.asString())) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "服务器 " + name + " 只支持 stdio 传输；url 等远程配置暂不支持");
-            }
+        if ("stdio".equals(type)) {
             clean.put("type", "stdio");
         }
         return clean;
@@ -366,13 +459,20 @@ public class McpConfigController {
     }
 
     private static String commandLine(McpServerConfig config) {
+        if (config.isRemote()) {
+            return config.transport().toUpperCase(Locale.ROOT) + " " + config.url();
+        }
         if (config.command() == null) {
             return "";
         }
         return config.args().isEmpty() ? config.command() : config.command() + " " + String.join(" ", config.args());
     }
 
-    public record AddRequest(String name, String command, String args, Map<String, String> env) {
+    public record AddRequest(String name, String command, String args, Map<String, String> env, String transport,
+        String url, Map<String, String> headers) {
+        public AddRequest(String name, String command, String args, Map<String, String> env) {
+            this(name, command, args, env, null, null, null);
+        }
     }
 
     /** 粘贴导入：config 是原始 JSON 文本（两种格式见 McpConfigImports）。 */

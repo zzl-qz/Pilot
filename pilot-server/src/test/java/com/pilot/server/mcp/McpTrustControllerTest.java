@@ -44,8 +44,10 @@ class McpTrustControllerTest {
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() throws IOException {
-        Files.writeString(workspace.resolve(".mcp.json"), mapper.writeValueAsString(Map.of("mcpServers", Map.of("fake",
-            Map.of("command", "node", "args", List.of("s.mjs")), "remote", Map.of("url", "https://example.com")))));
+        Files.writeString(workspace.resolve(".mcp.json"), mapper.writeValueAsString(Map.of("mcpServers", Map.of(
+            "fake", Map.of("command", "node", "args", List.of("s.mjs")),
+            "remote", Map.of("url", "https://example.com/mcp"),
+            "broken", Map.of("url", "ftp://example.com")))));
         sessions = new SessionService();
         sessionId = sessions.createSession("MCP 信任", workspace.toString()).id();
         McpTrustStore store = new McpTrustStore(mapper, dataDir.resolve("mcp-trust.json"));
@@ -65,10 +67,11 @@ class McpTrustControllerTest {
     @Test
     void trustViewReflectsConfiguredServers() {
         List<McpTrustController.TrustedServer> view = controller.trust(sessionId);
-        assertEquals(2, view.size());
-        assertEquals("fake", view.get(0).server());
-        assertEquals("UNTRUSTED", view.get(0).state());
-        assertEquals("remote", view.get(1).server());
+        assertEquals(3, view.size());
+        assertEquals("broken", view.get(0).server());
+        assertEquals("fake", view.get(1).server());
+        assertEquals("UNTRUSTED", view.get(1).state());
+        assertEquals("remote", view.get(2).server());
     }
 
     @Test
@@ -112,8 +115,9 @@ class McpTrustControllerTest {
             () -> controller.resolve(sessionId, trustRequest("trust", "", null))).getStatusCode());
         assertEquals(HttpStatus.NOT_FOUND, assertThrows(ResponseStatusException.class,
             () -> controller.resolve(sessionId, trustRequest("trust", "ghost", null))).getStatusCode());
+        assertEquals("TRUSTED_UNPINNED", controller.resolve(sessionId, trustRequest("trust", "remote", null)).state());
         assertEquals(HttpStatus.CONFLICT, assertThrows(ResponseStatusException.class,
-            () -> controller.resolve(sessionId, trustRequest("trust", "remote", null))).getStatusCode());
+            () -> controller.resolve(sessionId, trustRequest("trust", "broken", null))).getStatusCode());
         assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
             () -> controller.resolve(sessionId, trustRequest("unknown-action", "fake", null))).getStatusCode());
     }

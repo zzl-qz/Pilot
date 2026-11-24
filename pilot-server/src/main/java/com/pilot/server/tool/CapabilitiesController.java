@@ -117,6 +117,9 @@ public class CapabilitiesController {
     }
 
     private static String commandLine(McpServerConfig config) {
+        if (config.isRemote()) {
+            return config.transport().toUpperCase(java.util.Locale.ROOT) + " " + config.url();
+        }
         if (config.command() == null) {
             return "";
         }

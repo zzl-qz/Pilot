@@ -160,8 +160,23 @@ public final class McpTrustStore {
 
     // ————— 哈希 —————
 
-    /** 服务器启动命令的指纹：command + args + env（env 按 key 排序）。 */
+    /** 服务器配置指纹：stdio 钉住 command+args+env（保持 v1 兼容）；远程钉住 transport+url+headers。 */
     public static String hash(McpServerConfig config) {
+        if (config.isRemote()) {
+            StringBuilder canonical = new StringBuilder("mcp-remote-config-v1\n");
+            canonical.append("transport=").append(escape(String.valueOf(config.transport()))).append('\n');
+            canonical.append("url=").append(escape(String.valueOf(config.url()))).append('\n');
+            Map<String, String> headers = new TreeMap<>();
+            if (config.headers() != null) {
+                headers.putAll(config.headers());
+            }
+            canonical.append("headers=").append(headers.size()).append('\n');
+            for (Map.Entry<String, String> entry : headers.entrySet()) {
+                canonical.append("header.").append(escape(entry.getKey())).append('=')
+                    .append(escape(entry.getValue())).append('\n');
+            }
+            return sha256(canonical.toString());
+        }
         StringBuilder canonical = new StringBuilder("mcp-config-v1\n");
         canonical.append("command=").append(escape(String.valueOf(config.command()))).append('\n');
         canonical.append("args=").append(config.args().size()).append('\n');

@@ -63,6 +63,7 @@ final class McpClient implements AutoCloseable {
 
     private volatile Process process;
     private volatile OutputStream stdin;
+    private volatile McpHttpTransport httpTransport;
     private volatile List<McpToolInfo> tools;
     private final AtomicLong toolsRevision = new AtomicLong();
 
@@ -76,8 +77,15 @@ final class McpClient implements AutoCloseable {
     }
 
     boolean running() {
+        if (closed.get()) {
+            return false;
+        }
+        McpHttpTransport remote = httpTransport;
+        if (remote != null) {
+            return remote.running();
+        }
         Process current = process;
-        return !closed.get() && current != null && current.isAlive();
+        return current != null && current.isAlive();
     }
 
     static Path canonicalWorkspace(Path workspace) {
@@ -106,10 +114,25 @@ final class McpClient implements AutoCloseable {
     }
 
     void start(Duration timeout) {
-        if (closed.get() || process != null) {
+        if (closed.get() || process != null || httpTransport != null) {
             throw new McpException("MCP 客户端不能重复启动");
         }
         long deadline = deadline(timeout);
+        if (config.isRemote()) {
+            McpHttpTransport transport = new McpHttpTransport(name, config, mapper, this::invalidateTools);
+            httpTransport = transport;
+            try {
+                Map<String, Object> params = new LinkedHashMap<>();
+                params.put("protocolVersion", PROTOCOL_VERSION);
+                params.put("capabilities", Map.of());
+                params.put("clientInfo", Map.of("name", "pilot", "version", "0.1"));
+                transport.start(ids.getAndIncrement(), params, deadline);
+            } catch (McpException e) {
+                close();
+                throw e;
+            }
+            return;
+        }
         List<String> command = new ArrayList<>();
         command.add(resolveCommand(config.command()));
         command.addAll(config.args());
@@ -213,6 +236,17 @@ final class McpClient implements AutoCloseable {
             throw new McpException("MCP 并发请求已达上限，尚未发送本次请求");
         }
         long id = ids.getAndIncrement();
+        McpHttpTransport remote = httpTransport;
+        if (remote != null) {
+            AtomicBoolean dispatched = new AtomicBoolean();
+            try {
+                return remote.request(id, method, params, deadline, dispatched);
+            } catch (McpException failure) {
+                throw outcome(failure, method, dispatched.get());
+            } finally {
+                slots.release();
+            }
+        }
         CompletableFuture<JsonNode> future = new CompletableFuture<>();
         AtomicBoolean dispatched = new AtomicBoolean();
         pending.put(id, future);
@@ -335,10 +369,7 @@ final class McpClient implements AutoCloseable {
                 }
                 boolean hasMethod = node.has("method");
                 if ("notifications/tools/list_changed".equals(node.path("method").asString("")) && !node.has("id")) {
-                    synchronized (toolsRevision) {
-                        toolsRevision.incrementAndGet();
-                        tools = null;
-                    }
+                    invalidateTools();
                 } else if (hasMethod && node.has("id")) {
                     answerServerRequest(node);
                 } else if (!hasMethod && node.has("id")) {
@@ -383,9 +414,21 @@ final class McpClient implements AutoCloseable {
         return current == null ? null : current.toHandle();
     }
 
+    private void invalidateTools() {
+        synchronized (toolsRevision) {
+            toolsRevision.incrementAndGet();
+            tools = null;
+        }
+    }
+
     private void terminate(McpException failure) {
         if (!closed.compareAndSet(false, true)) {
             return;
+        }
+        McpHttpTransport remote = httpTransport;
+        httpTransport = null;
+        if (remote != null) {
+            remote.close();
         }
         Process current = process;
         process = null;

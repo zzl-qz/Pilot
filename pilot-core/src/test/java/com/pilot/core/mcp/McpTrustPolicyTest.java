@@ -65,9 +65,15 @@ class McpTrustPolicyTest {
         assertFalse(McpTrustPolicy.callReadOnly(manager, workspace, "fake", "echo"));
         assertFalse(McpTrustPolicy.trusted(manager, workspace, "fake"));
 
-        // 配置不可用（url-only）：报错路径放行
+        // 合法远程 HTTP/SSE 服务器与 stdio 同等待遇：未信任时须审批
         Files.writeString(workspace.resolve(".mcp.json"),
-            mapper.writeValueAsString(Map.of("mcpServers", Map.of("remote", Map.of("url", "https://example.com")))));
+            mapper.writeValueAsString(Map.of("mcpServers", Map.of("remote", Map.of("url", "https://example.com/mcp")))));
+        assertFalse(McpTrustPolicy.listingReadOnly(manager, workspace, "remote"));
+        assertTrue(McpTrustPolicy.listingNeedsConfirm(manager, workspace, "remote"));
+
+        // 配置不可用（非法协议）：报错路径放行
+        Files.writeString(workspace.resolve(".mcp.json"),
+            mapper.writeValueAsString(Map.of("mcpServers", Map.of("remote", Map.of("url", "ftp://example.com")))));
         assertTrue(McpTrustPolicy.listingReadOnly(manager, workspace, "remote"));
         assertFalse(McpTrustPolicy.listingNeedsConfirm(manager, workspace, "remote"));
         assertTrue(McpTrustPolicy.callReadOnly(manager, workspace, "remote", "anything"));

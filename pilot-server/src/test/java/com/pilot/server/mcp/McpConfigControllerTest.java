@@ -23,6 +23,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.pilot.core.mcp.McpManager;
+import com.pilot.core.mcp.McpServerConfig;
 import com.pilot.core.mcp.McpTrustStore;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.session.SessionService;
@@ -237,12 +238,11 @@ class McpConfigControllerTest {
         assertEquals(HttpStatus.BAD_REQUEST,
             assertThrows(ResponseStatusException.class, () -> controller.importServers(sessionId,
                 new McpConfigController.ImportRequest("{\"不合法 名字\": {\"command\": \"npx\"}}"))).getStatusCode());
-        ResponseStatusException urlOnly = assertThrows(ResponseStatusException.class,
+        ResponseStatusException badUrl = assertThrows(ResponseStatusException.class,
             () -> controller.importServers(sessionId, new McpConfigController.ImportRequest(
-                "{\"remote\": {\"type\": \"http\", \"url\": \"https://example.com\"}}")));
-        assertEquals(HttpStatus.BAD_REQUEST, urlOnly.getStatusCode());
-        assertTrue(urlOnly.getReason().contains("不允许导入") || urlOnly.getReason().contains("只支持 stdio"),
-            urlOnly.getReason());
+                "{\"remote\": {\"type\": \"http\", \"url\": \"ftp://example.com\"}}")));
+        assertEquals(HttpStatus.BAD_REQUEST, badUrl.getStatusCode());
+        assertTrue(badUrl.getReason().contains("http/https"), badUrl.getReason());
         ResponseStatusException disabled =
             assertThrows(ResponseStatusException.class, () -> controller.importServers(sessionId,
                 new McpConfigController.ImportRequest("{\"off\": {\"command\": \"node\", \"disabled\": true}}")));
@@ -255,23 +255,42 @@ class McpConfigControllerTest {
     }
 
     @Test
+    void supportsAddingAndImportingRemoteHttpAndSseServersWithoutLeakingHeaders() throws IOException {
+        McpConfigController.ServerPayload added = controller.add(sessionId, new McpConfigController.AddRequest("docs",
+            null, null, null, "http", "https://mcp.example.com/v1", Map.of("Authorization", "Bearer top-secret")));
+        assertTrue(added.usable());
+        assertEquals("HTTP https://mcp.example.com/v1", added.command());
+        assertFalse(added.toString().contains("top-secret"), "返回给界面的视图不得泄露认证头");
+
+        McpConfigController.ImportResponse imported = controller.importServers(sessionId,
+            new McpConfigController.ImportRequest(
+                "{\"sse-remote\": {\"type\": \"sse\", \"url\": \"https://sse.example.com/events\", "
+                    + "\"headers\": {\"X-Token\": \"abc\"}}}"));
+        assertEquals(List.of("sse-remote"), imported.imported());
+        McpServerConfig cfg = manager.servers(workspace).get("sse-remote");
+        assertTrue(cfg.isRemote());
+        assertEquals("sse", cfg.transport());
+        assertEquals("https://sse.example.com/events", cfg.url());
+    }
+
+    @Test
     void probeReportsFailuresAsOkFalseWithReason() throws IOException {
         ResponseStatusException missing =
             assertThrows(ResponseStatusException.class, () -> controller.probe(sessionId, "unknown"));
         assertEquals(HttpStatus.NOT_FOUND, missing.getStatusCode());
 
-        // 启动失败的 command 与 url-only 条目都按 ok=false 返回原因（每个测试方法有独立的 @TempDir）
+        // 启动失败的 command 与非法协议 url 条目都按 ok=false 返回原因（每个测试方法有独立的 @TempDir）
         writeUserConfig(
-            Map.of("bad", Map.of("command", "/definitely/not/here"), "remote", Map.of("url", "https://example.com")));
+            Map.of("bad", Map.of("command", "/definitely/not/here"), "bad-remote", Map.of("url", "ftp://example.com")));
         McpConfigController.ProbeResponse broken = controller.probe(sessionId, "bad");
         assertFalse(broken.ok());
         assertTrue(broken.error().contains("无法启动"), broken.error());
         assertFalse(broken.running());
         assertTrue(broken.tools().isEmpty());
 
-        McpConfigController.ProbeResponse urlOnlyServer = controller.probe(sessionId, "remote");
-        assertFalse(urlOnlyServer.ok());
-        assertTrue(urlOnlyServer.error().contains("只配置了 url"), urlOnlyServer.error());
+        McpConfigController.ProbeResponse badRemote = controller.probe(sessionId, "bad-remote");
+        assertFalse(badRemote.ok());
+        assertTrue(badRemote.error().contains("http/https"), badRemote.error());
     }
 
     @Test

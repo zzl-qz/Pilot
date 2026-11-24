@@ -178,9 +178,12 @@ export interface McpConfigControllerServerPayload {
 /** McpConfigController.java / AddRequest */
 export interface McpConfigControllerAddRequest {
   name: string;
-  command: string;
+  command?: string;
   args?: string;
   env?: Record<string, string>;
+  transport?: 'stdio' | 'http' | 'sse' | string;
+  url?: string;
+  headers?: Record<string, string>;
 }
 
 /** McpConfigController.java / ImportRequest */

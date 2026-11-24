@@ -202,13 +202,17 @@ export function McpSettings() {
 }
 
 const MCP_IMPORT_PLACEHOLDER = `{
-  "my-mcp-server": {
+  "local-fs": {
     "command": "npx",
-    "args": ["-y", "@scope/server"]
+    "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
+  },
+  "remote-docs": {
+    "type": "http",
+    "url": "https://example.com/mcp"
   }
 }`;
 
-/** 添加表单：双模式。「表单」按字段填写（args 支持空格简写或 JSON 数组）；「粘贴 JSON」直接导入现成配置。 */
+/** 添加表单：双模式。「表单」按字段填写（支持本地 stdio 与远程 HTTP / SSE）；「粘贴 JSON」直接导入现成配置。 */
 function McpAddServer({ onDone }: { onDone: (message?: string) => void }) {
   const [mode, setMode] = useState<'form' | 'json'>('form');
   return <div className="mcp-add-wrap" id="mcp-add-form">
@@ -220,30 +224,48 @@ function McpAddServer({ onDone }: { onDone: (message?: string) => void }) {
   </div>;
 }
 
-/** 表单模式：字段逐项填写，解析与校验在后端。 */
+/** 表单模式：字段逐项填写，支持本地命令（stdio）与远程 Streamable HTTP / SSE，解析与校验在后端。 */
 function McpAddForm({ onDone }: { onDone: (message?: string) => void }) {
   const sessionId = useStore(state => state.sessionId);
+  const [transport, setTransport] = useState<'stdio' | 'http' | 'sse'>('stdio');
   const [name, setName] = useState('');
   const [command, setCommand] = useState('');
   const [args, setArgs] = useState('');
+  const [url, setUrl] = useState('');
   const [envRows, setEnvRows] = useState<Array<{ key: string; value: string }>>([]);
+  const [headerRows, setHeaderRows] = useState<Array<{ key: string; value: string }>>([]);
   const [busy, setBusy] = useState(false);
-  const [hint, setHint] = useState('名称与命令必填；参数可留空。');
+  const [hint, setHint] = useState('选择本地命令（stdio）或远程 HTTP / SSE 地址后保存。');
   const [hasError, setHasError] = useState(false);
+  const isRemote = transport !== 'stdio';
 
   async function submit() {
     if (!sessionId || busy) return;
     setBusy(true);
     setHasError(false);
     setHint('正在保存…');
-    const env: Record<string, string> = {};
-    for (const row of envRows) {
-      if (row.key.trim() && row.value) env[row.key.trim()] = row.value;
-    }
     try {
-      const created = await api.mcpAddServer(sessionId, { name: name.trim(), command: command.trim(), args, env });
-      setName(''); setCommand(''); setArgs(''); setEnvRows([]);
-      onDone(`已保存 ${created?.name || name.trim()}；在对话里让模型用它，首次启动时会请求批准。`);
+      let created;
+      if (isRemote) {
+        const headers: Record<string, string> = {};
+        for (const row of headerRows) {
+          if (row.key.trim() && row.value) headers[row.key.trim()] = row.value;
+        }
+        created = await api.mcpAddServer(sessionId, {
+          name: name.trim(),
+          transport,
+          url: url.trim(),
+          headers
+        });
+      } else {
+        const env: Record<string, string> = {};
+        for (const row of envRows) {
+          if (row.key.trim() && row.value) env[row.key.trim()] = row.value;
+        }
+        created = await api.mcpAddServer(sessionId, { name: name.trim(), transport: 'stdio', command: command.trim(), args, env });
+      }
+      setName(''); setCommand(''); setArgs(''); setUrl(''); setEnvRows([]); setHeaderRows([]);
+      onDone(`已保存 ${created?.name || name.trim()}；先点「测试连接」验证，或在对话中首次使用时批准。`);
     } catch (failure) {
       setHasError(true);
       setHint('保存失败。' + errorInfo(failure).message);
@@ -252,37 +274,68 @@ function McpAddForm({ onDone }: { onDone: (message?: string) => void }) {
     }
   }
 
+  const canSubmit = Boolean(name.trim() && (isRemote ? url.trim() : command.trim()) && !busy);
+
   return <form className="settings-form mcp-add-form" aria-label="添加 MCP 服务器" onSubmit={event => {
     event.preventDefault();
-    if (name.trim() && command.trim() && !busy) void submit();
+    if (canSubmit) void submit();
   }} onKeyDown={event => {
     if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.keyCode === 229)) event.preventDefault();
   }}>
-    <div className="mcp-add-fields">
-      <TextInput id="mcp-add-name" label="名称" value={name} placeholder="filesystem" isDisabled={busy}
-        hasSpellCheck={false} onChange={setName} />
-      <TextInput id="mcp-add-command" label="命令" value={command} placeholder="npx / node / uvx" isDisabled={busy}
-        hasSpellCheck={false} onChange={setCommand} />
-    </div>
-    <TextInput id="mcp-add-args" label="参数（空格分隔，含空格的用引号包住；也可以填 JSON 数组）" width="100%"
-      value={args} placeholder={'-y @modelcontextprotocol/server-filesystem "D:\\my dir"'} isDisabled={busy}
-      hasSpellCheck={false} onChange={setArgs} />
-    <div className="mcp-env-editor">
-      <p className="mcp-env-label">环境变量（可选）</p>
-      {envRows.map((row, index) => <div key={index} className="mcp-env-row">
-        <TextInput label={`名称（变量 ${index + 1}）`} value={row.key} isDisabled={busy} hasSpellCheck={false}
-          onChange={value => setEnvRows(rows => rows.map((item, i) => i === index ? { ...item, key: value } : item))} />
-        <TextInput label={`值（变量 ${index + 1}）`} value={row.value} isDisabled={busy}
-          onChange={value => setEnvRows(rows => rows.map((item, i) => i === index ? { ...item, value } : item))} />
-        <Button type="button" label={`移除变量 ${index + 1}`} variant="ghost" isDisabled={busy}
-          onClick={() => setEnvRows(rows => rows.filter((_, i) => i !== index))} />
-      </div>)}
-      <Button type="button" label="添加变量" variant="ghost" isDisabled={busy}
-        onClick={() => setEnvRows(rows => [...rows, { key: '', value: '' }])} />
-    </div>
+    <SegmentedControl id="mcp-add-transport" label="传输方式" value={transport}
+      onChange={value => setTransport(value as 'stdio' | 'http' | 'sse')}>
+      <SegmentedControlItem value="stdio" label="本地命令 (stdio)" />
+      <SegmentedControlItem value="http" label="远程 Streamable HTTP" />
+      <SegmentedControlItem value="sse" label="远程 SSE" />
+    </SegmentedControl>
+    {!isRemote ? <>
+      <div className="mcp-add-fields">
+        <TextInput id="mcp-add-name" label="名称" value={name} placeholder="filesystem" isDisabled={busy}
+          hasSpellCheck={false} onChange={setName} />
+        <TextInput id="mcp-add-command" label="命令" value={command} placeholder="npx / node / uvx" isDisabled={busy}
+          hasSpellCheck={false} onChange={setCommand} />
+      </div>
+      <TextInput id="mcp-add-args" label="参数（空格分隔，含空格的用引号包住；也可以填 JSON 数组）" width="100%"
+        value={args} placeholder={'-y @modelcontextprotocol/server-filesystem "D:\\my dir"'} isDisabled={busy}
+        hasSpellCheck={false} onChange={setArgs} />
+      <div className="mcp-env-editor">
+        <p className="mcp-env-label">环境变量（可选）</p>
+        {envRows.map((row, index) => <div key={index} className="mcp-env-row">
+          <TextInput label={`名称（变量 ${index + 1}）`} value={row.key} isDisabled={busy} hasSpellCheck={false}
+            onChange={value => setEnvRows(rows => rows.map((item, i) => i === index ? { ...item, key: value } : item))} />
+          <TextInput label={`值（变量 ${index + 1}）`} value={row.value} isDisabled={busy}
+            onChange={value => setEnvRows(rows => rows.map((item, i) => i === index ? { ...item, value } : item))} />
+          <Button type="button" label={`移除变量 ${index + 1}`} variant="ghost" isDisabled={busy}
+            onClick={() => setEnvRows(rows => rows.filter((_, i) => i !== index))} />
+        </div>)}
+        <Button type="button" label="添加变量" variant="ghost" isDisabled={busy}
+          onClick={() => setEnvRows(rows => [...rows, { key: '', value: '' }])} />
+      </div>
+    </> : <>
+      <div className="mcp-add-fields">
+        <TextInput id="mcp-add-name" label="名称" value={name} placeholder="remote-docs" isDisabled={busy}
+          hasSpellCheck={false} onChange={setName} />
+        <TextInput id="mcp-add-url" label="服务器 URL" value={url} inputMode="url"
+          placeholder={transport === 'sse' ? 'https://example.com/sse' : 'https://example.com/mcp'} isDisabled={busy}
+          hasSpellCheck={false} onChange={setUrl} />
+      </div>
+      <div className="mcp-env-editor">
+        <p className="mcp-env-label">自定义请求头（可选，公开或免鉴权服务可留空）</p>
+        {headerRows.map((row, index) => <div key={index} className="mcp-env-row">
+          <TextInput label={`Header 名（${index + 1}）`} value={row.key} placeholder="Authorization" isDisabled={busy} hasSpellCheck={false}
+            onChange={value => setHeaderRows(rows => rows.map((item, i) => i === index ? { ...item, key: value } : item))} />
+          <TextInput label={`Header 值（${index + 1}）`} value={row.value} type="password" isDisabled={busy}
+            onChange={value => setHeaderRows(rows => rows.map((item, i) => i === index ? { ...item, value } : item))} />
+          <Button type="button" label={`移除请求头 ${index + 1}`} variant="ghost" isDisabled={busy}
+            onClick={() => setHeaderRows(rows => rows.filter((_, i) => i !== index))} />
+        </div>)}
+        <Button type="button" label="添加请求头" variant="ghost" isDisabled={busy}
+          onClick={() => setHeaderRows(rows => [...rows, { key: '', value: '' }])} />
+      </div>
+    </>}
     <div className="settings-inline-actions">
       <Button id="mcp-add-submit" variant="primary" label={busy ? '保存中…' : '保存服务器'}
-        isDisabled={busy || !name.trim() || !command.trim()} onClick={() => void submit()} />
+        isDisabled={!canSubmit} onClick={() => void submit()} />
     </div>
     <p className="settings-status" role={hasError ? 'alert' : 'status'}>{hint}</p>
   </form>;
@@ -338,7 +391,7 @@ function McpImportForm({ onDone }: { onDone: (message?: string) => void }) {
     <textarea id="mcp-import-config" className="mcp-json-input" value={config} placeholder={MCP_IMPORT_PLACEHOLDER}
       spellCheck={false} aria-label="MCP 完整配置 JSON" disabled={busy} rows={8}
       onChange={event => setConfig(event.target.value)} />
-    <p className="mcp-import-hint">支持直接粘贴 {"{"}"服务器名": {"{"}…{"}"}{"}"} 或 {"{"}"mcpServers": {"{"}"服务器名": {"{"}…{"}"}{"}"}{"}"}；只导入 stdio 的 command/args/env/type，pilotPermissions 等本地授权字段会被拒绝。</p>
+    <p className="mcp-import-hint">支持直接粘贴 {"{"}"服务器名": {"{"}…{"}"}{"}"} 或 {"{"}"mcpServers": {"{"}"服务器名": {"{"}…{"}"}{"}"}{"}"}；支持本地 stdio（command/args/env）与远程 HTTP / SSE（url/headers/type），pilotPermissions 等本地授权字段会被拒绝。</p>
     <div className="settings-inline-actions">
       <Button id="mcp-import-submit" variant="primary" label={busy ? '导入中…' : '导入'}
         isDisabled={busy || !config.trim()} onClick={() => void submit()} />
