@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { locateQueueTarget, queueBlockReason, queueEntryKey, queueHeader, queueLane, textWithoutParkedMark } from '../src/lib/queue.js';
+import { locateQueueTarget, queueBlockReason, queueEntryBadges, queueEntryKey, queueHeader, queueLane, textWithoutParkedMark } from '../src/lib/queue.js';
 
 const image = (name) => ({ name, url: `/api/sessions/s/attachments/${name}` });
 const entry = (text, attachments = [], imagePositions = []) => ({ content: text, text, attachments, imagePositions });
@@ -71,4 +71,15 @@ test('范围外、没写对象和收尾提交不会自动发送', () => {
   assert.match(queueBlockReason('这里点击之后为啥是这样，不太行吧，修复一下'), /哪个按钮/);
   assert.match(queueBlockReason('命名有点奇怪'), /哪一个名字/);
   assert.equal(textWithoutParkedMark('遗留（不在本次范围） | 能力页仍失败'), '能力页仍失败');
+});
+
+test('排队消息徽标展示分析模式与绑定技能', () => {
+  assert.deepEqual(queueEntryBadges({ content: '普通消息', mode: 'act', skill: '' }), []);
+  assert.deepEqual(queueEntryBadges({ content: '先做方案', mode: 'plan', skill: 'code-review' }), [
+    { kind: 'mode', label: '分析模式' },
+    { kind: 'skill', label: '/code-review' }
+  ]);
+  assert.deepEqual(queueEntryBadges({ content: '仅带技能', skill: 'bug-triage' }), [
+    { kind: 'skill', label: '/bug-triage' }
+  ]);
 });

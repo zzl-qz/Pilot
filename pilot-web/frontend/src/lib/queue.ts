@@ -3,6 +3,18 @@ import type { DraftAttachment } from '../types/input.js';
 import { attachmentUrl, splitAttachmentMarkers } from './attachments/attachments.js';
 import type { QueueEditTarget } from '../types/store.js';
 
+export function queueEntryBadges(entry: QueueEntry | null | undefined): Array<{ kind: 'mode' | 'skill'; label: string }> {
+  const badges: Array<{ kind: 'mode' | 'skill'; label: string }> = [];
+  if (entry?.mode === 'plan') {
+    badges.push({ kind: 'mode', label: '分析模式' });
+  }
+  const skill = typeof entry?.skill === 'string' ? entry.skill.trim() : '';
+  if (skill) {
+    badges.push({ kind: 'skill', label: `/${skill}` });
+  }
+  return badges;
+}
+
 /**
  * 排队消息的内容指纹：正文 + 附件 + 图片位置。
  * 只用下标会在刷新/自动取走队首后把编辑保存到另一条消息上；正文相同的两条也要靠附件区分。

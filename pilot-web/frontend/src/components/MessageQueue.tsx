@@ -3,7 +3,7 @@ import { Button } from '@astryxdesign/core/Button';
 import { useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { splitAttachmentMarkers, joinAttachmentMarkers } from '../lib/attachments/attachments.js';
-import { locateQueueTarget, queueBlockReason, queueEntryKey, queueHeader, queueLane, textWithoutParkedMark } from '../lib/queue.js';
+import { locateQueueTarget, queueBlockReason, queueEntryBadges, queueEntryKey, queueHeader, queueLane, textWithoutParkedMark } from '../lib/queue.js';
 import type { QueueEditTarget } from '../types/store.js';
 import { Icon } from './Icon.jsx';
 
@@ -145,6 +145,7 @@ function QueueRow({ entry, index, position, count, lane, held, onDragStart, onDr
     ? [constraints.length ? `约束 ${constraints.length}` : '', acceptance.length ? `验收 ${acceptance.length}` : '']
       .filter(Boolean).join(' · ')
     : '';
+  const badges = queueEntryBadges(entry);
   const edit = () => useStore.getState().setUi({ queueEdit: { index, key: queueEntryKey(entry) } });
   return (
     <>
@@ -184,7 +185,16 @@ function QueueRow({ entry, index, position, count, lane, held, onDragStart, onDr
           {open ? '收起全文' : '展开全文'}
         </button>}
         {blocked && <p className="queue-block">{blocked}</p>}
-        {requirementSummary && <span className="queue-requirements" title={[...constraints, ...acceptance].join('\n')}>{requirementSummary}</span>}
+        {(badges.length > 0 || requirementSummary) && (
+          <div className="queue-meta-badges">
+            {badges.map(badge => (
+              <span key={`${badge.kind}:${badge.label}`} className={`queue-badge is-${badge.kind}`}>
+                {badge.label}
+              </span>
+            ))}
+            {requirementSummary && <span className="queue-requirements" title={[...constraints, ...acceptance].join('\n')}>{requirementSummary}</span>}
+          </div>
+        )}
         {(images.length > 0 || files.length > 0) && (
           <span className="attach-strip">
             {images.map((image) => (

@@ -395,7 +395,8 @@ public class SessionController {
                     attachments.displayAttachments(id, message.attachments()), message.imagePositions(),
                     message.requirements() == null || message.requirements().empty() ? null
                         : new QueueRequirementsView(message.requirements().constraints(),
-                            message.requirements().acceptance())))
+                            message.requirements().acceptance()),
+                    message.mode(), message.skill()))
                 .toList(),
             RunStarter.queueRevision(messages), runStarter.queueHeld(id), runStarter.queueWaitingReason(id));
     }
@@ -739,10 +740,15 @@ public class SessionController {
     }
 
     public record QueueEntry(String content, List<AttachmentService.DisplayAttachment> attachments,
-        List<Integer> imagePositions, QueueRequirementsView requirements) {
+        List<Integer> imagePositions, QueueRequirementsView requirements, String mode, String skill) {
         public QueueEntry(String content, List<AttachmentService.DisplayAttachment> attachments,
             List<Integer> imagePositions) {
-            this(content, attachments, imagePositions, null);
+            this(content, attachments, imagePositions, null, "", "");
+        }
+
+        public QueueEntry(String content, List<AttachmentService.DisplayAttachment> attachments,
+            List<Integer> imagePositions, QueueRequirementsView requirements) {
+            this(content, attachments, imagePositions, requirements, "", "");
         }
     }
 
