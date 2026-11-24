@@ -56,11 +56,55 @@ public interface BrowserBackend {
         return false;
     }
 
+    /** 清理页面上智能体留下的光标与状态胶囊。 */
+    default void clearOverlay(String sessionId) {
+    }
+
+    /** 当前会话是否处于智能体自动控制锁定态。 */
+    default boolean agentControlled(String sessionId) {
+        return false;
+    }
+
+    /** 设置或更新智能体控制锁定态与状态文本；{@code resume=true} 时同时解除用户停止锁。 */
+    default void setAgentControl(String sessionId, boolean active, String status, boolean resume) {
+    }
+
+    default void setAgentControl(String sessionId, boolean active, String status) {
+        setAgentControl(sessionId, active, status, false);
+    }
+
+    /** 用户在 UI/网页或页内点击 Stop 时主动终止智能体控制并移除控制指示。 */
+    default void stopControl(String sessionId) {
+        clearOverlay(sessionId);
+    }
+
+    /** 后端是否支持子代理运行期间自动录制可回放过程录像。 */
+    default boolean supportsProcessRecording() {
+        return false;
+    }
+
+    /** 使页面上旧的 snapshot ref 失效，避免接管恢复后重放旧引用。 */
+    default void invalidateRefs(String sessionId) {
+    }
+
+    /** 清理会话及旗下派生出来的全部子浏览器通道。 */
+    default void closeSessionTree(String parentSessionId) {
+        closeSession(parentSessionId);
+    }
+
     /**
      * @param text       给模型看的文字结果
      * @param screenshot 截图文件的绝对路径；没有截图时为 {@code null}
+     * @param metadata   sidecar 提供的结构化宿主机事实（不可信页面数据已在边端脱敏）
      */
-    record Reply(String text, String screenshot) {
+    record Reply(String text, String screenshot, Map<String, Object> metadata) {
+        public Reply {
+            metadata = metadata == null ? Map.of() : Map.copyOf(metadata);
+        }
+
+        public Reply(String text, String screenshot) {
+            this(text, screenshot, Map.of());
+        }
     }
 
     /** 浏览器操作失败。 */

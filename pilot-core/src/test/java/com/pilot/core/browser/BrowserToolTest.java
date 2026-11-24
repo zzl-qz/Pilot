@@ -307,11 +307,13 @@ class BrowserToolTest {
     void rejectsMissingTargetsAndUploadLimits() throws IOException {
         Files.writeString(workspace.resolve("a.txt"), "x");
         BrowserTool browser = tool();
-        for (String action : List.of("hover", "download", "fill", "type", "select", "upload")) {
+        for (String action : List.of("download", "fill", "type", "select", "check", "uncheck", "upload")) {
             String result = browser
                 .execute(Map.of("action", action, "text", "x", "values", List.of("a"), "files", List.of("a.txt")));
             assertTrue(result.contains("需要 ref（来自 snapshot）或 selector"), action + " -> " + result);
         }
+        String hoverMissing = browser.execute(Map.of("action", "hover"));
+        assertTrue(hoverMissing.contains("需要 ref（来自 snapshot）、selector 或坐标 (x, y)"), hoverMissing);
         List<String> eleven = new ArrayList<>();
         for (int i = 0; i <= 10; i++) {
             eleven.add("a.txt");
@@ -324,13 +326,164 @@ class BrowserToolTest {
         assertEquals(1, backend.commands.size());
     }
 
+    @Test
+    void enforcesSubagentEvaluateLockPaymentHardBlockHandoffBrokerAndEvidence() {
+        List<BrowserEvidenceRecord> captured = new ArrayList<>();
+        BrowserHandoffBroker broker = new BrowserHandoffBroker();
+        BrowserTool restricted = new BrowserTool(backend, "s1", new PathValidator(workspace))
+            .withRunContext("parent-s1", "run-1", "bagent-1").withAllowEvaluate(false).withHandoffBroker(broker)
+            .withEvidenceRecorder(captured::add).withHandoffTimeout(Duration.ofSeconds(5));
+
+        assertTrue(restricted.execute(Map.of("action", "evaluate", "expression", "1+1")).contains("不允许执行 evaluate"));
+
+        String blocked = restricted.execute(Map.of("action", "click", "ref", "e1", "external", true, "expected_url",
+            "https://checkout.stripe.com/c/pay/cs_test", "purpose", "自动付款"));
+        assertTrue(blocked.contains("handoff"), blocked);
+        assertTrue(backend.commands.isEmpty(), "支付页自动点击不得发往后端");
+
+        Thread responder = new Thread(() -> {
+            long deadline = System.currentTimeMillis() + 3000;
+            while (System.currentTimeMillis() < deadline) {
+                if (!broker.pending("parent-s1").isEmpty()) {
+                    broker.resume("s1", "用户已完成登录");
+                    return;
+                }
+                try {
+                    Thread.sleep(15);
+                } catch (InterruptedException ignored) {
+                    return;
+                }
+            }
+        });
+        responder.start();
+        String resumed = restricted.execute(Map.of("action", "handoff", "kind", "auth", "reason", "请完成登录"));
+        assertTrue(resumed.contains("用户已完成浏览器接管"), resumed);
+        assertTrue(resumed.contains("用户已完成登录"), resumed);
+        assertTrue(backend.clearedOverlay);
+        assertTrue(backend.invalidatedRefs);
+        assertTrue(backend.commands.stream().anyMatch(cmd -> "describe".equals(cmd.get("op"))));
+        assertTrue(captured.stream().anyMatch(rec -> "payment".equals(rec.gateKind())));
+        assertTrue(captured.stream().anyMatch(rec -> "handoff".equals(rec.action()) && "ok".equals(rec.status())));
+
+        BrowserTool full = tool();
+        assertEquals("ok", full.execute(Map.of("action", "new_tab", "url", "http://127.0.0.1:5173/next")));
+        assertEquals("new_tab", backend.commands.getLast().get("op"));
+    }
+
+    @Test
+    void forwardsCheckUncheckScrollWaitUrlStateTypeClearAndTracksControlLock() {
+        BrowserTool browser = tool();
+        assertEquals("ok", browser.execute(Map.of("action", "check", "ref", "e1")));
+        assertEquals("ok", browser.execute(Map.of("action", "uncheck", "selector", "#agree")));
+        assertEquals("ok", browser.execute(Map.of("action", "scroll", "direction", "down", "amount", 420)));
+        assertEquals("ok", browser.execute(Map.of("action", "type", "ref", "e2", "text", "新内容", "clear", true)));
+        assertEquals("ok", browser.execute(
+            Map.of("action", "wait", "url", "/dashboard", "selector", ".spinner", "state", "hidden", "ms", 1200)));
+
+        assertEquals(Map.of("op", "check", "ref", "e1"), backend.commands.get(0));
+        assertEquals(Map.of("op", "uncheck", "selector", "#agree"), backend.commands.get(1));
+        assertEquals(Map.of("op", "scroll", "direction", "down", "amount", 420), backend.commands.get(2));
+        assertEquals(Map.of("op", "type", "ref", "e2", "text", "新内容", "clear", true), backend.commands.get(3));
+        assertEquals(Map.of("op", "wait", "url", "/dashboard", "selector", ".spinner", "state", "hidden", "ms", 1200L),
+            backend.commands.get(4));
+
+        assertTrue(backend.execute(
+            "s1", Map.of("op", "snapshot"), Duration.ofSeconds(1)).text().equals("ok"));
+        assertTrue(backend.controlActive);
+        assertEquals("输入 e2", backend.controlStatus);
+
+        assertTrue(browser.execute(Map.of("action", "scroll", "direction", "diagonal")).startsWith("ERROR:"));
+        assertTrue(browser.execute(Map.of("action", "wait", "state", "invalid")).startsWith("ERROR:"));
+
+        assertEquals("ok", browser.execute(Map.of("action", "close")));
+        assertFalse(backend.controlActive);
+    }
+
+    @Test
+    void forwardsDragCoordinatesDialogBatchAndProcessRecording() {
+        List<BrowserEvidenceRecord> captured = new ArrayList<>();
+        backend.recording = true;
+        BrowserTool browser = tool().withEvidenceRecorder(captured::add);
+
+        assertEquals("ok", browser.execute(
+            Map.of("action", "click", "x", 180, "y", 240)));
+        assertEquals("ok", browser.execute(
+            Map.of("action", "hover", "x", 90, "y", 110)));
+        assertEquals("ok", browser.execute(
+            Map.of("action", "scroll", "x", 200, "y", 300, "direction", "down", "amount", 160)));
+        assertEquals("ok", browser.execute(Map.of(
+            "action", "drag", "ref", "e1", "targetRef", "e2", "frame", "f1", "dragSteps", 10)));
+        assertEquals("ok", browser.execute(Map.of(
+            "action", "drag", "x", 40, "y", 50, "targetX", 220, "targetY", 150)));
+        assertEquals("ok", browser.execute(
+            Map.of("action", "dialog", "accept", true, "promptText", "确认口令")));
+        assertEquals("ok", browser.execute(Map.of("action", "dialog")));
+
+        assertEquals(Map.of("op", "click", "x", 180, "y", 240), backend.commands.get(0));
+        assertEquals(Map.of("op", "hover", "x", 90, "y", 110), backend.commands.get(1));
+        assertEquals(Map.of("op", "scroll", "direction", "down", "amount", 160, "x", 200, "y", 300),
+            backend.commands.get(2));
+        assertEquals(Map.of("op", "drag", "ref", "e1", "targetRef", "e2", "frame", "f1", "steps", 10),
+            backend.commands.get(3));
+        assertEquals(Map.of("op", "drag", "x", 40, "y", 50, "targetX", 220, "targetY", 150),
+            backend.commands.get(4));
+        assertEquals(Map.of("op", "dialog", "accept", true, "promptText", "确认口令"),
+            backend.commands.get(5));
+        assertEquals(Map.of("op", "dialog"), backend.commands.get(6));
+
+        assertEquals("ok", browser.execute(Map.of(
+            "action", "batch",
+            "stopOnError", false,
+            "delayMs", 30,
+            "steps", List.of(
+                Map.of("action", "fill", "ref", "e3", "text", "batch-val"),
+                Map.of("action", "dblclick", "ref", "e4"),
+                Map.of("action", "wait", "ms", 20)))));
+        Map<String, Object> batchCmd = backend.commands.get(7);
+        assertEquals("batch", batchCmd.get("op"));
+        assertEquals(false, batchCmd.get("stopOnError"));
+        assertEquals(30, batchCmd.get("delayMs"));
+
+        assertTrue(browser.execute(Map.of("action", "batch", "steps", List.of())).startsWith("ERROR:"));
+        assertTrue(browser.execute(Map.of(
+            "action", "batch", "steps", List.of(Map.of("action", "navigate", "url", "http://127.0.0.1"))))
+            .startsWith("ERROR:"));
+        assertTrue(browser.execute(Map.of(
+            "action", "batch", "steps", List.of(Map.of("action", "click", "ref", "e1", "external", true))))
+            .startsWith("ERROR:"));
+
+        String prevArtifacts = System.getProperty("pilot.artifacts.dir");
+        System.setProperty("pilot.artifacts.dir", artifacts.toString());
+        try {
+            assertEquals("ok", browser.execute(Map.of("action", "record", "mode", "start")));
+            String stopText = browser.execute(Map.of("action", "record", "mode", "stop"));
+            assertTrue(stopText.contains("replay.json") || "ok".equals(stopText), stopText);
+            String recPath = String.valueOf(backend.commands.getLast().get("path"));
+            assertTrue(recPath.startsWith(artifacts.toString()), recPath);
+            assertTrue(recPath.endsWith(".replay.json"), recPath);
+            assertTrue(captured.stream().anyMatch(
+                rec -> "record".equals(rec.action()) && recPath.equals(rec.recordingPath())));
+        } finally {
+            if (prevArtifacts == null) {
+                System.clearProperty("pilot.artifacts.dir");
+            } else {
+                System.setProperty("pilot.artifacts.dir", prevArtifacts);
+            }
+        }
+    }
+
     private static final class FakeBackend implements BrowserBackend {
         private Availability availability = Availability.ready();
         private final List<Map<String, Object>> commands = new ArrayList<>();
         private final List<String> sessions = new ArrayList<>();
         private String failure;
         private boolean screenshot;
+        private boolean recording;
         private boolean paused;
+        private boolean clearedOverlay;
+        private boolean invalidatedRefs;
+        private boolean controlActive;
+        private String controlStatus = "";
 
         @Override
         public Availability availability() {
@@ -340,6 +493,29 @@ class BrowserToolTest {
         @Override
         public boolean interactionsPaused(String sessionId) {
             return paused;
+        }
+
+        @Override
+        public void clearOverlay(String sessionId) {
+            clearedOverlay = true;
+            controlActive = false;
+            controlStatus = "";
+        }
+
+        @Override
+        public void setAgentControl(String sessionId, boolean active, String status, boolean resume) {
+            controlActive = active;
+            controlStatus = status == null ? "" : status;
+        }
+
+        @Override
+        public boolean agentControlled(String sessionId) {
+            return controlActive;
+        }
+
+        @Override
+        public void invalidateRefs(String sessionId) {
+            invalidatedRefs = true;
         }
 
         @Override
@@ -355,6 +531,16 @@ class BrowserToolTest {
                     Files.createDirectories(path.getParent());
                     Files.write(path, new byte[] {1, 2, 3});
                     return new Reply("已截图", path.toString());
+                } catch (IOException e) {
+                    throw new BrowserException(e.getMessage());
+                }
+            }
+            if (recording && "record".equals(command.get("op")) && "stop".equals(command.get("mode"))) {
+                try {
+                    Path path = Path.of(String.valueOf(command.get("path")));
+                    Files.createDirectories(path.getParent());
+                    Files.writeString(path, "{\"version\":1,\"frames\":[],\"actions\":[]}");
+                    return new Reply("ok", null, Map.of("recording", Map.of("path", path.toString())));
                 } catch (IOException e) {
                     throw new BrowserException(e.getMessage());
                 }

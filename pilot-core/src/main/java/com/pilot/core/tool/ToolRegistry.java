@@ -30,8 +30,9 @@ public final class ToolRegistry {
      * 名字放在这里，复制到新注册表后仍然生效。
      * install_skill 和 propose_skill 不放进来：目录为空时模型只能靠它们在同一轮里安装并加载。
      */
-    private static final Set<String> DEFERRED = Set.of("office", "browser", "prepare_runtime", "local_resources",
-        "publish_artifact", "dispatch_agents", "mcp_tools", "mcp_call", "code_diagnostics", "remember", "read_memory");
+    private static final Set<String> DEFERRED =
+        Set.of("office", "browser", "browser_agent", "prepare_runtime", "local_resources", "publish_artifact",
+            "dispatch_agents", "mcp_tools", "mcp_call", "code_diagnostics", "remember", "read_memory");
     private final ConcurrentMap<String, Tool> tools = new ConcurrentHashMap<>();
     /**
      * 已启用的延迟工具，按激活顺序保存。

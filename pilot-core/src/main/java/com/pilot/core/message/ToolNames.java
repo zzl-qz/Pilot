@@ -31,6 +31,7 @@ public final class ToolNames {
     public static final String USE_SKILL = "use_skill";
     public static final String READ_TOOL_OUTPUT = "read_tool_output";
     public static final String BROWSER = "browser";
+    public static final String BROWSER_AGENT = "browser_agent";
 
     /** 以下几个工具由 pilot-server 注册，core 的提示词分段和上下文统计也要认它们。 */
     public static final String SPAWN_AGENT = "spawn_agent";

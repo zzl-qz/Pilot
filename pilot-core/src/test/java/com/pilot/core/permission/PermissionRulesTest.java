@@ -150,4 +150,29 @@ class PermissionRulesTest {
         assertEquals(List.of("read_file(src/**)"), PermissionRules.loadWorkspace(workspace).allowRules());
         assertTrue(Files.isRegularFile(PermissionRules.workspaceFile(workspace)));
     }
+
+    @Test
+    void browserRulesIsolateLoopbackPortsAndSupportDomainWildcards() throws IOException {
+        PermissionRules rules = rules(
+            """
+                {"permissions":{"allow":["browser(http://localhost:5173)","browser(click:https://*.example.com)"],"deny":["browser(https://admin.example.com)"]}}
+                """);
+
+        ToolCall localSamePort =
+            new ToolCall("b1", "browser", Map.of("action", "click", "url", "http://localhost:5173/app"));
+        ToolCall localOtherPort =
+            new ToolCall("b2", "browser", Map.of("action", "click", "url", "http://localhost:5174/app"));
+        assertEquals(PermissionDecision.ALLOW, rules.evaluate(localSamePort).decision());
+        assertNull(rules.evaluate(localOtherPort), "不同端口的回环服务不得共享站点放行规则");
+
+        ToolCall allowedWildcard =
+            new ToolCall("b3", "browser", Map.of("action", "click", "expected_url", "https://docs.example.com/guide"));
+        ToolCall wrongActionWildcard =
+            new ToolCall("b4", "browser", Map.of("action", "fill", "expected_url", "https://docs.example.com/guide"));
+        ToolCall deniedAdmin = new ToolCall("b5", "browser",
+            Map.of("action", "click", "expected_url", "https://admin.example.com/settings"));
+        assertEquals(PermissionDecision.ALLOW, rules.evaluate(allowedWildcard).decision());
+        assertNull(rules.evaluate(wrongActionWildcard));
+        assertEquals(PermissionDecision.DENY, rules.evaluate(deniedAdmin).decision());
+    }
 }

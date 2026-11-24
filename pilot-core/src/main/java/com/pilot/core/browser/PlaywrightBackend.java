@@ -79,6 +79,8 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
     private final Map<String, Long> sessionGeneration = new ConcurrentHashMap<>();
     /** 正在被右侧面板镜像的会话：有人看就不做空闲回收。 */
     private final java.util.Set<String> mirroredSessions = ConcurrentHashMap.newKeySet();
+    /** 智能体正在持续控制页面覆盖层的会话集合。 */
+    private final java.util.Set<String> controlledSessions = ConcurrentHashMap.newKeySet();
     private final AtomicBoolean probing = new AtomicBoolean();
 
     private Process process;
@@ -177,13 +179,83 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
         }
         String prefix = restartNotice(sessionId);
         String screenshot = reply.path("screenshot").asString("");
-        return new Reply(prefix + reply.path("text").asString(""), screenshot.isBlank() ? null : screenshot);
+        return new Reply(prefix + reply.path("text").asString(""), screenshot.isBlank() ? null : screenshot,
+            extractMetadata(reply));
+    }
+
+    private static Map<String, Object> extractMetadata(JsonNode reply) {
+        if (reply == null || !reply.isObject()) {
+            return Map.of();
+        }
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        String url = reply.path("url").asString("");
+        if (!url.isBlank()) {
+            metadata.put("url", url);
+        }
+        String title = reply.path("title").asString("");
+        if (!title.isBlank()) {
+            metadata.put("title", title);
+        }
+        if (reply.has("sensitive") && reply.get("sensitive").isBoolean()) {
+            metadata.put("sensitive", reply.get("sensitive").asBoolean());
+        }
+        if (reply.has("consoleErrors") && reply.get("consoleErrors").isNumber()) {
+            metadata.put("consoleErrors", reply.get("consoleErrors").asInt());
+        }
+        if (reply.has("failedRequests") && reply.get("failedRequests").isNumber()) {
+            metadata.put("failedRequests", reply.get("failedRequests").asInt());
+        }
+        if (reply.has("tabId") && reply.get("tabId").isString()) {
+            metadata.put("tabId", reply.get("tabId").asString());
+        }
+        JsonNode blocked = reply.get("blockedOrigins");
+        if (blocked != null && blocked.isArray() && !blocked.isEmpty()) {
+            java.util.List<String> list = new java.util.ArrayList<>();
+            for (JsonNode item : blocked) {
+                String value = item.asString("");
+                if (!value.isBlank()) {
+                    list.add(value);
+                }
+            }
+            if (!list.isEmpty()) {
+                metadata.put("blockedOrigins", java.util.List.copyOf(list));
+            }
+        }
+        JsonNode gate = reply.get("gate");
+        if (gate != null && gate.isObject()) {
+            String kind = gate.path("kind").asString("");
+            String reason = gate.path("reason").asString("");
+            if (!kind.isBlank()) {
+                metadata.put("gate", Map.of("kind", kind, "reason", reason));
+            }
+        }
+        JsonNode download = reply.get("download");
+        if (download != null && download.isObject()) {
+            Map<String, Object> dl = new LinkedHashMap<>();
+            dl.put("name", download.path("name").asString(""));
+            dl.put("path", download.path("path").asString(""));
+            dl.put("mimeType", download.path("mimeType").asString(""));
+            dl.put("sizeBytes", download.path("sizeBytes").asLong(0L));
+            dl.put("basis", download.path("basis").asString(""));
+            metadata.put("download", Map.copyOf(dl));
+        }
+        JsonNode recording = reply.get("recording");
+        if (recording != null && recording.isObject()) {
+            Map<String, Object> rec = new LinkedHashMap<>();
+            rec.put("path", recording.path("path").asString(""));
+            rec.put("frames", recording.path("frames").asInt(0));
+            rec.put("actions", recording.path("actions").asInt(0));
+            rec.put("durationMs", recording.path("durationMs").asLong(0L));
+            metadata.put("recording", Map.copyOf(rec));
+        }
+        return metadata.isEmpty() ? Map.of() : Map.copyOf(metadata);
     }
 
     @Override
     public void closeSession(String sessionId) {
         sessionGeneration.remove(sessionId);
         mirroredSessions.remove(sessionId);
+        controlledSessions.remove(sessionId);
         synchronized (lifecycle) {
             if (process == null || !process.isAlive()) {
                 return;
@@ -251,14 +323,81 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
         }
     }
 
+    @Override
+    public void clearOverlay(String sessionId) {
+        controlledSessions.remove(sessionId);
+        signalIfAlive(sessionId, "clear-overlay", Map.of());
+    }
+
+    @Override
+    public boolean agentControlled(String sessionId) {
+        return sessionId != null && controlledSessions.contains(sessionId);
+    }
+
+    @Override
+    public void setAgentControl(String sessionId, boolean active, String status, boolean resume) {
+        if (sessionId != null) {
+            if (active) {
+                controlledSessions.add(sessionId);
+            } else {
+                controlledSessions.remove(sessionId);
+            }
+        }
+        Map<String, Object> args = new LinkedHashMap<>();
+        args.put("agentControlled", active);
+        args.put("status", status == null ? "" : status);
+        args.put("resume", resume);
+        signalIfAlive(sessionId, "control-state", args);
+    }
+
+    @Override
+    public void stopControl(String sessionId) {
+        if (sessionId != null) {
+            controlledSessions.remove(sessionId);
+        }
+        signalIfAlive(sessionId, "stop-control", Map.of("source", "ui"));
+    }
+
+    @Override
+    public boolean supportsProcessRecording() {
+        return true;
+    }
+
+    @Override
+    public void invalidateRefs(String sessionId) {
+        signalIfAlive(sessionId, "invalidate-refs", Map.of());
+    }
+
+    private void signalIfAlive(String sessionId, String op, Map<String, Object> args) {
+        synchronized (lifecycle) {
+            if (process == null || !process.isAlive()) {
+                return;
+            }
+        }
+        try {
+            request(sessionId, op, args, PAGE_SIGNAL_TIMEOUT);
+        } catch (BrowserException ignored) {
+            // 没有活动页面或正在退出
+        }
+    }
+
     /** sidecar 的主动事件：从协议读取线程转交到单线程事件流，不阻塞 req/resp。 */
     private void dispatchEvent(JsonNode node) {
+        String sessionId = node.path("session").asString("");
+        String kind = node.path("event").asString("");
+        if ("control-stopped".equals(kind)) {
+            controlledSessions.remove(sessionId);
+        } else if ("control-state".equals(kind)) {
+            if (node.path("agentControlled").asBoolean(false)) {
+                controlledSessions.add(sessionId);
+            } else {
+                controlledSessions.remove(sessionId);
+            }
+        }
         BrowserEventListener current = listener;
         if (current == null) {
             return;
         }
-        String sessionId = node.path("session").asString("");
-        String kind = node.path("event").asString("");
         try {
             events.execute(() -> {
                 try {

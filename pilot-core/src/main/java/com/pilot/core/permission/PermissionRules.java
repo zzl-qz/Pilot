@@ -1,18 +1,21 @@
 package com.pilot.core.permission;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.pilot.core.browser.BrowserCommand;
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.message.ToolNames;
 
@@ -278,6 +281,9 @@ public final class PermissionRules {
         if (rule.specifier().isEmpty()) {
             return true;
         }
+        if (ToolNames.BROWSER.equalsIgnoreCase(call.name())) {
+            return browserMatches(rule.specifier(), call);
+        }
         List<String> targets = targets(call);
         if (targets.isEmpty()) {
             return false;
@@ -291,10 +297,101 @@ public final class PermissionRules {
         return false;
     }
 
-    /** 收集用于匹配的字符串参数：命令、路径、模式、目标。 */
+    private static boolean browserMatches(String specifier, ToolCall call) {
+        String spec = specifier == null ? "" : specifier.strip().toLowerCase(Locale.ROOT);
+        if (spec.isEmpty()) {
+            return false;
+        }
+        Map<String, Object> args = call.args() == null ? Map.of() : call.args();
+        String requiredAction = "";
+        String siteSpec = spec;
+        if (!spec.startsWith("http://") && !spec.startsWith("https://")) {
+            int colon = spec.indexOf(':');
+            if (colon > 0 && spec.substring(0, colon).matches("[a-z_]+")) {
+                requiredAction = spec.substring(0, colon);
+                siteSpec = spec.substring(colon + 1).strip();
+            }
+        }
+        if (!requiredAction.isEmpty()) {
+            Object rawAction = args.get("action");
+            String actualAction = rawAction == null ? "" : String.valueOf(rawAction).strip().toLowerCase(Locale.ROOT);
+            if (!requiredAction.equals(actualAction)) {
+                return false;
+            }
+            if (siteSpec.isEmpty()) {
+                return true;
+            }
+        }
+        for (String url : browserUrls(args)) {
+            if (siteMatches(siteSpec, url)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean siteMatches(String siteSpec, String rawUrl) {
+        String origin = BrowserCommand.originOf(rawUrl);
+        if (origin == null) {
+            return false;
+        }
+        String host = URI.create(origin).getHost();
+        if (host == null) {
+            return false;
+        }
+        host = host.toLowerCase(Locale.ROOT);
+        if (BrowserCommand.isLoopbackHost(host)) {
+            String expectedOrigin = BrowserCommand.originOf(siteSpec);
+            return expectedOrigin != null && expectedOrigin.equals(origin);
+        }
+        String expectedOrigin = BrowserCommand.originOf(siteSpec);
+        if (expectedOrigin != null) {
+            return expectedOrigin.equals(origin);
+        }
+        if (!siteSpec.contains("://") && !siteSpec.contains("/")) {
+            if (siteSpec.startsWith("*.")) {
+                String base = siteSpec.substring(2);
+                return !base.isEmpty() && (host.equals(base) || host.endsWith("." + base));
+            }
+            return host.equals(siteSpec) || globMatches(siteSpec, host);
+        }
+        return globMatches(siteSpec, origin);
+    }
+
+    private static List<String> browserUrls(Map<String, Object> args) {
+        List<String> urls = new ArrayList<>();
+        for (String key : List.of("expected_url", "url")) {
+            Object value = args.get(key);
+            if (value instanceof String text && !text.isBlank()) {
+                urls.add(text.strip());
+            }
+        }
+        return urls;
+    }
+
+    /** 收集用于匹配的字符串参数：命令、路径、模式、目标或浏览器站点。 */
     private static List<String> targets(ToolCall call) {
         Map<String, Object> args = call.args() == null ? Map.of() : call.args();
         List<String> values = new ArrayList<>();
+        if (ToolNames.BROWSER.equalsIgnoreCase(call.name())) {
+            Object rawAction = args.get("action");
+            String action = rawAction == null ? "" : String.valueOf(rawAction).strip().toLowerCase(Locale.ROOT);
+            for (String rawUrl : browserUrls(args)) {
+                String origin = BrowserCommand.originOf(rawUrl);
+                if (origin == null) {
+                    continue;
+                }
+                values.add(origin);
+                String host = URI.create(origin).getHost();
+                if (host != null && !BrowserCommand.isLoopbackHost(host)) {
+                    values.add(host.toLowerCase(Locale.ROOT));
+                }
+                if (!action.isEmpty()) {
+                    values.add(action + ":" + origin);
+                }
+            }
+            return values;
+        }
         for (String key : List.of("path", "file_path", "filePath", "command", "pattern", "target")) {
             Object value = args.get(key);
             if (value instanceof String text && !text.isBlank()) {

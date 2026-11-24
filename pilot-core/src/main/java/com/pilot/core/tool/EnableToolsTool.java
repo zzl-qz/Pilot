@@ -24,7 +24,7 @@ public final class EnableToolsTool implements Tool {
 
     @Override
     public String description() {
-        return "打开还没放进本次请求的扩展工具。names 填工具名，例如 browser、office、mcp_call、publish_artifact、remember、read_memory。打开后从下一轮开始才能按完整参数调用。";
+        return "打开还没放进本次请求的扩展工具。names 填工具名，例如 browser、browser_agent、office、mcp_call、publish_artifact、remember、read_memory。打开后从下一轮开始才能按完整参数调用。";
     }
 
     @Override
