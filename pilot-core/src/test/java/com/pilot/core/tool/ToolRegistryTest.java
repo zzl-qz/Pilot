@@ -80,6 +80,14 @@ class ToolRegistryTest {
     }
 
     @Test
+    void codeDiagnosticsIsExposedAsCoreToolWhenAvailable() {
+        registry.register(tool("read_file", "读文件"));
+        registry.register(tool("code_diagnostics", "代码诊断"));
+        assertEquals(List.of("code_diagnostics", "read_file"),
+            registry.definitions().stream().map(ToolDefinition::name).toList());
+    }
+
+    @Test
     void enabledDeferredToolsKeepTheirActivationOrder() {
         registry.register(tool("read_file", "读文件"));
         registry.register(tool("browser", "浏览器"));

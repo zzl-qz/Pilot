@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -51,11 +50,9 @@ class CodeDiagnosticsToolTest {
     }
 
     @Test
-    void presentCheckerCanBeEnabled() {
+    void presentCheckerIsVisibleImmediatelyAsCoreTool() {
         ToolRegistry registry = new ToolRegistry();
         registry.register(new CodeDiagnosticsTool(() -> "src/A.java:2: 缺少分号"));
-        assertTrue(registry.names().isEmpty());
-        registry.enable(List.of(CodeDiagnosticsTool.NAME));
         assertTrue(registry.names().contains(CodeDiagnosticsTool.NAME));
     }
 }

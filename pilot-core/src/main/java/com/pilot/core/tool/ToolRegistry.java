@@ -32,7 +32,7 @@ public final class ToolRegistry {
      */
     private static final Set<String> DEFERRED =
         Set.of("office", "browser", "browser_agent", "prepare_runtime", "local_resources", "publish_artifact",
-            "dispatch_agents", "mcp_tools", "mcp_call", "code_diagnostics", "remember", "read_memory");
+            "dispatch_agents", "mcp_tools", "mcp_call", "remember", "read_memory");
     private final ConcurrentMap<String, Tool> tools = new ConcurrentHashMap<>();
     /**
      * 已启用的延迟工具，按激活顺序保存。
