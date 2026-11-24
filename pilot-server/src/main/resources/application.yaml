@@ -133,6 +133,22 @@ pilot:
     # 同时能跑的任务数。一个任务卡住时，不要把后面的任务全堵死
     # PILOT_AGENT_RUN_THREADS 可覆盖默认的 4 个运行线程。
   web-search:
+    # 搜索提供商：auto（API 优先 → SearXNG → 公开只读源）、bocha、tavily、brave、serper、exa、searxng、public
+    provider: ${PILOT_WEB_SEARCH_PROVIDER:auto}
+    # 当前提供商的通用 API Key（推荐放环境变量或「设置 → 搜索」，勿提交到仓库）
+    api-key: ${PILOT_WEB_SEARCH_API_KEY:}
+    # 可选自定义搜索 API 端点；留空使用各提供商官方默认地址
+    api-endpoint: ${PILOT_WEB_SEARCH_API_ENDPOINT:}
+    # 按提供商分别配置密钥（auto 模式可自动检测并优先使用）
+    bocha-api-key: ${PILOT_WEB_SEARCH_BOCHA_API_KEY:}
+    tavily-api-key: ${PILOT_WEB_SEARCH_TAVILY_API_KEY:}
+    brave-api-key: ${PILOT_WEB_SEARCH_BRAVE_API_KEY:}
+    serper-api-key: ${PILOT_WEB_SEARCH_SERPER_API_KEY:}
+    exa-api-key: ${PILOT_WEB_SEARCH_EXA_API_KEY:}
+    # 主源失败或无结果时，自动回退到本机 SearXNG 与免密钥官方公开只读源（Wikipedia/GitHub/StackOverflow/arXiv）
+    fallback-enabled: ${PILOT_WEB_SEARCH_FALLBACK_ENABLED:true}
+    # 可选出网代理（如 http://127.0.0.1:7890），同时传递给本机 SearXNG 与云端/公开搜索接口（本机回环自动直连）
+    proxy: ${PILOT_WEB_SEARCH_PROXY:}
     # true：启动时在本机拉起 SearXNG。false：不拉起。不需要搜索密钥。
     local: ${PILOT_WEB_SEARCH_LOCAL:true}
     # 留空使用内置搜索地址。回环 HTTP 根地址未写端口时，本机模式沿用内置端口。

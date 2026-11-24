@@ -1,12 +1,16 @@
 package com.pilot.server.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
 
 import org.junit.jupiter.api.Test;
+
+import com.pilot.core.tool.search.WebSearchProvider;
 
 class WebSearchPropertiesTest {
     @Test
@@ -43,5 +47,31 @@ class WebSearchPropertiesTest {
             assertThrows(IllegalArgumentException.class, () -> new WebSearchProperties(true, endpoint, null, null));
         }
         assertThrows(IllegalArgumentException.class, () -> new WebSearchProperties(false, null, null, null, 0));
+    }
+
+    @Test
+    void parsesMultiProviderFieldsAndMasksSecretsInToString() {
+        var props = new WebSearchProperties(false, "http://127.0.0.1:8888", "", "", 15, "bocha",
+            "sk-secret-main-key-1234", "https://api.bochaai.com/v1/web-search/", true, "http://127.0.0.1:7890",
+            "bocha-key-9999", "tvly-key-8888", "", "", "");
+        assertEquals(WebSearchProvider.BOCHA, props.searchProvider());
+        assertEquals("https://api.bochaai.com/v1/web-search", props.apiEndpoint());
+        assertTrue(props.fallbackEnabledDefault());
+        assertEquals("bocha-key-9999", props.providerKeys().get(WebSearchProvider.BOCHA));
+        assertEquals("tvly-key-8888", props.providerKeys().get(WebSearchProvider.TAVILY));
+        String rendered = props.toString();
+        assertFalse(rendered.contains("sk-secret-main-key-1234"));
+        assertFalse(rendered.contains("bocha-key-9999"));
+        assertFalse(rendered.contains("tvly-key-8888"));
+    }
+
+    @Test
+    void rejectsInvalidProviderApiEndpointAndProxy() {
+        assertThrows(IllegalArgumentException.class, () -> new WebSearchProperties(false, null, null, null, null,
+            "unknown-provider", "", "", true, "", "", "", "", "", ""));
+        assertThrows(IllegalArgumentException.class, () -> new WebSearchProperties(false, null, null, null, null,
+            "bocha", "", "ftp://bad.host", true, "", "", "", "", "", ""));
+        assertThrows(IllegalArgumentException.class, () -> new WebSearchProperties(false, null, null, null, null,
+            "auto", "", "", true, "ftp://127.0.0.1:7890", "", "", "", "", ""));
     }
 }

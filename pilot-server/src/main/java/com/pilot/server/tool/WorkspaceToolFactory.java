@@ -65,6 +65,7 @@ import com.pilot.server.capability.LocalResourcesTool;
 import com.pilot.server.compat.WorkspaceToolLookup;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.WebSearchProperties;
+import com.pilot.server.search.WebSearchSettings;
 import com.pilot.server.store.PilotDataDir;
 
 import tools.jackson.databind.ObjectMapper;
@@ -98,6 +99,7 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
     private PilotDataDir dataDir;
     private BrowserEvidenceService browserEvidence;
     private BrowserHandoffBroker browserHandoffs;
+    private WebSearchSettings webSearchSettings;
     /** 建工具表时读取已经落库的计划，避免把完成的步骤退回去。 */
     private final ThreadLocal<Supplier<List<PlanItem>>> plans = ThreadLocal.withInitial(() -> List::of);
     /** 建工具表时绑定当前会话，让 ask_user 记录等待归属。 */
@@ -146,6 +148,12 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
     @Autowired(required = false)
     public void setBrowserHandoffs(BrowserHandoffBroker browserHandoffs) {
         this.browserHandoffs = browserHandoffs;
+    }
+
+    @Autowired(required = false)
+    public void setWebSearchSettings(WebSearchSettings webSearchSettings) {
+        this.webSearchSettings = webSearchSettings;
+        this.cache.clear();
     }
 
     /**
@@ -306,8 +314,10 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
     }
 
     private WebSearchTool searchTool() {
-        return new WebSearchTool(webClient, mapper, webSearchProperties.endpointUri(),
-            webSearchProperties.requestTimeout());
+        if (webSearchSettings != null) {
+            return new WebSearchTool(webSearchSettings::httpClient, mapper, webSearchSettings::toConfig);
+        }
+        return new WebSearchTool(webClient, mapper, webSearchProperties.toConfig());
     }
 
     private ToolRegistry create(Path root, PlanSink planSink) {

@@ -1,18 +1,41 @@
+# pilot-managed-settings: v3
 # Pilot 写给本机 SearXNG 的配置。只监听 127.0.0.1，不对外。
-# 这些引擎都不需要 API key。JSON 必须开着，否则 web_search 拿不到结果。
+# 如需完全自定义本文件，删除首行 `# pilot-managed-settings: ...` 注释即可，Pilot 将不再自动更新。
+# 这些引擎都不需要 API key；JSON 必须开着，否则 web_search 拿不到结果。
 
 use_default_settings:
   engines:
     keep_only:
-      - brave
+      # 综合中英文网页（移除在当前版本会崩溃或解析失效的 sogou / baidu / wikidata）
+      - bing
+      - 360search
+      - yahoo
       - duckduckgo
-      - baidu
-      - sogou
+      - brave
       - quark
+      - startpage
+      - mojeek
+      - google
+      # 百科
+      - wikipedia
+      # 新闻与时效
+      - bing news
+      - google news
+      - startpage news
+      - brave.news
+      - mojeek news
+      # 技术 / 开发 / 学术
+      - github
+      - stackoverflow
+      - mdn
+      - pypi
+      - npm
+      - arxiv
 
 search:
   safe_search: 0
   autocomplete: ""
+  default_lang: "auto"
   formats:
     - html
     - json
@@ -26,13 +49,21 @@ server:
   image_proxy: false
 
 outgoing:
-  request_timeout: 5.0
-  max_request_timeout: 10.0
+  request_timeout: 8.0
+  max_request_timeout: 15.0
+  pool_connections: 100
+  pool_maxsize: 20
 
 engines:
-  - name: baidu
+  - name: bing
     disabled: false
-  - name: sogou
+  - name: google
+    disabled: false
+  - name: 360search
+    disabled: false
+  - name: yahoo
     disabled: false
   - name: quark
+    disabled: false
+  - name: npm
     disabled: false

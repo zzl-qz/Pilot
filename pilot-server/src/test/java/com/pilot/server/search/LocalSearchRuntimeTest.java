@@ -1,5 +1,6 @@
 package com.pilot.server.search;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -8,6 +9,7 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 import org.junit.jupiter.api.Test;
@@ -56,5 +58,43 @@ class LocalSearchRuntimeTest {
             service.close();
             assertFalse(LocalSearchRuntime.portOpen(address));
         }
+    }
+
+    @Test
+    void syncManagedSettingsCreatesUpgradesV1AndV2AndPreservesCustomUserFile() throws Exception {
+        Path settings = dataDir.resolve("searxng").resolve("settings.yml");
+        assertFalse(LocalSearchRuntime.isSettingsUpToDate(settings));
+        assertTrue(LocalSearchRuntime.syncManagedSettings(settings));
+        assertTrue(LocalSearchRuntime.isSettingsUpToDate(settings));
+        String v3 = Files.readString(settings);
+        assertTrue(v3.startsWith("# pilot-managed-settings: v3"));
+        assertTrue(v3.contains("- bing"));
+        assertTrue(v3.contains("- 360search"));
+        assertFalse(v3.contains("- sogou"));
+        assertFalse(v3.contains("- baidu"));
+        assertFalse(v3.contains("- wikidata"));
+
+        // 已经是 v3 时不再重复覆盖
+        assertFalse(LocalSearchRuntime.syncManagedSettings(settings));
+
+        // 模拟旧版 v1 与 v2 托管文件：均应自动备份并升级为 v3
+        for (String legacy : new String[] {
+            "# Pilot 写给本机 SearXNG 的配置。只监听 127.0.0.1，不对外。\nuse_default_settings: true\n",
+            "# pilot-managed-settings: v2\nuse_default_settings: true\n"
+        }) {
+            Files.writeString(settings, legacy);
+            assertFalse(LocalSearchRuntime.isSettingsUpToDate(settings));
+            assertTrue(LocalSearchRuntime.syncManagedSettings(settings));
+            assertTrue(LocalSearchRuntime.isSettingsUpToDate(settings));
+            assertTrue(Files.readString(settings).startsWith("# pilot-managed-settings: v3"));
+            assertEquals(legacy, Files.readString(settings.resolveSibling("settings.yml.bak")));
+        }
+
+        // 用户去掉托管头自行定制后，绝不覆盖
+        String custom = "# my custom searxng settings\nserver:\n  port: 8888\n";
+        Files.writeString(settings, custom);
+        assertTrue(LocalSearchRuntime.isSettingsUpToDate(settings));
+        assertFalse(LocalSearchRuntime.syncManagedSettings(settings));
+        assertEquals(custom, Files.readString(settings));
     }
 }

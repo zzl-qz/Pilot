@@ -1,9 +1,11 @@
 package com.pilot.server.search;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.nio.channels.SocketChannel;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -13,6 +15,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
@@ -48,6 +51,9 @@ public class LocalSearchRuntime implements SmartLifecycle {
     private static final Duration IMPORT_CHECK_TIMEOUT = Duration.ofSeconds(60);
     private static final Duration PYTHON_VERSION_CHECK_TIMEOUT = Duration.ofSeconds(15);
     private static final String SETTINGS_RESOURCE = "searxng/settings.yml";
+    private static final String MANAGED_HEADER_PREFIX = "# pilot-managed-settings: v";
+    private static final String LEGACY_V1_HEADER = "# Pilot 写给本机 SearXNG 的配置。";
+    private static final int MANAGED_SETTINGS_VERSION = 3;
     private static final String WINDOWS_SHIM_RESOURCE = "searxng/pwd.py";
     private static final String ARCHIVE_NAME = "searxng.tar.gz";
     /** 小于这个大小的压缩包基本是下载中断留下的残骸。 */
@@ -58,77 +64,168 @@ public class LocalSearchRuntime implements SmartLifecycle {
     /** macOS/Linux 上 python3 常见是指向 3.x 的软链，Windows 的同名命令会拉起商店，所以不放进去。 */
     private static final List<String> POSIX_PYTHON_CANDIDATES = List.of("python3", "python");
 
+    public record RuntimeStatus(boolean localEnabled, boolean managed, boolean running, boolean portOpen,
+        boolean settingsUpToDate, String endpoint, String settingsPath, String logPath, String message) {
+    }
+
     private final WebSearchProperties properties;
     private final PilotDataDir dataDir;
+    private final Object lifecycleLock = new Object();
+    private WebSearchSettings webSearchSettings;
     private volatile Process process;
     private volatile boolean running;
 
+    @Autowired(required = false)
+    public void setWebSearchSettings(WebSearchSettings webSearchSettings) {
+        this.webSearchSettings = webSearchSettings;
+    }
+
     @Override
     public void start() {
-        String host = properties.managedHost();
-        if (host == null) {
-            return;
-        }
-        var address = new InetSocketAddress(host, properties.endpointUri().getPort());
-        if (portOpen(address)) {
-            log.info("{} 已有搜索服务，不再重复启动", properties.endpoint());
-            running = true;
-            return;
-        }
-        try {
-            Path root = managedRoot();
-            Files.createDirectories(root);
-            Path settings = root.resolve("settings.yml");
-            if (Files.notExists(settings)) {
-                copySettings(settings);
+        synchronized (lifecycleLock) {
+            String host = properties.managedHost();
+            if (host == null) {
+                return;
             }
-            Path source = sourceDir();
-            if (Files.isRegularFile(source.resolve("searx").resolve("webapp.py"))) {
-                log.info("已有 SearXNG 源码，直接使用：{}", source);
-            } else {
-                log.info("本机还没有 SearXNG 源码，开始拉取");
-                if (!clone(source)) {
+            var address = new InetSocketAddress(host, properties.endpointUri().getPort());
+            if (portOpen(address)) {
+                log.info("{} 已有搜索服务，不再重复启动", properties.endpoint());
+                running = true;
+                return;
+            }
+            try {
+                Path root = managedRoot();
+                Files.createDirectories(root);
+                Path settings = root.resolve("settings.yml");
+                syncManagedSettings(settings);
+                Path source = sourceDir();
+                if (Files.isRegularFile(source.resolve("searx").resolve("webapp.py"))) {
+                    log.info("已有 SearXNG 源码，直接使用：{}", source);
+                } else {
+                    log.info("本机还没有 SearXNG 源码，开始拉取");
+                    if (!clone(source)) {
+                        return;
+                    }
+                }
+                Path venv = source.resolve(".venv");
+                if (ready(venv)) {
+                    log.info("依赖已装好，直接启动 SearXNG");
+                } else if (!install(source, venv)) {
                     return;
                 }
+                ensureWindowsShim(venv);
+                syncThemeStatic(source);
+                ProcessBuilder builder = new ProcessBuilder(launchCommand(venv));
+                builder.directory(source.toFile());
+                builder.environment().put("SEARXNG_SETTINGS_PATH", settings.toAbsolutePath().toString());
+                builder.environment().put("SEARXNG_BIND_ADDRESS", address.getHostString());
+                builder.environment().put("SEARXNG_PORT", Integer.toString(address.getPort()));
+                applyProxyEnvironment(builder);
+                Path logFile = root.resolve("searxng.log");
+                builder.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile.toFile()));
+                builder.redirectErrorStream(true);
+                process = builder.start();
+                if (!waitUntilUp(address, STARTUP_WAIT) || !process.isAlive()) {
+                    log.warn("SearXNG 没有在 {} 起来，日志：{}", properties.endpoint(), logFile);
+                    stopProcess();
+                    return;
+                }
+                running = true;
+                log.info("本机搜索已启动：{}/search", properties.endpoint());
+            } catch (IOException e) {
+                log.warn("启动本机搜索失败：{}", e.toString());
             }
-            Path venv = source.resolve(".venv");
-            if (ready(venv)) {
-                log.info("依赖已装好，直接启动 SearXNG");
-            } else if (!install(source, venv)) {
-                return;
-            }
-            ensureWindowsShim(venv);
-            syncThemeStatic(source);
-            ProcessBuilder builder = new ProcessBuilder(launchCommand(venv));
-            builder.directory(source.toFile());
-            builder.environment().put("SEARXNG_SETTINGS_PATH", settings.toAbsolutePath().toString());
-            builder.environment().put("SEARXNG_BIND_ADDRESS", address.getHostString());
-            builder.environment().put("SEARXNG_PORT", Integer.toString(address.getPort()));
-            Path logFile = root.resolve("searxng.log");
-            builder.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile.toFile()));
-            builder.redirectErrorStream(true);
-            process = builder.start();
-            if (!waitUntilUp(address, STARTUP_WAIT) || !process.isAlive()) {
-                log.warn("SearXNG 没有在 {} 起来，日志：{}", properties.endpoint(), logFile);
-                stopProcess();
-                return;
-            }
-            running = true;
-            log.info("本机搜索已启动：{}/search", properties.endpoint());
-        } catch (IOException e) {
-            log.warn("启动本机搜索失败：{}", e.toString());
         }
     }
 
     @Override
     public void stop() {
-        stopProcess();
-        running = false;
+        synchronized (lifecycleLock) {
+            stopProcess();
+            running = false;
+        }
     }
 
     @Override
     public boolean isRunning() {
-        return running;
+        Process current = process;
+        return running && (current == null || current.isAlive());
+    }
+
+    public RuntimeStatus status() {
+        String host = properties.managedHost();
+        Path root = managedRoot();
+        Path settings = root.resolve("settings.yml");
+        Path logFile = root.resolve("searxng.log");
+        boolean upToDate = isSettingsUpToDate(settings);
+        if (host == null) {
+            String message = properties.local()
+                ? "当前 SearXNG 地址不是本机回环 HTTP 根地址，由外部服务自行管理"
+                : "本机 SearXNG 自动拉起已关闭（pilot.web-search.local=false）";
+            return new RuntimeStatus(properties.local(), false, isRunning(), false, upToDate, properties.endpoint(),
+                settings.toString(), logFile.toString(), message);
+        }
+        var address = new InetSocketAddress(host, properties.endpointUri().getPort());
+        boolean open = portOpen(address);
+        Process current = process;
+        boolean ownedAlive = current != null && current.isAlive();
+        String message;
+        if (ownedAlive && open) {
+            message = upToDate ? "本机 SearXNG 运行中（由 Pilot 托管）"
+                : "本机 SearXNG 运行中，但托管配置可升级至 v" + MANAGED_SETTINGS_VERSION;
+        } else if (current != null && !current.isAlive() && !open) {
+            message = "本机 SearXNG 进程已意外退出，请点击重启或查看日志";
+        } else if (open) {
+            message = upToDate ? "端口已监听（外部 SearXNG 进程）"
+                : "端口由外部 SearXNG 进程占用，且托管配置为旧版；建议停掉旧进程后重启以升级至 v"
+                    + MANAGED_SETTINGS_VERSION;
+        } else {
+            message = "本机 SearXNG 未运行";
+        }
+        return new RuntimeStatus(properties.local(), true, isRunning() && open, open, upToDate, properties.endpoint(),
+            settings.toString(), logFile.toString(), message);
+    }
+
+    /** 同步托管 SearXNG 配置并尝试重启由 Pilot 托管的本机进程。 */
+    public RuntimeStatus restart() {
+        synchronized (lifecycleLock) {
+            String host = properties.managedHost();
+            if (host == null) {
+                return status();
+            }
+            Path root = managedRoot();
+            Path settings = root.resolve("settings.yml");
+            boolean upgraded = false;
+            try {
+                upgraded = syncManagedSettings(settings);
+            } catch (IOException e) {
+                log.warn("同步本机 SearXNG 配置失败：{}", e.toString());
+                RuntimeStatus current = status();
+                return new RuntimeStatus(current.localEnabled(), current.managed(), current.running(),
+                    current.portOpen(), current.settingsUpToDate(), current.endpoint(), current.settingsPath(),
+                    current.logPath(), "同步配置失败：" + e.getMessage());
+            }
+            var address = new InetSocketAddress(host, properties.endpointUri().getPort());
+            boolean owned = process != null;
+            if (owned) {
+                stopProcess();
+                running = false;
+                waitUntilDown(address, Duration.ofSeconds(3));
+            } else if (portOpen(address)) {
+                RuntimeStatus current = status();
+                String msg = (upgraded ? "已更新托管配置（v" + MANAGED_SETTINGS_VERSION + "），但" : "")
+                    + "端口 " + address.getPort() + " 当前由外部进程占用，请重启该 SearXNG 进程或重启 Pilot 使其生效";
+                return new RuntimeStatus(current.localEnabled(), current.managed(), current.running(), true,
+                    isSettingsUpToDate(settings), current.endpoint(), current.settingsPath(), current.logPath(), msg);
+            }
+            start();
+            RuntimeStatus after = status();
+            String msg = after.portOpen()
+                ? (upgraded ? "已升级配置至 v" + MANAGED_SETTINGS_VERSION + " 并重启本机 SearXNG" : "已重启本机 SearXNG")
+                : "重启本机 SearXNG 未成功，请检查日志：" + after.logPath();
+            return new RuntimeStatus(after.localEnabled(), after.managed(), after.running(), after.portOpen(),
+                after.settingsUpToDate(), after.endpoint(), after.settingsPath(), after.logPath(), msg);
+        }
     }
 
     @Override
@@ -155,6 +252,90 @@ public class LocalSearchRuntime implements SmartLifecycle {
             return SourceLayout.localData(repo).resolve("searxng");
         }
         return dataDir.file("searxng");
+    }
+
+    /**
+     * 同步 Pilot 托管的 SearXNG 配置。
+     *
+     * <p>文件不存在时直接写入；存在且带有旧版 Pilot 托管头时先备份到 {@code settings.yml.bak} 再升级；
+     * 若用户已移除托管头自行定制，则保持原文件不变。
+     */
+    static boolean syncManagedSettings(Path target) throws IOException {
+        if (target.getParent() != null) {
+            Files.createDirectories(target.getParent());
+        }
+        if (Files.notExists(target)) {
+            copySettings(target);
+            return true;
+        }
+        String firstLine;
+        try (BufferedReader reader = Files.newBufferedReader(target, StandardCharsets.UTF_8)) {
+            firstLine = reader.readLine();
+        }
+        if (!needsManagedUpgrade(firstLine)) {
+            return false;
+        }
+        Path backup = target.resolveSibling(target.getFileName() + ".bak");
+        Files.copy(target, backup, StandardCopyOption.REPLACE_EXISTING);
+        copySettings(target);
+        log.info("已自动升级托管 SearXNG 配置至 v{}（旧配置已备份到 {}）", MANAGED_SETTINGS_VERSION, backup);
+        return true;
+    }
+
+    private static boolean needsManagedUpgrade(String firstLine) {
+        if (firstLine == null || firstLine.isBlank()) {
+            return true;
+        }
+        String trimmed = firstLine.strip();
+        if (trimmed.startsWith(LEGACY_V1_HEADER)) {
+            return true;
+        }
+        if (trimmed.startsWith(MANAGED_HEADER_PREFIX)) {
+            String rawVersion = trimmed.substring(MANAGED_HEADER_PREFIX.length()).strip();
+            try {
+                return Integer.parseInt(rawVersion) < MANAGED_SETTINGS_VERSION;
+            } catch (NumberFormatException ignored) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static boolean isSettingsUpToDate(Path target) {
+        if (target == null || Files.notExists(target)) {
+            return false;
+        }
+        try (BufferedReader reader = Files.newBufferedReader(target, StandardCharsets.UTF_8)) {
+            return !needsManagedUpgrade(reader.readLine());
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private void applyProxyEnvironment(ProcessBuilder builder) {
+        String proxy = webSearchSettings != null ? webSearchSettings.effectiveProxy() : properties.proxy();
+        if (proxy == null || proxy.isBlank()) {
+            return;
+        }
+        var env = builder.environment();
+        env.put("HTTP_PROXY", proxy);
+        env.put("HTTPS_PROXY", proxy);
+        env.put("http_proxy", proxy);
+        env.put("https_proxy", proxy);
+        env.put("NO_PROXY", "127.0.0.1,localhost,::1");
+        env.put("no_proxy", "127.0.0.1,localhost,::1");
+    }
+
+    private static void waitUntilDown(InetSocketAddress address, Duration timeout) {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (System.nanoTime() < deadline && portOpen(address)) {
+            try {
+                Thread.sleep(150);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
     }
 
     private static void copySettings(Path target) throws IOException {
