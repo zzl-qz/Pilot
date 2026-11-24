@@ -26,7 +26,7 @@ import com.pilot.server.store.SettingsStore;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 联网搜索运行时设置（提供商、API 密钥、SearXNG 地址、回退开关与出网代理）。
+ * 联网搜索运行时设置（提供商、分商 API 密钥与端点、SearXNG 地址、回退开关、优先策略与出网代理）。
  *
  * <p>优先级：SettingsStore 持久化值 &gt; 配置文件 / 环境变量 {@code pilot.web-search.*}。
  * 修改后立即对后续 {@code web_search} 调用生效，无需重启；对外不回传明文密钥。
@@ -40,15 +40,23 @@ public class WebSearchSettings {
     private static final String KEY_API_ENDPOINT = "web-search.api-endpoint";
     private static final String KEY_SEARXNG_ENDPOINT = "web-search.searxng-endpoint";
     private static final String KEY_FALLBACK_ENABLED = "web-search.fallback-enabled";
+    private static final String KEY_PREFER_PILOT_SEARCH = "web-search.prefer-pilot-search";
     private static final String KEY_PROXY = "web-search.proxy";
 
     public record Snapshot(WebSearchProvider provider, String apiKey, Map<WebSearchProvider, String> providerKeys,
-        String apiEndpoint, String searxngEndpoint, boolean fallbackEnabled, String proxy, Duration timeout) {
+        String apiEndpoint, Map<WebSearchProvider, String> providerEndpoints, String searxngEndpoint,
+        boolean fallbackEnabled, boolean preferPilotSearch, String proxy, Duration timeout) {
 
         public WebSearchConfig toConfig(WebSearchConfig.PublicSources publicSources) {
             URI apiUri = apiEndpoint == null || apiEndpoint.isBlank() ? null : URI.create(apiEndpoint);
+            Map<WebSearchProvider, URI> endpoints = new EnumMap<>(WebSearchProvider.class);
+            for (Map.Entry<WebSearchProvider, String> entry : providerEndpoints.entrySet()) {
+                if (entry.getValue() != null && !entry.getValue().isBlank()) {
+                    endpoints.put(entry.getKey(), URI.create(entry.getValue()));
+                }
+            }
             return new WebSearchConfig(provider, apiKey, apiUri, URI.create(searxngEndpoint), timeout,
-                fallbackEnabled, providerKeys, publicSources);
+                fallbackEnabled, providerKeys, publicSources, endpoints);
         }
 
         public WebSearchConfig toConfig() {
@@ -64,6 +72,13 @@ public class WebSearchSettings {
             return auto == null ? apiKey : cfg.resolveApiKey(auto);
         }
 
+        public String activeApiEndpoint() {
+            if (provider.requiresApiKey()) {
+                return providerEndpoints.getOrDefault(provider, "");
+            }
+            return apiEndpoint;
+        }
+
         public String effectiveProviderId() {
             if (provider != WebSearchProvider.AUTO) {
                 return provider.id();
@@ -75,25 +90,30 @@ public class WebSearchSettings {
         @Override
         public String toString() {
             return "Snapshot[provider=" + provider + ", apiKey=" + WebSearchConfig.maskSecret(apiKey)
-                + ", providerKeys=" + providerKeys.keySet() + ", apiEndpoint=" + apiEndpoint
+                + ", providerKeys=" + providerKeys.keySet() + ", providerEndpoints=" + providerEndpoints.keySet()
                 + ", searxngEndpoint=" + searxngEndpoint + ", fallbackEnabled=" + fallbackEnabled
-                + ", proxy=" + SecretScrubber.scrub(proxy) + ", timeout=" + timeout + "]";
+                + ", preferPilotSearch=" + preferPilotSearch + ", proxy=" + SecretScrubber.scrub(proxy)
+                + ", timeout=" + timeout + "]";
         }
     }
 
     public record ProviderView(String id, String label, String description, boolean requiresApiKey,
-        String defaultEndpoint, boolean apiKeySet, String apiKeyMasked) {
+        String defaultEndpoint, String apiEndpoint, boolean apiKeySet, String apiKeyMasked) {
+    }
+
+    public record NativeSearchState(boolean active, String summary) {
     }
 
     public record View(String provider, String effectiveProvider, String apiEndpoint, boolean apiKeySet,
-        String apiKeyMasked, String searxngEndpoint, boolean fallbackEnabled, String proxy,
-        int requestTimeoutSeconds, boolean localEnabled, boolean localManaged, boolean localRunning,
-        boolean localPortOpen, boolean localSettingsUpToDate, String localSettingsPath, String localLogPath,
-        String localMessage, List<ProviderView> providers) {
+        String apiKeyMasked, String searxngEndpoint, boolean fallbackEnabled, boolean preferPilotSearch,
+        String proxy, String proxyNotice, int requestTimeoutSeconds, boolean localEnabled, boolean localManaged,
+        boolean localRunning, boolean localPortOpen, boolean localSettingsUpToDate, String localSettingsPath,
+        String localLogPath, String localMessage, boolean nativeWebSearchActive, String nativeWebSearchSummary,
+        List<ProviderView> providers) {
     }
 
     public record UpdateCommand(String provider, String apiKey, Boolean clearApiKey, String apiEndpoint,
-        String searxngEndpoint, Boolean fallbackEnabled, String proxy) {
+        String searxngEndpoint, Boolean fallbackEnabled, Boolean preferPilotSearch, String proxy) {
     }
 
     private final WebSearchProperties defaults;
@@ -116,6 +136,10 @@ public class WebSearchSettings {
 
     public WebSearchConfig toConfig() {
         return current.toConfig();
+    }
+
+    public boolean preferPilotSearch() {
+        return current.preferPilotSearch();
     }
 
     public String effectiveProxy() {
@@ -173,11 +197,23 @@ public class WebSearchSettings {
             }
         }
 
-        String nextApiEndpoint = before.apiEndpoint();
+        Map<WebSearchProvider, String> nextProviderEndpoints = new EnumMap<>(WebSearchProvider.class);
+        nextProviderEndpoints.putAll(before.providerEndpoints());
+        String nextGenericEndpoint = before.apiEndpoint();
         if (command.apiEndpoint() != null) {
-            nextApiEndpoint = command.apiEndpoint().isBlank() ? ""
+            String normalizedEndpoint = command.apiEndpoint().isBlank() ? ""
                 : WebSearchProperties.normalizeHttpEndpoint(command.apiEndpoint(), "apiEndpoint");
-            writes.put(KEY_API_ENDPOINT, nextApiEndpoint);
+            if (nextProvider.requiresApiKey()) {
+                if (normalizedEndpoint.isEmpty()) {
+                    nextProviderEndpoints.remove(nextProvider);
+                } else {
+                    nextProviderEndpoints.put(nextProvider, normalizedEndpoint);
+                }
+                writes.put(providerEndpointSlot(nextProvider), normalizedEndpoint);
+            } else {
+                nextGenericEndpoint = normalizedEndpoint;
+                writes.put(KEY_API_ENDPOINT, normalizedEndpoint);
+            }
         }
 
         String nextSearxngEndpoint = before.searxngEndpoint();
@@ -193,6 +229,12 @@ public class WebSearchSettings {
             writes.put(KEY_FALLBACK_ENABLED, Boolean.toString(nextFallback));
         }
 
+        boolean nextPreferPilot = command.preferPilotSearch() == null
+            ? before.preferPilotSearch() : command.preferPilotSearch();
+        if (command.preferPilotSearch() != null) {
+            writes.put(KEY_PREFER_PILOT_SEARCH, Boolean.toString(nextPreferPilot));
+        }
+
         String nextProxy = before.proxy();
         if (command.proxy() != null) {
             nextProxy = command.proxy().isBlank() ? "" : WebSearchProperties.normalizeProxy(command.proxy());
@@ -202,8 +244,9 @@ public class WebSearchSettings {
         if (!writes.isEmpty()) {
             store.saveAll(writes);
         }
-        Snapshot next = new Snapshot(nextProvider, nextGenericKey, Map.copyOf(nextProviderKeys), nextApiEndpoint,
-            nextSearxngEndpoint, nextFallback, nextProxy, before.timeout());
+        Snapshot next = new Snapshot(nextProvider, nextGenericKey, Map.copyOf(nextProviderKeys), nextGenericEndpoint,
+            Map.copyOf(nextProviderEndpoints), nextSearxngEndpoint, nextFallback, nextPreferPilot, nextProxy,
+            before.timeout());
         current = next;
         activeHttpProxy = parseHttpProxyAddress(nextProxy);
         log.info("联网搜索设置已更新：{}", next);
@@ -232,7 +275,8 @@ public class WebSearchSettings {
         }
         store.saveAll(writes);
         Snapshot next = new Snapshot(before.provider(), nextGenericKey, Map.copyOf(nextProviderKeys),
-            before.apiEndpoint(), before.searxngEndpoint(), before.fallbackEnabled(), before.proxy(), before.timeout());
+            before.apiEndpoint(), before.providerEndpoints(), before.searxngEndpoint(), before.fallbackEnabled(),
+            before.preferPilotSearch(), before.proxy(), before.timeout());
         current = next;
         log.info("已清除联网搜索 API Key（目标提供商：{}）", target.id());
         return next;
@@ -262,27 +306,49 @@ public class WebSearchSettings {
                 genericKey = trimmed;
             }
         }
-        String apiEndpoint = overrides.apiEndpoint() == null ? base.apiEndpoint()
-            : (overrides.apiEndpoint().isBlank() ? ""
-                : WebSearchProperties.normalizeHttpEndpoint(overrides.apiEndpoint(), "apiEndpoint"));
+        Map<WebSearchProvider, URI> endpoints = new EnumMap<>(WebSearchProvider.class);
+        for (Map.Entry<WebSearchProvider, String> entry : base.providerEndpoints().entrySet()) {
+            if (entry.getValue() != null && !entry.getValue().isBlank()) {
+                endpoints.put(entry.getKey(), URI.create(entry.getValue()));
+            }
+        }
+        String genericEndpoint = base.apiEndpoint();
+        if (overrides.apiEndpoint() != null) {
+            String normalized = overrides.apiEndpoint().isBlank() ? ""
+                : WebSearchProperties.normalizeHttpEndpoint(overrides.apiEndpoint(), "apiEndpoint");
+            if (provider.requiresApiKey()) {
+                if (normalized.isEmpty()) {
+                    endpoints.remove(provider);
+                } else {
+                    endpoints.put(provider, URI.create(normalized));
+                }
+            } else {
+                genericEndpoint = normalized;
+            }
+        }
         String searxngEndpoint = overrides.searxngEndpoint() == null || overrides.searxngEndpoint().isBlank()
             ? base.searxngEndpoint()
             : WebSearchProperties.normalizeHttpEndpoint(overrides.searxngEndpoint(), "searxngEndpoint");
         boolean fallback = overrides.fallbackEnabled() == null ? base.fallbackEnabled() : overrides.fallbackEnabled();
-        URI apiUri = apiEndpoint.isBlank() ? null : URI.create(apiEndpoint);
+        URI apiUri = genericEndpoint.isBlank() ? null : URI.create(genericEndpoint);
         return new WebSearchConfig(provider, genericKey, apiUri, URI.create(searxngEndpoint), base.timeout(), fallback,
-            Map.copyOf(keys), publicSources);
+            Map.copyOf(keys), publicSources, Map.copyOf(endpoints));
     }
 
     public View view(LocalSearchRuntime.RuntimeStatus runtimeStatus) {
+        return view(runtimeStatus, null);
+    }
+
+    public View view(LocalSearchRuntime.RuntimeStatus runtimeStatus, NativeSearchState nativeSearch) {
         Snapshot snap = current;
         WebSearchConfig cfg = snap.toConfig();
         String activeKey = snap.activeApiKey();
         List<ProviderView> providers = new ArrayList<>();
         for (WebSearchProvider p : WebSearchProvider.values()) {
             String key = p.requiresApiKey() ? cfg.resolveApiKey(p) : "";
+            String customEndpoint = p.requiresApiKey() ? snap.providerEndpoints().getOrDefault(p, "") : "";
             providers.add(new ProviderView(p.id(), p.label(), p.description(), p.requiresApiKey(), p.defaultEndpoint(),
-                !key.isBlank(), WebSearchConfig.maskSecret(key)));
+                customEndpoint, !key.isBlank(), WebSearchConfig.maskSecret(key)));
         }
         boolean localEnabled = runtimeStatus != null ? runtimeStatus.localEnabled() : defaults.local();
         boolean localManaged = runtimeStatus != null ? runtimeStatus.managed() : defaults.managedHost() != null;
@@ -292,11 +358,25 @@ public class WebSearchSettings {
         String settingsPath = runtimeStatus == null ? "" : runtimeStatus.settingsPath();
         String logPath = runtimeStatus == null ? "" : runtimeStatus.logPath();
         String localMessage = runtimeStatus == null ? "本机搜索运行时未启用" : runtimeStatus.message();
-        return new View(snap.provider().id(), snap.effectiveProviderId(), snap.apiEndpoint(), !activeKey.isBlank(),
-            WebSearchConfig.maskSecret(activeKey), snap.searxngEndpoint(), snap.fallbackEnabled(),
-            SecretScrubber.scrub(snap.proxy()), (int)snap.timeout().toSeconds(), localEnabled, localManaged,
-            localRunning, localPortOpen, localSettingsUpToDate, settingsPath, logPath, localMessage,
+        boolean nativeActive = nativeSearch != null && nativeSearch.active();
+        String nativeSummary = nativeSearch == null ? "" : nativeSearch.summary();
+        return new View(snap.provider().id(), snap.effectiveProviderId(), snap.activeApiEndpoint(),
+            !activeKey.isBlank(), WebSearchConfig.maskSecret(activeKey), snap.searxngEndpoint(),
+            snap.fallbackEnabled(), snap.preferPilotSearch(), snap.proxy(), proxyNoticeFor(snap.proxy()),
+            (int)snap.timeout().toSeconds(), localEnabled, localManaged, localRunning, localPortOpen,
+            localSettingsUpToDate, settingsPath, logPath, localMessage, nativeActive, nativeSummary,
             List.copyOf(providers));
+    }
+
+    private static String proxyNoticeFor(String proxy) {
+        if (proxy == null || proxy.isBlank()) {
+            return "";
+        }
+        String lower = proxy.strip().toLowerCase(Locale.ROOT);
+        if (lower.startsWith("socks5://") || lower.startsWith("socks5h://")) {
+            return "SOCKS5 代理当前仅作用于本机 SearXNG，云端搜索 API 与公开只读源将直连；建议改用 http://host:port 以同时覆盖全部搜索源。";
+        }
+        return "";
     }
 
     private Snapshot restore(WebSearchProperties props) {
@@ -319,17 +399,32 @@ public class WebSearchSettings {
                 providerKeys.put(candidate, value);
             }
         }
-        String apiEndpoint = restoreOptionalEndpoint(store.find(KEY_API_ENDPOINT).orElse(props.apiEndpoint()),
+        String legacyEndpoint = restoreOptionalEndpoint(store.find(KEY_API_ENDPOINT).orElse(props.apiEndpoint()),
             props.apiEndpoint());
+        Map<WebSearchProvider, String> providerEndpoints = new EnumMap<>(WebSearchProvider.class);
+        for (WebSearchProvider candidate : WebSearchProvider.apiProviders()) {
+            String stored = restoreOptionalEndpoint(store.find(providerEndpointSlot(candidate)).orElse(""), "");
+            if (!stored.isBlank()) {
+                providerEndpoints.put(candidate, stored);
+            }
+        }
+        if (provider.requiresApiKey() && !legacyEndpoint.isBlank() && !providerEndpoints.containsKey(provider)) {
+            providerEndpoints.put(provider, legacyEndpoint);
+        }
         String searxngEndpoint = restoreRequiredEndpoint(store.find(KEY_SEARXNG_ENDPOINT).orElse(props.endpoint()),
             props.endpoint());
         boolean fallbackEnabled = store.find(KEY_FALLBACK_ENABLED)
             .filter(v -> !v.isBlank())
             .map(Boolean::parseBoolean)
             .orElse(props.fallbackEnabledDefault());
+        boolean preferPilotSearch = store.find(KEY_PREFER_PILOT_SEARCH)
+            .filter(v -> !v.isBlank())
+            .map(Boolean::parseBoolean)
+            .orElse(false);
         String proxy = restoreOptionalProxy(store.find(KEY_PROXY).orElse(props.proxy()), props.proxy());
-        return new Snapshot(provider, genericKey, Map.copyOf(providerKeys), apiEndpoint, searxngEndpoint,
-            fallbackEnabled, proxy, props.requestTimeout());
+        return new Snapshot(provider, genericKey, Map.copyOf(providerKeys), legacyEndpoint,
+            Map.copyOf(providerEndpoints), searxngEndpoint, fallbackEnabled, preferPilotSearch, proxy,
+            props.requestTimeout());
     }
 
     private static String restoreOptionalEndpoint(String raw, String fallback) {
@@ -367,6 +462,10 @@ public class WebSearchSettings {
 
     private static String providerKeySlot(WebSearchProvider provider) {
         return KEY_API_KEY + "." + provider.id();
+    }
+
+    private static String providerEndpointSlot(WebSearchProvider provider) {
+        return KEY_API_ENDPOINT + "." + provider.id();
     }
 
     private InetSocketAddress currentProxyAddress() {

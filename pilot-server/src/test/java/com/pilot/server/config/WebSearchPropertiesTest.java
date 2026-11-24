@@ -73,5 +73,7 @@ class WebSearchPropertiesTest {
             "bocha", "", "ftp://bad.host", true, "", "", "", "", "", ""));
         assertThrows(IllegalArgumentException.class, () -> new WebSearchProperties(false, null, null, null, null,
             "auto", "", "", true, "ftp://127.0.0.1:7890", "", "", "", "", ""));
+        assertThrows(IllegalArgumentException.class, () -> new WebSearchProperties(false, null, null, null, null,
+            "auto", "", "", true, "http://user:secret@127.0.0.1:7890", "", "", "", "", ""));
     }
 }

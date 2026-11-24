@@ -121,6 +121,9 @@ public record WebSearchProperties(boolean local, String endpoint, String python,
             throw new IllegalArgumentException("代理地址格式无效，请使用 http://host:port 或 socks5://host:port");
         }
         String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+        if (uri.getUserInfo() != null) {
+            throw new IllegalArgumentException("代理地址不支持内嵌账号密码，请使用无凭据的代理地址（如 http://127.0.0.1:7890）");
+        }
         if (!("http".equals(scheme) || "https".equals(scheme) || "socks5".equals(scheme) || "socks5h".equals(scheme))
             || uri.getHost() == null || uri.getRawQuery() != null || uri.getRawFragment() != null
             || uri.getPort() == 0 || uri.getPort() > 65_535) {

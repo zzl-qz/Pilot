@@ -609,19 +609,40 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                         || uri.getPath() == null || uri.getPath().split("/").length < 3) {
                         return "ERROR: 请提供具体的开源仓库或源码链接";
                     }
-                    if (state().evidence().stream().noneMatch(e -> ToolNames.WEB_FETCH.equals(e.tool())
-                        && EvidenceStatus.SUCCESS.is(e.status()) && source.equals(e.target()))) {
+                    if (state().evidence().stream().noneMatch(e -> matchesFetchedSource(e, source))) {
                         return "ERROR: 链接还没有成功读取，请先用 web_fetch 阅读：" + source;
                     }
                 }
                 return mapper.writeValueAsString(
                     Map.of("sources", sources, "decision", decision, "license", license, "sourceEvidence",
                         state()
-                            .evidence().stream().filter(e -> ToolNames.WEB_FETCH.equals(e.tool())
-                                && EvidenceStatus.SUCCESS.is(e.status()) && sources.contains(e.target()))
+                            .evidence().stream().filter(e -> sources.stream().anyMatch(s -> matchesFetchedSource(e, s)))
                             .map(TaskControlService.Evidence::id).toList()));
             }
         };
+    }
+
+    private static boolean matchesFetchedSource(TaskControlService.Evidence evidence, String source) {
+        if (!ToolNames.WEB_FETCH.equals(evidence.tool()) || !EvidenceStatus.SUCCESS.is(evidence.status())) {
+            return false;
+        }
+        String normalizedSource = stripTrailingSlash(source);
+        if (normalizedSource.equals(stripTrailingSlash(evidence.target()))) {
+            return true;
+        }
+        String redirected = com.pilot.core.tool.WebFetchTool.parseFetchedSourceUrl(evidence.result());
+        return !redirected.isEmpty() && normalizedSource.equals(stripTrailingSlash(redirected));
+    }
+
+    private static String stripTrailingSlash(String value) {
+        if (value == null) {
+            return "";
+        }
+        String text = value.strip();
+        while (text.endsWith("/") && text.length() > "https://a".length()) {
+            text = text.substring(0, text.length() - 1);
+        }
+        return text;
     }
 
     @Override

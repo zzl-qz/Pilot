@@ -100,6 +100,7 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
     private BrowserEvidenceService browserEvidence;
     private BrowserHandoffBroker browserHandoffs;
     private WebSearchSettings webSearchSettings;
+    private volatile WebSearchTool sharedSearchTool;
     /** 建工具表时读取已经落库的计划，避免把完成的步骤退回去。 */
     private final ThreadLocal<Supplier<List<PlanItem>>> plans = ThreadLocal.withInitial(() -> List::of);
     /** 建工具表时绑定当前会话，让 ask_user 记录等待归属。 */
@@ -153,6 +154,8 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
     @Autowired(required = false)
     public void setWebSearchSettings(WebSearchSettings webSearchSettings) {
         this.webSearchSettings = webSearchSettings;
+        this.sharedSearchTool = webSearchSettings == null ? null
+            : new WebSearchTool(webSearchSettings::httpClient, mapper, webSearchSettings::toConfig);
         this.cache.clear();
     }
 
@@ -314,8 +317,9 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
     }
 
     private WebSearchTool searchTool() {
-        if (webSearchSettings != null) {
-            return new WebSearchTool(webSearchSettings::httpClient, mapper, webSearchSettings::toConfig);
+        WebSearchTool shared = sharedSearchTool;
+        if (shared != null) {
+            return shared;
         }
         return new WebSearchTool(webClient, mapper, webSearchProperties.toConfig());
     }

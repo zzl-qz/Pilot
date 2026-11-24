@@ -77,7 +77,7 @@ class WebSearchSettingsControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.apiKeySet").value(false));
 
-        // 非法提供商与非法代理均返回 400
+        // 非法提供商、非法代理与带内嵌账号密码的代理均返回 400
         mvc.perform(put("/api/settings/web-search")
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"provider\":\"not-a-provider\"}"))
@@ -86,6 +86,31 @@ class WebSearchSettingsControllerTest {
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"proxy\":\"ftp://127.0.0.1:7890\"}"))
             .andExpect(status().isBadRequest());
+        mvc.perform(put("/api/settings/web-search")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"proxy\":\"http://user:pass@127.0.0.1:7890\"}"))
+            .andExpect(status().isBadRequest());
+
+        // 分提供商隔离自定义 apiEndpoint，且 socks5 代理返回明确提示，preferPilotSearch 正常持久化
+        mvc.perform(put("/api/settings/web-search")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""
+                {"provider":"bocha","apiEndpoint":"https://proxy.corp/bocha","proxy":"socks5://127.0.0.1:1080","preferPilotSearch":true}
+                """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.apiEndpoint").value("https://proxy.corp/bocha"))
+            .andExpect(jsonPath("$.preferPilotSearch").value(true))
+            .andExpect(jsonPath("$.proxyNotice", containsString("SOCKS5")));
+
+        mvc.perform(put("/api/settings/web-search")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""
+                {"provider":"tavily","proxy":""}
+                """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.provider").value("tavily"))
+            .andExpect(jsonPath("$.apiEndpoint").value(""))
+            .andExpect(jsonPath("$.proxyNotice").value(""));
     }
 
     @Test

@@ -20,6 +20,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.pilot.core.tool.WebSearchTool;
 import com.pilot.core.tool.search.WebSearchConfig;
 import com.pilot.core.tool.search.WebSearchModels.SearchHit;
+import com.pilot.server.model.ModelRuntimeSettings;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -37,6 +38,7 @@ public class WebSearchSettingsController {
     private final WebSearchSettings settings;
     private final ObjectMapper mapper;
     private final ObjectProvider<LocalSearchRuntime> runtimeProvider;
+    private final ObjectProvider<ModelRuntimeSettings> modelRuntimeProvider;
 
     @GetMapping
     public WebSearchSettings.View get() {
@@ -66,7 +68,7 @@ public class WebSearchSettingsController {
         return currentView();
     }
 
-    /** 只读实时搜索测试：支持叠加当前表单中尚未保存的字段；不落盘、不回传密钥。 */
+    /** 只读实时搜索测试：支持叠加当前表单中尚未保存的字段；不落盘、不回传密钥，始终绕过短时冷却。 */
     @PostMapping("/test")
     public TestResponse test(@RequestBody(required = false) TestRequest request) {
         String query = request == null || request.query() == null || request.query().isBlank()
@@ -91,7 +93,7 @@ public class WebSearchSettingsController {
             if (request != null && request.category() != null && !request.category().isBlank()) {
                 args.put("category", request.category().strip());
             }
-            WebSearchTool.SearchReport report = tool.executeDetailed(args);
+            WebSearchTool.SearchReport report = tool.executeDetailed(args, true);
             return new TestResponse(report.ok(), report.sourceId(), report.sourceLabel(), report.triedSources(),
                 report.hits(), report.answers(), report.warnings(), report.error(), report.elapsedMs());
         } finally {
@@ -109,20 +111,43 @@ public class WebSearchSettingsController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "当前未加载本机搜索运行时");
         }
         LocalSearchRuntime.RuntimeStatus status = runtime.restart();
-        return settings.view(status);
+        return settings.view(status, nativeSearchState());
     }
 
     private WebSearchSettings.View currentView() {
         LocalSearchRuntime runtime = runtimeProvider.getIfAvailable();
         LocalSearchRuntime.RuntimeStatus status = runtime == null ? null : runtime.status();
-        return settings.view(status);
+        return settings.view(status, nativeSearchState());
+    }
+
+    private WebSearchSettings.NativeSearchState nativeSearchState() {
+        ModelRuntimeSettings modelRuntime = modelRuntimeProvider.getIfAvailable();
+        if (modelRuntime == null) {
+            return new WebSearchSettings.NativeSearchState(false, "");
+        }
+        try {
+            ModelRuntimeSettings.View view = modelRuntime.current();
+            boolean nativeWeb = view.nativeCapabilities() != null && view.nativeCapabilities().contains("WEB_SEARCH");
+            if (settings.preferPilotSearch()) {
+                return new WebSearchSettings.NativeSearchState(false,
+                    "已开启「优先使用 Pilot 自配置搜索」：当前模型（" + view.model() + "）将统一调用下方配置的搜索源。");
+            }
+            if (nativeWeb) {
+                return new WebSearchSettings.NativeSearchState(true,
+                    "当前模型（" + view.model() + "）默认启用了模型商内置搜索；如需改用下方博查/Tavily/SearXNG，请开启「优先使用 Pilot 自配置搜索」。");
+            }
+            return new WebSearchSettings.NativeSearchState(false,
+                "当前模型（" + view.model() + "）未启用原生搜索，所有联网搜索均走下方 Pilot 配置。");
+        } catch (RuntimeException ignored) {
+            return new WebSearchSettings.NativeSearchState(false, "");
+        }
     }
 
     public record UpdateRequest(String provider, String apiKey, Boolean clearApiKey, String apiEndpoint,
-        String searxngEndpoint, Boolean fallbackEnabled, String proxy) {
+        String searxngEndpoint, Boolean fallbackEnabled, Boolean preferPilotSearch, String proxy) {
         WebSearchSettings.UpdateCommand toCommand() {
             return new WebSearchSettings.UpdateCommand(provider, apiKey, clearApiKey, apiEndpoint, searxngEndpoint,
-                fallbackEnabled, proxy);
+                fallbackEnabled, preferPilotSearch, proxy);
         }
     }
 
@@ -130,7 +155,7 @@ public class WebSearchSettingsController {
         Boolean clearApiKey, String apiEndpoint, String searxngEndpoint, Boolean fallbackEnabled, String proxy) {
         WebSearchSettings.UpdateCommand toOverrides() {
             return new WebSearchSettings.UpdateCommand(provider, apiKey, clearApiKey, apiEndpoint, searxngEndpoint,
-                fallbackEnabled, proxy);
+                fallbackEnabled, null, proxy);
         }
     }
 

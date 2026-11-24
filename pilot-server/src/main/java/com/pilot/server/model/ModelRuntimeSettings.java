@@ -13,6 +13,7 @@ import com.pilot.core.model.MeteredModelClient;
 import com.pilot.core.model.ModelPricing;
 import com.pilot.core.model.ModelProfile;
 import com.pilot.core.model.NativeCapability;
+import com.pilot.server.search.WebSearchSettings;
 import com.pilot.server.store.SettingsStore;
 
 import tools.jackson.core.JsonParser;
@@ -74,11 +75,17 @@ public final class ModelRuntimeSettings {
     private final ObjectMapper mapper;
     private final RequestTimeouts timeoutDefaults;
     private ModelCapabilityDiscovery discovery;
+    private WebSearchSettings webSearchSettings;
 
     @org.springframework.beans.factory.annotation.Autowired
     public void setCapabilityDiscovery(ModelCapabilityDiscovery discovery) {
         this.discovery = discovery;
         models.onChange(ignored -> discover());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setWebSearchSettings(WebSearchSettings webSearchSettings) {
+        this.webSearchSettings = webSearchSettings;
     }
 
     @jakarta.annotation.PostConstruct
@@ -171,6 +178,16 @@ public final class ModelRuntimeSettings {
      * 未接入发现服务的嵌入式调用保持静态兼容逻辑。
      */
     public Set<NativeCapability> nativeCapabilities(ModelSettings.Snapshot model) {
+        Set<NativeCapability> resolved = resolveNativeCapabilities(model);
+        if (webSearchSettings != null && webSearchSettings.preferPilotSearch()
+            && resolved.contains(NativeCapability.WEB_SEARCH)) {
+            return resolved.stream().filter(cap -> cap != NativeCapability.WEB_SEARCH)
+                .collect(Collectors.toUnmodifiableSet());
+        }
+        return resolved;
+    }
+
+    private Set<NativeCapability> resolveNativeCapabilities(ModelSettings.Snapshot model) {
         ModelCapabilityDiscovery.Report report = capabilityReport(model);
         if (report != null) {
             return report.capabilities();
@@ -257,7 +274,7 @@ public final class ModelRuntimeSettings {
         ModelSettings.Snapshot model = models.snapshot();
         Options options = options(model);
         ModelCapabilityDiscovery.Report report = capabilityReport(model);
-        Set<NativeCapability> capabilities = report == null ? nativeCapabilities(model) : report.capabilities();
+        Set<NativeCapability> capabilities = nativeCapabilities(model);
         Set<String> names = capabilities.stream().map(Enum::name).collect(Collectors.toUnmodifiableSet());
         String mode = options.webSearchMode() == null ? ModelProtocols.AUTO : options.webSearchMode();
         String source = switch (mode) {
@@ -269,6 +286,9 @@ public final class ModelRuntimeSettings {
         };
         if (report != null) {
             source = report.message();
+        }
+        if (webSearchSettings != null && webSearchSettings.preferPilotSearch()) {
+            source = "已在「设置 → 搜索」开启优先使用 Pilot 自配置搜索";
         }
         return new View(model.model(), model.endpoint(), options, profile(model, options), names, source, report,
             timeoutDefaults, timeouts(options));
