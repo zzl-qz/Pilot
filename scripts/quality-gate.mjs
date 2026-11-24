@@ -259,25 +259,34 @@ function lintJava(entries) {
   const javaBin = javaBinary();
   const classpath = jars.join(process.platform === 'win32' ? ';' : ':');
   const configDir = join(ROOT, 'config', 'java');
+  const configs = ['checkstyle-strict.xml', 'checkstyle.xml'].filter((name) => existsSync(join(configDir, name)));
   const display = new Map(entries.map((entry) => [resolve(entry.abs), entry.path]));
   const findings = [];
+  const emitted = new Set();
   // 命令行有长度上限（Windows 尤其明显），分批调用再合并报告，避免一次传几百个路径。
   const batchSize = process.platform === 'win32' ? 40 : 200;
   for (let offset = 0; offset < entries.length; offset += batchSize) {
     const batch = entries.slice(offset, offset + batchSize).map((entry) => entry.abs);
     const workDir = mkdtempSync(join(tmpdir(), 'pilot-checkstyle-'));
-    const output = join(workDir, 'report.xml');
-    const configPath = join(workDir, 'checkstyle-strict.xml');
-    writeFileSync(configPath, readFileSync(join(configDir, 'checkstyle-strict.xml'), 'utf8'), 'utf8');
-    const args = ['-cp', classpath, 'com.puppycrawl.tools.checkstyle.Main', '-c', configPath,
-      '-f', 'xml', '-o', output, ...batch];
-    const result = runCapture(javaBin, args);
-    if (!existsSync(output)) {
-      throw new Error(`Checkstyle 执行失败：${result.stderr.trim() || `退出码 ${result.status}`}`);
-    }
     const seen = new Set();
-    findings.push(...parseCheckstyleReport(safeRead(output) ?? '', display, seen));
-    // 检查器没返回结果的文等于没检查过（例如带 BOM 的 UTF-8 会被静默跳过），必须显式报出来。
+    for (const [index, configName] of configs.entries()) {
+      const output = join(workDir, `report-${index}.xml`);
+      const configPath = join(workDir, configName);
+      writeFileSync(configPath, readFileSync(join(configDir, configName), 'utf8'), 'utf8');
+      const args = ['-cp', classpath, 'com.puppycrawl.tools.checkstyle.Main', '-c', configPath,
+        '-f', 'xml', '-o', output, ...batch];
+      const result = runCapture(javaBin, args);
+      if (!existsSync(output)) {
+        throw new Error(`Checkstyle 执行失败（${configName}）：${result.stderr.trim() || `退出码 ${result.status}`}`);
+      }
+      for (const finding of parseCheckstyleReport(safeRead(output) ?? '', display, index === 0 ? seen : null)) {
+        const key = `${finding.path}:${finding.line}:${finding.rule}`;
+        if (emitted.has(key)) continue;
+        emitted.add(key);
+        findings.push(finding);
+      }
+    }
+    // 检查器没返回结果的文件等于没检查过（例如带 BOM 的 UTF-8 会被静默跳过），必须显式报出来。
     for (const abs of batch) {
       if (!seen.has(resolve(abs))) {
         findings.push({ path: display.get(resolve(abs)) ?? toRepoPath(abs), line: 1, rule: 'unparsed-file', detail: HINTS['unparsed-file'] });
