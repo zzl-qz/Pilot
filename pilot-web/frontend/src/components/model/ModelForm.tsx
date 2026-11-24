@@ -51,7 +51,16 @@ export function useModelForm({ model = '', endpoint: savedEndpoint = '', context
     setName: edit(updateName), setEndpoint: edit(updateEndpoint), setKey: edit(updateKey),
     setContextTokens: edit(updateContext), setMaxOutputTokens: edit(updateOutput), setChildModel: edit(updateChild),
     save: () => submit(() => useStore.getState().saveModel(buildModelUpdate({ model: name, endpoint, apiKey: key, contextTokens, maxOutputTokens, childModel }))),
-    clearKey: () => submit(() => useStore.getState().clearModelKey(), false)
+    clearKey: () => submit(() => useStore.getState().clearModelKey(), false),
+    resetFromSettings: (next: { model?: string; endpoint?: string; contextTokens?: number | null; maxOutputTokens?: number | null; childModel?: string }) => {
+      dirty.current = false;
+      updateName(next.model || '');
+      updateEndpoint(next.endpoint || '');
+      updateContext(next.contextTokens == null ? '' : String(next.contextTokens));
+      updateOutput(next.maxOutputTokens == null ? '' : String(next.maxOutputTokens));
+      updateChild(next.childModel || '');
+      updateKey('');
+    }
   };
 }
 

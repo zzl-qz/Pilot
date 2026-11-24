@@ -189,6 +189,35 @@ export type UniversalFileResponse = S.SessionFilesControllerFileResponse & {
   structured?: UniversalStructuredPreview | null;
 };
 
+export interface ModelProfileView {
+  id: string;
+  name: string;
+  endpoint: string;
+  model: string;
+  apiKeySet: boolean;
+  apiKeyMasked: string;
+  contextTokens: number | null;
+  maxOutputTokens: number | null;
+  childModel: string;
+  active: boolean;
+}
+export interface ModelProfilesView {
+  activeProfileId: string;
+  profiles: ModelProfileView[];
+}
+export interface ModelProfileSaveRequest {
+  name?: string;
+  endpoint?: string;
+  model?: string;
+  apiKey?: string;
+  clearApiKey?: boolean;
+  inheritCurrentKey?: boolean;
+  contextTokens?: number | null;
+  maxOutputTokens?: number | null;
+  childModel?: string;
+  activate?: boolean;
+}
+
 export interface ApiResults {
   workProducts: S.WorkProductServiceProduct[];
   workbenchFiles: WorkbenchFile[];
@@ -319,6 +348,11 @@ export interface ApiResults {
   savePermissionRules: S.PermissionRulesControllerRulesResponse;
   saveModel: S.SettingsControllerSettingsResponse;
   clearModelKey: S.SettingsControllerSettingsResponse;
+  modelProfiles: ModelProfilesView;
+  createModelProfile: ModelProfilesView;
+  updateModelProfile: ModelProfilesView;
+  deleteModelProfile: ModelProfilesView;
+  activateModelProfile: ModelProfilesView;
   modelRuntime: S.ModelRuntimeSettingsView;
   saveModelRuntime: S.ModelRuntimeSettingsView;
   probeModels: S.SettingsControllerModelsResponse;

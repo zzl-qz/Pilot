@@ -9,6 +9,35 @@ html[data-theme] .pilot-model-picker {
   outline: 2px solid var(--ink);
   outline-offset: -2px;
 }
+.pilot-model-picker .model-picker-profiles {
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--line-soft);
+  margin-bottom: 8px;
+}
+.pilot-model-picker .model-picker-profile-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 4px;
+}
+.pilot-model-picker .model-picker-profile-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-soft);
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+.pilot-model-picker .model-picker-profile-chip.is-active {
+  border-color: var(--accent);
+  background: var(--ui-selected);
+  font-weight: 600;
+}
+.pilot-model-picker .model-picker-profile-chip:disabled { opacity: 0.6; cursor: default; }
 @media (pointer: coarse), (max-width: 640px) {
   .pilot-model-picker .model-picker-head button { min-width: 44px; min-height: 44px; }
 }

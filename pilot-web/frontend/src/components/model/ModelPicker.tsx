@@ -1,5 +1,8 @@
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Button } from '@astryxdesign/core/Button';
+import type { ModelProfileView } from '../../types/api.js';
+import { api } from '../../api.js';
+import { errorInfo } from '../../lib/errors.js';
 import { useStore } from '../../store.js';
 import { buildModelUpdate, normalizeModelNames } from '../../lib/model-settings.js';
 import { useModelDiscovery } from './ModelDiscovery.jsx';
@@ -13,6 +16,9 @@ export function ModelPicker({ onClose, models, initialModel = '', initialEndpoin
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(initialModel);
   const [pending, setPending] = useState('');
+  const [profiles, setProfiles] = useState<ModelProfileView[]>([]);
+  const [activatingProfile, setActivatingProfile] = useState('');
+  const [profileError, setProfileError] = useState('');
   const [position, setPosition] = useState<React.CSSProperties | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -24,9 +30,13 @@ export function ModelPicker({ onClose, models, initialModel = '', initialEndpoin
 
   useEffect(() => {
     mounted.current = true;
+    const controller = new AbortController();
     useStore.getState().resetModelFeedback();
     void probe.current();
-    return () => { mounted.current = false; };
+    api.modelProfiles(controller.signal).then(res => {
+      if (mounted.current && Array.isArray(res?.profiles)) setProfiles(res.profiles);
+    }).catch(() => { /* 预设读取失败不影响单模型切换 */ });
+    return () => { mounted.current = false; controller.abort(); };
   }, []);
 
   // 定位前弹层不可见，此时 focus 会被浏览器忽略；等首次定位完成再交给搜索框。
@@ -88,6 +98,24 @@ export function ModelPicker({ onClose, models, initialModel = '', initialEndpoin
     menu.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
   }, [focused, query]);
 
+  async function selectProfile(profile: ModelProfileView) {
+    if (activatingProfile || useStore.getState().modelSave.busy) return;
+    if (profile.active) { onClose(); return; }
+    setActivatingProfile(profile.id);
+    setProfileError('');
+    try {
+      await api.activateModelProfile(profile.id);
+      await useStore.getState().loadSettings();
+      if (!mounted.current) return;
+      useStore.getState().showNotice(`已切换模型预设：${profile.name}（${profile.model}）`);
+      onClose();
+    } catch (error) {
+      if (mounted.current) setProfileError(errorInfo(error).message || '切换预设失败');
+    } finally {
+      if (mounted.current) setActivatingProfile('');
+    }
+  }
+
   async function select(model: string) {
     if (!model || useStore.getState().modelSave.busy) return;
     if (model === initialModel) { onClose(); return; }
@@ -120,6 +148,23 @@ export function ModelPicker({ onClose, models, initialModel = '', initialEndpoin
       <Button label="刷新模型列表" variant="ghost" icon={<Icon name="refresh" />} isIconOnly
         isDisabled={feedback.busy || discovery.probing} onClick={() => probe.current()} />
     </div>
+    {profiles.length > 0 && <div className="model-picker-profiles" role="group" aria-label="已保存预设">
+      <div className="model-picker-caption">
+        <span>模型预设</span>
+        <span>{profiles.length}</span>
+      </div>
+      <div className="model-picker-profile-chips">
+        {profiles.map(profile => <button key={profile.id} type="button"
+          className={`model-picker-profile-chip${profile.active ? ' is-active' : ''}`}
+          disabled={feedback.busy || Boolean(activatingProfile)}
+          title={`${profile.model} · ${profile.endpoint}`}
+          onClick={() => void selectProfile(profile)}>
+          <span>{profile.name}</span>
+          {activatingProfile === profile.id ? <small>切换中…</small> : profile.active && <Icon name="check" />}
+        </button>)}
+      </div>
+      {profileError && <p className="model-picker-message" role="alert">{profileError}</p>}
+    </div>}
     <div className="model-picker-search">
       <Icon name="search" />
       <input ref={input} role="combobox" aria-label="搜索模型" aria-autocomplete="list" aria-expanded="true" aria-controls={listId}

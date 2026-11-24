@@ -179,6 +179,42 @@ public class ModelSettings {
         return next;
     }
 
+    /** 原子切换整套模型配置（供多模型预设一键切换使用），统一落盘并触发能力刷新。 */
+    public synchronized Snapshot applySnapshot(Snapshot target) {
+        if (target == null) {
+            throw new IllegalArgumentException("模型配置不能为空");
+        }
+        String nextEndpoint = target.endpoint() == null ? "" : target.endpoint().strip();
+        String nextModel = target.model() == null ? "" : target.model().strip();
+        if (blank(nextModel)) {
+            throw new IllegalArgumentException("模型名称不能为空");
+        }
+        requireHttpEndpoint(nextEndpoint);
+        String nextKey = target.apiKey() == null ? "" : target.apiKey().strip();
+        Long context = target.contextTokens() != null && target.contextTokens() > 0 ? target.contextTokens() : null;
+        Integer output = target.maxOutputTokens() != null && target.maxOutputTokens() > 0
+            ? target.maxOutputTokens() : null;
+        String child = target.childModel() == null ? "" : target.childModel().strip();
+
+        Snapshot before = current;
+        Snapshot next = new Snapshot(nextEndpoint, nextModel, nextKey, context, output, child);
+        save(next);
+        current = next;
+        ModelCapacity.activate(next.capacity());
+        if (!next.equals(before)) {
+            listeners.forEach(listener -> {
+                try {
+                    listener.accept(next);
+                } catch (RuntimeException failure) {
+                    log.warn("模型预设已切换，后台能力验证暂未启动");
+                }
+            });
+        }
+        log.info("模型配置已通过预设切换：model={} endpoint={} apiKey={}", next.model(), next.endpoint(),
+            next.hasApiKey() ? "已配置" : "未配置");
+        return next;
+    }
+
     private void save(Snapshot next) {
         Map<String, String> values = new LinkedHashMap<>();
         values.put(KEY_ENDPOINT, next.endpoint());

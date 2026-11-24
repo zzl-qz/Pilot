@@ -1,4 +1,4 @@
-import type { ActionResponse, ApiResults, BrowserRecordingReplay, InputMessage, SubmissionResult, Update, ScheduleDraft, ScheduleInput, WebSearchSettingsUpdate, WebSearchTestRequest } from './types/api.js';
+import type { ActionResponse, ApiResults, BrowserRecordingReplay, InputMessage, ModelProfileSaveRequest, SubmissionResult, Update, ScheduleDraft, ScheduleInput, WebSearchSettingsUpdate, WebSearchTestRequest } from './types/api.js';
 import type * as S from './types/server.js';
 import { errorInfo } from './lib/errors.js';
 import { voiceFilename } from './lib/voice-input.js';
@@ -326,6 +326,14 @@ export const api = {
     apiJson<ApiResults['savePermissionRules']>('/api/permission-rules', jsonBody('PUT', body)),
   saveModel: (body: Update<S.SettingsControllerModelRequest>) => apiJson<ApiResults['saveModel']>('/api/settings/model', jsonBody('PUT', body)),
   clearModelKey: () => apiJson<ApiResults['clearModelKey']>('/api/settings/model/api-key', { method: 'DELETE' }),
+  modelProfiles: (signal?: AbortSignal) => apiJson<ApiResults['modelProfiles']>('/api/settings/model/profiles', { signal }),
+  createModelProfile: (body: ModelProfileSaveRequest) => apiJson<ApiResults['createModelProfile']>('/api/settings/model/profiles', jsonBody('POST', body)),
+  updateModelProfile: (id: string, body: ModelProfileSaveRequest) =>
+    apiJson<ApiResults['updateModelProfile']>(`/api/settings/model/profiles/${encodeURIComponent(id)}`, jsonBody('PUT', body)),
+  deleteModelProfile: (id: string) =>
+    apiJson<ApiResults['deleteModelProfile']>(`/api/settings/model/profiles/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  activateModelProfile: (id: string) =>
+    apiJson<ApiResults['activateModelProfile']>(`/api/settings/model/profiles/${encodeURIComponent(id)}/activate`, { method: 'POST' }),
   modelRuntime: () => apiJson<ApiResults['modelRuntime']>('/api/settings/model/runtime'),
   saveModelRuntime: (body: Update<S.ModelRuntimeControllerUpdate>) => apiJson<ApiResults['saveModelRuntime']>('/api/settings/model/runtime', jsonBody('PUT', body)),
   probeModels: (body: Update<S.SettingsControllerModelsRequest>) => apiJson<ApiResults['probeModels']>('/api/settings/model/models', jsonBody('POST', body)),

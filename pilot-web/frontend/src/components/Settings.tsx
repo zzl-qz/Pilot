@@ -12,6 +12,7 @@ import { Icon } from "./Icon.jsx";
 import { Modal } from "./Modal.jsx";
 import { ModelOptions, useModelDiscovery } from "./model/ModelDiscovery.jsx";
 import { ModelSaveFeedback, useModelForm } from "./model/ModelForm.jsx";
+import { ModelProfiles } from "./model/ModelProfiles.js";
 import { ModelRuntimeSettings } from "./model/ModelRuntimeSettings.jsx";
 import { PermissionSettings } from "./settings/PermissionSettings.js";
 import { AlertSettings } from "./settings/AlertSettings.js";
@@ -113,7 +114,7 @@ function AppearanceSettings() {
 
 function ModelSettings() {
   const settings = useStore(state => state.settingsData);
-  const { name, endpoint, key, contextTokens, maxOutputTokens, childModel, setName, setEndpoint, setKey, setContextTokens, setMaxOutputTokens, setChildModel, saving, feedback, save, clearKey } = useModelForm({ model: settings?.model, endpoint: settings?.modelEndpoint, contextTokens: settings?.contextTokens, maxOutputTokens: settings?.maxOutputTokens, childModel: settings?.childModel });
+  const { name, endpoint, key, contextTokens, maxOutputTokens, childModel, setName, setEndpoint, setKey, setContextTokens, setMaxOutputTokens, setChildModel, saving, feedback, save, clearKey, resetFromSettings } = useModelForm({ model: settings?.model, endpoint: settings?.modelEndpoint, contextTokens: settings?.contextTokens, maxOutputTokens: settings?.maxOutputTokens, childModel: settings?.childModel });
   const discovery = useModelDiscovery({ endpoint, apiKey: key });
   const probeStatus = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
@@ -167,6 +168,10 @@ function ModelSettings() {
       </form>
       <ModelOptions models={discovery.models} value={name} onSelect={setName} disabled={saving} discovered={discovery.discovered} />
     </section>
+    <ModelProfiles
+      draft={{ model: name, endpoint, apiKey: key, contextTokens, maxOutputTokens, childModel }}
+      onActivated={profile => resetFromSettings(profile)}
+    />
     <VoiceSettings />
     <ModelRuntimeSettings model={settings?.model || ''} endpoint={settings?.modelEndpoint || ''} />
   </>;
