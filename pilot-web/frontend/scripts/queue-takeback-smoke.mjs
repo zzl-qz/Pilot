@@ -40,7 +40,9 @@ useStore.setState({
   showNotice: message => window.notices.push(message),
   composerApi: {
     getText: () => window.draftText,
-    setText: text => { window.draftText = text; },
+    // 模拟真实 composer-input.ts 语义：setText 会清空附件芯片，replaceText 保留附件芯片
+    setText: text => { window.draftText = text; window.draftFiles = []; },
+    replaceText: text => { window.draftText = text; },
     appendText: text => { window.draftText += text; },
     getDraft: () => ({ text: window.draftText, imagePositions: [] }),
     insertAttachments: items => { window.draftFiles = [...window.draftFiles, ...items]; },
@@ -109,7 +111,29 @@ browser = await chromium.launch(browserOptions({ headless: true }));
   assert.deepEqual(await page.evaluate(() => window.draftFiles.map(item => item.name)), ['a.png']);
   assert.match(await page.evaluate(() => window.notices.at(-1)), /含 1 个附件/);
 
-  // 3) 附件读取失败：不删除队列，保留原文并提示
+  // 3) 复合场景：分析模式 + 技能名/命令不一致的内置技能（code-review -> /review-code）+ 图片附件同时恢复且不互相冲掉
+  await page.evaluate(() => {
+    window.draftText = '';
+    window.draftFiles = [];
+    window.store.setState({
+      skills: [{ name: 'code-review', command: '/review-code', description: '代码审阅', source: 'builtin' }],
+      ui: { ...window.store.getState().ui, executionMode: 'act' }
+    });
+    window.setEntries([{
+      content: '检查结果', text: '检查结果',
+      attachments: [{ name: 'diff.png', mimeType: 'image/png', url: '/api/sessions/s1/attachments/diff.png' }],
+      imagePositions: [0], mode: 'plan', skill: 'code-review'
+    }]);
+  });
+  await page.getByRole('button', { name: '放回输入框' }).click();
+  await page.waitForFunction(() => window.calls.length === 3);
+  assert.equal(await page.evaluate(() => window.store.getState().ui.executionMode), 'plan');
+  assert.equal(await page.evaluate(() => window.draftText), '/review-code 检查结果');
+  assert.deepEqual(await page.evaluate(() => window.draftFiles.map(item => item.name)), ['diff.png']);
+  assert.match(await page.evaluate(() => window.notices.at(-1)), /分析模式/);
+  assert.match(await page.evaluate(() => window.notices.at(-1)), /\/review-code/);
+
+  // 4) 附件读取失败：不删除队列，保留原文并提示
   await page.evaluate(() => {
     window.draftText = '保留的草稿';
     window.draftFiles = [];
@@ -120,7 +144,7 @@ browser = await chromium.launch(browserOptions({ headless: true }));
   });
   await page.getByRole('button', { name: '放回输入框' }).click();
   await page.waitForFunction(() => window.notices.some(text => /仍在队列中/.test(text)));
-  assert.equal(await page.evaluate(() => window.calls.length), 2, '读取失败不应删除队列');
+  assert.equal(await page.evaluate(() => window.calls.length), 3, '读取失败不应删除队列');
   assert.equal(await page.evaluate(() => window.draftText), '保留的草稿');
   assert.equal(await page.locator('.queue-item').count(), 1);
 

@@ -7,7 +7,7 @@ import { api } from '../api.js';
 import { appendUserRow } from '../thread-reducer.js';
 import { rememberInput } from '../lib/input-history.js';
 import { dropDraft, readDraft } from '../lib/drafts.js';
-import { resolveSkillCommand, toSkillCommands } from '../lib/skills.js';
+import { DEFAULT_SKILL_CONTENT, resolveSkillCommand, toSkillCommands } from '../lib/skills.js';
 import { sameUserInput } from '../thread-utils.js';
 
 export function createInputActions({ set, get }: StoreContext): StoreSlice<'registerComposer' | 'modelReady' | 'submitInput' | 'composerApi'> {
@@ -62,7 +62,7 @@ export function createInputActions({ set, get }: StoreContext): StoreSlice<'regi
       // /技能名 参数 → 服务端期望 content=参数 + skill=技能名（旧版 resolveSkillCommand 同语义）
       const skillCall = resolveSkillCommand(text, toSkillCommands(get().skills || []));
       const payloadContent = skillCall
-        ? (skillCall.args || '（用户未提供额外要求，按技能指引执行）')
+        ? (skillCall.args || DEFAULT_SKILL_CONTENT)
         : text;
       const mode = get().ui.executionMode === 'plan' ? 'plan' : 'act';
       const body: InputMessage = { content: payloadContent, attachments: attachments || [], imagePositions: imagePositions || [], mode };

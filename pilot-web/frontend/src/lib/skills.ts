@@ -3,6 +3,8 @@ import type { QuickCommand, SkillCommand } from '../types/input.js';
 // 技能命令的纯逻辑：把 /api/skills 的清单映射成快捷指令、与内置指令合并、发送时解析技能调用。
 // 纯函数模块，不碰 DOM 与网络；app.js 负责拉取与渲染。
 
+export const DEFAULT_SKILL_CONTENT = '（用户未提供额外要求，按技能指引执行）';
+
 /**
  * 把技能清单（/api/skills 的 available 项）映射成快捷指令形状。
  *
@@ -55,6 +57,18 @@ export function resolveSkillCommand(text: unknown, skillCommands: readonly Skill
     return null;
   }
   return { skill: command.skill, args: (match[2] || '').trim() };
+}
+
+/** 将服务端保存的技能名（如 code-review）映射回输入框可再次触发的斜杠命令（如 /review-code）。 */
+export function formatSkillPrefix(skill: string | null | undefined, available?: readonly SkillPayload[] | null): string {
+  const raw = String(skill || '').trim();
+  if (!raw) return '';
+  const bare = raw.startsWith('/') ? raw.slice(1) : raw;
+  const matched = (available || []).find(item => item && (item.name === bare || item.command === '/' + bare || item.command === raw));
+  if (matched?.command) {
+    return matched.command.startsWith('/') ? matched.command : '/' + matched.command;
+  }
+  return raw.startsWith('/') ? raw : '/' + raw;
 }
 
 /** 设置页单条技能的展示：{ name, meta, description }，meta 含来源与快捷命令。 */

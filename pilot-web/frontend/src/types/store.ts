@@ -47,7 +47,7 @@ export interface MirrorState {
 /** 正在编辑的排队消息：用内容指纹而不是下标定位，刷新/重排后不会改到别的消息。 */
 export interface QueueEditTarget { index: number; key: string }
 export interface ComposerBridge {
-  setText(text: string): void; getText(): string; getDraft?(): { text: string; imagePositions: number[] }; attachmentIds?(): string[]; insertAttachments?: ReturnType<typeof import('../lib/composer-input.js').createComposerInput>['insertAttachments']; appendText(text: string): void; focus(): void;
+  setText(text: string): void; replaceText?(text: string): void; getText(): string; getDraft?(): { text: string; imagePositions: number[] }; attachmentIds?(): string[]; insertAttachments?: ReturnType<typeof import('../lib/composer-input.js').createComposerInput>['insertAttachments']; appendText(text: string): void; focus(): void;
   prepareReload?(): { ok: boolean; reason?: string };
   insertMention?(path: string): void;
   editMessage?(sequence: number, text: string): void;

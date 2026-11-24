@@ -1,9 +1,47 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fetchQueuedDraft } from '../src/lib/queue.js';
+import { buildTakeBackDraftText, fetchQueuedDraft, queueEntryBadges, queueEntryKey } from '../src/lib/queue.js';
+import { DEFAULT_SKILL_CONTENT, formatSkillPrefix, resolveSkillCommand, toSkillCommands } from '../src/lib/skills.js';
 import { attachmentUrl } from '../src/lib/attachments/attachments.js';
 
 const bytes = (text) => new TextEncoder().encode(text);
+
+const BUILTIN_SKILLS = [
+  { name: 'code-review', command: '/review-code', description: '代码审阅', argumentHint: '', source: 'builtin' },
+  { name: 'bug-triage', command: '/triage', description: '排查问题', argumentHint: '', source: 'builtin' }
+];
+
+test('正文相同但执行模式或技能不同的排队消息指纹不同', () => {
+  const base = { content: '同一正文', attachments: [], imagePositions: [] };
+  assert.notEqual(queueEntryKey({ ...base, mode: 'act' }), queueEntryKey({ ...base, mode: 'plan' }));
+  assert.notEqual(queueEntryKey({ ...base, skill: 'code-review' }), queueEntryKey({ ...base, skill: 'bug-triage' }));
+  assert.equal(queueEntryKey({ ...base, skill: ' code-review ' }), queueEntryKey({ ...base, skill: 'code-review' }));
+});
+
+test('放回输入框时将技能名映射为真实斜杠命令并支持往返解析', () => {
+  const prefix = formatSkillPrefix('code-review', BUILTIN_SKILLS);
+  assert.equal(prefix, '/review-code');
+
+  const restored = buildTakeBackDraftText('', '检查这次改动', prefix);
+  assert.equal(restored, '/review-code 检查这次改动');
+  assert.deepEqual(
+    resolveSkillCommand(restored, toSkillCommands(BUILTIN_SKILLS)),
+    { skill: 'code-review', args: '检查这次改动' }
+  );
+
+  // 无额外参数占位文本不污染放回后的草稿
+  assert.equal(buildTakeBackDraftText('', DEFAULT_SKILL_CONTENT, prefix), '/review-code ');
+  // 已带命令前缀时不重复拼接
+  assert.equal(buildTakeBackDraftText('', '/review-code 检查改动', prefix), '/review-code 检查改动');
+  // 输入框已有草稿时，技能命令留在首行保证再次发送仍命中技能
+  assert.equal(buildTakeBackDraftText('已有草稿', '检查改动', prefix), '/review-code 检查改动\n已有草稿');
+  // 队列徽标同样显示真实斜杠命令
+  assert.deepEqual(queueEntryBadges({ content: 'x', mode: 'plan', skill: 'code-review' }, BUILTIN_SKILLS), [
+    { kind: 'mode', label: '分析模式' },
+    { kind: 'skill', label: '/review-code' }
+  ]);
+});
+
 function fetcher(files, calls = []) {
   return async (url) => {
     calls.push(url);

@@ -181,8 +181,14 @@ export function Composer() {
       getDraft: () => input.getDraft(),
       attachmentIds: () => input.attachmentIds(),
       setText: (text) => input.setText(text),
+      replaceText: (text) => input.replaceText(text),
       appendText: (text) => input.appendText(text),
-      insertAttachments: (items) => input.insertAttachments(items),
+      insertAttachments: (items) => {
+        for (const item of items || []) {
+          if (item?.id) draftFilesRef.current.set(item.id, item);
+        }
+        input.insertAttachments(items);
+      },
       insertMention: (path) => input.insertMention(path),
       focus: () => input.focus()
     } });

@@ -3,7 +3,8 @@ import { planInOpenSegment } from '../thread-reducer.js';
 import { api, ApiError } from '../api.js';
 import { writeDraft } from '../lib/drafts.js';
 import { errorInfo } from '../lib/errors.js';
-import { fetchQueuedDraft, locateQueueTarget, normalizeQueue, queueEntryKey } from '../lib/queue.js';
+import { buildTakeBackDraftText, fetchQueuedDraft, locateQueueTarget, normalizeQueue, queueEntryKey } from '../lib/queue.js';
+import { formatSkillPrefix } from '../lib/skills.js';
 
 const dismissDesktopAlert = (id: string) => {
   void globalThis.window?.pilotDesktop?.dismissFloatingAlert?.(id)?.catch?.(() => {});
@@ -378,13 +379,20 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
           return false;
         }
         const existing = bridge.getText();
-        const text = restored.text.trim();
-        if (text) {
-          bridge.setText(existing.trim() ? existing.replace(/\s+$/, '') + '\n' + text : text);
+        const skillCommand = formatSkillPrefix(entry.skill, get().skills);
+        const nextText = buildTakeBackDraftText(existing, restored.text, skillCommand);
+        if (nextText !== existing) {
+          if (bridge.replaceText) bridge.replaceText(nextText);
+          else bridge.setText(nextText);
         }
         if (restored.files.length) bridge.insertAttachments?.(restored.files);
+        if (entry.mode === 'plan' || entry.mode === 'act') get().setUi({ executionMode: entry.mode });
         writeDraft(localStorage, sessionId, bridge.getText());
-        get().showNotice('已放回输入框' + (restored.files.length ? '（含 ' + restored.files.length + ' 个附件）' : '') + '，可继续编辑后发送。');
+        const details: string[] = [];
+        if (entry.mode === 'plan') details.push('分析模式');
+        if (skillCommand) details.push(skillCommand);
+        if (restored.files.length) details.push(`含 ${restored.files.length} 个附件`);
+        get().showNotice('已放回输入框' + (details.length ? `（${details.join('，')}）` : '') + '，可继续编辑后发送。');
         return true;
       } finally {
         if (current()) set((draft) => { draft.queueTakingBack = false; });

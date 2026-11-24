@@ -1,30 +1,69 @@
 import type { QueueEntry, QueueResponse } from '../types/runtime.js';
 import type { DraftAttachment } from '../types/input.js';
+import type * as S from '../types/server.js';
 import { attachmentUrl, splitAttachmentMarkers } from './attachments/attachments.js';
+import { DEFAULT_SKILL_CONTENT, formatSkillPrefix } from './skills.js';
 import type { QueueEditTarget } from '../types/store.js';
 
-export function queueEntryBadges(entry: QueueEntry | null | undefined): Array<{ kind: 'mode' | 'skill'; label: string }> {
+export function queueEntryBadges(
+  entry: QueueEntry | null | undefined,
+  skills?: readonly S.SkillsControllerSkillPayload[] | null
+): Array<{ kind: 'mode' | 'skill'; label: string }> {
   const badges: Array<{ kind: 'mode' | 'skill'; label: string }> = [];
   if (entry?.mode === 'plan') {
     badges.push({ kind: 'mode', label: '分析模式' });
   }
-  const skill = typeof entry?.skill === 'string' ? entry.skill.trim() : '';
-  if (skill) {
-    badges.push({ kind: 'skill', label: `/${skill}` });
+  const skillLabel = formatSkillPrefix(entry?.skill, skills);
+  if (skillLabel) {
+    badges.push({ kind: 'skill', label: skillLabel });
   }
   return badges;
 }
 
+function hasCommandPrefix(text: string, command: string): boolean {
+  return text === command || text.startsWith(command + ' ') || text.startsWith(command + '\n');
+}
+
 /**
- * 排队消息的内容指纹：正文 + 附件 + 图片位置。
- * 只用下标会在刷新/自动取走队首后把编辑保存到另一条消息上；正文相同的两条也要靠附件区分。
+ * 组装「放回输入框」后的草稿正文：
+ * - 若排队消息绑定了技能，还原其真实斜杠命令并去除占位提示文本，避免重复前缀；
+ * - 若输入框已有草稿且带技能，将技能命令置于首行，保证再次发送时 resolveSkillCommand 仍能命中。
+ */
+export function buildTakeBackDraftText(existingText: string, queuedText: string, skillCommand = ''): string {
+  const existing = String(existingText || '');
+  const trimmedExisting = existing.trim();
+  const cmd = String(skillCommand || '').trim();
+  const rawQueued = String(queuedText || '').trim();
+  const cleanQueued = cmd && rawQueued === DEFAULT_SKILL_CONTENT ? '' : rawQueued;
+
+  let restored = cleanQueued;
+  if (cmd) {
+    if (!cleanQueued) {
+      restored = `${cmd} `;
+    } else if (!hasCommandPrefix(cleanQueued, cmd)) {
+      restored = `${cmd} ${cleanQueued}`;
+    }
+  }
+  if (!restored) return existing;
+  if (!trimmedExisting) return restored;
+  if (cmd && !trimmedExisting.startsWith('/')) {
+    return `${restored.trimEnd()}\n${existing.trimStart()}`;
+  }
+  return `${existing.replace(/\s+$/, '')}\n${restored}`;
+}
+
+/**
+ * 排队消息的内容指纹：正文 + 附件 + 图片位置 + 执行模式 + 绑定技能。
+ * 只用下标会在刷新/自动取走队首后把编辑保存到另一条消息上；正文相同的两条也要靠附件、模式和技能区分。
  */
 export function queueEntryKey(entry: QueueEntry | null | undefined): string {
   const text = entry?.text ?? entry?.content ?? '';
   const attachments = (Array.isArray(entry?.attachments) ? entry.attachments : [])
     .map(item => `${item?.name || ''}@${item?.url || item?.path || ''}#${item?.size ?? ''}`).join('|');
   const positions = (Array.isArray(entry?.imagePositions) ? entry.imagePositions : []).join(',');
-  return `${text}\u0000${attachments}\u0000${positions}`;
+  const mode = entry?.mode === 'plan' || entry?.mode === 'act' ? entry.mode : '';
+  const skill = typeof entry?.skill === 'string' ? entry.skill.trim() : '';
+  return `${text}\u0000${attachments}\u0000${positions}\u0000${mode}\u0000${skill}`;
 }
 
 /**

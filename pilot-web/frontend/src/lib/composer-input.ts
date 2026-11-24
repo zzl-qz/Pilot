@@ -324,6 +324,13 @@ export function createComposerInput(root: HTMLElement, { rail, onChange = () => 
       onChange();
     },
 
+    /** 仅替换正文文字，保留已挂在附件托盘中的附件芯片（例如从排队取回消息时）。 */
+    replaceText(text: unknown) {
+      root.replaceChildren(...(text ? [document.createTextNode(String(text))] : []));
+      refresh();
+      onChange();
+    },
+
     /**
      * 恢复草稿：正文回到输入框，附件按保存顺序回到 rail。
      * `imagePositions` 只为兼容旧草稿保留，附件不再嵌在正文里。

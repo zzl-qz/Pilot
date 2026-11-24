@@ -131,6 +131,7 @@ function QueueRow({ entry, index, position, count, lane, held, onDragStart, onDr
   const running = useStore(state => state.running);
   const busy = useStore(state => state.queueBusy || state.cancelling || state.pausing);
   const takingBack = useStore(state => state.queueTakingBack);
+  const skills = useStore(state => state.skills);
   const [open, setOpen] = useState(false);
   const text = entry.text ?? entry.content ?? '';
   const spoken = splitAttachmentMarkers(text);
@@ -145,7 +146,7 @@ function QueueRow({ entry, index, position, count, lane, held, onDragStart, onDr
     ? [constraints.length ? `约束 ${constraints.length}` : '', acceptance.length ? `验收 ${acceptance.length}` : '']
       .filter(Boolean).join(' · ')
     : '';
-  const badges = queueEntryBadges(entry);
+  const badges = queueEntryBadges(entry, skills);
   const edit = () => useStore.getState().setUi({ queueEdit: { index, key: queueEntryKey(entry) } });
   return (
     <>
