@@ -537,20 +537,27 @@ public class AgentRunService implements RunStarter {
     @Override
     public boolean followup(String sessionId, String text, List<Attachment> attachments, List<Integer> imagePositions,
         RunStarter.QueueRequirements requirements, String mode) {
+        return followup(sessionId, text, attachments, imagePositions, requirements, mode, null);
+    }
+
+    @Override
+    public boolean followup(String sessionId, String text, List<Attachment> attachments, List<Integer> imagePositions,
+        RunStarter.QueueRequirements requirements, String mode, String skill) {
         boolean hasAttachments = attachments != null && !attachments.isEmpty();
         if ((text == null || text.isBlank()) && !hasAttachments) {
             return false;
         }
         String content = text == null ? "" : text.strip();
         String normalizedMode = "plan".equalsIgnoreCase(mode) ? "plan" : null;
+        String normalizedSkill = skill == null || skill.isBlank() ? null : skill.strip();
         Deque<String> queue = inbox(sessionId);
         synchronized (queue) {
             // 与运行结束后的队列交接共用锁，避免检查完活动运行后才入队，消息无人接走。
             if (registry.activeRun(sessionId).isEmpty()) {
                 return false;
             }
-            queue.offer(QueuedMessageCodec.encode(
-                new QueuedMessageCodec.Stored(content, attachments, imagePositions, requirements, normalizedMode)));
+            queue.offer(QueuedMessageCodec.encode(new QueuedMessageCodec.Stored(content, attachments, imagePositions,
+                requirements, normalizedMode, normalizedSkill)));
             persistQueue(sessionId, queue);
         }
         return true;
@@ -574,7 +581,7 @@ public class AgentRunService implements RunStarter {
 
     private static List<QueuedMessage> queueEntries(Deque<String> queue) {
         return queue.stream().map(QueuedMessageCodec::decode).map(item -> new QueuedMessage(item.content(),
-            item.attachments(), item.imagePositions(), item.requirements(), item.mode())).toList();
+            item.attachments(), item.imagePositions(), item.requirements(), item.mode(), item.skill())).toList();
     }
 
     @Override
@@ -1022,7 +1029,7 @@ public class AgentRunService implements RunStarter {
             TaskControlService.Requirements requirements =
                 next.requirements() == null ? null : next.requirements().toRequirements();
             launch(sessionId, runId, next.content(), next.attachments(), next.imagePositions(), false, requirements,
-                false, null, "plan".equalsIgnoreCase(next.mode()));
+                false, next.skill(), "plan".equalsIgnoreCase(next.mode()));
         } catch (RuntimeException e) {
             registry.unregister(runId);
             publish(sessionId, runId, new RunFailed(RunFailureCode.QUEUE_START_FAILED, "排队消息启动失败，消息已保留", false));

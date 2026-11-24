@@ -926,7 +926,7 @@ class AgentRunServiceTest {
     }
 
     @Test
-    void emptyWorkspaceHasNoSkillSurface() throws Exception {
+    void emptyWorkspaceHasNoSkillSurfaceWhenBuiltinsDisabled() throws Exception {
         var requests = new CopyOnWriteArrayList<List<Message>>();
         var toolSets = new CopyOnWriteArrayList<List<ToolDefinition>>();
         ModelClient model = (messages, tools) -> {
@@ -934,13 +934,50 @@ class AgentRunServiceTest {
             toolSets.add(tools);
             return done();
         };
-        try (var fixture = new Fixture(model, 8)) {
+        try (var fixture = new Fixture(model, 8, false, 1, PermissionMode.AUTO, false)) {
             fixture.start();
             fixture.awaitFinished("COMPLETED");
 
             assertTrue(toolSets.get(0).stream().noneMatch(tool -> "use_skill".equals(tool.name())),
                 "无技能时不注册 use_skill");
             assertFalse(systemOf(requests.get(0)).contains("## 技能"), "无技能时目录段整体消失，零 token 成本");
+        }
+    }
+
+    @Test
+    void queuedMessageActivatesBoundBuiltinSkillAfterActiveRunCompletes() throws Exception {
+        CountDownLatch run1Entered = new CountDownLatch(1);
+        CountDownLatch releaseRun1 = new CountDownLatch(1);
+        var requests = new CopyOnWriteArrayList<List<Message>>();
+        AtomicInteger calls = new AtomicInteger();
+        ModelClient model = (messages, tools) -> {
+            requests.add(messages);
+            if (calls.incrementAndGet() == 1) {
+                run1Entered.countDown();
+                try {
+                    releaseRun1.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            return done();
+        };
+        try (var fixture = new Fixture(model, 8)) {
+            fixture.start();
+            assertTrue(run1Entered.await(5, TimeUnit.SECONDS));
+            assertTrue(fixture.service.followup(fixture.sessionId, "请审阅改动", List.of(), List.of(), null, null,
+                "code-review"));
+            releaseRun1.countDown();
+            fixture.awaitFinished("COMPLETED");
+            fixture.awaitFinished("COMPLETED");
+
+            assertEquals(2, requests.size());
+            String secondRunUserText = requests.get(1).stream()
+                .filter(msg -> "user".equals(msg.role()))
+                .map(Message::content)
+                .reduce("", (a, b) -> a + "\n" + b);
+            assertTrue(secondRunUserText.contains("代码审阅工作流"), secondRunUserText);
+            assertTrue(secondRunUserText.contains("请审阅改动"), secondRunUserText);
         }
     }
 
@@ -1263,12 +1300,22 @@ class AgentRunServiceTest {
         }
 
         Fixture(ModelClient model, int maxSteps, boolean goals, int runThreads, PermissionMode mode,
+            boolean builtinSkills) {
+            this(model, maxSteps, goals, runThreads, mode, null, null, builtinSkills);
+        }
+
+        Fixture(ModelClient model, int maxSteps, boolean goals, int runThreads, PermissionMode mode,
             Integer directMaxRequests) {
-            this(model, maxSteps, goals, runThreads, mode, directMaxRequests, null);
+            this(model, maxSteps, goals, runThreads, mode, directMaxRequests, null, true);
         }
 
         Fixture(ModelClient model, int maxSteps, boolean goals, int runThreads, PermissionMode mode,
             Integer directMaxRequests, String repositoryBrief) {
+            this(model, maxSteps, goals, runThreads, mode, directMaxRequests, repositoryBrief, true);
+        }
+
+        Fixture(ModelClient model, int maxSteps, boolean goals, int runThreads, PermissionMode mode,
+            Integer directMaxRequests, String repositoryBrief, boolean builtinSkills) {
             AgentProperties properties =
                 new AgentProperties(workspace.toString(), mode, maxSteps, 3, 5, 300, runThreads, 0, 60_000, false,
                     goals, directMaxRequests, null, null, null, null, null, null, null, null, null, repositoryBrief);
@@ -1334,7 +1381,7 @@ class AgentRunServiceTest {
             };
             RunSnapshotService snapshots = new RunSnapshotService(mapper, dataDir);
             TaskControlService taskControls = new TaskControlService(mapper, dataDir);
-            SkillService skills = new SkillService(new SkillProperties(true, null), properties, dataDir);
+            SkillService skills = new SkillService(new SkillProperties(true, null, builtinSkills), properties, dataDir);
             MultiAgentProperties multiProperties = new MultiAgentProperties(false, 1, 1, 8, 30, List.of());
             preparation = new AgentRunPreparation(sessions, factory, properties, multiProperties, taskControls,
                 commandTasks, snapshots, plans, mapper, skills);

@@ -201,6 +201,27 @@ class SkillCatalogTest {
     }
 
     @Test
+    void loadsBuiltinSkillsAndAllowsProjectAndCommandOverrides() throws Exception {
+        SkillCatalog builtinsOnly = SkillCatalog.scan(List.of(), true);
+        assertTrue(builtinsOnly.find("code-review").isPresent());
+        assertTrue(builtinsOnly.find("bug-triage").isPresent());
+        assertTrue(builtinsOnly.find("security-audit").isPresent());
+        assertEquals(SkillSource.BUILTIN, builtinsOnly.find("code-review").orElseThrow().manifest().source());
+        assertTrue(builtinsOnly.invalid().isEmpty());
+
+        // 项目级同名覆盖内置技能，项目级同名快捷指令让内置技能安静让位而不报错
+        Path project = Files.createDirectories(dir.resolve("project-override"));
+        write(project, "code-review", "---\ndescription: 项目自定义审阅\n", "自定义正文");
+        write(project, "my-triage", "---\ndescription: 项目排查\ncommand: /triage\n", "自定义排查");
+        SkillCatalog merged = SkillCatalog.scan(List.of(new SkillCatalog.Root(project, SkillSource.PROJECT)), true);
+        assertEquals(SkillSource.PROJECT, merged.find("code-review").orElseThrow().manifest().source());
+        assertEquals("自定义正文", merged.find("code-review").orElseThrow().body());
+        assertEquals("/triage", merged.find("my-triage").orElseThrow().manifest().command());
+        assertEquals(null, merged.find("bug-triage").orElseThrow().manifest().command());
+        assertTrue(merged.invalid().isEmpty(), "内置技能快捷命令冲突时不应污染 invalid 列表");
+    }
+
+    @Test
     void concurrentScansAreSafe() throws Exception {
         Path root = Files.createDirectories(dir.resolve("skills"));
         write(root, "one", "---\ndescription: 唯一\n", "正文");

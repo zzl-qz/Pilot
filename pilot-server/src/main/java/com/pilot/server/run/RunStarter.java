@@ -87,22 +87,28 @@ public interface RunStarter {
         }
     }
 
-    /** 排队中的一条消息：正文已经内联了文本文件，这里只额外带需要多模态编码的图片与可选模式。 */
+    /** 排队中的一条消息：正文已经内联了文本文件，这里额外带需要多模态编码的图片、可选模式与技能名。 */
     record QueuedMessage(String content, List<Attachment> attachments, List<Integer> imagePositions,
-        QueueRequirements requirements, String mode) {
+        QueueRequirements requirements, String mode, String skill) {
         public QueuedMessage {
             content = content == null ? "" : content;
             attachments = attachments == null ? List.of() : List.copyOf(attachments);
             imagePositions = imagePositions == null ? List.of() : List.copyOf(imagePositions);
+            skill = skill == null || skill.isBlank() ? null : skill.strip();
         }
 
         public QueuedMessage(String content, List<Attachment> attachments, List<Integer> imagePositions) {
-            this(content, attachments, imagePositions, null, null);
+            this(content, attachments, imagePositions, null, null, null);
         }
 
         public QueuedMessage(String content, List<Attachment> attachments, List<Integer> imagePositions,
             QueueRequirements requirements) {
-            this(content, attachments, imagePositions, requirements, null);
+            this(content, attachments, imagePositions, requirements, null, null);
+        }
+
+        public QueuedMessage(String content, List<Attachment> attachments, List<Integer> imagePositions,
+            QueueRequirements requirements, String mode) {
+            this(content, attachments, imagePositions, requirements, mode, null);
         }
     }
 
@@ -136,6 +142,12 @@ public interface RunStarter {
     default boolean followup(String sessionId, String text, List<Attachment> attachments, List<Integer> imagePositions,
         QueueRequirements requirements, String mode) {
         return followup(sessionId, text, attachments, imagePositions, requirements);
+    }
+
+    /** 带显式执行模式与技能名的追加；默认退化为忽略技能以兼容测试桩。 */
+    default boolean followup(String sessionId, String text, List<Attachment> attachments, List<Integer> imagePositions,
+        QueueRequirements requirements, String mode, String skill) {
+        return followup(sessionId, text, attachments, imagePositions, requirements, mode);
     }
 
     /** 暂停在当前安全步骤结束后生效，保留任务及排队消息。 */

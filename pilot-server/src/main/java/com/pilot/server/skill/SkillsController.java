@@ -19,6 +19,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.skill.SkillManifest;
 import com.pilot.core.skill.SkillProblem;
+import com.pilot.core.skill.SkillSource;
 import com.pilot.server.api.ApiErrors;
 import com.pilot.server.session.lookup.SessionLookup;
 
@@ -59,9 +60,11 @@ public class SkillsController {
     public record SkillPayload(String name, String description, String command, String argumentHint,
         List<String> allowedTools, String source, String directory) {
         static SkillPayload of(SkillManifest manifest) {
+            String dir = manifest.source() == SkillSource.BUILTIN ? "builtin/" + manifest.name()
+                : manifest.directory().toString();
             return new SkillPayload(manifest.name(), manifest.description(), manifest.command(),
                 manifest.argumentHint(), manifest.allowedTools(), manifest.source().name().toLowerCase(Locale.ROOT),
-                manifest.directory().toString());
+                dir);
         }
     }
 

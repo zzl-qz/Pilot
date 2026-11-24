@@ -25,6 +25,7 @@ import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.skill.SkillCatalog;
 import com.pilot.core.skill.SkillManifest;
+import com.pilot.core.skill.SkillSource;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.skill.SkillService;
 
@@ -154,6 +155,9 @@ public class PluginCompatService {
         SkillCatalog catalog = skills.catalogFor(workspace.toString());
         List<Item> items = new ArrayList<>();
         for (SkillManifest manifest : catalog.list()) {
+            if (manifest.source() == SkillSource.BUILTIN) {
+                continue;
+            }
             List<String> details = new ArrayList<>();
             boolean broken = false;
             boolean changed = false;

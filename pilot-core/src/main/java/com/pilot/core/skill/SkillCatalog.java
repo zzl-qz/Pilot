@@ -1,6 +1,7 @@
 package com.pilot.core.skill;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -60,17 +61,24 @@ public final class SkillCatalog {
     }
 
     /**
-     * 扫描技能目录。
+     * 扫描技能目录（不含内置技能，保持单目录/自定义扫描语义稳定）。
      *
      * @param roots 按优先级降序的扫描来源（项目级在前）；不存在的目录跳过
      */
     public static SkillCatalog scan(List<Root> roots) {
-        return scan(roots, MAX_SKILLS);
+        return scan(roots, MAX_SKILLS, false);
+    }
+
+    /**
+     * 扫描技能目录，并可选附带 classpath 内置开箱技能（优先级：项目级 &gt; 用户级 &gt; 内置）。
+     */
+    public static SkillCatalog scan(List<Root> roots, boolean includeBuiltins) {
+        return scan(roots, MAX_SKILLS, includeBuiltins);
     }
 
     /** 安装候选不受模型常驻目录的数量上限影响；下载器负责候选数量和体积预算。 */
     public static SkillCatalog installationCandidates(Path root) {
-        return scan(List.of(new Root(root, SkillSource.PROJECT)), Integer.MAX_VALUE);
+        return scan(List.of(new Root(root, SkillSource.PROJECT)), Integer.MAX_VALUE, false);
     }
 
     /** 单技能仓库的名称来自声明，不要求仓库名与技能名相同。 */
@@ -87,7 +95,7 @@ public final class SkillCatalog {
         }
     }
 
-    private static SkillCatalog scan(List<Root> roots, int maxSkills) {
+    private static SkillCatalog scan(List<Root> roots, int maxSkills, boolean includeBuiltins) {
         Map<String, Skill> byName = new LinkedHashMap<>();
         List<SkillProblem> problems = new ArrayList<>();
         Set<String> commands = new LinkedHashSet<>();
@@ -108,7 +116,66 @@ public final class SkillCatalog {
                 load(dir, root.source(), byName, commands, problems, maxSkills);
             }
         }
+        if (includeBuiltins) {
+            loadBuiltins(byName, commands, maxSkills);
+        }
         return new SkillCatalog(ordered(byName), List.copyOf(problems));
+    }
+
+    /** 从 classpath {@code skills/index.txt} 加载内置技能包；同名项目/用户技能静默覆盖，快捷命令冲突时让位给外部技能。 */
+    private static void loadBuiltins(Map<String, Skill> byName, Set<String> commands, int maxSkills) {
+        ClassLoader loader = SkillCatalog.class.getClassLoader();
+        String indexText = readClasspathText(loader, "skills/index.txt");
+        if (indexText == null || indexText.isBlank()) {
+            return;
+        }
+        for (String rawLine : indexText.lines().toList()) {
+            String slug = rawLine.strip();
+            if (slug.isEmpty() || slug.startsWith("#") || !VALID_NAME.matcher(slug).matches()) {
+                continue;
+            }
+            if (byName.containsKey(slug) || byName.size() >= maxSkills) {
+                continue;
+            }
+            String content = readClasspathText(loader, "skills/" + slug + "/SKILL.md");
+            if (content == null || content.isBlank()) {
+                continue;
+            }
+            SkillFrontmatter.Parsed parsed;
+            try {
+                parsed = SkillFrontmatter.parse(content);
+            } catch (IllegalArgumentException e) {
+                continue;
+            }
+            if ((parsed.name() != null && !parsed.name().equals(slug)) || parsed.body().isEmpty()) {
+                continue;
+            }
+            Contracts.Check required = Contracts.check(parsed.requires());
+            if (!required.satisfied()) {
+                continue;
+            }
+            String command = parsed.command();
+            if (command != null && !commands.add(command)) {
+                // 项目/用户技能优先占用同名快捷指令，内置技能保留本身但让出快捷命令
+                command = null;
+            }
+            Path virtualDir = Path.of("builtin", slug);
+            byName.put(slug, new Skill(
+                new SkillManifest(slug, parsed.description(), command, parsed.argumentHint(), parsed.allowedTools(),
+                    parsed.requires(), parsed.requiresOptional(), virtualDir, SkillSource.BUILTIN),
+                parsed.body(), List.of()));
+        }
+    }
+
+    private static String readClasspathText(ClassLoader loader, String resource) {
+        try (InputStream stream = loader.getResourceAsStream(resource)) {
+            if (stream == null) {
+                return null;
+            }
+            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     /** 按加载序固化：项目级遮蔽用户级的语义依赖插入顺序，Map.copyOf 不保序，先按名重排。 */
@@ -244,11 +311,19 @@ public final class SkillCatalog {
      *                                  疑似二进制、读取失败；调用方把原因转成工具错误信息
      */
     public String readFile(Skill skill, String file) {
-        Path root = skill.manifest().directory();
         String cleaned = file == null ? "" : file.strip().replace('\\', '/');
-        if (cleaned.isEmpty() || cleaned.startsWith("/") || cleaned.contains("../")) {
+        if (cleaned.isEmpty() || cleaned.startsWith("/") || cleaned.contains("../") || cleaned.equals("..")) {
             throw new IllegalArgumentException("非法的文件路径：" + file);
         }
+        if (skill.manifest().source() == SkillSource.BUILTIN) {
+            String resource = "skills/" + skill.manifest().name() + "/" + cleaned;
+            String text = readClasspathText(SkillCatalog.class.getClassLoader(), resource);
+            if (text == null) {
+                throw new IllegalArgumentException("文件不存在或无法访问：" + cleaned);
+            }
+            return text;
+        }
+        Path root = skill.manifest().directory();
         Path target = root.resolve(cleaned).normalize();
         if (!target.startsWith(root)) {
             throw new IllegalArgumentException("文件路径越出技能目录：" + file);

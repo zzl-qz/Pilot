@@ -11,8 +11,8 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * 排队消息在 {@code queued_messages.content} 里的存储格式。
  *
- * <p>没有图片附件的消息仍是纯文本，和旧数据完全一致；带图片的消息存成一个固定前缀加 JSON，
- * 这样不改表结构，旧版本写入的队列也能原样读出来。文本文件已经内联进正文，不需要额外存。
+ * <p>没有图片附件、约束、模式与技能的消息仍是纯文本，和旧数据完全一致；携带扩展元数据的消息存成固定前缀加 JSON，
+ * 不改表结构，旧版本写入的队列也能原样读出来。
  */
 final class QueuedMessageCodec {
     private static final String PREFIX = "\u0001pilot-queue-v1\u0001";
@@ -22,33 +22,40 @@ final class QueuedMessageCodec {
     }
 
     record Stored(String content, List<Attachment> attachments, List<Integer> imagePositions,
-        QueueRequirements requirements, String mode) {
+        QueueRequirements requirements, String mode, String skill) {
         Stored {
             content = content == null ? "" : content;
             attachments = attachments == null ? List.of() : List.copyOf(attachments);
             imagePositions = imagePositions == null ? List.of() : List.copyOf(imagePositions);
+            skill = skill == null || skill.isBlank() ? null : skill.strip();
         }
 
         Stored(String content, List<Attachment> attachments, List<Integer> imagePositions) {
-            this(content, attachments, imagePositions, null, null);
+            this(content, attachments, imagePositions, null, null, null);
         }
 
         Stored(String content, List<Attachment> attachments, List<Integer> imagePositions,
             QueueRequirements requirements) {
-            this(content, attachments, imagePositions, requirements, null);
+            this(content, attachments, imagePositions, requirements, null, null);
+        }
+
+        Stored(String content, List<Attachment> attachments, List<Integer> imagePositions,
+            QueueRequirements requirements, String mode) {
+            this(content, attachments, imagePositions, requirements, mode, null);
         }
 
         Stored withContent(String text) {
-            return new Stored(text, attachments, imagePositions, requirements, mode);
+            return new Stored(text, attachments, imagePositions, requirements, mode, skill);
         }
 
         Stored withRequirements(QueueRequirements value) {
-            return new Stored(content, attachments, imagePositions, value, mode);
+            return new Stored(content, attachments, imagePositions, value, mode, skill);
         }
     }
 
     static String encode(Stored item) {
-        if (item.attachments().isEmpty() && item.requirements() == null && !"plan".equalsIgnoreCase(item.mode())) {
+        if (item.attachments().isEmpty() && item.requirements() == null && !"plan".equalsIgnoreCase(item.mode())
+            && item.skill() == null) {
             return item.content();
         }
         return PREFIX + MAPPER.writeValueAsString(item);

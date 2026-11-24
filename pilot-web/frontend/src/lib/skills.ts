@@ -59,7 +59,7 @@ export function resolveSkillCommand(text: unknown, skillCommands: readonly Skill
 
 /** 设置页单条技能的展示：{ name, meta, description }，meta 含来源与快捷命令。 */
 export function skillEntry(skill: Partial<SkillPayload> | null | undefined) {
-  const source = skill?.source === 'project' ? '项目级' : skill?.source === 'user' ? '用户级' : '';
+  const source = skill?.source === 'project' ? '项目级' : skill?.source === 'builtin' ? '内置' : skill?.source === 'user' ? '用户级' : '';
   const command = skill?.command ? `快捷命令 ${skill.command}` : '';
   const meta = [source, command].filter(Boolean).join(' · ');
   return {

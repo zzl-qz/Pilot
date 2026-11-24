@@ -61,4 +61,21 @@ class QueuedMessageCodecTest {
         assertTrue(requirements.acceptance().isEmpty());
         assertTrue(!requirements.empty());
     }
+
+    @Test
+    void skillRoundTripsInQueuedMessageAndLegacyJsonDecodesNullSkill() {
+        String encoded = QueuedMessageCodec.encode(
+            new QueuedMessageCodec.Stored("审阅本次改动", List.of(), List.of(), null, "plan", "code-review"));
+        assertTrue(encoded.startsWith("\u0001pilot-queue-v1\u0001"));
+        var decoded = QueuedMessageCodec.decode(encoded);
+        assertEquals("审阅本次改动", decoded.content());
+        assertEquals("plan", decoded.mode());
+        assertEquals("code-review", decoded.skill());
+
+        var edited = decoded.withContent("改一下审阅重点");
+        assertEquals("code-review", edited.skill(), "编辑排队消息正文不应丢失已绑定的技能");
+
+        String legacy = "\u0001pilot-queue-v1\u0001{\"content\":\"旧消息\",\"attachments\":[],\"imagePositions\":[]}";
+        assertNull(QueuedMessageCodec.decode(legacy).skill());
+    }
 }

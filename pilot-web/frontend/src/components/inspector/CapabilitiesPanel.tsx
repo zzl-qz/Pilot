@@ -151,7 +151,7 @@ export function CapabilitiesPanel() {
                 <li key={skill.name} className="cap-item">
                   <div className="cap-item-head">
                     <code className="cap-name">/{skill.command || skill.name}</code>
-                    {skill.source && <span className="cap-tag">{skill.source === 'project' ? '项目级' : '用户级'}</span>}
+                    {skill.source && <span className="cap-tag">{skill.source === 'project' ? '项目级' : skill.source === 'builtin' ? '内置' : '用户级'}</span>}
                     {pluginFor(plugins, 'skill', skill.name) && (
                       <span className="cap-tag" data-tone={pluginStatusTone(pluginFor(plugins, 'skill', skill.name)?.status)}>
                         {pluginStatusLabel(pluginFor(plugins, 'skill', skill.name)?.status)}

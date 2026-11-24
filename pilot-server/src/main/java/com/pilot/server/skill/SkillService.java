@@ -50,7 +50,7 @@ public class SkillService {
         return Path.of(target).toAbsolutePath().normalize();
     }
 
-    /** 按工作区扫描两级技能目录；关闭技能时返回 {@link SkillCatalog#EMPTY}。 */
+    /** 按工作区扫描三级技能来源（项目级 &gt; 用户级 &gt; 内置）；关闭技能时返回 {@link SkillCatalog#EMPTY}。 */
     public SkillCatalog catalogFor(String workspace) {
         if (!properties.enabled()) {
             return SkillCatalog.EMPTY;
@@ -58,7 +58,7 @@ public class SkillService {
         List<SkillCatalog.Root> roots = new ArrayList<>();
         roots.add(new SkillCatalog.Root(projectRootFor(workspace), SkillSource.PROJECT));
         roots.add(new SkillCatalog.Root(userRootOf(), SkillSource.USER));
-        return SkillCatalog.scan(roots);
+        return SkillCatalog.scan(roots, Boolean.TRUE.equals(properties.builtin()));
     }
 
     /** 用户级技能目录：配置 > 环境变量 {@code PILOT_SKILLS_DIR} > {@code <dataDir>/skills}。 */

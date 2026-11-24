@@ -49,10 +49,9 @@ class SkillsApiTest {
         String session = sessions.createSession("技能测试", workspace.toString()).id();
 
         mvc.perform(get("/api/skills").param("sessionId", session)).andExpect(status().isOk())
-            .andExpect(jsonPath("$.available.length()").value(1))
-            .andExpect(jsonPath("$.available[0].name").value("demo-review"))
-            .andExpect(jsonPath("$.available[0].command").value("/review"))
-            .andExpect(jsonPath("$.available[0].source").value("project"))
+            .andExpect(jsonPath("$.available[?(@.name == 'demo-review')].command").value("/review"))
+            .andExpect(jsonPath("$.available[?(@.name == 'demo-review')].source").value("project"))
+            .andExpect(jsonPath("$.available[?(@.name == 'code-review')].source").value("builtin"))
             .andExpect(jsonPath("$.invalid.length()").value(1)).andExpect(jsonPath("$.invalid[0].name").value("broken"))
             .andExpect(jsonPath("$.projectRoot")
                 .value(workspace.resolve(".pilot/skills").toAbsolutePath().normalize().toString()))
@@ -62,10 +61,13 @@ class SkillsApiTest {
     }
 
     @Test
-    void emptyCatalogStillReportsInstallRootsForGuidance() throws Exception {
-        String session = sessions.createSession("空目录", workspace.toString()).id();
+    void freshWorkspaceProvidesBuiltinSkillsAndInstallRoots() throws Exception {
+        String session = sessions.createSession("内置技能", workspace.toString()).id();
         mvc.perform(get("/api/skills").param("sessionId", session)).andExpect(status().isOk())
-            .andExpect(jsonPath("$.available").isEmpty()).andExpect(jsonPath("$.invalid").isEmpty())
+            .andExpect(jsonPath("$.available[?(@.name == 'code-review')].source").value("builtin"))
+            .andExpect(jsonPath("$.available[?(@.name == 'bug-triage')].source").value("builtin"))
+            .andExpect(jsonPath("$.available[?(@.name == 'security-audit')].source").value("builtin"))
+            .andExpect(jsonPath("$.invalid").isEmpty())
             .andExpect(jsonPath("$.projectRoot").isNotEmpty()).andExpect(jsonPath("$.userRoot").isNotEmpty());
     }
 

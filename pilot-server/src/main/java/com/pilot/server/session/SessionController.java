@@ -630,15 +630,11 @@ public class SessionController {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "技能 " + skill + " 不可用：" + reason);
             }
         }
-        // 运行中的消息进队列，附件随消息保存；独立验收条件只属于一次新任务的启动，技能是启动期行为，都不能排队。
-        // 先检查状态，避免被拒绝的请求产生文件副作用。
+        // 运行中的消息进队列，附件、约束/验收、模式与技能均随排队消息保存，等本轮结束后自动按序激活启动。
         String activeRun = runStarter.activeRun(id).orElse(null);
         RunStarter.QueueRequirements queuedRequirements =
             request.task() == null ? null : new RunStarter.QueueRequirements(request.task().constraints(),
                 request.task().acceptance().stream().map(TaskControlService.Acceptance::text).toList());
-        if (activeRun != null && skill != null) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "排队消息暂不支持技能，请等本轮结束后再发");
-        }
         AttachmentService.Prepared prepared;
         try {
             prepared = attachments.prepare(id, request.content(), request.attachments(), request.imagePositions(),
@@ -648,7 +644,7 @@ public class SessionController {
         }
         if (activeRun != null) {
             if (runStarter.followup(id, prepared.content(), prepared.attachments(), prepared.imagePositions(),
-                queuedRequirements, mode)) {
+                queuedRequirements, mode, skill)) {
                 sessions.touch(id);
                 return ResponseEntity.accepted().body(new MessageResponse(id, activeRun));
             }
@@ -656,11 +652,8 @@ public class SessionController {
         // 检查与启动之间可能刚好起了一个 run：抢占失败就退化成追加输入
         String runId = runStarter.claimRun(id).orElse(null);
         if (runId == null) {
-            if (skill != null) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "运行状态已变化，请结束当前任务后重试");
-            }
             if (runStarter.followup(id, prepared.content(), prepared.attachments(), prepared.imagePositions(),
-                queuedRequirements, mode)) {
+                queuedRequirements, mode, skill)) {
                 sessions.touch(id);
                 return ResponseEntity.accepted().body(new MessageResponse(id, runStarter.activeRun(id).orElse(null)));
             }
