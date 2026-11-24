@@ -21,13 +21,20 @@ public record WebSearchConfig(WebSearchProvider provider, String apiKey, URI api
     PublicSources publicSources, Map<WebSearchProvider, URI> providerEndpoints) {
 
     /** 免密钥公开只读官方 API 的基址集合；测试可替换为本机模拟服务。 */
-    public record PublicSources(URI wikipediaZh, URI wikipediaEn, URI github, URI stackExchange, URI arxiv) {
+    public record PublicSources(URI wikipediaZh, URI wikipediaEn, URI github, URI stackExchange, URI arxiv,
+        URI hackerNews, URI openAlex) {
         public static final PublicSources DEFAULT = new PublicSources(
             URI.create("https://zh.wikipedia.org/w/api.php"),
             URI.create("https://en.wikipedia.org/w/api.php"),
             URI.create("https://api.github.com/search/repositories"),
             URI.create("https://api.stackexchange.com/2.3/search/advanced"),
-            URI.create("https://export.arxiv.org/api/query"));
+            URI.create("https://export.arxiv.org/api/query"),
+            URI.create("https://hn.algolia.com/api/v1/search"),
+            URI.create("https://api.openalex.org/works"));
+
+        public PublicSources(URI wikipediaZh, URI wikipediaEn, URI github, URI stackExchange, URI arxiv) {
+            this(wikipediaZh, wikipediaEn, github, stackExchange, arxiv, null, null);
+        }
     }
 
     public WebSearchConfig(WebSearchProvider provider, String apiKey, URI apiEndpoint, URI searxngEndpoint,

@@ -1,36 +1,45 @@
-# pilot-managed-settings: v3
-# Pilot 写给本机 SearXNG 的配置。只监听 127.0.0.1，不对外。
+# pilot-managed-settings: v4
+# Pilot 写给本机 SearXNG 的免密钥高可用配置。只监听 127.0.0.1，不对外。
 # 如需完全自定义本文件，删除首行 `# pilot-managed-settings: ...` 注释即可，Pilot 将不再自动更新。
-# 这些引擎都不需要 API key；JSON 必须开着，否则 web_search 拿不到结果。
+# 下列引擎均无需任何 API Key；JSON 必须开着，否则 web_search 拿不到结果。
 
 use_default_settings:
   engines:
     keep_only:
-      # 综合中英文网页（移除在当前版本会崩溃或解析失效的 sogou / baidu / wikidata）
+      # 综合中英文网页（全部免 Key，已剔除持续崩溃或 403 的 sogou / baidu / google / wikidata）
       - bing
       - 360search
       - yahoo
-      - duckduckgo
       - brave
+      - duckduckgo
       - quark
       - startpage
       - mojeek
-      - google
       # 百科
       - wikipedia
-      # 新闻与时效
+      # 新闻与时效（duckduckgo news + bing news 中英文均高命中）
+      - duckduckgo news
       - bing news
-      - google news
       - startpage news
       - brave.news
       - mojeek news
-      # 技术 / 开发 / 学术
+      # 技术 / 中文开发 / AI / 开源包（全部官方公开或稳定免 Key）
+      - baidu kaifa
       - github
       - stackoverflow
       - mdn
       - pypi
       - npm
+      - hackernews
+      - huggingface
+      - crates.io
+      - docker hub
+      # 学术论文（全部免费官方公开接口）
       - arxiv
+      - semantic scholar
+      - openalex
+      - crossref
+      - pubmed
 
 search:
   safe_search: 0
@@ -57,13 +66,31 @@ outgoing:
 engines:
   - name: bing
     disabled: false
-  - name: google
-    disabled: false
   - name: 360search
     disabled: false
   - name: yahoo
     disabled: false
   - name: quark
     disabled: false
+  - name: duckduckgo news
+    disabled: false
+  - name: baidu kaifa
+    disabled: false
   - name: npm
+    disabled: false
+  - name: hackernews
+    disabled: false
+  - name: huggingface
+    disabled: false
+  - name: crates.io
+    disabled: false
+  - name: docker hub
+    disabled: false
+  - name: semantic scholar
+    disabled: false
+  - name: openalex
+    disabled: false
+  - name: crossref
+    disabled: false
+  - name: pubmed
     disabled: false

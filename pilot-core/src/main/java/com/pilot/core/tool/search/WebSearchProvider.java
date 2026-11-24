@@ -19,7 +19,7 @@ public enum WebSearchProvider {
     SEARXNG("searxng", "本机 / 自建 SearXNG", false, "http://127.0.0.1:8888",
         "免密钥元搜索，聚合多家公开引擎"),
     PUBLIC("public", "公开只读知识源", false, "",
-        "免密钥直连官方公开 API：Wikipedia（中/英）、GitHub、StackOverflow、arXiv");
+        "免密钥直连官方公开 API：Wikipedia（中/英）、GitHub、StackOverflow、Hacker News、arXiv、OpenAlex");
 
     private static final List<WebSearchProvider> API_PROVIDERS = List.of(BOCHA, TAVILY, BRAVE, SERPER, EXA);
 

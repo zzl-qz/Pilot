@@ -53,7 +53,8 @@ public class LocalSearchRuntime implements SmartLifecycle {
     private static final String SETTINGS_RESOURCE = "searxng/settings.yml";
     private static final String MANAGED_HEADER_PREFIX = "# pilot-managed-settings: v";
     private static final String LEGACY_V1_HEADER = "# Pilot 写给本机 SearXNG 的配置。";
-    private static final int MANAGED_SETTINGS_VERSION = 3;
+    private static final int MANAGED_SETTINGS_VERSION = 4;
+    private static final String PID_FILE_NAME = "searxng.pid";
     private static final String WINDOWS_SHIM_RESOURCE = "searxng/pwd.py";
     private static final String ARCHIVE_NAME = "searxng.tar.gz";
     /** 小于这个大小的压缩包基本是下载中断留下的残骸。 */
@@ -88,17 +89,21 @@ public class LocalSearchRuntime implements SmartLifecycle {
                 return;
             }
             var address = new InetSocketAddress(host, properties.endpointUri().getPort());
+            Path root = managedRoot();
+            Path settings = root.resolve("settings.yml");
+            Path source = sourceDir();
             if (portOpen(address)) {
-                log.info("{} 已有搜索服务，不再重复启动", properties.endpoint());
-                running = true;
-                return;
+                if (!isSettingsUpToDate(settings) && stopManagedOrphan(root, source, address)) {
+                    log.info("检测到旧版 Pilot 托管 SearXNG，已停止并准备按 v{} 配置重新启动", MANAGED_SETTINGS_VERSION);
+                } else {
+                    log.info("{} 已有搜索服务，不再重复启动", properties.endpoint());
+                    running = true;
+                    return;
+                }
             }
             try {
-                Path root = managedRoot();
                 Files.createDirectories(root);
-                Path settings = root.resolve("settings.yml");
                 syncManagedSettings(settings);
-                Path source = sourceDir();
                 if (Files.isRegularFile(source.resolve("searx").resolve("webapp.py"))) {
                     log.info("已有 SearXNG 源码，直接使用：{}", source);
                 } else {
@@ -125,9 +130,11 @@ public class LocalSearchRuntime implements SmartLifecycle {
                 builder.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile.toFile()));
                 builder.redirectErrorStream(true);
                 process = builder.start();
+                writePidFile(root, process.pid(), address.getPort());
                 if (!waitUntilUp(address, STARTUP_WAIT) || !process.isAlive()) {
                     log.warn("SearXNG 没有在 {} 起来，日志：{}", properties.endpoint(), logFile);
                     stopProcess();
+                    deletePidFile(root);
                     return;
                 }
                 running = true;
@@ -141,6 +148,9 @@ public class LocalSearchRuntime implements SmartLifecycle {
     @Override
     public void stop() {
         synchronized (lifecycleLock) {
+            if (process != null) {
+                deletePidFile(managedRoot());
+            }
             stopProcess();
             running = false;
         }
@@ -206,17 +216,24 @@ public class LocalSearchRuntime implements SmartLifecycle {
                     current.logPath(), "同步配置失败：" + e.getMessage());
             }
             var address = new InetSocketAddress(host, properties.endpointUri().getPort());
+            Path source = sourceDir();
             boolean owned = process != null;
             if (owned) {
                 stopProcess();
+                deletePidFile(root);
                 running = false;
                 waitUntilDown(address, Duration.ofSeconds(3));
             } else if (portOpen(address)) {
-                RuntimeStatus current = status();
-                String msg = (upgraded ? "已更新托管配置（v" + MANAGED_SETTINGS_VERSION + "），但" : "")
-                    + "端口 " + address.getPort() + " 当前由外部进程占用，请重启该 SearXNG 进程或重启 Pilot 使其生效";
-                return new RuntimeStatus(current.localEnabled(), current.managed(), current.running(), true,
-                    isSettingsUpToDate(settings), current.endpoint(), current.settingsPath(), current.logPath(), msg);
+                if (stopManagedOrphan(root, source, address)) {
+                    running = false;
+                } else {
+                    RuntimeStatus current = status();
+                    String msg = (upgraded ? "已更新托管配置（v" + MANAGED_SETTINGS_VERSION + "），但" : "")
+                        + "端口 " + address.getPort() + " 当前由外部进程占用，请重启该 SearXNG 进程或重启 Pilot 使其生效";
+                    return new RuntimeStatus(current.localEnabled(), current.managed(), current.running(), true,
+                        isSettingsUpToDate(settings), current.endpoint(), current.settingsPath(), current.logPath(),
+                        msg);
+                }
             }
             start();
             RuntimeStatus after = status();
@@ -335,6 +352,95 @@ public class LocalSearchRuntime implements SmartLifecycle {
                 Thread.currentThread().interrupt();
                 return;
             }
+        }
+    }
+
+    /**
+     * 安全停止上次 Pilot 运行遗留在本工作区托管目录下的旧 SearXNG 进程。
+     * 仅匹配命令行明确指向本实例 {@code sourceDir} 的 searxng 进程，绝不误杀其他进程。
+     */
+    private boolean stopManagedOrphan(Path root, Path source, InetSocketAddress address) {
+        if (source == null || !Files.isDirectory(source)) {
+            return false;
+        }
+        String normalizedSource = normalizeForMatch(source.toAbsolutePath().normalize().toString());
+        List<ProcessHandle> targets = new ArrayList<>();
+        long currentPid = ProcessHandle.current().pid();
+        Path pidFile = root.resolve(PID_FILE_NAME);
+        if (Files.isRegularFile(pidFile)) {
+            try {
+                String raw = Files.readString(pidFile, StandardCharsets.UTF_8).strip();
+                String[] parts = raw.split(":");
+                long recorded = Long.parseLong(parts[0]);
+                int recordedPort = parts.length > 1 ? Integer.parseInt(parts[1]) : address.getPort();
+                if (recorded != currentPid && recordedPort == address.getPort()) {
+                    ProcessHandle.of(recorded).filter(ProcessHandle::isAlive)
+                        .filter(h -> matchesManagedProcess(h, normalizedSource))
+                        .ifPresent(targets::add);
+                }
+            } catch (IOException | NumberFormatException ignored) {
+                // 忽略损坏的 pid 文件
+            }
+        }
+        if (targets.isEmpty() && address.getPort() == com.pilot.core.tool.WebSearchTool.DEFAULT_ENDPOINT.getPort()) {
+            ProcessHandle.allProcesses()
+                .filter(ProcessHandle::isAlive)
+                .filter(h -> h.pid() != currentPid)
+                .filter(h -> matchesManagedProcess(h, normalizedSource))
+                .forEach(targets::add);
+        }
+        if (targets.isEmpty()) {
+            return false;
+        }
+        for (ProcessHandle target : targets) {
+            List<ProcessHandle> children = target.descendants().toList();
+            target.destroy();
+            children.stream().filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroy);
+        }
+        waitUntilDown(address, Duration.ofSeconds(4));
+        if (portOpen(address)) {
+            for (ProcessHandle target : targets) {
+                if (target.isAlive()) {
+                    target.destroyForcibly();
+                }
+            }
+            waitUntilDown(address, Duration.ofSeconds(2));
+        }
+        deletePidFile(root);
+        return !portOpen(address);
+    }
+
+    static boolean matchesManagedProcess(ProcessHandle handle, String normalizedSource) {
+        StringBuilder joined = new StringBuilder();
+        handle.info().command().ifPresent(c -> joined.append(c).append(' '));
+        handle.info().commandLine().ifPresent(c -> joined.append(c).append(' '));
+        handle.info().arguments().ifPresent(args -> {
+            for (String arg : args) {
+                joined.append(arg).append(' ');
+            }
+        });
+        String cmd = normalizeForMatch(joined.toString());
+        return !normalizedSource.isEmpty() && cmd.contains(normalizedSource)
+            && (cmd.contains("searxng-run") || cmd.contains("searx.webapp"));
+    }
+
+    private static String normalizeForMatch(String path) {
+        return path.replace('\\', '/').toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private static void writePidFile(Path root, long pid, int port) {
+        try {
+            Files.writeString(root.resolve(PID_FILE_NAME), pid + ":" + port, StandardCharsets.UTF_8);
+        } catch (IOException ignored) {
+            // PID 文件仅用于跨重启识别旧托管进程，写失败不影响主流程
+        }
+    }
+
+    private static void deletePidFile(Path root) {
+        try {
+            Files.deleteIfExists(root.resolve(PID_FILE_NAME));
+        } catch (IOException ignored) {
+            // 忽略删除失败
         }
     }
 

@@ -61,32 +61,36 @@ class LocalSearchRuntimeTest {
     }
 
     @Test
-    void syncManagedSettingsCreatesUpgradesV1AndV2AndPreservesCustomUserFile() throws Exception {
+    void syncManagedSettingsCreatesUpgradesV1ToV3AndPreservesCustomUserFile() throws Exception {
         Path settings = dataDir.resolve("searxng").resolve("settings.yml");
         assertFalse(LocalSearchRuntime.isSettingsUpToDate(settings));
         assertTrue(LocalSearchRuntime.syncManagedSettings(settings));
         assertTrue(LocalSearchRuntime.isSettingsUpToDate(settings));
-        String v3 = Files.readString(settings);
-        assertTrue(v3.startsWith("# pilot-managed-settings: v3"));
-        assertTrue(v3.contains("- bing"));
-        assertTrue(v3.contains("- 360search"));
-        assertFalse(v3.contains("- sogou"));
-        assertFalse(v3.contains("- baidu"));
-        assertFalse(v3.contains("- wikidata"));
+        String v4 = Files.readString(settings);
+        assertTrue(v4.startsWith("# pilot-managed-settings: v4"));
+        assertTrue(v4.contains("- bing"));
+        assertTrue(v4.contains("- 360search"));
+        assertTrue(v4.contains("- duckduckgo news"));
+        assertTrue(v4.contains("- baidu kaifa"));
+        assertTrue(v4.contains("- openalex"));
+        assertFalse(v4.contains("- sogou"));
+        assertFalse(v4.contains("- baidu\n"));
+        assertFalse(v4.contains("- wikidata"));
 
-        // 已经是 v3 时不再重复覆盖
+        // 已经是 v4 时不再重复覆盖
         assertFalse(LocalSearchRuntime.syncManagedSettings(settings));
 
-        // 模拟旧版 v1 与 v2 托管文件：均应自动备份并升级为 v3
+        // 模拟旧版 v1 / v2 / v3 托管文件：均应自动备份并升级为 v4
         for (String legacy : new String[] {
             "# Pilot 写给本机 SearXNG 的配置。只监听 127.0.0.1，不对外。\nuse_default_settings: true\n",
-            "# pilot-managed-settings: v2\nuse_default_settings: true\n"
+            "# pilot-managed-settings: v2\nuse_default_settings: true\n",
+            "# pilot-managed-settings: v3\nuse_default_settings: true\n"
         }) {
             Files.writeString(settings, legacy);
             assertFalse(LocalSearchRuntime.isSettingsUpToDate(settings));
             assertTrue(LocalSearchRuntime.syncManagedSettings(settings));
             assertTrue(LocalSearchRuntime.isSettingsUpToDate(settings));
-            assertTrue(Files.readString(settings).startsWith("# pilot-managed-settings: v3"));
+            assertTrue(Files.readString(settings).startsWith("# pilot-managed-settings: v4"));
             assertEquals(legacy, Files.readString(settings.resolveSibling("settings.yml.bak")));
         }
 

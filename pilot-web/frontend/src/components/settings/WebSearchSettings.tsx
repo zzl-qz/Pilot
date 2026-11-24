@@ -228,7 +228,7 @@ export function WebSearchSettings() {
       </div>
       {provider === 'auto' && !anyApiKeySet && (
         <p className="settings-status">
-          当前未配置商用搜索 API 密钥，自动模式将依次使用本机 SearXNG 与免密钥公开只读源；如需更高命中率，可在上方选择博查 / Tavily / Brave / Serper / Exa 并填写密钥。
+          免密钥模式已就绪：自动模式默认使用本机 SearXNG（聚合 Bing / 360 / Yahoo / 百度开发者 / DuckDuckGo 新闻 / GitHub / StackOverflow / MDN / arXiv / OpenAlex 等免密钥引擎）并自动回退官方公开只读源；付费 API Key 完全可选。
         </p>
       )}
     </section>

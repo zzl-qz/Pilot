@@ -472,6 +472,22 @@ class WebToolsTest {
             exchange.getResponseBody().write(xml);
             exchange.close();
         });
+        server.createContext("/hn", exchange -> {
+            byte[] body = """
+                {"hits":[{"title":"Show HN: Zero-Key Local Search","url":"https://hn.example/zero-key","objectID":"42","points":312,"num_comments":88,"created_at":"2026-06-10T10:00:00Z"}]}
+                """.getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.createContext("/openalex", exchange -> {
+            byte[] body = """
+                {"results":[{"display_name":"OpenAlex Mixture of Experts Paper","primary_location":{"landing_page_url":"https://openalex.example/paper","source":{"display_name":"NeurIPS"}},"cited_by_count":128,"publication_date":"2026-03-15"}]}
+                """.getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
         server.createContext("/empty", exchange -> {
             byte[] body = "{\"items\":[],\"query\":{\"search\":[]}}".getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
@@ -481,7 +497,8 @@ class WebToolsTest {
         server.start();
         URI base = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
         var publicSources = new WebSearchConfig.PublicSources(base.resolve("/empty"), base.resolve("/empty"),
-            base.resolve("/github-403"), base.resolve("/empty"), base.resolve("/arxiv"));
+            base.resolve("/github-403"), base.resolve("/empty"), base.resolve("/arxiv"), base.resolve("/hn"),
+            base.resolve("/openalex"));
         try (HttpClient client = HttpClient.newHttpClient()) {
             // 1. AUTO mode tries Bocha (429 -> enters cooldown), fails over to Tavily using isolated endpoint
             WebSearchConfig cfg = new WebSearchConfig(WebSearchProvider.AUTO, "", null, base, Duration.ofSeconds(5),
@@ -521,6 +538,12 @@ class WebToolsTest {
                 Map.of("query", "Mixture of Experts", "category", "science"));
             assertTrue(arxivRes.ok());
             assertTrue(arxivQuery.get().contains("all:Mixture+AND+all:of+AND+all:Experts"), arxivQuery.get());
+            assertTrue(arxivRes.formattedText().contains("OpenAlex Mixture of Experts Paper"));
+
+            WebSearchTool.SearchReport hnRes = pubTool.executeDetailed(
+                Map.of("query", "Zero-Key Local Search", "category", "news"));
+            assertTrue(hnRes.ok());
+            assertTrue(hnRes.formattedText().contains("Show HN: Zero-Key Local Search"));
         } finally {
             server.stop(0);
         }

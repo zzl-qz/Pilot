@@ -637,13 +637,23 @@ public final class WebSearchClients {
                     perSource, subTimeout, 0.95));
             } else if (site.endsWith("arxiv.org")) {
                 tasks.add(() -> queryArxiv(client, sources.arxiv(), request.query(), perSource, subTimeout, 0.95));
+            } else if (site.endsWith("news.ycombinator.com")) {
+                if (sources.hackerNews() != null) {
+                    tasks.add(() -> queryHackerNews(client, mapper, sources.hackerNews(), request.query(),
+                        perSource, subTimeout, 0.95));
+                }
             } else {
-                warnings.add("公开只读知识源仅覆盖 Wikipedia/GitHub/StackOverflow/arXiv，不包含限定站点 " + site);
+                warnings.add("公开只读知识源仅覆盖 Wikipedia/GitHub/StackOverflow/HackerNews/arXiv/OpenAlex，不包含限定站点 "
+                    + site);
                 return new ProviderOutcome(provider.id(), provider.label(), List.of(), List.of(), List.of(), List.of(),
                     warnings, null, false, false);
             }
         } else if ("science".equals(request.category())) {
             tasks.add(() -> queryArxiv(client, sources.arxiv(), request.query(), perSource, subTimeout, 0.95));
+            if (sources.openAlex() != null) {
+                tasks.add(() -> queryOpenAlex(client, mapper, sources.openAlex(), request.query(), perSource,
+                    subTimeout, 0.92));
+            }
             tasks.add(() -> queryWikipedia(client, mapper, preferZh ? sources.wikipediaZh() : sources.wikipediaEn(),
                 preferZh ? "zh" : "en", request.query(), perSource, subTimeout, 0.85));
         } else if ("it".equals(request.category())) {
@@ -651,11 +661,19 @@ public final class WebSearchClients {
                 0.95));
             tasks.add(() -> queryStackExchange(client, mapper, sources.stackExchange(), request.query(),
                 perSource, subTimeout, 0.92));
+            if (sources.hackerNews() != null) {
+                tasks.add(() -> queryHackerNews(client, mapper, sources.hackerNews(), request.query(),
+                    Math.min(4, perSource), subTimeout, 0.88));
+            }
             tasks.add(() -> queryWikipedia(client, mapper, preferZh ? sources.wikipediaZh() : sources.wikipediaEn(),
                 preferZh ? "zh" : "en", request.query(), Math.min(3, perSource), subTimeout, 0.82));
         } else {
             if ("news".equals(request.category())) {
-                warnings.add("公开只读知识源偏向百科与技术文档，时效新闻建议配置博查/Tavily/Serper 等搜索 API");
+                if (sources.hackerNews() != null) {
+                    tasks.add(() -> queryHackerNews(client, mapper, sources.hackerNews(), request.query(),
+                        perSource, subTimeout, 0.94));
+                }
+                warnings.add("公开只读知识源以百科与技术资讯为主，综合新闻依赖本机 SearXNG 的新闻引擎");
             }
             if (preferZh) {
                 tasks.add(() -> queryWikipedia(client, mapper, sources.wikipediaZh(), "zh", request.query(),
@@ -672,6 +690,10 @@ public final class WebSearchClients {
                 if (request.looksTechnical()) {
                     tasks.add(() -> queryStackExchange(client, mapper, sources.stackExchange(), request.query(),
                         Math.min(4, perSource), subTimeout, 0.84));
+                    if (sources.hackerNews() != null) {
+                        tasks.add(() -> queryHackerNews(client, mapper, sources.hackerNews(), request.query(),
+                            Math.min(3, perSource), subTimeout, 0.83));
+                    }
                 }
             }
         }
@@ -985,6 +1007,106 @@ public final class WebSearchClients {
             return List.of("上游返回 " + raw.size() + " 条结果均不属于限定站点 " + site + "，已过滤");
         }
         return List.of();
+    }
+
+    private static SubSourceResult queryHackerNews(HttpClient client, ObjectMapper mapper, URI endpoint, String query,
+        int limit, Duration timeout, double baseScore) throws InterruptedException {
+        String source = "hackernews";
+        if (endpoint == null) {
+            return new SubSourceResult(source, List.of(), "未配置地址");
+        }
+        try {
+            String url = endpoint + "?query=" + encode(query) + "&tags=story&hitsPerPage=" + limit;
+            HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+                .timeout(timeout)
+                .header("Accept", "application/json")
+                .header("User-Agent", USER_AGENT)
+                .GET()
+                .build();
+            HttpText response = sendText(client, request, timeout);
+            if (response.statusCode() != 200) {
+                return new SubSourceResult(source, List.of(), "HTTP " + response.statusCode());
+            }
+            JsonNode items = mapper.readTree(response.body()).path("hits");
+            List<SearchHit> hits = new ArrayList<>();
+            int idx = 0;
+            for (JsonNode item : items) {
+                String title = cleanText(item.path("title").asString(""));
+                String objectId = item.path("objectID").asString("").strip();
+                String hitUrl = firstNonBlank(item.path("url").asString(""),
+                    objectId.isEmpty() ? "" : "https://news.ycombinator.com/item?id=" + objectId);
+                int points = item.path("points").asInt(0);
+                int comments = item.path("num_comments").asInt(0);
+                String snippet = "Hacker News · 赞同 " + points + " · 评论 " + comments;
+                String date = normalizeDate(item.path("created_at").asString(""));
+                if (!title.isEmpty() || !hitUrl.isEmpty()) {
+                    hits.add(new SearchHit(title, hitUrl, snippet, date, List.of(source),
+                        Math.max(0.1, baseScore - idx * 0.03)));
+                    idx++;
+                }
+            }
+            return new SubSourceResult(source, hits, null);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw e;
+        } catch (HttpTimeoutException e) {
+            return new SubSourceResult(source, List.of(), "超时");
+        } catch (Exception e) {
+            return new SubSourceResult(source, List.of(), e.getClass().getSimpleName());
+        }
+    }
+
+    private static SubSourceResult queryOpenAlex(HttpClient client, ObjectMapper mapper, URI endpoint, String query,
+        int limit, Duration timeout, double baseScore) throws InterruptedException {
+        String source = "openalex";
+        if (endpoint == null) {
+            return new SubSourceResult(source, List.of(), "未配置地址");
+        }
+        try {
+            String url = endpoint + "?search=" + encode(query) + "&per-page=" + limit;
+            HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+                .timeout(timeout)
+                .header("Accept", "application/json")
+                .header("User-Agent", USER_AGENT)
+                .GET()
+                .build();
+            HttpText response = sendText(client, request, timeout);
+            if (response.statusCode() != 200) {
+                return new SubSourceResult(source, List.of(), "HTTP " + response.statusCode());
+            }
+            JsonNode items = mapper.readTree(response.body()).path("results");
+            List<SearchHit> hits = new ArrayList<>();
+            int idx = 0;
+            for (JsonNode item : items) {
+                String title = cleanText(firstNonBlank(item.path("display_name").asString(""),
+                    item.path("title").asString("")));
+                String hitUrl = firstNonBlank(item.path("primary_location").path("landing_page_url").asString(""),
+                    item.path("doi").asString(""), item.path("id").asString(""));
+                int cited = item.path("cited_by_count").asInt(0);
+                String venue = cleanText(item.path("primary_location").path("source").path("display_name")
+                    .asString(""));
+                StringBuilder snippet = new StringBuilder();
+                if (!venue.isEmpty()) {
+                    snippet.append(venue).append(" · ");
+                }
+                snippet.append("被引 ").append(cited);
+                String date = normalizeDate(firstNonBlank(item.path("publication_date").asString(""),
+                    item.path("publication_year").asString("")));
+                if (!title.isEmpty() || !hitUrl.isEmpty()) {
+                    hits.add(new SearchHit(title, hitUrl, snippet.toString(), date, List.of(source),
+                        Math.max(0.1, baseScore - idx * 0.03)));
+                    idx++;
+                }
+            }
+            return new SubSourceResult(source, hits, null);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw e;
+        } catch (HttpTimeoutException e) {
+            return new SubSourceResult(source, List.of(), "超时");
+        } catch (Exception e) {
+            return new SubSourceResult(source, List.of(), e.getClass().getSimpleName());
+        }
     }
 
     private static ProviderOutcome apiStatusFailure(WebSearchProvider provider, String apiName, HttpText response,
