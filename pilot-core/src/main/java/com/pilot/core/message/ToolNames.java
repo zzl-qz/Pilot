@@ -16,6 +16,8 @@ public final class ToolNames {
     public static final String SEARCH_TEXT = "search_text";
     public static final String EDIT_FILE = "edit_file";
     public static final String CREATE_FILE = "create_file";
+    public static final String DELETE_FILE = "delete_file";
+    public static final String MOVE_FILE = "move_file";
     public static final String APPLY_PATCH = "apply_patch";
 
     public static final String RUN_COMMAND = "run_command";
@@ -41,7 +43,7 @@ public final class ToolNames {
     public static final String WAIT_UNTIL = "wait_until";
 
     /** 会直接改工作区文件的工具。 */
-    public static final Set<String> FILE_EDITS = Set.of(EDIT_FILE, CREATE_FILE, APPLY_PATCH);
+    public static final Set<String> FILE_EDITS = Set.of(EDIT_FILE, CREATE_FILE, DELETE_FILE, MOVE_FILE, APPLY_PATCH);
 
     private ToolNames() {
     }

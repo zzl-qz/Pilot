@@ -47,9 +47,11 @@ import com.pilot.core.tool.command.RunCommandTool;
 import com.pilot.core.tool.command.SandboxCommandTool;
 import com.pilot.core.tool.file.ApplyPatchTool;
 import com.pilot.core.tool.file.CreateFileTool;
+import com.pilot.core.tool.file.DeleteFileTool;
 import com.pilot.core.tool.file.EditFileTool;
 import com.pilot.core.tool.file.GlobFilesTool;
 import com.pilot.core.tool.file.ListDirTool;
+import com.pilot.core.tool.file.MoveFileTool;
 import com.pilot.core.tool.file.ReadFileTool;
 import com.pilot.core.tool.file.SandboxCreateFileTool;
 import com.pilot.core.tool.file.SandboxEditFileTool;
@@ -342,6 +344,8 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
         registry.register(new WebFetchTool(webClient));
         registry.register(new EditFileTool(validator, snapshots, reads));
         registry.register(new CreateFileTool(validator, snapshots, reads));
+        registry.register(new DeleteFileTool(validator, snapshots, reads));
+        registry.register(new MoveFileTool(validator, snapshots, reads));
         if (dataDir != null) {
             MemoryStore memoryStore = new MemoryStore(dataDir.file("memory"));
             registry.register(new RememberTool(memoryStore, root));

@@ -15,6 +15,8 @@ const TOOL_LABELS: Record<string, string> = {
   search_text: '搜索',
   edit_file: '编辑',
   create_file: '新建',
+  delete_file: '删除',
+  move_file: '移动',
   glob_files: '找文件',
   apply_patch: '补丁',
   run_command: '命令',
@@ -111,7 +113,7 @@ function toolArgsText(name: string, args: unknown) {
   const obj = args && typeof args === 'object' && !Array.isArray(args) ? (args as Record<string, unknown>) : null;
   const raw = obj
     ? (() => {
-        for (const key of ['command', 'path', 'file', 'pattern', 'query', 'url', 'question', 'task']) {
+        for (const key of ['command', 'path', 'source', 'file', 'pattern', 'query', 'url', 'question', 'task']) {
           if (obj[key] != null && String(obj[key]).trim()) return String(obj[key]).trim();
         }
         try { return JSON.stringify(obj); } catch { return ''; }

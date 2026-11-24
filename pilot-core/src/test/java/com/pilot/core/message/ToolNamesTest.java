@@ -17,6 +17,8 @@ class ToolNamesTest {
         assertEquals("search_text", ToolNames.SEARCH_TEXT);
         assertEquals("edit_file", ToolNames.EDIT_FILE);
         assertEquals("create_file", ToolNames.CREATE_FILE);
+        assertEquals("delete_file", ToolNames.DELETE_FILE);
+        assertEquals("move_file", ToolNames.MOVE_FILE);
         assertEquals("apply_patch", ToolNames.APPLY_PATCH);
         assertEquals("run_command", ToolNames.RUN_COMMAND);
         assertEquals("command_status", ToolNames.COMMAND_STATUS);
@@ -36,7 +38,8 @@ class ToolNamesTest {
     }
 
     @Test
-    void fileEditsCoverExactlyTheThreeWritingTools() {
-        assertEquals(Set.of("edit_file", "create_file", "apply_patch"), ToolNames.FILE_EDITS);
+    void fileEditsCoverAllDirectFileMutationTools() {
+        assertEquals(Set.of("edit_file", "create_file", "delete_file", "move_file", "apply_patch"),
+            ToolNames.FILE_EDITS);
     }
 }
