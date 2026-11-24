@@ -69,10 +69,11 @@ public final class CommandStatusTool implements Tool, ProducesCheck {
                 task = tasks.get(sessionId, id, owner);
             }
             String rendered = CommandToolSupport.render(task);
-            String sandboxHint = CommandToolSupport.nestedSandboxHint(tasks, task);
+            String sandboxHint = CommandToolSupport.nestedSandboxHint(tasks, task, owner);
             if (!sandboxHint.isEmpty()) {
                 rendered = sandboxHint + "\n" + rendered;
             }
+            rendered += CommandToolSupport.failureLogTail(tasks, task, owner);
             if (task == null || CommandToolSupport.running(task) || task.changeTracking() == null
                 || !task.changeTracking().active()) {
                 return ToolResult.text(rendered);

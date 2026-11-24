@@ -28,6 +28,7 @@ final class CommandToolSupport {
     private static final int CHECK_COMMAND_HEAD_CHARS = 150;
     private static final int CHECK_COMMAND_TAIL_CHARS = 70;
     private static final int SANDBOX_LOG_TAIL_CHARS = 8_000;
+    private static final int FAILURE_LOG_TAIL_CHARS = 2_000;
     private static final int MAC_SEATBELT_EX_OSERR = 71;
     private static final int MAX_REPORT_FILES = 24;
     private static final int MAX_REPORT_READ_BYTES = 256 * 1024;
@@ -147,7 +148,7 @@ final class CommandToolSupport {
         return head + " … " + tail;
     }
 
-    /** 确定性识别 macOS Seatbelt / Linux bwrap 嵌套沙箱失败，避免模型误将外层沙箱限制当成业务代码缺陷反复排错。 */
+    /** 确定性识别 macOS Seatbelt / Linux bwrap / Chromium 子进程嵌套沙箱失败，避免模型误将外层沙箱限制当成业务代码缺陷反复排错。 */
     static String nestedSandboxHint(String output, Integer exitCode) {
         if (output == null || output.isBlank()) {
             return "";
@@ -158,7 +159,10 @@ final class CommandToolSupport {
             && (lower.contains("operation not permitted") || Integer.valueOf(MAC_SEATBELT_EX_OSERR).equals(exitCode)));
         boolean linuxBwrap = lower.contains("bwrap:") && (lower.contains("no permissions to creating new namespace")
             || lower.contains("operation not permitted") || lower.contains("setting up uid map"));
-        return macSeatbelt || linuxBwrap ? NESTED_SANDBOX_HINT : "";
+        boolean chromiumSandbox = lower.contains("sandbox initialization failed: operation not permitted")
+            || (lower.contains("failed to initialize sandbox") && lower.contains("operation not permitted"))
+            || (lower.contains("failed to move to new namespace") && lower.contains("operation not permitted"));
+        return macSeatbelt || linuxBwrap || chromiumSandbox ? NESTED_SANDBOX_HINT : "";
     }
 
     static String nestedSandboxHint(CommandTaskManager tasks, CommandTaskManager.Task task) {
@@ -187,6 +191,29 @@ final class CommandToolSupport {
             }
         }
         return nestedSandboxHint(tail.text(), task.exitCode());
+    }
+
+    /** 后台命令非正常结束时附带尾部输出，让模型在 command_status 中直接看到失败原因，不必再额外翻一次 command_logs。 */
+    static String failureLogTail(CommandTaskManager tasks, CommandTaskManager.Task task, String ownerSessionId) {
+        if (tasks == null || task == null || running(task) || CommandTaskStatus.COMPLETED.is(task.status())) {
+            return "";
+        }
+        String session = ownerSessionId == null ? task.sessionId() : ownerSessionId;
+        long total = tasks.logLength(session, task.taskId());
+        if (total <= 0L) {
+            return "";
+        }
+        long offset = Math.max(0L, total - FAILURE_LOG_TAIL_CHARS);
+        CommandTaskManager.LogChunk chunk = tasks.logs(session, task.taskId(), offset, FAILURE_LOG_TAIL_CHARS + 200);
+        if (chunk == null) {
+            return "";
+        }
+        String text = chunk.text().replace("\r\n", "\n").replace('\r', '\n').strip();
+        if (text.isEmpty()) {
+            return "";
+        }
+        String prefix = offset > 0L ? "…（已省略前 " + offset + " 字符，完整日志见上方 command_logs）\n" : "";
+        return "\n输出:\n" + prefix + text;
     }
 
     /**

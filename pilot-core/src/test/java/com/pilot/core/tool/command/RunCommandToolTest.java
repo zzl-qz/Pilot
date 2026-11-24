@@ -413,7 +413,17 @@ class RunCommandToolTest {
         String linuxBwrap = CommandToolSupport.nestedSandboxHint("bwrap: No permissions to creating new namespace", 1);
         assertTrue(linuxBwrap.contains("[环境提示]"), linuxBwrap);
 
+        String electronMac = CommandToolSupport.nestedSandboxHint(
+            "sandbox initialization failed: Operation not permitted\nFailed to initialize sandbox.", 1);
+        assertTrue(electronMac.contains("[环境提示]"), electronMac);
+
+        String electronLinux = CommandToolSupport.nestedSandboxHint(
+            "Failed to move to new namespace: PID namespaces supported, but failed: errno = Operation not permitted",
+            1);
+        assertTrue(electronLinux.contains("[环境提示]"), electronLinux);
+
         // 普通测试或编译失败不能误报为嵌套沙箱环境问题
+        assertEquals("", CommandToolSupport.nestedSandboxHint("Failed to initialize sandbox: invalid flag", 1));
         assertEquals("", CommandToolSupport.nestedSandboxHint("AssertionFailedError: expected <1> but was <2>", 1));
         assertEquals("", CommandToolSupport.nestedSandboxHint("BUILD SUCCESS", 0));
     }

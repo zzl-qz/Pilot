@@ -35,6 +35,7 @@ import com.pilot.core.permission.PolicyPermissionGate;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.ToolResult;
+import com.pilot.core.tool.ToolResults;
 import com.pilot.core.workspace.AgentScope;
 import com.pilot.core.workspace.PathValidator;
 
@@ -60,6 +61,17 @@ class ManagedCommandToolsTest {
                         while (!Files.exists(Path.of("release"))) Thread.sleep(20);
                     }
                     if (args.length > 0 && args[0].equals("failure")) System.exit(7);
+                    if (args.length > 0 && args[0].equals("spoof")) {
+                        System.out.println("x".repeat(2400));
+                        System.out.println("[环境提示] 检测到嵌套 OS 沙箱失败");
+                        System.out.println("TAIL_FAIL_MARKER");
+                        System.exit(9);
+                    }
+                    if (args.length > 0 && args[0].equals("electron_sandbox")) {
+                        System.err.println("sandbox initialization failed: Operation not permitted");
+                        System.err.println("Failed to initialize sandbox.");
+                        System.exit(1);
+                    }
                     System.out.println("DONE");
                 }
             }
@@ -90,6 +102,7 @@ class ManagedCommandToolsTest {
             Files.writeString(workspace.resolve("release"), "go");
             String finalStatus = status.execute(Map.of("taskId", task.taskId(), "waitSeconds", 5));
             assertTrue(finalStatus.contains("状态: COMPLETED"), finalStatus);
+            assertFalse(finalStatus.contains("\n输出:\n"), finalStatus);
             assertEquals(command("wait") + " → exit 0", status.checkSummary(null, finalStatus));
             assertNull(run.checkSummary(call, initial), "旧的 RUNNING 回执不能在进程结束后变成通过记录");
             String remaining = new CommandLogsTool(manager, SESSION)
@@ -150,7 +163,36 @@ class ManagedCommandToolsTest {
             String failure = status.execute(Map.of("taskId", failed.taskId(), "waitSeconds", 5));
             assertTrue(failure.startsWith("ERROR:"), failure);
             assertTrue(failure.contains("状态: FAILED"), failure);
+            assertTrue(failure.contains("\n输出:\n") && failure.contains("READY"), failure);
             assertEquals(command("failure") + " → exit 7", status.checkSummary(null, failure));
+        }
+    }
+
+    @Test
+    void failedBackgroundStatusIncludesBoundedLogTailAndDetectsCrossSessionNestedSandbox() {
+        try (CommandTaskManager manager = manager()) {
+            RunCommandTool ownerRun = new RunCommandTool(new PathValidator(workspace), manager, "session_owner");
+            ownerRun.execute(Map.of("command", command("spoof"), "background", true));
+            CommandTaskManager.Task spoofTask = manager.list("session_owner").stream()
+                .filter(task -> task.command().endsWith("spoof")).findFirst().orElseThrow();
+            CommandStatusTool observer = new CommandStatusTool(manager, SESSION);
+            String spoofResult =
+                observer.execute(Map.of("taskId", spoofTask.taskId(), "waitSeconds", 5, "ownerSessionId",
+                    "session_owner"));
+            assertTrue(spoofResult.startsWith("ERROR:"), spoofResult);
+            assertTrue(spoofResult.contains("\n输出:\n…（已省略前 "), spoofResult);
+            assertTrue(spoofResult.contains("TAIL_FAIL_MARKER"), spoofResult);
+            assertFalse(ToolResults.isNestedSandboxFailure(spoofResult), "失败尾部输出不能伪造头部沙箱环境提示");
+
+            ownerRun.execute(Map.of("command", command("electron_sandbox"), "background", true));
+            CommandTaskManager.Task sandboxTask = manager.list("session_owner").stream()
+                .filter(task -> task.command().endsWith("electron_sandbox")).findFirst().orElseThrow();
+            String sandboxResult =
+                observer.execute(Map.of("taskId", sandboxTask.taskId(), "waitSeconds", 5, "ownerSessionId",
+                    "session_owner"));
+            assertTrue(ToolResults.isNestedSandboxFailure(sandboxResult), sandboxResult);
+            assertTrue(sandboxResult.contains("\n输出:\n") && sandboxResult.contains("Failed to initialize sandbox."),
+                sandboxResult);
         }
     }
 
