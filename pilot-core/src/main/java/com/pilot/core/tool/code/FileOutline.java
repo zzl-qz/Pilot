@@ -2,34 +2,51 @@ package com.pilot.core.tool.code;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
+import java.nio.file.FileVisitOption;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.PathMatcher;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import com.pilot.core.tool.file.SearchTool;
 import com.pilot.core.util.Texts;
 import com.pilot.core.workspace.PathValidator;
 
 /**
- * 纯本地、跨平台的文件结构大纲提取器：不依赖外部编译器/LSP，按扩展名抽取类型级与方法/函数级声明及精确行号，
- * 让模型读大文件前先 1 步定位目标方法行号。
+ * 纯本地、跨平台的文件结构大纲与跨文件符号定义搜索器：不依赖外部编译器/LSP，
+ * 按扩展名抽取类型级与方法/函数级声明及精确行号。
  */
 public final class FileOutline {
     public static final int MAX_SYMBOLS = 120;
+    private static final int MAX_SEARCH_RESULTS = 50;
+    private static final int MAX_SCAN_FILES = 4000;
+    private static final long SEARCH_TIME_BUDGET_NANOS = 3_000_000_000L;
     private static final long MAX_FILE_BYTES = 1024 * 1024;
+    private static final long MAX_SCAN_FILE_BYTES = 512 * 1024;
     private static final int MAX_SIGNATURE_CHARS = 120;
 
     private static final Set<String> CONTROL_KEYWORDS = Set.of("if", "else", "for", "while", "switch", "case", "catch",
         "try", "finally", "synchronized", "return", "throw", "new", "super", "this", "assert", "yield", "do", "await",
         "typeof", "delete", "void", "constructor", "import", "export", "from", "package");
+    private static final Set<String> CODE_EXTENSIONS = Set.of("java", "kt", "kts", "ts", "tsx", "js", "jsx", "mjs",
+        "cjs", "py", "go", "rs", "c", "h", "cpp", "hpp", "cs", "rb", "php", "swift", "scala", "md", "markdown");
 
     private static final Pattern JAVA_TYPE = Pattern.compile(
-        "^\\s*(?:(?:public|protected|private|static|final|abstract|sealed|non-sealed|strictfp)\\s+)*(?:@?interface|class|record|enum)\\s+([A-Za-z_][\\w$]*)");
+        "^\\s*(?:(?:public|protected|private|static|final|abstract|sealed|non-sealed|strictfp)\\s+)*(@?interface|class|record|enum)\\s+([A-Za-z_][\\w$]*)");
     private static final Pattern JAVA_METHOD = Pattern.compile(
         "^\\s*(?:(?:public|protected|private|static|final|abstract|synchronized|default|native|strictfp)\\s+)*(?:<[^>{};]+>\\s+)?(?:[\\w$.<>\\[\\], ?@]+\\s+)?([A-Za-z_][\\w$]*)\\s*\\(([^;{}]*?)\\)\\s*(?:throws\\s+[\\w$.,\\s]+)?(?:\\{|;)");
     private static final Pattern KT_DECL = Pattern.compile(
@@ -46,7 +63,7 @@ public final class FileOutline {
     private static final Pattern GO_TYPE = Pattern.compile("^\\s*type\\s+([A-Za-z_]\\w*)\\s+(struct|interface|\\S+)");
     private static final Pattern GO_FUNC = Pattern.compile("^\\s*func\\s+(?:\\(([^)]+)\\)\\s+)?([A-Za-z_]\\w*)\\s*\\(");
     private static final Pattern RUST_TYPE = Pattern
-        .compile("^\\s*(?:pub(?:\\([^)]*\\))?\\s+)?(?:unsafe\\s+)?(struct|enum|trait|impl|mod|type)\\s+([^{;]+)");
+        .compile("^\\s*(?:pub(?:\\([^)]*\\))?\\s+)?(?:unsafe\\s+)?(struct|enum|trait|impl|mod|type)\\s+([A-Za-z_][\\w:]*)");
     private static final Pattern RUST_FN = Pattern
         .compile("^\\s*(?:pub(?:\\([^)]*\\))?\\s+)?(?:async\\s+)?(?:unsafe\\s+)?(?:const\\s+)?fn\\s+([A-Za-z_]\\w*)");
     private static final Pattern MD_HEADING = Pattern.compile("^(#{1,3})\\s+(.+?)\\s*#*$");
@@ -111,6 +128,232 @@ public final class FileOutline {
         }
     }
 
+    /** 跨文件符号定义搜索：在工作区或指定子目录内按名称/类型/glob 检索类、接口、方法与函数定义。 */
+    public String search(String query, String scopePath, String glob, String kindFilter) {
+        if (query == null || query.isBlank()) {
+            return "ERROR: 缺少参数 query";
+        }
+        String needle = query.strip();
+        String needleLower = needle.toLowerCase(Locale.ROOT);
+        String normalizedKind = normalizeKindFilter(kindFilter);
+
+        List<Path> rootsToScan = new ArrayList<>();
+        if (scopePath != null && !scopePath.isBlank()) {
+            Path resolved;
+            try {
+                resolved = paths.resolve(scopePath);
+            } catch (RuntimeException e) {
+                return "ERROR: " + e.getMessage();
+            }
+            if (!Files.exists(resolved)) {
+                return "ERROR: 路径不存在: " + scopePath;
+            }
+            rootsToScan.add(resolved);
+        } else {
+            rootsToScan.addAll(paths.roots());
+        }
+
+        GlobFilter globFilter;
+        try {
+            globFilter = GlobFilter.compile(glob);
+        } catch (IllegalArgumentException e) {
+            return "ERROR: 无效的 glob 表达式: " + glob;
+        }
+
+        List<SearchHit> hits = new ArrayList<>();
+        AtomicInteger scannedFiles = new AtomicInteger();
+        AtomicBoolean capped = new AtomicBoolean();
+        long deadline = System.nanoTime() + SEARCH_TIME_BUDGET_NANOS;
+
+        for (Path base : rootsToScan) {
+            if (capped.get()) {
+                break;
+            }
+            if (Files.isRegularFile(base)) {
+                scanSingleFile(base, needle, needleLower, normalizedKind, globFilter, hits, scannedFiles);
+                continue;
+            }
+            try {
+                Files.walkFileTree(base, EnumSet.noneOf(FileVisitOption.class), Integer.MAX_VALUE,
+                    new SimpleFileVisitor<>() {
+                        @Override
+                        public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                            if (System.nanoTime() >= deadline || scannedFiles.get() >= MAX_SCAN_FILES) {
+                                capped.set(true);
+                                return FileVisitResult.TERMINATE;
+                            }
+                            if (!dir.equals(base)) {
+                                String dirName = dir.getFileName().toString();
+                                if (SearchTool.SKIPPED_DIRECTORIES.contains(dirName) || dirName.startsWith(".")
+                                    || !paths.allowsDirectory(dir)) {
+                                    return FileVisitResult.SKIP_SUBTREE;
+                                }
+                            }
+                            return FileVisitResult.CONTINUE;
+                        }
+
+                        @Override
+                        public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                            if (System.nanoTime() >= deadline || scannedFiles.get() >= MAX_SCAN_FILES) {
+                                capped.set(true);
+                                return FileVisitResult.TERMINATE;
+                            }
+                            if (!attrs.isRegularFile() || attrs.isSymbolicLink() || attrs.size() > MAX_SCAN_FILE_BYTES
+                                || !paths.allows(file)) {
+                                return FileVisitResult.CONTINUE;
+                            }
+                            scanSingleFile(file, needle, needleLower, normalizedKind, globFilter, hits, scannedFiles);
+                            return FileVisitResult.CONTINUE;
+                        }
+
+                        @Override
+                        public FileVisitResult visitFileFailed(Path file, IOException exc) {
+                            return FileVisitResult.CONTINUE;
+                        }
+                    });
+            } catch (IOException ignored) {
+                // 忽略个别不可访问目录
+            }
+        }
+
+        if (hits.isEmpty()) {
+            return "未找到匹配符号「" + needle + "」（已扫描 " + scannedFiles.get() + " 个文件"
+                + (capped.get() ? "，已达扫描上限，建议指定 path 或 glob 缩小范围" : "") + "）。";
+        }
+        hits.sort(Comparator.comparingInt(SearchHit::score).reversed()
+            .thenComparing(SearchHit::path)
+            .thenComparingInt(SearchHit::line));
+        boolean truncated = hits.size() > MAX_SEARCH_RESULTS;
+        List<SearchHit> shown = truncated ? hits.subList(0, MAX_SEARCH_RESULTS) : hits;
+        StringBuilder out = new StringBuilder();
+        out.append("符号搜索「").append(needle).append("」（共命中 ").append(hits.size()).append(" 处，已扫描 ")
+            .append(scannedFiles.get()).append(" 个文件");
+        if (capped.get()) {
+            out.append("，已达扫描上限");
+        }
+        out.append("）：");
+        for (SearchHit hit : shown) {
+            out.append('\n').append(hit.path()).append(':').append(hit.line()).append(": [").append(hit.kind())
+                .append("] ").append(hit.label());
+        }
+        if (truncated) {
+            out.append("\n… 仅显示前 ").append(MAX_SEARCH_RESULTS).append(" 处最相关定义（其余 ")
+                .append(hits.size() - MAX_SEARCH_RESULTS).append(" 处已省略，可用 path/glob/kind 进一步过滤）");
+        }
+        return out.toString();
+    }
+
+    private void scanSingleFile(Path file, String needle, String needleLower, String kindFilter, GlobFilter globFilter,
+        List<SearchHit> hits, AtomicInteger scannedFiles) {
+        String display = paths.display(file);
+        String ext = extension(display);
+        if (globFilter != null) {
+            if (!globFilter.matches(display, file.getFileName().toString())) {
+                return;
+            }
+        } else if (!CODE_EXTENSIONS.contains(ext)) {
+            return;
+        }
+        scannedFiles.incrementAndGet();
+        byte[] bytes;
+        try {
+            if (Files.size(file) > MAX_SCAN_FILE_BYTES) {
+                return;
+            }
+            bytes = Files.readAllBytes(file);
+        } catch (IOException e) {
+            return;
+        }
+        if (Texts.isBinary(bytes)) {
+            return;
+        }
+        String content = new String(bytes, StandardCharsets.UTF_8);
+        // 大小写不敏感快速预过滤：文件内容完全不含查询子串时跳过正则提取
+        if (!containsIgnoreCase(content, needleLower)) {
+            return;
+        }
+        String[] lines = content.split("\\R", -1);
+        for (Symbol symbol : extract(ext, lines)) {
+            if (!matchesKind(symbol.kind(), kindFilter)) {
+                continue;
+            }
+            int score = scoreMatch(symbol, needle, needleLower);
+            if (score > 0) {
+                hits.add(new SearchHit(display, symbol.line(), symbol.kind(), symbol.label(), score));
+            }
+        }
+    }
+
+    private static boolean containsIgnoreCase(String text, String lowerNeedle) {
+        int len = lowerNeedle.length();
+        int max = text.length() - len;
+        if (max < 0) {
+            return false;
+        }
+        char first = lowerNeedle.charAt(0);
+        char firstUpper = Character.toUpperCase(first);
+        for (int i = 0; i <= max; i++) {
+            char c = text.charAt(i);
+            if ((c == first || c == firstUpper) && text.regionMatches(true, i, lowerNeedle, 0, len)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static int scoreMatch(Symbol symbol, String needle, String needleLower) {
+        String name = symbol.name() == null ? "" : symbol.name();
+        String nameLower = name.toLowerCase(Locale.ROOT);
+        int typeBonus = isTypeKind(symbol.kind()) ? 5 : 0;
+        if (name.equals(needle)) {
+            return 100 + typeBonus;
+        }
+        if (nameLower.equals(needleLower)) {
+            return 90 + typeBonus;
+        }
+        if (nameLower.startsWith(needleLower)) {
+            return 70 + typeBonus;
+        }
+        if (nameLower.contains(needleLower)) {
+            return 50 + typeBonus;
+        }
+        if (symbol.label().toLowerCase(Locale.ROOT).contains(needleLower)) {
+            return 20 + typeBonus;
+        }
+        return 0;
+    }
+
+    private static boolean isTypeKind(String kind) {
+        return "class".equals(kind) || "interface".equals(kind) || "record".equals(kind) || "enum".equals(kind)
+            || "struct".equals(kind) || "trait".equals(kind) || "type".equals(kind);
+    }
+
+    private static String normalizeKindFilter(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "";
+        }
+        return raw.strip().toLowerCase(Locale.ROOT);
+    }
+
+    private static boolean matchesKind(String symbolKind, String filter) {
+        if (filter.isEmpty()) {
+            return true;
+        }
+        if (symbolKind.equals(filter)) {
+            return true;
+        }
+        if ("func".equals(filter) || "fn".equals(filter) || "def".equals(filter) || "function".equals(filter)) {
+            return "function".equals(symbolKind) || "method".equals(symbolKind);
+        }
+        if ("method".equals(filter)) {
+            return "method".equals(symbolKind) || "function".equals(symbolKind);
+        }
+        if ("type".equals(filter)) {
+            return isTypeKind(symbolKind);
+        }
+        return false;
+    }
+
     private static List<Symbol> extract(String ext, String[] lines) {
         return switch (ext) {
             case "java" -> extractJava(lines);
@@ -143,8 +386,11 @@ public final class FileOutline {
             if (isJavaIgnoredLine(trimmed)) {
                 continue;
             }
-            if (JAVA_TYPE.matcher(raw).find()) {
-                symbols.add(new Symbol(i + 1, clipSignature(trimmed), leadingSpaces(raw) >= 4));
+            Matcher typeMatch = JAVA_TYPE.matcher(raw);
+            if (typeMatch.find()) {
+                String kind = typeMatch.group(1).replace("@", "");
+                String name = typeMatch.group(2);
+                symbols.add(new Symbol(i + 1, name, kind, clipSignature(trimmed), leadingSpaces(raw) >= 4));
                 continue;
             }
             Symbol method = matchJavaMethod(lines, i, raw, trimmed);
@@ -182,7 +428,7 @@ public final class FileOutline {
             || beforeName.endsWith("->")) {
             return null;
         }
-        return new Symbol(index + 1, clipSignature(trimTrailingBrace(candidate.strip())), true);
+        return new Symbol(index + 1, name, "method", clipSignature(trimTrailingBrace(candidate.strip())), true);
     }
 
     private static String joinJavaSignature(String[] lines, int index, String raw, String trimmed) {
@@ -206,8 +452,11 @@ public final class FileOutline {
             String raw = lines[i];
             Matcher matcher = KT_DECL.matcher(raw);
             if (matcher.find()) {
-                boolean nested = "fun".equals(matcher.group(1)) && leadingSpaces(raw) >= 2;
-                symbols.add(new Symbol(i + 1, clipSignature(trimTrailingBrace(raw.strip())), nested));
+                String kw = matcher.group(1);
+                String name = matcher.group(2);
+                String kind = "fun".equals(kw) ? "function" : ("typealias".equals(kw) ? "type" : kw);
+                boolean nested = "fun".equals(kw) && leadingSpaces(raw) >= 2;
+                symbols.add(new Symbol(i + 1, name, kind, clipSignature(trimTrailingBrace(raw.strip())), nested));
             }
         }
         return symbols;
@@ -234,19 +483,29 @@ public final class FileOutline {
             if (trimmed.isEmpty() || trimmed.startsWith("//") || trimmed.startsWith("*")) {
                 continue;
             }
-            if (TS_TYPE.matcher(raw).find()) {
-                symbols.add(new Symbol(i + 1, clipSignature(trimTrailingBrace(trimmed)), false));
+            Matcher typeMatch = TS_TYPE.matcher(raw);
+            if (typeMatch.find()) {
+                symbols.add(new Symbol(i + 1, typeMatch.group(2), typeMatch.group(1),
+                    clipSignature(trimTrailingBrace(trimmed)), false));
                 continue;
             }
-            if (TS_FUNCTION.matcher(raw).find() || TS_ARROW.matcher(raw).find()) {
-                symbols.add(new Symbol(i + 1, clipSignature(trimTrailingBrace(trimmed)), leadingSpaces(raw) >= 2));
+            Matcher fnMatch = TS_FUNCTION.matcher(raw);
+            if (fnMatch.find()) {
+                symbols.add(new Symbol(i + 1, fnMatch.group(1), "function",
+                    clipSignature(trimTrailingBrace(trimmed)), leadingSpaces(raw) >= 2));
+                continue;
+            }
+            Matcher arrowMatch = TS_ARROW.matcher(raw);
+            if (arrowMatch.find()) {
+                symbols.add(new Symbol(i + 1, arrowMatch.group(1), "function",
+                    clipSignature(trimTrailingBrace(trimmed)), leadingSpaces(raw) >= 2));
                 continue;
             }
             Matcher method = TS_METHOD.matcher(raw);
             if (method.find()) {
                 String name = method.group(1);
                 if (!CONTROL_KEYWORDS.contains(name)) {
-                    symbols.add(new Symbol(i + 1, clipSignature(trimTrailingBrace(trimmed)), true));
+                    symbols.add(new Symbol(i + 1, name, "method", clipSignature(trimTrailingBrace(trimmed)), true));
                 }
             }
         }
@@ -259,7 +518,8 @@ public final class FileOutline {
             Matcher matcher = PYTHON_DECL.matcher(lines[i]);
             if (matcher.find()) {
                 boolean nested = !matcher.group(1).isEmpty();
-                symbols.add(new Symbol(i + 1, clipSignature(lines[i].strip()), nested));
+                String kind = "class".equals(matcher.group(2)) ? "class" : (nested ? "method" : "function");
+                symbols.add(new Symbol(i + 1, matcher.group(3), kind, clipSignature(lines[i].strip()), nested));
             }
         }
         return symbols;
@@ -269,14 +529,19 @@ public final class FileOutline {
         List<Symbol> symbols = new ArrayList<>();
         for (int i = 0; i < lines.length; i++) {
             String raw = lines[i];
-            if (GO_TYPE.matcher(raw).find()) {
-                symbols.add(new Symbol(i + 1, clipSignature(trimTrailingBrace(raw.strip())), false));
+            Matcher typeMatch = GO_TYPE.matcher(raw);
+            if (typeMatch.find()) {
+                String kind = "struct".equals(typeMatch.group(2)) || "interface".equals(typeMatch.group(2))
+                    ? typeMatch.group(2) : "type";
+                symbols.add(new Symbol(i + 1, typeMatch.group(1), kind,
+                    clipSignature(trimTrailingBrace(raw.strip())), false));
                 continue;
             }
             Matcher fn = GO_FUNC.matcher(raw);
             if (fn.find()) {
                 boolean method = fn.group(1) != null;
-                symbols.add(new Symbol(i + 1, clipSignature(trimTrailingBrace(raw.strip())), method));
+                symbols.add(new Symbol(i + 1, fn.group(2), method ? "method" : "function",
+                    clipSignature(trimTrailingBrace(raw.strip())), method));
             }
         }
         return symbols;
@@ -286,12 +551,17 @@ public final class FileOutline {
         List<Symbol> symbols = new ArrayList<>();
         for (int i = 0; i < lines.length; i++) {
             String raw = lines[i];
-            if (RUST_TYPE.matcher(raw).find()) {
-                symbols.add(new Symbol(i + 1, clipSignature(trimTrailingBrace(raw.strip())), false));
+            Matcher typeMatch = RUST_TYPE.matcher(raw);
+            if (typeMatch.find()) {
+                symbols.add(new Symbol(i + 1, typeMatch.group(2), typeMatch.group(1),
+                    clipSignature(trimTrailingBrace(raw.strip())), false));
                 continue;
             }
-            if (RUST_FN.matcher(raw).find()) {
-                symbols.add(new Symbol(i + 1, clipSignature(trimTrailingBrace(raw.strip())), leadingSpaces(raw) >= 2));
+            Matcher fnMatch = RUST_FN.matcher(raw);
+            if (fnMatch.find()) {
+                boolean nested = leadingSpaces(raw) >= 2;
+                symbols.add(new Symbol(i + 1, fnMatch.group(1), nested ? "method" : "function",
+                    clipSignature(trimTrailingBrace(raw.strip())), nested));
             }
         }
         return symbols;
@@ -311,8 +581,9 @@ public final class FileOutline {
             }
             Matcher heading = MD_HEADING.matcher(trimmed);
             if (heading.find()) {
-                symbols
-                    .add(new Symbol(i + 1, heading.group(1) + " " + heading.group(2), heading.group(1).length() > 1));
+                String title = heading.group(2);
+                symbols.add(new Symbol(i + 1, title, "heading", heading.group(1) + " " + title,
+                    heading.group(1).length() > 1));
             }
         }
         return symbols;
@@ -323,7 +594,10 @@ public final class FileOutline {
         for (int i = 0; i < lines.length; i++) {
             Matcher matcher = GENERIC_DECL.matcher(lines[i]);
             if (matcher.find()) {
-                symbols.add(new Symbol(i + 1, matcher.group(1) + " " + matcher.group(2), leadingSpaces(lines[i]) >= 2));
+                String kw = matcher.group(1);
+                String kind = ("func".equals(kw) || "def".equals(kw) || "fn".equals(kw)) ? "function" : kw;
+                symbols.add(new Symbol(i + 1, matcher.group(2), kind, kw + " " + matcher.group(2),
+                    leadingSpaces(lines[i]) >= 2));
             }
         }
         return symbols;
@@ -369,6 +643,30 @@ public final class FileOutline {
         return singleLine.substring(0, MAX_SIGNATURE_CHARS) + "…";
     }
 
-    private record Symbol(int line, String label, boolean nested) {
+    private record Symbol(int line, String name, String kind, String label, boolean nested) {
+    }
+
+    private record SearchHit(String path, int line, String kind, String label, int score) {
+    }
+
+    private record GlobFilter(PathMatcher fullMatcher, PathMatcher fileNameMatcher) {
+        static GlobFilter compile(String rawGlob) {
+            if (rawGlob == null || rawGlob.isBlank()) {
+                return null;
+            }
+            String normalized = rawGlob.strip().replace('\\', '/');
+            PathMatcher full = FileSystems.getDefault().getPathMatcher("glob:" + normalized);
+            PathMatcher name = normalized.contains("/") ? null
+                : FileSystems.getDefault().getPathMatcher("glob:" + normalized);
+            return new GlobFilter(full, name);
+        }
+
+        boolean matches(String relativePath, String fileName) {
+            String slashPath = relativePath.replace('\\', '/');
+            if (fileNameMatcher != null && fileNameMatcher.matches(Path.of(fileName))) {
+                return true;
+            }
+            return fullMatcher.matches(Path.of(slashPath));
+        }
     }
 }

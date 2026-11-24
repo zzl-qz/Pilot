@@ -142,4 +142,44 @@ class FileOutlineTest {
         assertTrue(tool.execute(Map.of("path", "../outside.java")).startsWith("ERROR:"));
         assertTrue(tool.execute(Map.of("path", "img.bin")).startsWith("ERROR: 二进制文件"));
     }
+
+    @Test
+    void searchesSymbolsAcrossFilesWithRankingGlobKindAndSkippedDirs() throws Exception {
+        Files.createDirectories(workspace.resolve("src/java"));
+        Files.createDirectories(workspace.resolve("web"));
+        Files.createDirectories(workspace.resolve("node_modules/pkg"));
+        Files.writeString(workspace.resolve("src/java/OrderService.java"), """
+            public class OrderService {
+                public void createOrderHelper() {}
+                public void createOrder() {}
+            }
+            """);
+        Files.writeString(workspace.resolve("web/orders.ts"), """
+            export interface OrderServiceConfig { retries: number }
+            export function createOrder() { return true; }
+            """);
+        Files.writeString(workspace.resolve("node_modules/pkg/ignored.ts"), """
+            export function createOrder() { return false; }
+            """);
+
+        CodeSymbolTool tool = new CodeSymbolTool(new PathValidator(workspace));
+
+        String all = tool.execute(Map.of("query", "createOrder"));
+        assertTrue(all.contains("src/java/OrderService.java:3: [method] public void createOrder()"), all);
+        assertTrue(all.contains("web/orders.ts:2: [function] export function createOrder()"), all);
+        assertFalse(all.contains("node_modules"), "必须跳过 node_modules 等构建依赖目录");
+        // 精确名称匹配 createOrder 必须排在前缀匹配 createOrderHelper 之前
+        assertTrue(all.indexOf("createOrder()") < all.indexOf("createOrderHelper()"), all);
+
+        String javaOnly = tool.execute(Map.of("query", "OrderService", "glob", "*.java", "kind", "class"));
+        assertTrue(javaOnly.contains("src/java/OrderService.java:1: [class] public class OrderService"), javaOnly);
+        assertFalse(javaOnly.contains("web/orders.ts"), javaOnly);
+
+        String scoped = tool.execute(Map.of("query", "createOrder", "path", "web"));
+        assertTrue(scoped.contains("web/orders.ts:2:"), scoped);
+        assertFalse(scoped.contains("OrderService.java"), scoped);
+
+        assertTrue(tool.execute(Map.of()).startsWith("ERROR:"));
+        assertTrue(tool.execute(Map.of("query", "createOrder", "path", "../outside")).startsWith("ERROR:"));
+    }
 }
