@@ -127,7 +127,8 @@ class ModelFailoverTest {
         AgentLoop loop = new AgentLoop(provider.forRun(), new ToolRegistry(),
             new PolicyPermissionGate(PermissionMode.READ_ONLY), new AgentLoop.Config(4, 3, "system", List::of))
             .withRetryBudget(new RetryBudget(new RetryBudget.Settings(5, 60_000, 1, 1, 0)));
-        AgentLoop.Result result = loop.run("hello", List.of(), ignored -> {});
+        AgentLoop.Result result = loop.run("hello", List.of(), ignored -> {
+        });
         assertNull(result.failureCode());
         assertEquals("quota-fallback-ok", result.finalText());
 
@@ -137,7 +138,7 @@ class ModelFailoverTest {
             ModelClientException.httpError(ModelFailureKind.PERMANENT, 400, -1L, "HTTP 400 invalid_request")));
         assertFalse(ModelClientProvider.isFailoverEligible(
             new ModelClientException(ModelFailureKind.CONTEXT_OVERFLOW, "context_length_exceeded")));
-        assertFalse(ModelClientProvider.isFailoverEligible(
-            new ModelClientException(ModelFailureKind.INTERRUPTED, "cancelled")));
+        assertFalse(ModelClientProvider
+            .isFailoverEligible(new ModelClientException(ModelFailureKind.INTERRUPTED, "cancelled")));
     }
 }

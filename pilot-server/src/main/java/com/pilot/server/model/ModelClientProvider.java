@@ -94,8 +94,8 @@ public final class ModelClientProvider implements ModelClient {
         return client().chat(messages, tools, text, reasoning);
     }
 
-    public ModelClientProvider withFallback(
-        Function<ModelSettings.Snapshot, Optional<ModelProfileStore.FallbackTarget>> resolver) {
+    public ModelClientProvider
+        withFallback(Function<ModelSettings.Snapshot, Optional<ModelProfileStore.FallbackTarget>> resolver) {
         this.fallbackResolver = resolver == null ? ignored -> Optional.empty() : resolver;
         return this;
     }
@@ -183,8 +183,8 @@ public final class ModelClientProvider implements ModelClient {
             }
             ModelProfileStore.FallbackTarget target = resolved.get();
             backup = factory.apply(target.snapshot());
-            log.warn("主模型调用失败，本次运行自动故障转移至备用预设：name={} model={} endpoint={}", target.name(),
-                target.snapshot().model(), target.snapshot().endpoint());
+            log.warn("主模型调用失败，本次运行自动故障转移至备用预设：name={} model={} endpoint={}", target.name(), target.snapshot().model(),
+                target.snapshot().endpoint());
             return target.name() + "（" + target.snapshot().model() + "）";
         }
 

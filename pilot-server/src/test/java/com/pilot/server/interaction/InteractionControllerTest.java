@@ -9,11 +9,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -37,8 +37,7 @@ import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.QuestionBroker;
 import com.pilot.server.session.question.QuestionController;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = {"pilot.store=memory"})
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {"pilot.store=memory"})
 class InteractionControllerTest {
     private static final Path ROOT =
         Path.of(System.getProperty("java.io.tmpdir"), "pilot-interaction-test-" + UUID.randomUUID());
@@ -76,9 +75,10 @@ class InteractionControllerTest {
     void snapshotAndQuestionSessionOwnershipWork() throws Exception {
         Session owner = sessions.createSession("修复构建脚本");
         ApprovalBroker scoped = ApprovalBroker.forSession(approvals, owner.id());
-        var approvalFuture = scoped.register("call_app_1", "run_command", "rm -rf dist", Map.of("command", "rm -rf dist"));
-        var questionFuture = questions.register("call_q_1", owner.id(), "使用哪个部署环境", List.of("测试", "生产"),
-            Duration.ofMinutes(5));
+        var approvalFuture =
+            scoped.register("call_app_1", "run_command", "rm -rf dist", Map.of("command", "rm -rf dist"));
+        var questionFuture =
+            questions.register("call_q_1", owner.id(), "使用哪个部署环境", List.of("测试", "生产"), Duration.ofMinutes(5));
 
         try {
             InteractionHub.PendingSnapshot snapshot = controller.pending();
@@ -121,7 +121,8 @@ class InteractionControllerTest {
                 + "\r\nAccept: text/event-stream\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.UTF_8));
             out.flush();
 
-            BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+            BufferedReader reader =
+                new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
             String headerLine;
             boolean okHeader = false;
             while ((headerLine = reader.readLine()) != null && !headerLine.isEmpty()) {
@@ -136,8 +137,8 @@ class InteractionControllerTest {
             assertTrue(initial.contains("questions"), initial);
 
             // 新增选择后推送快照
-            var q = questions.register("call_sse_q", owner.id(), "确认回滚吗", List.of("确认回滚", "保持现状"),
-                Duration.ofMinutes(3));
+            var q =
+                questions.register("call_sse_q", owner.id(), "确认回滚吗", List.of("确认回滚", "保持现状"), Duration.ofMinutes(3));
             try {
                 String qFrame = readUntil(reader, "call_sse_q");
                 assertTrue(qFrame.contains("部署验证"), qFrame);
@@ -161,11 +162,10 @@ class InteractionControllerTest {
         var decision = approvals.register("ses_http", "call_http_reject", "run_command", "npm install",
             Map.of("command", "npm install"));
         try (HttpClient client = HttpClient.newHttpClient()) {
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("http://127.0.0.1:" + port + "/api/approvals/call_http_reject"))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString("{\"approved\":false,\"reason\":\"请改用 pnpm\"}"))
-                .build();
+            HttpRequest request =
+                HttpRequest.newBuilder().uri(URI.create("http://127.0.0.1:" + port + "/api/approvals/call_http_reject"))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString("{\"approved\":false,\"reason\":\"请改用 pnpm\"}")).build();
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
             assertEquals(200, response.statusCode());
             assertFalse(decision.get());

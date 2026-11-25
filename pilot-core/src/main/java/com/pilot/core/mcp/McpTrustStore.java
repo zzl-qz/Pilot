@@ -172,8 +172,8 @@ public final class McpTrustStore {
             }
             canonical.append("headers=").append(headers.size()).append('\n');
             for (Map.Entry<String, String> entry : headers.entrySet()) {
-                canonical.append("header.").append(escape(entry.getKey())).append('=')
-                    .append(escape(entry.getValue())).append('\n');
+                canonical.append("header.").append(escape(entry.getKey())).append('=').append(escape(entry.getValue()))
+                    .append('\n');
             }
             return sha256(canonical.toString());
         }

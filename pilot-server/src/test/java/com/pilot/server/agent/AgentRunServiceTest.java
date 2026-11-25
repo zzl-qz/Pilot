@@ -965,17 +965,15 @@ class AgentRunServiceTest {
         try (var fixture = new Fixture(model, 8)) {
             fixture.start();
             assertTrue(run1Entered.await(5, TimeUnit.SECONDS));
-            assertTrue(fixture.service.followup(fixture.sessionId, "请审阅改动", List.of(), List.of(), null, null,
-                "code-review"));
+            assertTrue(
+                fixture.service.followup(fixture.sessionId, "请审阅改动", List.of(), List.of(), null, null, "code-review"));
             releaseRun1.countDown();
             fixture.awaitFinished("COMPLETED");
             fixture.awaitFinished("COMPLETED");
 
             assertEquals(2, requests.size());
-            String secondRunUserText = requests.get(1).stream()
-                .filter(msg -> "user".equals(msg.role()))
-                .map(Message::content)
-                .reduce("", (a, b) -> a + "\n" + b);
+            String secondRunUserText = requests.get(1).stream().filter(msg -> "user".equals(msg.role()))
+                .map(Message::content).reduce("", (a, b) -> a + "\n" + b);
             assertTrue(secondRunUserText.contains("代码审阅工作流"), secondRunUserText);
             assertTrue(secondRunUserText.contains("请审阅改动"), secondRunUserText);
         }

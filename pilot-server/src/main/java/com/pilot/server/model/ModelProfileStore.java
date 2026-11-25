@@ -11,9 +11,10 @@ import org.springframework.stereotype.Component;
 
 import com.pilot.server.store.SettingsStore;
 
-import lombok.extern.slf4j.Slf4j;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 多模型配置预设管理（本地 Ollama、免费路由、主力模型、子代理模型等）。
@@ -48,8 +49,8 @@ public class ModelProfileStore {
         ModelSettings.Snapshot current = models.snapshot();
         String effectiveActive = resolveEffectiveActive(current);
         String effectiveFallback = resolveEffectiveFallback();
-        List<ProfileView> views = profiles.stream()
-            .map(profile -> toView(profile, profile.id().equals(effectiveActive), profile.id().equals(effectiveFallback)))
+        List<ProfileView> views = profiles.stream().map(
+            profile -> toView(profile, profile.id().equals(effectiveActive), profile.id().equals(effectiveFallback)))
             .toList();
         return new ProfilesView(effectiveActive, effectiveFallback, views);
     }
@@ -102,7 +103,8 @@ public class ModelProfileStore {
         } else {
             apiKey = existing.apiKey();
         }
-        Long context = request.contextTokens() == null ? existing.contextTokens() : positiveLong(request.contextTokens());
+        Long context =
+            request.contextTokens() == null ? existing.contextTokens() : positiveLong(request.contextTokens());
         Integer output =
             request.maxOutputTokens() == null ? existing.maxOutputTokens() : positiveInt(request.maxOutputTokens());
         String child = request.childModel() == null ? existing.childModel() : request.childModel().strip();

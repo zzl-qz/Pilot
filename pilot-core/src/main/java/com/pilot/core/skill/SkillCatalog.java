@@ -160,10 +160,11 @@ public final class SkillCatalog {
                 command = null;
             }
             Path virtualDir = Path.of("builtin", slug);
-            byName.put(slug, new Skill(
-                new SkillManifest(slug, parsed.description(), command, parsed.argumentHint(), parsed.allowedTools(),
-                    parsed.requires(), parsed.requiresOptional(), virtualDir, SkillSource.BUILTIN),
-                parsed.body(), List.of()));
+            byName.put(slug,
+                new Skill(
+                    new SkillManifest(slug, parsed.description(), command, parsed.argumentHint(), parsed.allowedTools(),
+                        parsed.requires(), parsed.requiresOptional(), virtualDir, SkillSource.BUILTIN),
+                    parsed.body(), List.of()));
         }
     }
 

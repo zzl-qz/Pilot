@@ -28,8 +28,8 @@ class ModelCatalogServiceTest {
         HttpServer online = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         online.createContext("/v1/models", exchange -> {
             receivedAuth.set(exchange.getRequestHeaders().getFirst("Authorization"));
-            byte[] bytes = "{\"data\":[{\"id\":\"qwen2.5-coder:14b\"},{\"id\":\"llama3.2\"}]}"
-                .getBytes(StandardCharsets.UTF_8);
+            byte[] bytes =
+                "{\"data\":[{\"id\":\"qwen2.5-coder:14b\"},{\"id\":\"llama3.2\"}]}".getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "application/json");
             exchange.sendResponseHeaders(200, bytes.length);
             try (var out = exchange.getResponseBody()) {
@@ -60,7 +60,8 @@ class ModelCatalogServiceTest {
         long started = System.nanoTime();
         try {
             List<ModelCatalogService.LocalModelService> found = service.scanLocalServices(List.of(
-                new ModelCatalogService.LocalService("Ollama", "http://127.0.0.1:" + online.getAddress().getPort() + "/v1"),
+                new ModelCatalogService.LocalService("Ollama",
+                    "http://127.0.0.1:" + online.getAddress().getPort() + "/v1"),
                 new ModelCatalogService.LocalService("Slow", "http://127.0.0.1:" + slow.getAddress().getPort() + "/v1"),
                 new ModelCatalogService.LocalService("Offline", "http://127.0.0.1:" + closedPort + "/v1")),
                 Duration.ofMillis(450));

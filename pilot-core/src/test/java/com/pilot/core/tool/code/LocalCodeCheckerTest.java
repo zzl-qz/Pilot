@@ -52,10 +52,8 @@ class LocalCodeCheckerTest {
         Files.writeString(moduleFile, "class Foo {}\n");
 
         List<String> captured = new ArrayList<>();
-        String mavenOut = "[INFO] Compiling 1 source file\n"
-            + "[ERROR] " + moduleFile.toAbsolutePath() + ":[12,9] cannot find symbol\n"
-            + "  symbol:   variable bar\n"
-            + "[ERROR] BUILD FAILURE\n";
+        String mavenOut = "[INFO] Compiling 1 source file\n" + "[ERROR] " + moduleFile.toAbsolutePath()
+            + ":[12,9] cannot find symbol\n" + "  symbol:   variable bar\n" + "[ERROR] BUILD FAILURE\n";
         LocalCodeChecker checker = new LocalCodeChecker(workspace, "mvn"::equals, (dir, cmd) -> {
             captured.addAll(cmd);
             return mavenOut;

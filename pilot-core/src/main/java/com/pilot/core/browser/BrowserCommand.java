@@ -479,8 +479,8 @@ public final class BrowserCommand {
             || !Double.isFinite(ny.doubleValue())) {
             return prefix + " 需要成对的数字坐标 (" + xKey + ", " + yKey + ")";
         }
-        int x = Math.max(0, Math.min(4096, (int) Math.round(nx.doubleValue())));
-        int y = Math.max(0, Math.min(4096, (int) Math.round(ny.doubleValue())));
+        int x = Math.max(0, Math.min(4096, (int)Math.round(nx.doubleValue())));
+        int y = Math.max(0, Math.min(4096, (int)Math.round(ny.doubleValue())));
         command.put(xKey, x);
         command.put(yKey, y);
         return null;

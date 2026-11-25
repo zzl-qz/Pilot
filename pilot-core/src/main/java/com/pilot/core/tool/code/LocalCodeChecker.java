@@ -21,12 +21,10 @@ import java.util.stream.Stream;
 
 /** 本机已安装的跨语言代码检查器（Maven/Gradle/TypeScript/Go/Python/Rust）。 */
 public final class LocalCodeChecker {
-    private static final boolean WINDOWS =
-        System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+    private static final boolean WINDOWS = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
     private static final Pattern STANDARD_LINE = Pattern.compile("^(.+?):(\\d+)(?::(\\d+))?:\\s*(.+)$");
     private static final Pattern TSC_PAREN_LINE = Pattern.compile("^(.+?)\\((\\d+),(\\d+)\\):\\s*(.+)$");
-    private static final Pattern MAVEN_ERROR_LINE =
-        Pattern.compile("^\\[ERROR]\\s+(.+?):\\[(\\d+),(\\d+)]\\s*(.+)$");
+    private static final Pattern MAVEN_ERROR_LINE = Pattern.compile("^\\[ERROR]\\s+(.+?):\\[(\\d+),(\\d+)]\\s*(.+)$");
     private static final Pattern PYRIGHT_LINE =
         Pattern.compile("^(.+?):(\\d+):(\\d+)\\s+-\\s+(error|warning|information):\\s*(.+)$");
     private static final Pattern OUTLINE = Pattern.compile(
@@ -100,10 +98,8 @@ public final class LocalCodeChecker {
         }
         if (target != null && Files.isRegularFile(target)) {
             String targetRel = toRelativeSlash(target);
-            List<DiagnosticEntry> matched = parsed.stream()
-                .filter(entry -> samePath(entry.path, targetRel))
-                .limit(MAX_LINES)
-                .toList();
+            List<DiagnosticEntry> matched =
+                parsed.stream().filter(entry -> samePath(entry.path, targetRel)).limit(MAX_LINES).toList();
             if (!matched.isEmpty()) {
                 return formatEntries(matched);
             }
@@ -330,8 +326,8 @@ public final class LocalCodeChecker {
         }
         String pkg = "./...";
         if (target != null && target.startsWith(moduleDir)) {
-            Path rel = Files.isRegularFile(target) ? moduleDir.relativize(target.getParent())
-                : moduleDir.relativize(target);
+            Path rel =
+                Files.isRegularFile(target) ? moduleDir.relativize(target.getParent()) : moduleDir.relativize(target);
             String slash = rel.toString().replace('\\', '/');
             pkg = slash.isEmpty() ? "." : "./" + slash;
         }
@@ -354,8 +350,7 @@ public final class LocalCodeChecker {
             if (targetArg != null) {
                 args.add(targetArg);
             }
-            return new CheckPlan(Kind.PYTHON, "ruff", projectDir, buildPathCommand("ruff", args),
-                FAST_TIMEOUT_SECONDS);
+            return new CheckPlan(Kind.PYTHON, "ruff", projectDir, buildPathCommand("ruff", args), FAST_TIMEOUT_SECONDS);
         }
         return null;
     }
@@ -539,8 +534,7 @@ public final class LocalCodeChecker {
         Matcher pyright = PYRIGHT_LINE.matcher(line);
         if (pyright.matches()) {
             String path = normalizeDiagnosticPath(pyright.group(1), workingDir);
-            return new DiagnosticEntry(path, pyright.group(2),
-                pyright.group(4) + ": " + pyright.group(5).strip());
+            return new DiagnosticEntry(path, pyright.group(2), pyright.group(4) + ": " + pyright.group(5).strip());
         }
         Matcher std = STANDARD_LINE.matcher(line);
         if (std.matches()) {
@@ -576,14 +570,11 @@ public final class LocalCodeChecker {
     }
 
     private String extractMavenSummaryError(String output) {
-        List<String> errors = output.lines()
-            .map(String::strip)
-            .filter(line -> line.startsWith("[ERROR]"))
+        List<String> errors = output.lines().map(String::strip).filter(line -> line.startsWith("[ERROR]"))
             .map(line -> line.substring("[ERROR]".length()).strip())
             .filter(line -> !line.isEmpty() && !line.startsWith("->") && !line.startsWith("To see")
                 && !line.startsWith("Re-run") && !line.startsWith("For more") && !line.startsWith("[Help"))
-            .limit(8)
-            .toList();
+            .limit(8).toList();
         if (errors.isEmpty()) {
             return "";
         }
@@ -591,11 +582,7 @@ public final class LocalCodeChecker {
     }
 
     private String summarizeFailureOutput(String output) {
-        List<String> lines = output.lines()
-            .map(String::strip)
-            .filter(line -> !line.isEmpty())
-            .limit(8)
-            .toList();
+        List<String> lines = output.lines().map(String::strip).filter(line -> !line.isEmpty()).limit(8).toList();
         return String.join("\n", lines);
     }
 
@@ -622,9 +609,7 @@ public final class LocalCodeChecker {
         if (path == null || path.isBlank()) {
             return null;
         }
-        List<String> candidates = WINDOWS
-            ? List.of(name + ".exe", name + ".cmd", name + ".bat", name)
-            : List.of(name);
+        List<String> candidates = WINDOWS ? List.of(name + ".exe", name + ".cmd", name + ".bat", name) : List.of(name);
         for (String rawDir : path.split(File.pathSeparator)) {
             String dir = rawDir.strip();
             if (dir.length() >= 2 && dir.startsWith("\"") && dir.endsWith("\"")) {
@@ -656,7 +641,8 @@ public final class LocalCodeChecker {
         Kind kind) {
         Process process = null;
         try {
-            ProcessBuilder builder = new ProcessBuilder(command).directory(directory.toFile()).redirectErrorStream(true);
+            ProcessBuilder builder =
+                new ProcessBuilder(command).directory(directory.toFile()).redirectErrorStream(true);
             if (kind == Kind.MAVEN || kind == Kind.GRADLE) {
                 String currentJavaHome = System.getProperty("java.home");
                 String envJavaHome = builder.environment().get("JAVA_HOME");
@@ -715,17 +701,14 @@ public final class LocalCodeChecker {
     }
 
     enum Kind {
-        TYPESCRIPT,
-        MAVEN,
-        GRADLE,
-        GO,
-        PYTHON,
-        RUST
+        TYPESCRIPT, MAVEN, GRADLE, GO, PYTHON, RUST
     }
 
-    record CheckPlan(Kind kind, String label, Path workingDir, List<String> command, long timeoutSeconds) {}
+    record CheckPlan(Kind kind, String label, Path workingDir, List<String> command, long timeoutSeconds) {
+    }
 
-    private record ProcessOutcome(int exitCode, String output, boolean timedOut) {}
+    private record ProcessOutcome(int exitCode, String output, boolean timedOut) {
+    }
 
     private record DiagnosticEntry(String path, String line, String message) {
         String format() {

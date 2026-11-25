@@ -11,6 +11,7 @@ import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
@@ -59,8 +60,8 @@ class ModelZeroKeyAuthHeaderTest {
 
             authHeader.set("unset");
             StringBuilder streamed = new StringBuilder();
-            assertEquals("ok",
-                blankClient.chat(List.of(Message.user("hi")), List.of(), streamed::append, ignored -> {}).content());
+            assertEquals("ok", blankClient.chat(List.of(Message.user("hi")), List.of(), streamed::append, ignored -> {
+            }).content());
             assertNull(authHeader.get(), "流式模式空白密钥不应发送 Authorization 头");
 
             OpenAiCompatibleModelClient keyedClient = new OpenAiCompatibleModelClient(HttpClient.newHttpClient(), json,
@@ -118,12 +119,12 @@ class ModelZeroKeyAuthHeaderTest {
         try {
             URI uri = URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/v1");
             AnthropicMessagesModelClient client = new AnthropicMessagesModelClient(HttpClient.newHttpClient(), json,
-                uri, null, "local-claude", Duration.ofSeconds(5), ModelProfile.generic(), java.util.Set.of());
+                uri, null, "local-claude", Duration.ofSeconds(5), ModelProfile.generic(), Set.of());
             assertEquals("hello", client.chat(List.of(Message.user("hi")), List.of()).content());
             assertNull(keyHeader.get(), "Anthropic 协议空白密钥不应发送 x-api-key 头");
 
             AnthropicMessagesModelClient keyed = new AnthropicMessagesModelClient(HttpClient.newHttpClient(), json, uri,
-                " ant-key ", "local-claude", Duration.ofSeconds(5), ModelProfile.generic(), java.util.Set.of());
+                " ant-key ", "local-claude", Duration.ofSeconds(5), ModelProfile.generic(), Set.of());
             keyed.chat(List.of(Message.user("hi")), List.of());
             assertEquals("ant-key", keyHeader.get());
         } finally {

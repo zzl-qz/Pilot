@@ -55,18 +55,16 @@ public final class InMemoryApprovalBroker implements ApprovalBroker {
         Instant expiresAt = requestedAt.plus(timeout);
         CompletableFuture<Boolean> future = new CompletableFuture<Boolean>();
         Entry entry = new Entry(
-            new PendingApproval(callId, toolName, argsSummary, args, requestedAt, sessionId, expiresAt),
-            future);
+            new PendingApproval(callId, toolName, argsSummary, args, requestedAt, sessionId, expiresAt), future);
         if (pending.putIfAbsent(callId, entry) != null) {
             throw new IllegalStateException("approval already pending: " + callId);
         }
-        future.completeOnTimeout(false, timeout.toMillis(), TimeUnit.MILLISECONDS)
-            .whenComplete((approved, error) -> {
-                if (pending.remove(callId, entry)) {
-                    rejectionReasons.remove(callId);
-                    notifyListeners();
-                }
-            });
+        future.completeOnTimeout(false, timeout.toMillis(), TimeUnit.MILLISECONDS).whenComplete((approved, error) -> {
+            if (pending.remove(callId, entry)) {
+                rejectionReasons.remove(callId);
+                notifyListeners();
+            }
+        });
         notifyListeners();
         return future;
     }

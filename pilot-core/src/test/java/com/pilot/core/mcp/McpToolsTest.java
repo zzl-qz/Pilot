@@ -369,10 +369,9 @@ class McpToolsTest {
     }
 
     private void writeConfig(List<String> args) throws IOException {
-        String config = mapper.writeValueAsString(Map.of("mcpServers", Map.of(
-            "fake", Map.of("command", node.toString(), "args", args),
-            "remote", Map.of("url", "https://example.com/mcp"),
-            "broken", Map.of("url", "ftp://example.com/mcp"))));
+        String config = mapper
+            .writeValueAsString(Map.of("mcpServers", Map.of("fake", Map.of("command", node.toString(), "args", args),
+                "remote", Map.of("url", "https://example.com/mcp"), "broken", Map.of("url", "ftp://example.com/mcp"))));
         Files.writeString(workspace.resolve(".mcp.json"), config);
     }
 

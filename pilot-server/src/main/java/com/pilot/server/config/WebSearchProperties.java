@@ -26,8 +26,8 @@ public record WebSearchProperties(boolean local, String endpoint, String python,
 
     public WebSearchProperties(boolean local, String endpoint, String python, String home,
         Integer requestTimeoutSeconds) {
-        this(local, endpoint, python, home, requestTimeoutSeconds, null, null, null, null, null, null, null, null,
-            null, null);
+        this(local, endpoint, python, home, requestTimeoutSeconds, null, null, null, null, null, null, null, null, null,
+            null);
     }
 
     @ConstructorBinding
@@ -125,8 +125,8 @@ public record WebSearchProperties(boolean local, String endpoint, String python,
             throw new IllegalArgumentException("代理地址不支持内嵌账号密码，请使用无凭据的代理地址（如 http://127.0.0.1:7890）");
         }
         if (!("http".equals(scheme) || "https".equals(scheme) || "socks5".equals(scheme) || "socks5h".equals(scheme))
-            || uri.getHost() == null || uri.getRawQuery() != null || uri.getRawFragment() != null
-            || uri.getPort() == 0 || uri.getPort() > 65_535) {
+            || uri.getHost() == null || uri.getRawQuery() != null || uri.getRawFragment() != null || uri.getPort() == 0
+            || uri.getPort() > 65_535) {
             throw new IllegalArgumentException("代理地址必须为合法的 http/https/socks5 地址（如 http://127.0.0.1:7890）");
         }
         return value;
@@ -161,9 +161,9 @@ public record WebSearchProperties(boolean local, String endpoint, String python,
 
     @Override
     public String toString() {
-        return "WebSearchProperties[local=" + local + ", endpoint=" + endpoint + ", provider=" + provider
-            + ", apiKey=" + WebSearchConfig.maskSecret(apiKey) + ", apiEndpoint=" + apiEndpoint
-            + ", fallbackEnabled=" + fallbackEnabledDefault() + ", proxy=" + SecretScrubber.scrub(proxy)
-            + ", configuredProviderKeys=" + providerKeys().keySet() + "]";
+        return "WebSearchProperties[local=" + local + ", endpoint=" + endpoint + ", provider=" + provider + ", apiKey="
+            + WebSearchConfig.maskSecret(apiKey) + ", apiEndpoint=" + apiEndpoint + ", fallbackEnabled="
+            + fallbackEnabledDefault() + ", proxy=" + SecretScrubber.scrub(proxy) + ", configuredProviderKeys="
+            + providerKeys().keySet() + "]";
     }
 }

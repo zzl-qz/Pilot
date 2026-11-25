@@ -40,8 +40,8 @@ public final class QuestionBroker {
         List<String> cleanOptions = options == null ? List.of()
             : options.stream().filter(Objects::nonNull).map(String::strip).filter(s -> !s.isBlank()).toList();
         Instant requestedAt = clock.instant();
-        Instant expiresAt = timeout != null && !timeout.isNegative() && !timeout.isZero()
-            ? requestedAt.plus(timeout) : null;
+        Instant expiresAt =
+            timeout != null && !timeout.isNegative() && !timeout.isZero() ? requestedAt.plus(timeout) : null;
         CompletableFuture<String> future = new CompletableFuture<>();
         Entry entry = new Entry(
             new PendingQuestion(cleanCallId, cleanSessionId, cleanQuestion, cleanOptions, requestedAt, expiresAt),
@@ -104,8 +104,8 @@ public final class QuestionBroker {
     }
 
     public List<PendingQuestion> pending() {
-        return waiting.values().stream().map(Entry::question)
-            .sorted(Comparator.comparing(PendingQuestion::requestedAt)).toList();
+        return waiting.values().stream().map(Entry::question).sorted(Comparator.comparing(PendingQuestion::requestedAt))
+            .toList();
     }
 
     public void addListener(Runnable listener) {

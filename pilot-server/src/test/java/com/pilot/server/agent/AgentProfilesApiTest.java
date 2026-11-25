@@ -55,15 +55,15 @@ class AgentProfilesApiTest {
 
         mvc.perform(get("/api/agents").param("sessionId", session)).andExpect(status().isOk())
             .andExpect(jsonPath("$.available[?(@.name == 'explorer')].source").value("builtin"))
-            .andExpect(jsonPath("$.available[?(@.name == 'explorer')].content", hasItem(containsString("description:"))))
+            .andExpect(
+                jsonPath("$.available[?(@.name == 'explorer')].content", hasItem(containsString("description:"))))
             .andExpect(jsonPath("$.available[?(@.name == 'proj-only')].source").value("project"))
             .andExpect(jsonPath("$.available[?(@.name == 'proj-only')].content", hasItem(containsString("项目级提示词"))))
             .andExpect(jsonPath("$.invalid[?(@.name == 'broken')].reason", hasItem(containsString("frontmatter"))));
 
         mvc.perform(put("/api/agents/reviewer").contentType(MediaType.APPLICATION_JSON)
             .content("{\"content\":" + quote(reviewer) + "}")).andExpect(status().isOk())
-            .andExpect(jsonPath("$.source").value("user"))
-            .andExpect(jsonPath("$.writable").value(false))
+            .andExpect(jsonPath("$.source").value("user")).andExpect(jsonPath("$.writable").value(false))
             .andExpect(jsonPath("$.hasUserOverride").value(true));
 
         mvc.perform(get("/api/agents").param("sessionId", session)).andExpect(status().isOk())
@@ -80,10 +80,11 @@ class AgentProfilesApiTest {
 
     @Test
     void rejectsTraversalInvalidDefinitionsTooLongPromptsAndMissingSession() throws Exception {
-        mvc.perform(put("/api/agents/invalid_name").contentType(MediaType.APPLICATION_JSON)
-            .content("{\"content\":\"bad\"}")).andExpect(status().isBadRequest());
-        mvc.perform(put("/api/agents/valid").contentType(MediaType.APPLICATION_JSON)
-            .content("{\"content\":\"bad\"}")).andExpect(status().isBadRequest());
+        mvc.perform(
+            put("/api/agents/invalid_name").contentType(MediaType.APPLICATION_JSON).content("{\"content\":\"bad\"}"))
+            .andExpect(status().isBadRequest());
+        mvc.perform(put("/api/agents/valid").contentType(MediaType.APPLICATION_JSON).content("{\"content\":\"bad\"}"))
+            .andExpect(status().isBadRequest());
         String mismatchedName = "---\nname: other\ndescription: 名称不一致\n---\n提示词。";
         mvc.perform(put("/api/agents/valid").contentType(MediaType.APPLICATION_JSON)
             .content("{\"content\":" + quote(mismatchedName) + "}")).andExpect(status().isBadRequest());

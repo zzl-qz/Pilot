@@ -62,11 +62,10 @@ final class McpHttpTransport implements AutoCloseable {
         this.config = config;
         this.baseUri = URI.create(config.url());
         this.mapper = mapper;
-        this.onToolsListChanged = onToolsListChanged == null ? () -> { } : onToolsListChanged;
-        this.http = HttpClient.newBuilder()
-            .connectTimeout(CONNECT_TIMEOUT)
-            .followRedirects(HttpClient.Redirect.NEVER)
-            .build();
+        this.onToolsListChanged = onToolsListChanged == null ? () -> {
+        } : onToolsListChanged;
+        this.http =
+            HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).followRedirects(HttpClient.Redirect.NEVER).build();
         this.legacySseMode = McpServerConfig.TRANSPORT_SSE.equals(config.transport());
         this.postEndpoint = baseUri;
     }
@@ -123,8 +122,7 @@ final class McpHttpTransport implements AutoCloseable {
         AtomicBoolean dispatched, boolean allowSseFallback) {
         byte[] payload = encodeRequest(id, method, params);
         HttpRequest.Builder req = baseRequest(baseUri, remainingDuration(deadline))
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json, text/event-stream")
+            .header("Content-Type", "application/json").header("Accept", "application/json, text/event-stream")
             .header("MCP-Protocol-Version", McpClient.PROTOCOL_VERSION)
             .POST(HttpRequest.BodyPublishers.ofByteArray(payload));
         if (sessionId != null && !sessionId.isBlank()) {
@@ -137,18 +135,17 @@ final class McpHttpTransport implements AutoCloseable {
             if (allowSseFallback && code == 405) {
                 throw new FallbackToLegacySseException();
             }
-            response.headers().firstValue("Mcp-Session-Id")
-                .filter(v -> !v.isBlank())
+            response.headers().firstValue("Mcp-Session-Id").filter(v -> !v.isBlank())
                 .ifPresent(v -> sessionId = v.strip());
             if (code >= 300 && code < 400) {
                 String location = response.headers().firstValue("Location").orElse("");
-                throw new McpException("远程 MCP 服务器返回重定向（HTTP " + code
-                    + (location.isBlank() ? "" : " -> " + location) + "），为避免泄露认证头已停止跟随，请填写最终地址");
+                throw new McpException("远程 MCP 服务器返回重定向（HTTP " + code + (location.isBlank() ? "" : " -> " + location)
+                    + "），为避免泄露认证头已停止跟随，请填写最终地址");
             }
             if (code < 200 || code >= 300) {
                 String snippet = readErrorSnippet(body);
-                throw new McpException("远程 MCP 服务器 " + name + " 返回 HTTP " + code
-                    + (snippet.isBlank() ? "" : "：" + snippet));
+                throw new McpException(
+                    "远程 MCP 服务器 " + name + " 返回 HTTP " + code + (snippet.isBlank() ? "" : "：" + snippet));
             }
             String contentType = response.headers().firstValue("Content-Type").orElse("").toLowerCase(Locale.ROOT);
             if (contentType.contains("text/event-stream")) {
@@ -168,8 +165,7 @@ final class McpHttpTransport implements AutoCloseable {
         byte[] payload = encodeRaw(message);
         URI target = legacySseMode ? postEndpoint : baseUri;
         HttpRequest.Builder req = baseRequest(target, remainingDuration(deadline))
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json, text/event-stream")
+            .header("Content-Type", "application/json").header("Accept", "application/json, text/event-stream")
             .header("MCP-Protocol-Version", McpClient.PROTOCOL_VERSION)
             .POST(HttpRequest.BodyPublishers.ofByteArray(payload));
         if (sessionId != null && !sessionId.isBlank()) {
@@ -180,8 +176,8 @@ final class McpHttpTransport implements AutoCloseable {
             int code = response.statusCode();
             if (code < 200 || code >= 300) {
                 String snippet = readErrorSnippet(body);
-                throw new McpException("远程 MCP 通知 " + method + " 失败（HTTP " + code
-                    + (snippet.isBlank() ? "" : "：" + snippet) + "）");
+                throw new McpException(
+                    "远程 MCP 通知 " + method + " 失败（HTTP " + code + (snippet.isBlank() ? "" : "：" + snippet) + "）");
             }
         } catch (IOException ignored) {
             // 通知本身无需响应体
@@ -213,19 +209,16 @@ final class McpHttpTransport implements AutoCloseable {
     }
 
     private void runLegacySseLoop(CompletableFuture<URI> endpointFuture) {
-        HttpRequest req = baseRequest(baseUri, null)
-            .header("Accept", "text/event-stream")
-            .header("Cache-Control", "no-cache")
-            .GET()
-            .build();
+        HttpRequest req = baseRequest(baseUri, null).header("Accept", "text/event-stream")
+            .header("Cache-Control", "no-cache").GET().build();
         try {
             HttpResponse<InputStream> response = http.send(req, HttpResponse.BodyHandlers.ofInputStream());
             int code = response.statusCode();
             if (code < 200 || code >= 300) {
                 try (InputStream err = response.body()) {
                     String snippet = readErrorSnippet(err);
-                    endpointFuture.completeExceptionally(new McpException("远程 MCP SSE 握手失败（HTTP " + code
-                        + (snippet.isBlank() ? "" : "：" + snippet) + "）"));
+                    endpointFuture.completeExceptionally(new McpException(
+                        "远程 MCP SSE 握手失败（HTTP " + code + (snippet.isBlank() ? "" : "：" + snippet) + "）"));
                 }
                 return;
             }
@@ -269,8 +262,8 @@ final class McpHttpTransport implements AutoCloseable {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
-            McpException failure = e instanceof McpException me ? me
-                : new McpException("远程 MCP SSE 连接断开：" + e.getMessage());
+            McpException failure =
+                e instanceof McpException me ? me : new McpException("远程 MCP SSE 连接断开：" + e.getMessage());
             endpointFuture.completeExceptionally(failure);
             failAllPending(failure);
         } finally {
@@ -341,18 +334,16 @@ final class McpHttpTransport implements AutoCloseable {
         try {
             byte[] payload = encodeRequest(id, method, params);
             HttpRequest req = baseRequest(target, remainingDuration(deadline))
-                .header("Content-Type", "application/json")
-                .header("Accept", "application/json, text/event-stream")
-                .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
-                .build();
+                .header("Content-Type", "application/json").header("Accept", "application/json, text/event-stream")
+                .POST(HttpRequest.BodyPublishers.ofByteArray(payload)).build();
             dispatched.set(true);
             HttpResponse<InputStream> response = send(req, method);
             try (InputStream body = response.body()) {
                 int code = response.statusCode();
                 if (code < 200 || code >= 300) {
                     String snippet = readErrorSnippet(body);
-                    throw new McpException("远程 MCP SSE 请求失败（HTTP " + code
-                        + (snippet.isBlank() ? "" : "：" + snippet) + "）");
+                    throw new McpException(
+                        "远程 MCP SSE 请求失败（HTTP " + code + (snippet.isBlank() ? "" : "：" + snippet) + "）");
                 }
                 byte[] bytes = readBounded(body, McpJson.MAX_FRAME_BYTES);
                 if (bytes.length > 0 && isJsonContentType(response)) {
@@ -580,10 +571,8 @@ final class McpHttpTransport implements AutoCloseable {
         if (sid != null && !sid.isBlank() && !legacySseMode) {
             Thread cleanup = new Thread(() -> {
                 try {
-                    HttpRequest deleteReq = baseRequest(baseUri, Duration.ofSeconds(3))
-                        .header("Mcp-Session-Id", sid)
-                        .DELETE()
-                        .build();
+                    HttpRequest deleteReq =
+                        baseRequest(baseUri, Duration.ofSeconds(3)).header("Mcp-Session-Id", sid).DELETE().build();
                     http.send(deleteReq, HttpResponse.BodyHandlers.discarding());
                 } catch (IOException | InterruptedException | RuntimeException ignored) {
                     if (ignored instanceof InterruptedException) {
@@ -596,6 +585,5 @@ final class McpHttpTransport implements AutoCloseable {
         }
     }
 
-    private static final class FallbackToLegacySseException extends RuntimeException {
-    }
+    private static final class FallbackToLegacySseException extends RuntimeException {}
 }

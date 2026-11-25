@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -126,7 +127,8 @@ class GitCommitWorkflowTest {
         Files.writeString(repo.resolve("file.txt"), "main conflicting edit\n", StandardCharsets.UTF_8);
         ChangeService.GitOperationResult conflict = service.switchBranch(repo, "feature");
         assertFalse(conflict.ok());
-        assertTrue(conflict.error().toLowerCase().contains("local changes") || conflict.error().contains("覆盖"), conflict.error());
+        assertTrue(conflict.error().toLowerCase().contains("local changes") || conflict.error().contains("覆盖"),
+            conflict.error());
         assertEquals("main", service.branches(repo).current());
         assertFalse(service.switchBranch(repo, "--help").ok());
         assertFalse(service.switchBranch(repo, "nonexistent-branch").ok());
@@ -134,7 +136,7 @@ class GitCommitWorkflowTest {
     }
 
     private void git(String... args) throws Exception {
-        List<String> cmd = new java.util.ArrayList<>();
+        List<String> cmd = new ArrayList<>();
         cmd.add("git");
         cmd.addAll(List.of(args));
         Process process = new ProcessBuilder(cmd).directory(repo.toFile()).redirectErrorStream(true).start();

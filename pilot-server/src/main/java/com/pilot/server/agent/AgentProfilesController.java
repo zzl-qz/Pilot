@@ -170,8 +170,8 @@ public class AgentProfilesController {
     }
 
     public record ProfilePayload(String name, String description, List<String> tools, List<String> files,
-        List<String> denyFiles, List<String> commands, List<String> denyCommands, boolean writable,
-        String source, String content, boolean hasUserOverride) {
+        List<String> denyFiles, List<String> commands, List<String> denyCommands, boolean writable, String source,
+        String content, boolean hasUserOverride) {
         static ProfilePayload of(AgentProfile p, String source, String content, boolean hasUserOverride) {
             return new ProfilePayload(p.name(), p.description(), p.tools(), p.files(), p.denyFiles(), p.commands(),
                 p.denyCommands(), p.writable(), source, content, hasUserOverride);

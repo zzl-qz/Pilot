@@ -18,14 +18,14 @@ class InMemoryApprovalBrokerTest {
     @Test
     void tracksSessionIdExpiryAndListeners() throws Exception {
         Instant fixed = Instant.parse("2026-11-23T12:00:00Z");
-        InMemoryApprovalBroker broker = new InMemoryApprovalBroker(Duration.ofSeconds(300),
-            Clock.fixed(fixed, ZoneOffset.UTC));
+        InMemoryApprovalBroker broker =
+            new InMemoryApprovalBroker(Duration.ofSeconds(300), Clock.fixed(fixed, ZoneOffset.UTC));
         AtomicInteger events = new AtomicInteger();
         broker.addListener(events::incrementAndGet);
 
         ApprovalBroker sessionScoped = ApprovalBroker.forSession(broker, "ses_123");
-        CompletableFuture<Boolean> decision = sessionScoped.register("call_1", "run_command", "rm -rf build",
-            Map.of("command", "rm -rf build"));
+        CompletableFuture<Boolean> decision =
+            sessionScoped.register("call_1", "run_command", "rm -rf build", Map.of("command", "rm -rf build"));
 
         assertEquals(1, broker.pending().size());
         PendingApproval pending = broker.pending().getFirst();

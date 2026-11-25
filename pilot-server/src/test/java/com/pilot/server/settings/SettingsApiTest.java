@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -230,7 +231,7 @@ class SettingsApiTest {
         long started = System.nanoTime();
         mvc.perform(post("/api/settings/model/scan-local")).andExpect(status().isOk())
             .andExpect(jsonPath("$.services").isArray());
-        org.junit.jupiter.api.Assertions.assertTrue(Duration.ofNanos(System.nanoTime() - started).toMillis() < 3000);
+        Assertions.assertTrue(Duration.ofNanos(System.nanoTime() - started).toMillis() < 3000);
     }
 
     private ResultActions listModels(String body) throws Exception {

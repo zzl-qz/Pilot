@@ -922,8 +922,7 @@ public final class AgentLoop {
         if (config.completionChecks() && (!openSteps.isEmpty() || !blockedSteps.isEmpty())) {
             String partial = content;
             if (!content.contains("本轮为部分交付，尚未完成：")) {
-                partial += "\n\n本轮为部分交付，尚未完成："
-                    + String.join("；", openSteps.isEmpty() ? blockedSteps : openSteps);
+                partial += "\n\n本轮为部分交付，尚未完成：" + String.join("；", openSteps.isEmpty() ? blockedSteps : openSteps);
                 if (!blockedSteps.isEmpty() && !openSteps.isEmpty()) {
                     partial += "\n\n已阻塞：" + String.join("；", blockedSteps);
                 }
@@ -1283,7 +1282,8 @@ public final class AgentLoop {
         ContextCompactor.truncateLongToolOutputs(messages, messages.size());
         if (overTarget(messages, targetChars, targetTokens)) {
             // 按新水位当预算，等价于「一定会触发」的压缩轮：正常水位下不会因为够松而跳过摘要。
-            budget.apply(messages, targetTokens, targetChars, fixedOverheadTokens(messages), events, observedThroughIndex);
+            budget.apply(messages, targetTokens, targetChars, fixedOverheadTokens(messages), events,
+                observedThroughIndex);
             observedThroughIndex = Math.min(observedThroughIndex, messages.size());
         }
         if (overTarget(messages, targetChars, targetTokens)) {

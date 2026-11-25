@@ -316,24 +316,21 @@ class BrowserControlServiceTest {
         service.setEvidence(evidence);
 
         Path recDir = Files.createDirectories(evRoot.resolve("recordings"));
-        Path recFile = Files.writeString(recDir.resolve("run-1.replay.json"),
-            "{\"version\":1,\"frames\":[],\"actions\":[]}");
+        Path recFile =
+            Files.writeString(recDir.resolve("run-1.replay.json"), "{\"version\":1,\"frames\":[],\"actions\":[]}");
         Path outsideFile = Files.writeString(temp.resolve("escape.replay.json"), "{}");
 
-        evidence.record(new BrowserEvidenceRecord("ev_rec", "s1", "s1", "r1", "ba_1", Instant.now(),
-            "record", "ok", "http://127.0.0.1:5173/", "Demo", "已录制", "", "", "", "", 0L, List.of(),
-            0, 0, "", recFile.toString()));
-        evidence.record(new BrowserEvidenceRecord("ev_escape", "s1", "s1", "r1", "ba_1", Instant.now(),
-            "record", "ok", "http://127.0.0.1:5173/", "Demo", "越界路径", "", "", "", "", 0L, List.of(),
-            0, 0, "", outsideFile.toString()));
+        evidence.record(new BrowserEvidenceRecord("ev_rec", "s1", "s1", "r1", "ba_1", Instant.now(), "record", "ok",
+            "http://127.0.0.1:5173/", "Demo", "已录制", "", "", "", "", 0L, List.of(), 0, 0, "", recFile.toString()));
+        evidence.record(new BrowserEvidenceRecord("ev_escape", "s1", "s1", "r1", "ba_1", Instant.now(), "record", "ok",
+            "http://127.0.0.1:5173/", "Demo", "越界路径", "", "", "", "", 0L, List.of(), 0, 0, "", outsideFile.toString()));
 
         Assertions.assertEquals(recFile.toAbsolutePath().normalize(),
             service.resolveEvidenceRecording("s1", "ev_rec").orElseThrow());
-        Assertions.assertTrue(service.resolveEvidenceRecording("s1", "ev_escape").isEmpty(),
-            "受控根目录之外的录像路径必须拒绝读取");
+        Assertions.assertTrue(service.resolveEvidenceRecording("s1", "ev_escape").isEmpty(), "受控根目录之外的录像路径必须拒绝读取");
         Map<String, Object> resp = service.evidence("s1", "", 20);
         @SuppressWarnings("unchecked")
-        Map<String, Object> summary = (Map<String, Object>) resp.get("summary");
+        Map<String, Object> summary = (Map<String, Object>)resp.get("summary");
         Assertions.assertEquals(2, summary.get("recordings"));
     }
 }

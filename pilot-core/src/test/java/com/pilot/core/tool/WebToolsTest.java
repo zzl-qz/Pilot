@@ -103,20 +103,21 @@ class WebToolsTest {
             capturedQuery.set(exchange.getRequestURI().getRawQuery());
             forwardedFor.set(exchange.getRequestHeaders().getFirst("X-Forwarded-For"));
             realIp.set(exchange.getRequestHeaders().getFirst("X-Real-IP"));
-            String payload = """
-                {
-                  "answers": ["Spring Boot 3 requires Java 17+"],
-                  "infoboxes": [{"infobox": "Spring Boot", "content": "Java web framework", "urls": [{"url": "https://spring.io"}]}],
-                  "suggestions": ["spring boot 3 migration"],
-                  "unresponsive_engines": [["baidu", "parsing error"], ["duckduckgo", "CAPTCHA"]],
-                  "results": [
-                    {"title": "Docs", "url": "https://docs.spring.io/boot/?utm_source=test#top", "content": "Short", "publishedDate": "2025-05-01T12:00:00", "engines": ["bing"], "score": 1.0},
-                    {"title": "Spring Boot Official Docs", "url": "https://docs.spring.io/boot", "content": "Detailed official documentation for Spring Boot 3", "engines": ["google"], "score": 1.0},
-                    {"title": "Subdomain Guide", "url": "https://ref.docs.spring.io/boot/guide", "content": "Spring Boot reference guide", "engines": ["brave"], "score": 0.8},
-                    {"title": "Off-Domain Noise", "url": "https://merriam-webster.com/dictionary/spring", "content": "Dictionary entry", "engines": ["bing"], "score": 1.5}
-                  ]
-                }
-                """;
+            String payload =
+                """
+                    {
+                      "answers": ["Spring Boot 3 requires Java 17+"],
+                      "infoboxes": [{"infobox": "Spring Boot", "content": "Java web framework", "urls": [{"url": "https://spring.io"}]}],
+                      "suggestions": ["spring boot 3 migration"],
+                      "unresponsive_engines": [["baidu", "parsing error"], ["duckduckgo", "CAPTCHA"]],
+                      "results": [
+                        {"title": "Docs", "url": "https://docs.spring.io/boot/?utm_source=test#top", "content": "Short", "publishedDate": "2025-05-01T12:00:00", "engines": ["bing"], "score": 1.0},
+                        {"title": "Spring Boot Official Docs", "url": "https://docs.spring.io/boot", "content": "Detailed official documentation for Spring Boot 3", "engines": ["google"], "score": 1.0},
+                        {"title": "Subdomain Guide", "url": "https://ref.docs.spring.io/boot/guide", "content": "Spring Boot reference guide", "engines": ["brave"], "score": 0.8},
+                        {"title": "Off-Domain Noise", "url": "https://merriam-webster.com/dictionary/spring", "content": "Dictionary entry", "engines": ["bing"], "score": 1.5}
+                      ]
+                    }
+                    """;
             byte[] bytes = payload.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "application/json");
             exchange.sendResponseHeaders(200, bytes.length);
@@ -125,16 +126,11 @@ class WebToolsTest {
         });
         server.start();
         try (HttpClient client = HttpClient.newHttpClient()) {
-            WebSearchTool tool = new WebSearchTool(client, mapper,
-                URI.create("http://127.0.0.1:" + server.getAddress().getPort()));
-            WebSearchTool.SearchReport report = tool.executeDetailed(Map.of(
-                "query", "spring boot",
-                "count", 5,
-                "category", "it",
-                "time_range", "week",
-                "language", "zh",
-                "site", "https://docs.spring.io/guide",
-                "page", 2));
+            WebSearchTool tool =
+                new WebSearchTool(client, mapper, URI.create("http://127.0.0.1:" + server.getAddress().getPort()));
+            WebSearchTool.SearchReport report =
+                tool.executeDetailed(Map.of("query", "spring boot", "count", 5, "category", "it", "time_range", "week",
+                    "language", "zh", "site", "https://docs.spring.io/guide", "page", 2));
             assertTrue(report.ok());
             assertEquals("127.0.0.1", forwardedFor.get());
             assertEquals("127.0.0.1", realIp.get());
@@ -165,9 +161,11 @@ class WebToolsTest {
             assertEquals("Bearer bocha-secret-999999", exchange.getRequestHeaders().getFirst("Authorization"));
             String req = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             assertTrue(req.contains("\"freshness\":\"oneWeek\""));
-            byte[] body = """
-                {"data":{"webPages":{"value":[{"name":"博查结果","url":"https://bocha.example/a","summary":"中文摘要","datePublished":"2026-03-01T00:00:00Z"}]}}}
-                """.getBytes(StandardCharsets.UTF_8);
+            byte[] body =
+                """
+                    {"data":{"webPages":{"value":[{"name":"博查结果","url":"https://bocha.example/a","summary":"中文摘要","datePublished":"2026-03-01T00:00:00Z"}]}}}
+                    """
+                    .getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
             exchange.close();
@@ -176,9 +174,11 @@ class WebToolsTest {
             String req = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             assertTrue(req.contains("\"include_domains\":[\"docs.spring.io\"]"));
             assertTrue(req.contains("\"topic\":\"news\""));
-            byte[] body = """
-                {"answer":"Direct Tavily answer","results":[{"title":"Tavily Hit","url":"https://docs.spring.io/x","content":"Tavily snippet","published_date":"2026-04-02","score":0.95}]}
-                """.getBytes(StandardCharsets.UTF_8);
+            byte[] body =
+                """
+                    {"answer":"Direct Tavily answer","results":[{"title":"Tavily Hit","url":"https://docs.spring.io/x","content":"Tavily snippet","published_date":"2026-04-02","score":0.95}]}
+                    """
+                    .getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
             exchange.close();
@@ -186,27 +186,33 @@ class WebToolsTest {
         server.createContext("/brave", exchange -> {
             assertEquals("BSA-brave-secret-1234", exchange.getRequestHeaders().getFirst("X-Subscription-Token"));
             assertTrue(exchange.getRequestURI().getRawQuery().contains("freshness=pd"));
-            byte[] body = """
-                {"web":{"results":[{"title":"Brave <b>Hit</b>","url":"https://brave.example/1","description":"Brave &amp; clean","page_age":"2026-05-03T10:00:00"}]}}
-                """.getBytes(StandardCharsets.UTF_8);
+            byte[] body =
+                """
+                    {"web":{"results":[{"title":"Brave <b>Hit</b>","url":"https://brave.example/1","description":"Brave &amp; clean","page_age":"2026-05-03T10:00:00"}]}}
+                    """
+                    .getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
             exchange.close();
         });
         server.createContext("/serper/news", exchange -> {
             assertEquals("serper-secret-8888", exchange.getRequestHeaders().getFirst("X-API-KEY"));
-            byte[] body = """
-                {"answerBox":{"answer":"Serper direct"},"news":[{"title":"Serper News","link":"https://news.example/n","snippet":"Headline","date":"2 hours ago"}],"relatedSearches":[{"query":"follow up"}]}
-                """.getBytes(StandardCharsets.UTF_8);
+            byte[] body =
+                """
+                    {"answerBox":{"answer":"Serper direct"},"news":[{"title":"Serper News","link":"https://news.example/n","snippet":"Headline","date":"2 hours ago"}],"relatedSearches":[{"query":"follow up"}]}
+                    """
+                    .getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
             exchange.close();
         });
         server.createContext("/exa", exchange -> {
             assertEquals("exa-secret-7777", exchange.getRequestHeaders().getFirst("x-api-key"));
-            byte[] body = """
-                {"results":[{"title":"Exa Paper","url":"https://arxiv.org/abs/2501.00001","text":"Semantic abstract","publishedDate":"2026-01-15T00:00:00Z","score":0.9}]}
-                """.getBytes(StandardCharsets.UTF_8);
+            byte[] body =
+                """
+                    {"results":[{"title":"Exa Paper","url":"https://arxiv.org/abs/2501.00001","text":"Semantic abstract","publishedDate":"2026-01-15T00:00:00Z","score":0.9}]}
+                    """
+                    .getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
             exchange.close();
@@ -242,24 +248,24 @@ class WebToolsTest {
             assertTrue(braveOut.contains("Brave & clean"));
 
             // Serper (/search -> /news when category=news)
-            var serper = new WebSearchTool(client, mapper, new WebSearchConfig(WebSearchProvider.SERPER,
-                "serper-secret-8888", base.resolve("/serper/search"), base, Duration.ofSeconds(5), false, Map.of(),
-                null));
+            var serper =
+                new WebSearchTool(client, mapper, new WebSearchConfig(WebSearchProvider.SERPER, "serper-secret-8888",
+                    base.resolve("/serper/search"), base, Duration.ofSeconds(5), false, Map.of(), null));
             String serperOut = serper.execute(Map.of("query", "ai", "category", "news"));
             assertTrue(serperOut.contains("Serper direct"));
             assertTrue(serperOut.contains("Serper News"));
             assertTrue(serperOut.contains("follow up"));
 
             // Exa
-            var exa = new WebSearchTool(client, mapper, new WebSearchConfig(WebSearchProvider.EXA,
-                "exa-secret-7777", base.resolve("/exa"), base, Duration.ofSeconds(5), false, Map.of(), null));
+            var exa = new WebSearchTool(client, mapper, new WebSearchConfig(WebSearchProvider.EXA, "exa-secret-7777",
+                base.resolve("/exa"), base, Duration.ofSeconds(5), false, Map.of(), null));
             String exaOut = exa.execute(Map.of("query", "transformer", "category", "science"));
             assertTrue(exaOut.contains("Exa Paper"));
 
             // Error scrubbing: API key must never echo back
-            var failing = new WebSearchTool(client, mapper, new WebSearchConfig(WebSearchProvider.BOCHA,
-                "bocha-secret-leak-token", base.resolve("/bocha-fail"), base, Duration.ofSeconds(5), false, Map.of(),
-                null));
+            var failing = new WebSearchTool(client, mapper,
+                new WebSearchConfig(WebSearchProvider.BOCHA, "bocha-secret-leak-token", base.resolve("/bocha-fail"),
+                    base, Duration.ofSeconds(5), false, Map.of(), null));
             String failOut = failing.execute(Map.of("query", "secret"));
             assertTrue(failOut.startsWith("ERROR:"));
             assertFalse(failOut.contains("bocha-secret-leak-token"));
@@ -283,25 +289,31 @@ class WebToolsTest {
             exchange.close();
         });
         server.createContext("/wiki-en", exchange -> {
-            byte[] body = """
-                {"query":{"search":[{"title":"Java (programming language)","snippet":"<span>Java</span> is a language","timestamp":"2026-02-01T00:00:00Z"}]}}
-                """.getBytes(StandardCharsets.UTF_8);
+            byte[] body =
+                """
+                    {"query":{"search":[{"title":"Java (programming language)","snippet":"<span>Java</span> is a language","timestamp":"2026-02-01T00:00:00Z"}]}}
+                    """
+                    .getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
             exchange.close();
         });
         server.createContext("/github", exchange -> {
-            byte[] body = """
-                {"items":[{"full_name":"spring-projects/spring-boot","html_url":"https://github.com/spring-projects/spring-boot","description":"Spring Boot","language":"Java","stargazers_count":75000,"updated_at":"2026-06-01T00:00:00Z"}]}
-                """.getBytes(StandardCharsets.UTF_8);
+            byte[] body =
+                """
+                    {"items":[{"full_name":"spring-projects/spring-boot","html_url":"https://github.com/spring-projects/spring-boot","description":"Spring Boot","language":"Java","stargazers_count":75000,"updated_at":"2026-06-01T00:00:00Z"}]}
+                    """
+                    .getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
             exchange.close();
         });
         server.createContext("/stack", exchange -> {
-            byte[] json = """
-                {"items":[{"title":"How to fix &amp; configure Java?","link":"https://stackoverflow.com/q/123","answer_count":4,"score":42,"is_answered":true,"tags":["java","spring"],"last_activity_date":1735689600}]}
-                """.getBytes(StandardCharsets.UTF_8);
+            byte[] json =
+                """
+                    {"items":[{"title":"How to fix &amp; configure Java?","link":"https://stackoverflow.com/q/123","answer_count":4,"score":42,"is_answered":true,"tags":["java","spring"],"last_activity_date":1735689600}]}
+                    """
+                    .getBytes(StandardCharsets.UTF_8);
             ByteArrayOutputStream gzOut = new ByteArrayOutputStream();
             try (GZIPOutputStream gz = new GZIPOutputStream(gzOut)) {
                 gz.write(json);
@@ -337,8 +349,8 @@ class WebToolsTest {
                 Duration.ofSeconds(5), true, Map.of(WebSearchProvider.BOCHA, "bocha-k"), publicSources);
             WebSearchTool tool = new WebSearchTool(client, mapper, cfg);
 
-            WebSearchTool.SearchReport itReport = tool.executeDetailed(Map.of("query", "spring boot java",
-                "category", "it", "count", 8));
+            WebSearchTool.SearchReport itReport =
+                tool.executeDetailed(Map.of("query", "spring boot java", "category", "it", "count", 8));
             assertTrue(itReport.ok());
             assertEquals("public", itReport.sourceId());
             assertEquals(List.of("bocha", "searxng", "public"), itReport.triedSources());
@@ -346,8 +358,8 @@ class WebToolsTest {
             assertTrue(itReport.formattedText().contains("spring-projects/spring-boot"));
             assertTrue(itReport.formattedText().contains("How to fix & configure Java?"));
 
-            WebSearchTool.SearchReport scienceReport = tool.executeDetailed(Map.of("query", "attention",
-                "category", "science", "count", 5));
+            WebSearchTool.SearchReport scienceReport =
+                tool.executeDetailed(Map.of("query", "attention", "category", "science", "count", 5));
             assertTrue(scienceReport.ok());
             assertTrue(scienceReport.formattedText().contains("Attention Revisited"));
             assertTrue(scienceReport.formattedText().contains("arxiv"));
@@ -366,27 +378,33 @@ class WebToolsTest {
                 exchange.close();
                 return;
             }
-            byte[] body = """
-                {"data":{"webPages":{"value":[{"name":"Bocha Recovered","url":"https://bocha.example/ok","summary":"Recovered on retry"}]}}}
-                """.getBytes(StandardCharsets.UTF_8);
+            byte[] body =
+                """
+                    {"data":{"webPages":{"value":[{"name":"Bocha Recovered","url":"https://bocha.example/ok","summary":"Recovered on retry"}]}}}
+                    """
+                    .getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
             exchange.close();
         });
         server.createContext("/search", exchange -> {
-            byte[] body = """
-                {"results":[
-                  {"title":"Unrelated Thymeleaf Template Issue","url":"https://so.example/1","content":"Completely unrelated snippet","engines":["stackoverflow"],"score":1.0}
-                ]}
-                """.getBytes(StandardCharsets.UTF_8);
+            byte[] body =
+                """
+                    {"results":[
+                      {"title":"Unrelated Thymeleaf Template Issue","url":"https://so.example/1","content":"Completely unrelated snippet","engines":["stackoverflow"],"score":1.0}
+                    ]}
+                    """
+                    .getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
             exchange.close();
         });
         server.createContext("/github", exchange -> {
-            byte[] body = """
-                {"items":[{"full_name":"openjdk/httpclient-timeout-demo","html_url":"https://github.com/openjdk/httpclient-timeout-demo","description":"Java HttpClient timeout configuration examples","language":"Java","stargazers_count":500}]}
-                """.getBytes(StandardCharsets.UTF_8);
+            byte[] body =
+                """
+                    {"items":[{"full_name":"openjdk/httpclient-timeout-demo","html_url":"https://github.com/openjdk/httpclient-timeout-demo","description":"Java HttpClient timeout configuration examples","language":"Java","stargazers_count":500}]}
+                    """
+                    .getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
             exchange.close();
@@ -413,8 +431,8 @@ class WebToolsTest {
             // 2. Partial SearXNG result (<3) auto-supplements from PUBLIC and relevance reranks matching hit first
             var partialTool = new WebSearchTool(client, mapper, new WebSearchConfig(WebSearchProvider.SEARXNG, "", null,
                 base, Duration.ofSeconds(5), true, Map.of(), publicSources));
-            WebSearchTool.SearchReport report = partialTool.executeDetailed(Map.of(
-                "query", "Java HttpClient timeout", "category", "it", "count", 5));
+            WebSearchTool.SearchReport report =
+                partialTool.executeDetailed(Map.of("query", "Java HttpClient timeout", "category", "it", "count", 5));
             assertTrue(report.ok());
             assertEquals("searxng+public", report.sourceId());
             assertEquals(2, report.hits().size());
@@ -441,9 +459,11 @@ class WebToolsTest {
         });
         server.createContext("/tavily-ok", exchange -> {
             tavilyCalls.incrementAndGet();
-            byte[] body = """
-                {"results":[{"title":"Tavily Backup Hit","url":"https://tavily.example/ok","content":"Backup success","score":0.9}]}
-                """.getBytes(StandardCharsets.UTF_8);
+            byte[] body =
+                """
+                    {"results":[{"title":"Tavily Backup Hit","url":"https://tavily.example/ok","content":"Backup success","score":0.9}]}
+                    """
+                    .getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
             exchange.close();
@@ -473,17 +493,21 @@ class WebToolsTest {
             exchange.close();
         });
         server.createContext("/hn", exchange -> {
-            byte[] body = """
-                {"hits":[{"title":"Show HN: Zero-Key Local Search","url":"https://hn.example/zero-key","objectID":"42","points":312,"num_comments":88,"created_at":"2026-06-10T10:00:00Z"}]}
-                """.getBytes(StandardCharsets.UTF_8);
+            byte[] body =
+                """
+                    {"hits":[{"title":"Show HN: Zero-Key Local Search","url":"https://hn.example/zero-key","objectID":"42","points":312,"num_comments":88,"created_at":"2026-06-10T10:00:00Z"}]}
+                    """
+                    .getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
             exchange.close();
         });
         server.createContext("/openalex", exchange -> {
-            byte[] body = """
-                {"results":[{"display_name":"OpenAlex Mixture of Experts Paper","primary_location":{"landing_page_url":"https://openalex.example/paper","source":{"display_name":"NeurIPS"}},"cited_by_count":128,"publication_date":"2026-03-15"}]}
-                """.getBytes(StandardCharsets.UTF_8);
+            byte[] body =
+                """
+                    {"results":[{"display_name":"OpenAlex Mixture of Experts Paper","primary_location":{"landing_page_url":"https://openalex.example/paper","source":{"display_name":"NeurIPS"}},"cited_by_count":128,"publication_date":"2026-03-15"}]}
+                    """
+                    .getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
             exchange.close();
@@ -503,8 +527,8 @@ class WebToolsTest {
             // 1. AUTO mode tries Bocha (429 -> enters cooldown), fails over to Tavily using isolated endpoint
             WebSearchConfig cfg = new WebSearchConfig(WebSearchProvider.AUTO, "", null, base, Duration.ofSeconds(5),
                 true, Map.of(WebSearchProvider.BOCHA, "k-bocha", WebSearchProvider.TAVILY, "k-tavily"), publicSources,
-                Map.of(WebSearchProvider.BOCHA, base.resolve("/bocha-429"),
-                    WebSearchProvider.TAVILY, base.resolve("/tavily-ok")));
+                Map.of(WebSearchProvider.BOCHA, base.resolve("/bocha-429"), WebSearchProvider.TAVILY,
+                    base.resolve("/tavily-ok")));
             WebSearchTool tool = new WebSearchTool(client, mapper, cfg);
 
             WebSearchTool.SearchReport first = tool.executeDetailed(Map.of("query", "backup"));
@@ -530,18 +554,19 @@ class WebToolsTest {
             // 4. GitHub rate limit emits readable Chinese warning & arXiv builds multi-term AND query
             WebSearchTool pubTool = new WebSearchTool(client, mapper, new WebSearchConfig(WebSearchProvider.PUBLIC, "",
                 null, base, Duration.ofSeconds(5), false, Map.of(), publicSources, Map.of()));
-            WebSearchTool.SearchReport ghRate = pubTool.executeDetailed(Map.of("query", "spring", "site", "github.com"));
+            WebSearchTool.SearchReport ghRate =
+                pubTool.executeDetailed(Map.of("query", "spring", "site", "github.com"));
             assertFalse(ghRate.ok());
             assertTrue(ghRate.error().contains("每分钟限流"), ghRate.error());
 
-            WebSearchTool.SearchReport arxivRes = pubTool.executeDetailed(
-                Map.of("query", "Mixture of Experts", "category", "science"));
+            WebSearchTool.SearchReport arxivRes =
+                pubTool.executeDetailed(Map.of("query", "Mixture of Experts", "category", "science"));
             assertTrue(arxivRes.ok());
             assertTrue(arxivQuery.get().contains("all:Mixture+AND+all:of+AND+all:Experts"), arxivQuery.get());
             assertTrue(arxivRes.formattedText().contains("OpenAlex Mixture of Experts Paper"));
 
-            WebSearchTool.SearchReport hnRes = pubTool.executeDetailed(
-                Map.of("query", "Zero-Key Local Search", "category", "news"));
+            WebSearchTool.SearchReport hnRes =
+                pubTool.executeDetailed(Map.of("query", "Zero-Key Local Search", "category", "news"));
             assertTrue(hnRes.ok());
             assertTrue(hnRes.formattedText().contains("Show HN: Zero-Key Local Search"));
         } finally {
@@ -617,8 +642,9 @@ class WebToolsTest {
             exchange.close();
         });
         server.createContext("/gzip-og", exchange -> {
-            String html = "\uFEFF<html><head><title></title><meta property=\"og:title\" content=\"Spring Virtual Threads\"></head>"
-                + "<body><main><p>Gzip compressed SPA documentation body content.</p></main></body></html>";
+            String html =
+                "\uFEFF<html><head><title></title><meta property=\"og:title\" content=\"Spring Virtual Threads\"></head>"
+                    + "<body><main><p>Gzip compressed SPA documentation body content.</p></main></body></html>";
             ByteArrayOutputStream gzOut = new ByteArrayOutputStream();
             try (GZIPOutputStream gz = new GZIPOutputStream(gzOut)) {
                 gz.write(html.getBytes(StandardCharsets.UTF_8));
@@ -736,9 +762,8 @@ class WebToolsTest {
             String timedOut = bounded.execute(Map.of("url", base + "/slow-1"));
             assertTrue(timedOut.contains("超时"), timedOut);
 
-            assertEquals("https://spring.io/blog/post/",
-                WebFetchTool.parseFetchedSourceUrl(
-                    "来源: https://spring.io/blog/post/（由 https://spring.io/blog/post 重定向）\n标题: Hi"));
+            assertEquals("https://spring.io/blog/post/", WebFetchTool
+                .parseFetchedSourceUrl("来源: https://spring.io/blog/post/（由 https://spring.io/blog/post 重定向）\n标题: Hi"));
         } finally {
             server.stop(0);
         }

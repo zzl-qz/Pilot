@@ -101,8 +101,8 @@ public class MobileWorkbenchController {
         }
         return pending.stream().map(approval -> {
             EventEnvelope owner = owners.get(approval.callId());
-            String sessionId = !approval.sessionId().isBlank() ? approval.sessionId()
-                : owner == null ? "" : owner.sessionId();
+            String sessionId =
+                !approval.sessionId().isBlank() ? approval.sessionId() : owner == null ? "" : owner.sessionId();
             String title = sessionId.isBlank() ? "正在确认任务归属"
                 : repository.find(sessionId).map(session -> session.title()).orElse("正在确认任务归属");
             return new MobileApproval(approval.callId(), approval.toolName(), approval.argsSummary(),

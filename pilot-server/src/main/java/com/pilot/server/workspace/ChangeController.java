@@ -65,8 +65,7 @@ public class ChangeController {
 
     /** 读取当前工作区近期提交历史与当前分支名。 */
     @GetMapping("/git/log")
-    public ChangeService.CommitLogReport gitLog(@PathVariable String id,
-        @RequestParam(defaultValue = "15") int limit) {
+    public ChangeService.CommitLogReport gitLog(@PathVariable String id, @RequestParam(defaultValue = "15") int limit) {
         return changes.log(workspace(id), limit);
     }
 
@@ -142,8 +141,15 @@ public class ChangeController {
     public record CommitRequest(List<String> paths, Boolean all, String message) {
     }
 
-    public record PathRequest(String path) { }
-    public record BranchRequest(String branch) { }
-    public record StashPushRequest(String message) { }
-    public record StashPopRequest(String reference) { }
+    public record PathRequest(String path) {
+    }
+
+    public record BranchRequest(String branch) {
+    }
+
+    public record StashPushRequest(String message) {
+    }
+
+    public record StashPopRequest(String reference) {
+    }
 }

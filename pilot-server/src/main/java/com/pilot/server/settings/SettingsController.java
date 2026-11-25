@@ -17,6 +17,7 @@ import com.pilot.core.model.ModelClientException;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.server.attachment.AttachmentLimits;
 import com.pilot.server.model.ModelCatalogService;
+import com.pilot.server.model.ModelCatalogService.LocalModelService;
 import com.pilot.server.model.ModelSettings;
 import com.pilot.server.permission.PermissionSettings;
 import com.pilot.server.voice.VoiceLimits;
@@ -154,6 +155,6 @@ public class SettingsController {
     public record ModelsResponse(List<String> models) {
     }
 
-    public record LocalModelsResponse(List<com.pilot.server.model.ModelCatalogService.LocalModelService> services) {
+    public record LocalModelsResponse(List<LocalModelService> services) {
     }
 }

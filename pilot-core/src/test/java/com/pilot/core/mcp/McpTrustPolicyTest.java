@@ -66,8 +66,8 @@ class McpTrustPolicyTest {
         assertFalse(McpTrustPolicy.trusted(manager, workspace, "fake"));
 
         // 合法远程 HTTP/SSE 服务器与 stdio 同等待遇：未信任时须审批
-        Files.writeString(workspace.resolve(".mcp.json"),
-            mapper.writeValueAsString(Map.of("mcpServers", Map.of("remote", Map.of("url", "https://example.com/mcp")))));
+        Files.writeString(workspace.resolve(".mcp.json"), mapper
+            .writeValueAsString(Map.of("mcpServers", Map.of("remote", Map.of("url", "https://example.com/mcp")))));
         assertFalse(McpTrustPolicy.listingReadOnly(manager, workspace, "remote"));
         assertTrue(McpTrustPolicy.listingNeedsConfirm(manager, workspace, "remote"));
 

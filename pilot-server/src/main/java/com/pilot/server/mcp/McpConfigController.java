@@ -56,8 +56,8 @@ import tools.jackson.databind.node.ObjectNode;
 public class McpConfigController {
     private static final Pattern NAME = Pattern.compile("[A-Za-z0-9._-]{1,64}");
     private static final Set<String> IMPORT_FIELDS = Set.of("command", "args", "env", "type", "url", "headers");
-    private static final Set<String> REMOTE_TYPES = Set.of("http", "streamable-http", "streamable_http",
-        "streamablehttp", "sse");
+    private static final Set<String> REMOTE_TYPES =
+        Set.of("http", "streamable-http", "streamable_http", "streamablehttp", "sse");
     /** 与 McpToolsTool.MAX_LISTED 同一展示口径。 */
     private static final int MAX_LISTED_TOOLS = 80;
 
@@ -121,8 +121,8 @@ public class McpConfigController {
             if (request.headers() != null && request.headers().values().stream().anyMatch(value -> value == null)) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "headers 的值不能为 null");
             }
-            String normalizedType = "sse".equals(rawTransport) ? McpServerConfig.TRANSPORT_SSE
-                : McpServerConfig.TRANSPORT_HTTP;
+            String normalizedType =
+                "sse".equals(rawTransport) ? McpServerConfig.TRANSPORT_SSE : McpServerConfig.TRANSPORT_HTTP;
             Map<String, String> headers = new LinkedHashMap<>();
             if (request.headers() != null) {
                 request.headers().forEach((key, value) -> {
@@ -384,8 +384,7 @@ public class McpConfigController {
             || (!urlNode.isMissingNode() && (commandNode.isMissingNode() || commandNode.asString("").isBlank()));
         if (remote) {
             if (!commandNode.isMissingNode()) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "服务器 " + name + " 不能同时配置 command 与远程 url");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "服务器 " + name + " 不能同时配置 command 与远程 url");
             }
             if (!urlNode.isTextual() || urlNode.asString("").isBlank()) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "服务器 " + name + " 缺少远程 url");
@@ -405,8 +404,7 @@ public class McpConfigController {
                 }
                 for (String key : headers.propertyNames()) {
                     if (!headers.path(key).isTextual()) {
-                        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                            "服务器 " + name + " 的 headers 值必须是字符串");
+                        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "服务器 " + name + " 的 headers 值必须是字符串");
                     }
                 }
                 clean.set("headers", headers.deepCopy());

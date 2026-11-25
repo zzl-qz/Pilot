@@ -4,6 +4,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -118,7 +119,7 @@ public class CapabilitiesController {
 
     private static String commandLine(McpServerConfig config) {
         if (config.isRemote()) {
-            return config.transport().toUpperCase(java.util.Locale.ROOT) + " " + config.url();
+            return config.transport().toUpperCase(Locale.ROOT) + " " + config.url();
         }
         if (config.command() == null) {
             return "";

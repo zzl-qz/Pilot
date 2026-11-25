@@ -567,8 +567,8 @@ class BrowserIntegrationTest {
 
         assertTrue(stoppedEvent.await(5, TimeUnit.SECONDS), "点击页内 Stop 按钮必须触发 control-stopped 事件");
         String overlayAfterStop = backend.execute("it-session",
-            Map.of("op", "evaluate", "expression", "String(Boolean(document.querySelector('[data-pilot-agent-overlay]')))",
-                "userInitiated", true),
+            Map.of("op", "evaluate", "expression",
+                "String(Boolean(document.querySelector('[data-pilot-agent-overlay]')))", "userInitiated", true),
             Duration.ofSeconds(5)).text();
         assertEquals("false", overlayAfterStop, "点击 Stop 后必须立即移除页面蓝框和按钮");
 
@@ -642,27 +642,24 @@ class BrowserIntegrationTest {
         run("fill", "ref", nameRef, "text", "NestedOk");
         run("check", "ref", agreeRef);
         run("click", "ref", okRef);
-        String innerRes = run("evaluate", "expression",
-            "document.getElementById('f-outer').contentDocument"
-                + ".getElementById('f-inner').contentDocument.getElementById('inner-res').textContent");
+        String innerRes = run("evaluate", "expression", "document.getElementById('f-outer').contentDocument"
+            + ".getElementById('f-inner').contentDocument.getElementById('inner-res').textContent");
         assertEquals("INNER:NestedOk:true", innerRes);
 
         String confirmRef = ref(snap, "button", "触发确认框");
         String promptRef = ref(snap, "button", "触发输入框");
         run("dialog", "accept", false);
         run("click", "ref", confirmRef);
-        assertEquals("confirm:false", run("evaluate", "expression",
-            "document.getElementById('dlg-res').textContent"));
+        assertEquals("confirm:false", run("evaluate", "expression", "document.getElementById('dlg-res').textContent"));
 
         run("dialog", "accept", true);
         run("click", "ref", confirmRef);
-        assertEquals("confirm:true", run("evaluate", "expression",
-            "document.getElementById('dlg-res').textContent"));
+        assertEquals("confirm:true", run("evaluate", "expression", "document.getElementById('dlg-res').textContent"));
 
         run("dialog", "accept", true, "promptText", "pilot-ok");
         run("click", "ref", promptRef);
-        assertEquals("prompt:pilot-ok", run("evaluate", "expression",
-            "document.getElementById('dlg-res').textContent"));
+        assertEquals("prompt:pilot-ok",
+            run("evaluate", "expression", "document.getElementById('dlg-res').textContent"));
 
         String dialogHistory = run("dialog");
         assertTrue(dialogHistory.contains("[confirm] dismissed"), dialogHistory);
@@ -673,8 +670,8 @@ class BrowserIntegrationTest {
             workspace.resolve("chooser.png").toFile());
         String pickRef = ref(snap, "button", "动态选择附件");
         assertTrue(run("upload", "ref", pickRef, "files", List.of("chooser.png")).contains("上传 1 个文件"));
-        assertEquals("uploaded:chooser.png", run("evaluate", "expression",
-            "document.getElementById('upload-res').textContent"));
+        assertEquals("uploaded:chooser.png",
+            run("evaluate", "expression", "document.getElementById('upload-res').textContent"));
     }
 
     @Test
@@ -737,8 +734,7 @@ class BrowserIntegrationTest {
         assertTrue(run("record", "mode", "start").startsWith("已开始录制"));
 
         assertTrue(run("drag", "selector", "#drag-src", "targetSelector", "#drag-dst").startsWith("已从"));
-        assertEquals("dropped:card", run("evaluate", "expression",
-            "document.getElementById('drag-res').textContent"));
+        assertEquals("dropped:card", run("evaluate", "expression", "document.getElementById('drag-res').textContent"));
 
         assertTrue(run("drag", "x", 55, "y", 125, "targetX", 210, "targetY", 125, "dragSteps", 8).startsWith("已从"));
         String pointerText = run("evaluate", "expression", "document.getElementById('pointer-res').textContent");
@@ -746,8 +742,8 @@ class BrowserIntegrationTest {
         assertTrue(Integer.parseInt(pointerText.substring("moved:".length())) >= 180, pointerText);
 
         assertTrue(run("click", "x", 90, "y", 200).startsWith("已按坐标点击"));
-        assertTrue(run("evaluate", "expression", "document.getElementById('canvas-res').textContent")
-            .startsWith("canvas:"));
+        assertTrue(
+            run("evaluate", "expression", "document.getElementById('canvas-res').textContent").startsWith("canvas:"));
 
         List<Map<String, Object>> steps = new ArrayList<>();
         for (int i = 1; i <= 12; i++) {
@@ -755,8 +751,8 @@ class BrowserIntegrationTest {
         }
         String batchText = run("batch", "steps", steps);
         assertTrue(batchText.contains("已完成批量操作 12 步"), batchText);
-        assertEquals("12", run("evaluate", "expression",
-            "String(document.querySelectorAll('input[type=checkbox]:checked').length)"));
+        assertEquals("12",
+            run("evaluate", "expression", "String(document.querySelectorAll('input[type=checkbox]:checked').length)"));
 
         assertTrue(run("navigate", "url", base + "checkout").startsWith("已打开"));
         run("wait", "ms", 200);
@@ -771,16 +767,15 @@ class BrowserIntegrationTest {
         assertTrue(replay.path("actions").size() >= 3, "录像必须包含动作标记：" + replay.path("actions").size());
         for (JsonNode frame : replay.path("frames")) {
             assertFalse(frame.path("data").asText().isBlank());
-            assertFalse(frame.path("url").asText().contains("/checkout"),
-                "敏感页面帧必须被跳过：" + frame.path("url").asText());
+            assertFalse(frame.path("url").asText().contains("/checkout"), "敏感页面帧必须被跳过：" + frame.path("url").asText());
         }
 
         List<Map<String, Object>> longBatch = new ArrayList<>();
         for (int i = 0; i < 10; i++) {
             longBatch.add(Map.of("action", "wait", "ms", 120));
         }
-        CompletableFuture<String> asyncBatch = CompletableFuture.supplyAsync(
-            () -> run("batch", "steps", longBatch, "delayMs", 80));
+        CompletableFuture<String> asyncBatch =
+            CompletableFuture.supplyAsync(() -> run("batch", "steps", longBatch, "delayMs", 80));
         Thread.sleep(220);
         backend.stopControl("it-session");
         String aborted = asyncBatch.get(5, TimeUnit.SECONDS);

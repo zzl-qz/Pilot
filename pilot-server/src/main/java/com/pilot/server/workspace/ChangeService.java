@@ -819,9 +819,11 @@ public class ChangeService {
             return new GitBranchReport(false, "", List.of(), null);
         }
         CommandResult currentResult = run(root, List.of("git", "branch", "--show-current"));
-        CommandResult branchResult = run(root, List.of("git", "for-each-ref", "--format=%(refname:short)", "refs/heads"));
+        CommandResult branchResult =
+            run(root, List.of("git", "for-each-ref", "--format=%(refname:short)", "refs/heads"));
         if (currentResult.exitCode() != 0 || branchResult.exitCode() != 0) {
-            return new GitBranchReport(true, "", List.of(), firstUsefulError(branchResult.output(), currentResult.output()));
+            return new GitBranchReport(true, "", List.of(),
+                firstUsefulError(branchResult.output(), currentResult.output()));
         }
         String current = currentResult.output().strip();
         String output = branchResult.output();
@@ -905,8 +907,8 @@ public class ChangeService {
             return new GitOperationResult(false, "当前工作区不是 Git 仓库");
         }
         CommandResult result = run(root, command);
-        return result.exitCode() == 0 ? new GitOperationResult(true, null)
-            : new GitOperationResult(false, firstUsefulError(result.output(), "Git 操作失败（退出码 " + result.exitCode() + "）"));
+        return result.exitCode() == 0 ? new GitOperationResult(true, null) : new GitOperationResult(false,
+            firstUsefulError(result.output(), "Git 操作失败（退出码 " + result.exitCode() + "）"));
     }
 
     /** 读取近期提交历史与当前分支名。非 Git 仓库或尚无提交时返回空列表而非报错。 */
@@ -1029,16 +1031,15 @@ public class ChangeService {
             }
         }
 
-        List<String> addCmd = all ? List.of("git", "add", "-A")
-            : withPathspec(List.of("git", "add", "-A"), targetPaths);
+        List<String> addCmd =
+            all ? List.of("git", "add", "-A") : withPathspec(List.of("git", "add", "-A"), targetPaths);
         CommandResult addRes = run(root, addCmd);
         if (addRes.exitCode() != 0) {
             return new CommitResult(false, "", "", "", List.of(),
                 "暂存文件失败：" + firstUsefulError(addRes.output(), "git add 退出码 " + addRes.exitCode()));
         }
 
-        List<String> commitCmd = all
-            ? List.of("git", "commit", "-F", "-")
+        List<String> commitCmd = all ? List.of("git", "commit", "-F", "-")
             : withPathspec(List.of("git", "commit", "--only", "-F", "-"), targetPaths);
         CommandResult commitRes = runWithStdin(root, commitCmd, cleanMessage + "\n");
         if (commitRes.exitCode() != 0) {
@@ -1086,10 +1087,7 @@ public class ChangeService {
     private static CommandResult runWithStdin(Path workspace, List<String> command, String stdinText) {
         Process process = null;
         try {
-            process = new ProcessBuilder(command)
-                .directory(workspace.toFile())
-                .redirectErrorStream(true)
-                .start();
+            process = new ProcessBuilder(command).directory(workspace.toFile()).redirectErrorStream(true).start();
             ByteArrayOutputStream buffer = new ByteArrayOutputStream();
             InputStream stream = process.getInputStream();
             Thread drainer = Thread.ofVirtual().start(() -> {

@@ -13,8 +13,8 @@ import java.util.Map;
  * @param headers     远程请求自定义头（仅 http / sse 使用；toString 中自动脱敏）
  * @param unsupported 非空表示配置存在但当前无法使用，原因会原样展示给模型与用户
  */
-public record McpServerConfig(String name, String transport, String command, List<String> args,
-    Map<String, String> env, String url, Map<String, String> headers, String unsupported) {
+public record McpServerConfig(String name, String transport, String command, List<String> args, Map<String, String> env,
+    String url, Map<String, String> headers, String unsupported) {
     public static final String TRANSPORT_STDIO = "stdio";
     public static final String TRANSPORT_HTTP = "http";
     public static final String TRANSPORT_SSE = "sse";

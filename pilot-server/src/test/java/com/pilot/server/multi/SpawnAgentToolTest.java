@@ -31,8 +31,8 @@ import com.pilot.core.event.ToolStarted;
 import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
-import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ContextComposition;
+import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelProfile;
 import com.pilot.core.model.ModelResponse;
 import com.pilot.core.model.ModelUsage;
@@ -474,8 +474,9 @@ class SpawnAgentToolTest {
 
     @Test
     void routedChildModelStaysOnTheSubagentMeteringBoundary() {
-        ModelSettings settings = new ModelSettings(
-            new ModelProperties("key", "https://example.test/v1", "main-model", List.of()), new InMemorySettingsStore());
+        ModelSettings settings =
+            new ModelSettings(new ModelProperties("key", "https://example.test/v1", "main-model", List.of()),
+                new InMemorySettingsStore());
         List<RequestReport> reports = new CopyOnWriteArrayList<>();
         List<List<Message>> seen = new CopyOnWriteArrayList<>();
         List<List<ToolDefinition>> seenTools = new CopyOnWriteArrayList<>();
@@ -487,8 +488,8 @@ class SpawnAgentToolTest {
         ModelClientProvider provider = new ModelClientProvider(settings, snapshot -> new ModelClient() {
             @Override
             public ModelProfile profile() {
-                return ModelProfile.resolve(null, snapshot.model(), ModelProfile.AUTO, ModelProfile.AUTO, "", null, null,
-                    null, null);
+                return ModelProfile.resolve(null, snapshot.model(), ModelProfile.AUTO, ModelProfile.AUTO, "", null,
+                    null, null, null);
             }
 
             @Override
@@ -510,12 +511,11 @@ class SpawnAgentToolTest {
                 return true;
             }
         });
-        SpawnAgentTool tool =
-            new SpawnAgentTool((messages, tools) -> new ModelResponse("main answer", List.of()), new ToolRegistry(),
-                new PolicyPermissionGate(PermissionMode.READ_ONLY), ApprovalBroker.denyAll(),
-                new AgentLoop.Config(5, 3, "你是测试代理"), List::of, event -> {
-                }, () -> false).withChildRoute(() -> "child-model",
-                    AgentRunPreparation.meteredChildRoute(provider, "ses_m", "run_m", reports::add));
+        SpawnAgentTool tool = new SpawnAgentTool((messages, tools) -> new ModelResponse("main answer", List.of()),
+            new ToolRegistry(), new PolicyPermissionGate(PermissionMode.READ_ONLY), ApprovalBroker.denyAll(),
+            new AgentLoop.Config(5, 3, "你是测试代理"), List::of, event -> {
+            }, () -> false).withChildRoute(() -> "child-model",
+                AgentRunPreparation.meteredChildRoute(provider, "ses_m", "run_m", reports::add));
 
         assertTrue(tool.execute(Map.of("task", "走子路由")).contains("child answer"));
         assertTrue(tool.execute(Map.of("task", "指定模型", "model", "fast-model")).contains("child answer"));

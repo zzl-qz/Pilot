@@ -71,8 +71,8 @@ public class WebSearchSettingsController {
     /** 只读实时搜索测试：支持叠加当前表单中尚未保存的字段；不落盘、不回传密钥，始终绕过短时冷却。 */
     @PostMapping("/test")
     public TestResponse test(@RequestBody(required = false) TestRequest request) {
-        String query = request == null || request.query() == null || request.query().isBlank()
-            ? "Spring Boot 3" : request.query().strip();
+        String query = request == null || request.query() == null || request.query().isBlank() ? "Spring Boot 3"
+            : request.query().strip();
         WebSearchConfig config;
         HttpClient tempClient = null;
         try {

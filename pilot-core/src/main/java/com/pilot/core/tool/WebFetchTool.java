@@ -121,14 +121,11 @@ public final class WebFetchTool implements Tool {
                     return "ERROR: 网页请求超时";
                 }
                 Duration hopTimeout = Duration.ofNanos(Math.max(1_000_000L, remainingNanos));
-                HttpRequest request = HttpRequest.newBuilder(current)
-                    .timeout(hopTimeout)
+                HttpRequest request = HttpRequest.newBuilder(current).timeout(hopTimeout)
                     .header("User-Agent", USER_AGENT)
                     .header("Accept",
                         "text/html,application/xhtml+xml,text/plain,text/markdown,application/json,application/xml;q=0.9")
-                    .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-                    .header("Accept-Encoding", "gzip")
-                    .GET()
+                    .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8").header("Accept-Encoding", "gzip").GET()
                     .build();
                 try (var response = BoundedHttp.open(client, request, hopTimeout, MAX_BYTES)) {
                     int status = response.statusCode();
@@ -239,15 +236,10 @@ public final class WebFetchTool implements Tool {
     }
 
     private static boolean isSupportedContentType(String lowerType) {
-        return lowerType.contains("text/html")
-            || lowerType.contains("text/plain")
-            || lowerType.contains("application/xhtml+xml")
-            || lowerType.contains("application/json")
-            || lowerType.contains("+json")
-            || lowerType.contains("text/markdown")
-            || lowerType.contains("application/xml")
-            || lowerType.contains("text/xml")
-            || lowerType.contains("+xml");
+        return lowerType.contains("text/html") || lowerType.contains("text/plain")
+            || lowerType.contains("application/xhtml+xml") || lowerType.contains("application/json")
+            || lowerType.contains("+json") || lowerType.contains("text/markdown")
+            || lowerType.contains("application/xml") || lowerType.contains("text/xml") || lowerType.contains("+xml");
     }
 
     private static Charset detectCharset(String contentType, byte[] body, boolean html) {

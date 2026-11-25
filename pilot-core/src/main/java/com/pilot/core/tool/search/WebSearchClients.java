@@ -81,8 +81,8 @@ public final class WebSearchClients {
         String label = WebSearchProvider.SEARXNG.label();
         try {
             String base = stripTrailingSlash(config.resolveEndpoint(WebSearchProvider.SEARXNG).toString());
-            StringBuilder url = new StringBuilder(base).append("/search?q=")
-                .append(encode(request.effectiveQuery())).append("&format=json");
+            StringBuilder url = new StringBuilder(base).append("/search?q=").append(encode(request.effectiveQuery()))
+                .append("&format=json");
             if (request.page() > 1) {
                 url.append("&pageno=").append(request.page());
             }
@@ -103,14 +103,9 @@ public final class WebSearchClients {
             if (!searxLang.isEmpty()) {
                 url.append("&language=").append(encode(searxLang));
             }
-            HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(url.toString()))
-                .timeout(config.timeout())
-                .header("Accept", "application/json")
-                .header("User-Agent", USER_AGENT)
-                .header("X-Forwarded-For", "127.0.0.1")
-                .header("X-Real-IP", "127.0.0.1")
-                .GET()
-                .build();
+            HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(url.toString())).timeout(config.timeout())
+                .header("Accept", "application/json").header("User-Agent", USER_AGENT)
+                .header("X-Forwarded-For", "127.0.0.1").header("X-Real-IP", "127.0.0.1").GET().build();
             HttpText response = sendText(client, httpRequest, config.timeout());
             if (response.statusCode() != 200) {
                 return ProviderOutcome.failure(sourceId, label,
@@ -121,10 +116,11 @@ public final class WebSearchClients {
             for (JsonNode item : root.path("results")) {
                 String title = cleanText(item.path("title").asString(""));
                 String hitUrl = item.path("url").asString("").strip();
-                String snippet = truncate(cleanText(firstNonBlank(item.path("content").asString(""),
-                    item.path("description").asString(""))), MAX_SNIPPET_CHARS);
-                String published = firstNonBlank(item.path("publishedDate").asString(""),
-                    item.path("pubdate").asString(""));
+                String snippet = truncate(
+                    cleanText(firstNonBlank(item.path("content").asString(""), item.path("description").asString(""))),
+                    MAX_SNIPPET_CHARS);
+                String published =
+                    firstNonBlank(item.path("publishedDate").asString(""), item.path("pubdate").asString(""));
                 List<String> engines = readEngines(item);
                 double score = item.path("score").isNumber() ? item.path("score").asDouble(0.0) : 0.0;
                 if (!title.isEmpty() || !hitUrl.isEmpty()) {
@@ -193,8 +189,8 @@ public final class WebSearchClients {
             if (!failedEngines.isEmpty()) {
                 warnings.add("部分上游引擎未响应: " + String.join(", ", failedEngines));
             }
-            List<SearchHit> ranked = WebSearchModels.deduplicateAndRank(hits, request.count(), request.query(),
-                request.site());
+            List<SearchHit> ranked =
+                WebSearchModels.deduplicateAndRank(hits, request.count(), request.query(), request.site());
             if (!hits.isEmpty() && ranked.isEmpty() && !request.site().isEmpty()) {
                 warnings.add("上游返回 " + hits.size() + " 条结果均不属于限定站点 " + request.site() + "，已过滤");
             }
@@ -207,8 +203,8 @@ public final class WebSearchClients {
             return ProviderOutcome.failure(sourceId, label, "搜索请求超时", false, true);
         } catch (Exception e) {
             if (isConnectionDown(e)) {
-                return ProviderOutcome.failure(sourceId, label,
-                    "本地搜索未启动。把 pilot.web-search.local 设为 true 后重启。", true, false);
+                return ProviderOutcome.failure(sourceId, label, "本地搜索未启动。把 pilot.web-search.local 设为 true 后重启。", true,
+                    false);
             }
             return ProviderOutcome.failure(sourceId, label, "搜索请求失败: " + e.getClass().getSimpleName(), false, false);
         }
@@ -234,12 +230,9 @@ public final class WebSearchClients {
                 default -> "noLimit";
             });
             URI uri = config.resolveEndpoint(provider);
-            HttpRequest httpRequest = HttpRequest.newBuilder(uri)
-                .timeout(config.timeout())
-                .header("Authorization", "Bearer " + apiKey)
-                .header("Content-Type", "application/json")
-                .header("Accept", "application/json")
-                .header("User-Agent", USER_AGENT)
+            HttpRequest httpRequest = HttpRequest.newBuilder(uri).timeout(config.timeout())
+                .header("Authorization", "Bearer " + apiKey).header("Content-Type", "application/json")
+                .header("Accept", "application/json").header("User-Agent", USER_AGENT)
                 .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(payload), StandardCharsets.UTF_8))
                 .build();
             HttpText response = sendTextWithTransientRetry(client, httpRequest, config.timeout());
@@ -256,18 +249,19 @@ public final class WebSearchClients {
             for (JsonNode item : values) {
                 String title = cleanText(item.path("name").asString(""));
                 String hitUrl = item.path("url").asString("").strip();
-                String snippet = truncate(cleanText(firstNonBlank(item.path("summary").asString(""),
-                    item.path("snippet").asString(""))), MAX_SNIPPET_CHARS);
-                String published = firstNonBlank(item.path("datePublished").asString(""),
-                    item.path("dateLastCrawled").asString(""));
+                String snippet = truncate(
+                    cleanText(firstNonBlank(item.path("summary").asString(""), item.path("snippet").asString(""))),
+                    MAX_SNIPPET_CHARS);
+                String published =
+                    firstNonBlank(item.path("datePublished").asString(""), item.path("dateLastCrawled").asString(""));
                 if (!title.isEmpty() || !hitUrl.isEmpty()) {
                     hits.add(new SearchHit(title, hitUrl, snippet, normalizeDate(published), List.of("bocha"),
                         Math.max(0.1, 1.0 - idx * 0.02)));
                     idx++;
                 }
             }
-            List<SearchHit> ranked = WebSearchModels.deduplicateAndRank(hits, request.count(), request.query(),
-                request.site());
+            List<SearchHit> ranked =
+                WebSearchModels.deduplicateAndRank(hits, request.count(), request.query(), request.site());
             List<String> warnings = siteFilterWarnings(hits, ranked, request.site());
             return new ProviderOutcome(provider.id(), provider.label(), ranked, List.of(), List.of(), List.of(),
                 warnings, null, false, false);
@@ -306,12 +300,9 @@ public final class WebSearchClients {
                 payload.put("include_domains", List.of(request.site()));
             }
             URI uri = config.resolveEndpoint(provider);
-            HttpRequest httpRequest = HttpRequest.newBuilder(uri)
-                .timeout(config.timeout())
-                .header("Authorization", "Bearer " + apiKey)
-                .header("Content-Type", "application/json")
-                .header("Accept", "application/json")
-                .header("User-Agent", USER_AGENT)
+            HttpRequest httpRequest = HttpRequest.newBuilder(uri).timeout(config.timeout())
+                .header("Authorization", "Bearer " + apiKey).header("Content-Type", "application/json")
+                .header("Accept", "application/json").header("User-Agent", USER_AGENT)
                 .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(payload), StandardCharsets.UTF_8))
                 .build();
             HttpText response = sendTextWithTransientRetry(client, httpRequest, config.timeout());
@@ -335,8 +326,8 @@ public final class WebSearchClients {
                     hits.add(new SearchHit(title, hitUrl, snippet, normalizeDate(published), List.of("tavily"), score));
                 }
             }
-            List<SearchHit> ranked = WebSearchModels.deduplicateAndRank(hits, request.count(), request.query(),
-                request.site());
+            List<SearchHit> ranked =
+                WebSearchModels.deduplicateAndRank(hits, request.count(), request.query(), request.site());
             List<String> warnings = siteFilterWarnings(hits, ranked, request.site());
             return new ProviderOutcome(provider.id(), provider.label(), ranked, answers, List.of(), List.of(), warnings,
                 null, false, false);
@@ -356,8 +347,7 @@ public final class WebSearchClients {
         WebSearchProvider provider = WebSearchProvider.BRAVE;
         String apiKey = config.resolveApiKey(provider);
         if (apiKey.isBlank()) {
-            return ProviderOutcome.failure(provider.id(), provider.label(),
-                "未配置 Brave Search API Key", false, false);
+            return ProviderOutcome.failure(provider.id(), provider.label(), "未配置 Brave Search API Key", false, false);
         }
         try {
             String base = stripTrailingSlash(config.resolveEndpoint(provider).toString());
@@ -381,13 +371,9 @@ public final class WebSearchClients {
             if (request.page() > 1) {
                 url.append("&offset=").append(request.page() - 1);
             }
-            HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(url.toString()))
-                .timeout(config.timeout())
-                .header("X-Subscription-Token", apiKey)
-                .header("Accept", "application/json")
-                .header("User-Agent", USER_AGENT)
-                .GET()
-                .build();
+            HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(url.toString())).timeout(config.timeout())
+                .header("X-Subscription-Token", apiKey).header("Accept", "application/json")
+                .header("User-Agent", USER_AGENT).GET().build();
             HttpText response = sendTextWithTransientRetry(client, httpRequest, config.timeout());
             if (response.statusCode() != 200) {
                 return apiStatusFailure(provider, "Brave API", response, apiKey);
@@ -414,8 +400,8 @@ public final class WebSearchClients {
                     infoboxes.add(title.isEmpty() ? desc : (desc.isEmpty() ? title : title + "： " + desc));
                 }
             }
-            List<SearchHit> ranked = WebSearchModels.deduplicateAndRank(hits, request.count(), request.query(),
-                request.site());
+            List<SearchHit> ranked =
+                WebSearchModels.deduplicateAndRank(hits, request.count(), request.query(), request.site());
             List<String> warnings = siteFilterWarnings(hits, ranked, request.site());
             return new ProviderOutcome(provider.id(), provider.label(), ranked, List.of(), infoboxes, List.of(),
                 warnings, null, false, false);
@@ -463,12 +449,9 @@ public final class WebSearchClients {
             } else if ("en".equals(request.language())) {
                 payload.put("hl", "en");
             }
-            HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(endpoint))
-                .timeout(config.timeout())
-                .header("X-API-KEY", apiKey)
-                .header("Content-Type", "application/json")
-                .header("Accept", "application/json")
-                .header("User-Agent", USER_AGENT)
+            HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(endpoint)).timeout(config.timeout())
+                .header("X-API-KEY", apiKey).header("Content-Type", "application/json")
+                .header("Accept", "application/json").header("User-Agent", USER_AGENT)
                 .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(payload), StandardCharsets.UTF_8))
                 .build();
             HttpText response = sendTextWithTransientRetry(client, httpRequest, config.timeout());
@@ -479,8 +462,8 @@ public final class WebSearchClients {
             List<String> answers = new ArrayList<>();
             JsonNode answerBox = root.path("answerBox");
             if (answerBox.isObject()) {
-                String ans = firstNonBlank(answerBox.path("answer").asString(""),
-                    answerBox.path("snippet").asString(""));
+                String ans =
+                    firstNonBlank(answerBox.path("answer").asString(""), answerBox.path("snippet").asString(""));
                 if (!ans.isEmpty()) {
                     answers.add(truncate(cleanText(ans), MAX_SNIPPET_CHARS));
                 }
@@ -518,8 +501,8 @@ public final class WebSearchClients {
                     suggestions.add(q);
                 }
             }
-            List<SearchHit> ranked = WebSearchModels.deduplicateAndRank(hits, request.count(), request.query(),
-                request.site());
+            List<SearchHit> ranked =
+                WebSearchModels.deduplicateAndRank(hits, request.count(), request.query(), request.site());
             List<String> warnings = siteFilterWarnings(hits, ranked, request.site());
             return new ProviderOutcome(provider.id(), provider.label(), ranked, answers, infoboxes, suggestions,
                 warnings, null, false, false);
@@ -559,11 +542,8 @@ public final class WebSearchClients {
                 payload.put("startPublishedDate", start.toString());
             }
             URI uri = config.resolveEndpoint(provider);
-            HttpRequest httpRequest = HttpRequest.newBuilder(uri)
-                .timeout(config.timeout())
-                .header("x-api-key", apiKey)
-                .header("Content-Type", "application/json")
-                .header("Accept", "application/json")
+            HttpRequest httpRequest = HttpRequest.newBuilder(uri).timeout(config.timeout()).header("x-api-key", apiKey)
+                .header("Content-Type", "application/json").header("Accept", "application/json")
                 .header("User-Agent", USER_AGENT)
                 .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(payload), StandardCharsets.UTF_8))
                 .build();
@@ -576,19 +556,19 @@ public final class WebSearchClients {
             for (JsonNode item : root.path("results")) {
                 String title = cleanText(item.path("title").asString(""));
                 String hitUrl = item.path("url").asString("").strip();
-                String snippet = truncate(cleanText(firstNonBlank(item.path("text").asString(""),
-                    item.path("summary").asString(""),
-                    item.path("highlights").isArray() && !item.path("highlights").isEmpty()
-                        ? item.path("highlights").get(0).asString("") : "")),
-                    MAX_SNIPPET_CHARS);
+                String snippet =
+                    truncate(cleanText(firstNonBlank(item.path("text").asString(""), item.path("summary").asString(""),
+                        item.path("highlights").isArray() && !item.path("highlights").isEmpty()
+                            ? item.path("highlights").get(0).asString("") : "")),
+                        MAX_SNIPPET_CHARS);
                 String published = item.path("publishedDate").asString("");
                 double score = item.path("score").isNumber() ? item.path("score").asDouble(0.5) : 0.5;
                 if (!title.isEmpty() || !hitUrl.isEmpty()) {
                     hits.add(new SearchHit(title, hitUrl, snippet, normalizeDate(published), List.of("exa"), score));
                 }
             }
-            List<SearchHit> ranked = WebSearchModels.deduplicateAndRank(hits, request.count(), request.query(),
-                request.site());
+            List<SearchHit> ranked =
+                WebSearchModels.deduplicateAndRank(hits, request.count(), request.query(), request.site());
             List<String> warnings = siteFilterWarnings(hits, ranked, request.site());
             return new ProviderOutcome(provider.id(), provider.label(), ranked, List.of(), List.of(), List.of(),
                 warnings, null, false, false);
@@ -611,14 +591,13 @@ public final class WebSearchClients {
         SearchRequest request) throws InterruptedException {
         WebSearchProvider provider = WebSearchProvider.PUBLIC;
         WebSearchConfig.PublicSources sources = config.publicSources();
-        Duration subTimeout = config.timeout().compareTo(PUBLIC_SOURCE_MAX_TIMEOUT) < 0
-            ? config.timeout() : PUBLIC_SOURCE_MAX_TIMEOUT;
+        Duration subTimeout =
+            config.timeout().compareTo(PUBLIC_SOURCE_MAX_TIMEOUT) < 0 ? config.timeout() : PUBLIC_SOURCE_MAX_TIMEOUT;
         int perSource = Math.max(3, Math.min(6, request.count()));
         List<Callable<SubSourceResult>> tasks = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
         String site = request.site();
-        boolean preferZh = "zh".equals(request.language())
-            || (request.language().isEmpty() && request.containsCjk());
+        boolean preferZh = "zh".equals(request.language()) || (request.language().isEmpty() && request.containsCjk());
 
         if (!site.isEmpty()) {
             if (site.endsWith("wikipedia.org")) {
@@ -630,21 +609,20 @@ public final class WebSearchClients {
                         perSource, subTimeout, 0.92));
                 }
             } else if (site.endsWith("github.com")) {
-                tasks.add(() -> queryGitHub(client, mapper, sources.github(), request.query(), perSource, subTimeout,
-                    0.95));
+                tasks.add(
+                    () -> queryGitHub(client, mapper, sources.github(), request.query(), perSource, subTimeout, 0.95));
             } else if (site.endsWith("stackoverflow.com")) {
-                tasks.add(() -> queryStackExchange(client, mapper, sources.stackExchange(), request.query(),
-                    perSource, subTimeout, 0.95));
+                tasks.add(() -> queryStackExchange(client, mapper, sources.stackExchange(), request.query(), perSource,
+                    subTimeout, 0.95));
             } else if (site.endsWith("arxiv.org")) {
                 tasks.add(() -> queryArxiv(client, sources.arxiv(), request.query(), perSource, subTimeout, 0.95));
             } else if (site.endsWith("news.ycombinator.com")) {
                 if (sources.hackerNews() != null) {
-                    tasks.add(() -> queryHackerNews(client, mapper, sources.hackerNews(), request.query(),
-                        perSource, subTimeout, 0.95));
+                    tasks.add(() -> queryHackerNews(client, mapper, sources.hackerNews(), request.query(), perSource,
+                        subTimeout, 0.95));
                 }
             } else {
-                warnings.add("公开只读知识源仅覆盖 Wikipedia/GitHub/StackOverflow/HackerNews/arXiv/OpenAlex，不包含限定站点 "
-                    + site);
+                warnings.add("公开只读知识源仅覆盖 Wikipedia/GitHub/StackOverflow/HackerNews/arXiv/OpenAlex，不包含限定站点 " + site);
                 return new ProviderOutcome(provider.id(), provider.label(), List.of(), List.of(), List.of(), List.of(),
                     warnings, null, false, false);
             }
@@ -657,10 +635,10 @@ public final class WebSearchClients {
             tasks.add(() -> queryWikipedia(client, mapper, preferZh ? sources.wikipediaZh() : sources.wikipediaEn(),
                 preferZh ? "zh" : "en", request.query(), perSource, subTimeout, 0.85));
         } else if ("it".equals(request.category())) {
-            tasks.add(() -> queryGitHub(client, mapper, sources.github(), request.query(), perSource, subTimeout,
-                0.95));
-            tasks.add(() -> queryStackExchange(client, mapper, sources.stackExchange(), request.query(),
-                perSource, subTimeout, 0.92));
+            tasks
+                .add(() -> queryGitHub(client, mapper, sources.github(), request.query(), perSource, subTimeout, 0.95));
+            tasks.add(() -> queryStackExchange(client, mapper, sources.stackExchange(), request.query(), perSource,
+                subTimeout, 0.92));
             if (sources.hackerNews() != null) {
                 tasks.add(() -> queryHackerNews(client, mapper, sources.hackerNews(), request.query(),
                     Math.min(4, perSource), subTimeout, 0.88));
@@ -670,23 +648,23 @@ public final class WebSearchClients {
         } else {
             if ("news".equals(request.category())) {
                 if (sources.hackerNews() != null) {
-                    tasks.add(() -> queryHackerNews(client, mapper, sources.hackerNews(), request.query(),
-                        perSource, subTimeout, 0.94));
+                    tasks.add(() -> queryHackerNews(client, mapper, sources.hackerNews(), request.query(), perSource,
+                        subTimeout, 0.94));
                 }
                 warnings.add("公开只读知识源以百科与技术资讯为主，综合新闻依赖本机 SearXNG 的新闻引擎");
             }
             if (preferZh) {
-                tasks.add(() -> queryWikipedia(client, mapper, sources.wikipediaZh(), "zh", request.query(),
-                    perSource, subTimeout, 0.92));
+                tasks.add(() -> queryWikipedia(client, mapper, sources.wikipediaZh(), "zh", request.query(), perSource,
+                    subTimeout, 0.92));
                 tasks.add(() -> queryWikipedia(client, mapper, sources.wikipediaEn(), "en", request.query(),
                     Math.min(3, perSource), subTimeout, 0.84));
-                tasks.add(() -> queryGitHub(client, mapper, sources.github(), request.query(),
-                    Math.min(3, perSource), subTimeout, 0.86));
+                tasks.add(() -> queryGitHub(client, mapper, sources.github(), request.query(), Math.min(3, perSource),
+                    subTimeout, 0.86));
             } else {
-                tasks.add(() -> queryWikipedia(client, mapper, sources.wikipediaEn(), "en", request.query(),
-                    perSource, subTimeout, 0.92));
-                tasks.add(() -> queryGitHub(client, mapper, sources.github(), request.query(),
-                    Math.min(4, perSource), subTimeout, 0.86));
+                tasks.add(() -> queryWikipedia(client, mapper, sources.wikipediaEn(), "en", request.query(), perSource,
+                    subTimeout, 0.92));
+                tasks.add(() -> queryGitHub(client, mapper, sources.github(), request.query(), Math.min(4, perSource),
+                    subTimeout, 0.86));
                 if (request.looksTechnical()) {
                     tasks.add(() -> queryStackExchange(client, mapper, sources.stackExchange(), request.query(),
                         Math.min(4, perSource), subTimeout, 0.84));
@@ -720,8 +698,8 @@ public final class WebSearchClients {
         if (!failedSources.isEmpty()) {
             warnings.add("部分公开源不可用: " + String.join(", ", failedSources));
         }
-        List<SearchHit> ranked = WebSearchModels.deduplicateAndRank(allHits, request.count(), request.query(),
-            request.site());
+        List<SearchHit> ranked =
+            WebSearchModels.deduplicateAndRank(allHits, request.count(), request.query(), request.site());
         if (ranked.isEmpty() && !failedSources.isEmpty()) {
             return new ProviderOutcome(provider.id(), provider.label(), List.of(), List.of(), List.of(), List.of(),
                 warnings, "公开只读知识源均请求失败: " + String.join(", ", failedSources), false, false);
@@ -737,14 +715,10 @@ public final class WebSearchClients {
             return new SubSourceResult(source, List.of(), "未配置地址");
         }
         try {
-            String url = endpoint + "?action=query&list=search&srsearch=" + encode(query)
-                + "&srlimit=" + limit + "&utf8=1&format=json";
-            HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .timeout(timeout)
-                .header("Accept", "application/json")
-                .header("User-Agent", USER_AGENT)
-                .GET()
-                .build();
+            String url = endpoint + "?action=query&list=search&srsearch=" + encode(query) + "&srlimit=" + limit
+                + "&utf8=1&format=json";
+            HttpRequest request = HttpRequest.newBuilder(URI.create(url)).timeout(timeout)
+                .header("Accept", "application/json").header("User-Agent", USER_AGENT).GET().build();
             HttpText response = sendText(client, request, timeout);
             if (response.statusCode() != 200) {
                 if ((response.statusCode() == 403 || response.statusCode() == 429)
@@ -763,8 +737,8 @@ public final class WebSearchClients {
                 if (title.isEmpty()) {
                     continue;
                 }
-                String pageUrl = "https://" + lang + ".wikipedia.org/wiki/"
-                    + encode(title.replace(' ', '_')).replace("+", "%20");
+                String pageUrl =
+                    "https://" + lang + ".wikipedia.org/wiki/" + encode(title.replace(' ', '_')).replace("+", "%20");
                 String snippet = truncate(cleanText(item.path("snippet").asString("")), MAX_SNIPPET_CHARS);
                 String timestamp = normalizeDate(item.path("timestamp").asString(""));
                 hits.add(new SearchHit(title, pageUrl, snippet, timestamp, List.of(source),
@@ -790,12 +764,8 @@ public final class WebSearchClients {
         }
         try {
             String url = endpoint + "?q=" + encode(query) + "&per_page=" + limit;
-            HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .timeout(timeout)
-                .header("Accept", "application/vnd.github+json")
-                .header("User-Agent", USER_AGENT)
-                .GET()
-                .build();
+            HttpRequest request = HttpRequest.newBuilder(URI.create(url)).timeout(timeout)
+                .header("Accept", "application/vnd.github+json").header("User-Agent", USER_AGENT).GET().build();
             HttpText response = sendText(client, request, timeout);
             if (response.statusCode() != 200) {
                 if ((response.statusCode() == 403 || response.statusCode() == 429)
@@ -855,15 +825,11 @@ public final class WebSearchClients {
             return new SubSourceResult(source, List.of(), "未配置地址");
         }
         try {
-            String url = endpoint + "?order=desc&sort=relevance&q=" + encode(query)
-                + "&site=stackoverflow&pagesize=" + limit;
-            HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .timeout(timeout)
-                .header("Accept", "application/json")
-                .header("Accept-Encoding", "gzip")
-                .header("User-Agent", USER_AGENT)
-                .GET()
-                .build();
+            String url =
+                endpoint + "?order=desc&sort=relevance&q=" + encode(query) + "&site=stackoverflow&pagesize=" + limit;
+            HttpRequest request =
+                HttpRequest.newBuilder(URI.create(url)).timeout(timeout).header("Accept", "application/json")
+                    .header("Accept-Encoding", "gzip").header("User-Agent", USER_AGENT).GET().build();
             HttpText response = sendText(client, request, timeout);
             if (response.statusCode() != 200) {
                 if ((response.statusCode() == 403 || response.statusCode() == 429)
@@ -891,14 +857,14 @@ public final class WebSearchClients {
                     }
                 }
                 StringBuilder snippet = new StringBuilder();
-                snippet.append(answered ? "已解答" : "未采纳").append(" · 回答 ").append(answers)
-                    .append(" · 得分 ").append(score);
+                snippet.append(answered ? "已解答" : "未采纳").append(" · 回答 ").append(answers).append(" · 得分 ")
+                    .append(score);
                 if (!tags.isEmpty()) {
                     snippet.append(" · 标签: ").append(String.join(", ", tags));
                 }
                 long epoch = item.path("last_activity_date").asLong(0L);
-                String date = epoch > 0 ? LocalDate.ofInstant(Instant.ofEpochSecond(epoch), ZoneOffset.UTC).toString()
-                    : "";
+                String date =
+                    epoch > 0 ? LocalDate.ofInstant(Instant.ofEpochSecond(epoch), ZoneOffset.UTC).toString() : "";
                 if (!title.isEmpty() || !hitUrl.isEmpty()) {
                     hits.add(new SearchHit(title, hitUrl, snippet.toString(), date, List.of(source),
                         Math.max(0.1, baseScore - idx * 0.03)));
@@ -924,11 +890,8 @@ public final class WebSearchClients {
         }
         try {
             String url = endpoint + "?search_query=" + buildArxivQuery(query) + "&start=0&max_results=" + limit;
-            HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .timeout(timeout)
-                .header("Accept", "application/atom+xml,application/xml")
-                .header("User-Agent", USER_AGENT)
-                .GET()
+            HttpRequest request = HttpRequest.newBuilder(URI.create(url)).timeout(timeout)
+                .header("Accept", "application/atom+xml,application/xml").header("User-Agent", USER_AGENT).GET()
                 .build();
             HttpText response = sendText(client, request, timeout);
             if (response.statusCode() != 200) {
@@ -1017,12 +980,8 @@ public final class WebSearchClients {
         }
         try {
             String url = endpoint + "?query=" + encode(query) + "&tags=story&hitsPerPage=" + limit;
-            HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .timeout(timeout)
-                .header("Accept", "application/json")
-                .header("User-Agent", USER_AGENT)
-                .GET()
-                .build();
+            HttpRequest request = HttpRequest.newBuilder(URI.create(url)).timeout(timeout)
+                .header("Accept", "application/json").header("User-Agent", USER_AGENT).GET().build();
             HttpText response = sendText(client, request, timeout);
             if (response.statusCode() != 200) {
                 return new SubSourceResult(source, List.of(), "HTTP " + response.statusCode());
@@ -1064,12 +1023,8 @@ public final class WebSearchClients {
         }
         try {
             String url = endpoint + "?search=" + encode(query) + "&per-page=" + limit;
-            HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .timeout(timeout)
-                .header("Accept", "application/json")
-                .header("User-Agent", USER_AGENT)
-                .GET()
-                .build();
+            HttpRequest request = HttpRequest.newBuilder(URI.create(url)).timeout(timeout)
+                .header("Accept", "application/json").header("User-Agent", USER_AGENT).GET().build();
             HttpText response = sendText(client, request, timeout);
             if (response.statusCode() != 200) {
                 return new SubSourceResult(source, List.of(), "HTTP " + response.statusCode());
@@ -1078,13 +1033,13 @@ public final class WebSearchClients {
             List<SearchHit> hits = new ArrayList<>();
             int idx = 0;
             for (JsonNode item : items) {
-                String title = cleanText(firstNonBlank(item.path("display_name").asString(""),
-                    item.path("title").asString("")));
+                String title =
+                    cleanText(firstNonBlank(item.path("display_name").asString(""), item.path("title").asString("")));
                 String hitUrl = firstNonBlank(item.path("primary_location").path("landing_page_url").asString(""),
                     item.path("doi").asString(""), item.path("id").asString(""));
                 int cited = item.path("cited_by_count").asInt(0);
-                String venue = cleanText(item.path("primary_location").path("source").path("display_name")
-                    .asString(""));
+                String venue =
+                    cleanText(item.path("primary_location").path("source").path("display_name").asString(""));
                 StringBuilder snippet = new StringBuilder();
                 if (!venue.isEmpty()) {
                     snippet.append(venue).append(" · ");
@@ -1144,8 +1099,8 @@ public final class WebSearchClients {
     private static HttpText sendText(HttpClient client, HttpRequest request, Duration timeout)
         throws IOException, InterruptedException {
         try (BoundedHttp.Exchange exchange = BoundedHttp.open(client, request, timeout, MAX_RESPONSE_BYTES)) {
-            int limit = exchange.statusCode() >= 200 && exchange.statusCode() < 300
-                ? MAX_RESPONSE_BYTES : BoundedHttp.ERROR_BYTES;
+            int limit = exchange.statusCode() >= 200 && exchange.statusCode() < 300 ? MAX_RESPONSE_BYTES
+                : BoundedHttp.ERROR_BYTES;
             boolean gzip = exchange.headers().firstValue("content-encoding")
                 .map(v -> v.toLowerCase(Locale.ROOT).contains("gzip")).orElse(false);
             String rateLimitRemaining = exchange.headers().firstValue("x-ratelimit-remaining").orElse("");
@@ -1239,18 +1194,9 @@ public final class WebSearchClients {
         if (text == null || text.indexOf('&') < 0) {
             return text == null ? "" : text;
         }
-        String replaced = text.replace("&nbsp;", " ")
-            .replace("&amp;", "&")
-            .replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&quot;", "\"")
-            .replace("&#39;", "'")
-            .replace("&apos;", "'")
-            .replace("&mdash;", "—")
-            .replace("&ndash;", "–")
-            .replace("&hellip;", "…")
-            .replace("&middot;", "·")
-            .replace("&ldquo;", "“")
+        String replaced = text.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+            .replace("&quot;", "\"").replace("&#39;", "'").replace("&apos;", "'").replace("&mdash;", "—")
+            .replace("&ndash;", "–").replace("&hellip;", "…").replace("&middot;", "·").replace("&ldquo;", "“")
             .replace("&rdquo;", "”");
         Matcher matcher = NUMERIC_ENTITY.matcher(replaced);
         if (!matcher.find()) {
@@ -1283,8 +1229,8 @@ public final class WebSearchClients {
             return "";
         }
         String trimmed = raw.strip();
-        if (trimmed.length() >= 10 && Character.isDigit(trimmed.charAt(0))
-            && trimmed.charAt(4) == '-' && trimmed.charAt(7) == '-') {
+        if (trimmed.length() >= 10 && Character.isDigit(trimmed.charAt(0)) && trimmed.charAt(4) == '-'
+            && trimmed.charAt(7) == '-') {
             return trimmed.substring(0, 10);
         }
         return truncate(trimmed, 32);

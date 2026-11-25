@@ -64,8 +64,8 @@ class QueuedMessageCodecTest {
 
     @Test
     void skillRoundTripsInQueuedMessageAndLegacyJsonDecodesNullSkill() {
-        String encoded = QueuedMessageCodec.encode(
-            new QueuedMessageCodec.Stored("审阅本次改动", List.of(), List.of(), null, "plan", "code-review"));
+        String encoded = QueuedMessageCodec
+            .encode(new QueuedMessageCodec.Stored("审阅本次改动", List.of(), List.of(), null, "plan", "code-review"));
         assertTrue(encoded.startsWith("\u0001pilot-queue-v1\u0001"));
         var decoded = QueuedMessageCodec.decode(encoded);
         assertEquals("审阅本次改动", decoded.content());

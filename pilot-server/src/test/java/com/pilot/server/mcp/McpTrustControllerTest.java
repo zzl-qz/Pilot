@@ -44,10 +44,10 @@ class McpTrustControllerTest {
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() throws IOException {
-        Files.writeString(workspace.resolve(".mcp.json"), mapper.writeValueAsString(Map.of("mcpServers", Map.of(
-            "fake", Map.of("command", "node", "args", List.of("s.mjs")),
-            "remote", Map.of("url", "https://example.com/mcp"),
-            "broken", Map.of("url", "ftp://example.com")))));
+        Files.writeString(workspace.resolve(".mcp.json"),
+            mapper.writeValueAsString(
+                Map.of("mcpServers", Map.of("fake", Map.of("command", "node", "args", List.of("s.mjs")), "remote",
+                    Map.of("url", "https://example.com/mcp"), "broken", Map.of("url", "ftp://example.com")))));
         sessions = new SessionService();
         sessionId = sessions.createSession("MCP 信任", workspace.toString()).id();
         McpTrustStore store = new McpTrustStore(mapper, dataDir.resolve("mcp-trust.json"));

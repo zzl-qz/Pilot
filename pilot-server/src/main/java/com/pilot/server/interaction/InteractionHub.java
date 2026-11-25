@@ -105,8 +105,8 @@ public class InteractionHub {
         String sid = clean(sessionId);
         String resolvedTitle = title != null && !title.isBlank() ? title.strip()
             : sid.isEmpty() ? "当前对话" : sessions.find(sid).map(Session::title).orElse("当前对话");
-        RunAttentionEvent payload = new RunAttentionEvent(sid, clean(runId), clean(kind), clean(outcome),
-            resolvedTitle, summary == null ? "" : summary.strip(), Instant.now());
+        RunAttentionEvent payload = new RunAttentionEvent(sid, clean(runId), clean(kind), clean(outcome), resolvedTitle,
+            summary == null ? "" : summary.strip(), Instant.now());
         sendAll("run.attention", toJson(payload));
     }
 

@@ -81,11 +81,9 @@ class LocalSearchRuntimeTest {
         assertFalse(LocalSearchRuntime.syncManagedSettings(settings));
 
         // 模拟旧版 v1 / v2 / v3 托管文件：均应自动备份并升级为 v4
-        for (String legacy : new String[] {
-            "# Pilot 写给本机 SearXNG 的配置。只监听 127.0.0.1，不对外。\nuse_default_settings: true\n",
+        for (String legacy : new String[] {"# Pilot 写给本机 SearXNG 的配置。只监听 127.0.0.1，不对外。\nuse_default_settings: true\n",
             "# pilot-managed-settings: v2\nuse_default_settings: true\n",
-            "# pilot-managed-settings: v3\nuse_default_settings: true\n"
-        }) {
+            "# pilot-managed-settings: v3\nuse_default_settings: true\n"}) {
             Files.writeString(settings, legacy);
             assertFalse(LocalSearchRuntime.isSettingsUpToDate(settings));
             assertTrue(LocalSearchRuntime.syncManagedSettings(settings));

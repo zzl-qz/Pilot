@@ -74,28 +74,27 @@ class MultiAgentSubagentMeteringTest {
         });
         service.setBudgetLimits(new MultiAgentBudget(600, 100_000));
 
-        MultiAgentService.Result result = service
-            .dispatch(dispatch(List.of(TaskSpec.readOnly("T1", "记账", "读取代码", List.of(), List.of("src/**")))));
+        MultiAgentService.Result result =
+            service.dispatch(dispatch(List.of(TaskSpec.readOnly("T1", "记账", "读取代码", List.of(), List.of("src/**")))));
 
         assertTrue(result.completed(), result.report());
         assertFalse(groups.isEmpty(), "子代理请求必须真的打过模型");
         assertEquals(List.of("ses_test:subagent"), groups.stream().distinct().toList(),
             "dispatch 子代理不能混用主会话缓存组，也不能落回裸客户端");
         assertTrue(purposes.stream().allMatch("subagent"::equals), purposes.toString());
-        long usedTokens =
-            events.stream().filter(MultiAgentBudgetUpdated.class::isInstance).map(MultiAgentBudgetUpdated.class::cast)
-                .mapToLong(MultiAgentBudgetUpdated::usedTokens).max().orElse(0L);
+        long usedTokens = events.stream().filter(MultiAgentBudgetUpdated.class::isInstance)
+            .map(MultiAgentBudgetUpdated.class::cast).mapToLong(MultiAgentBudgetUpdated::usedTokens).max().orElse(0L);
         assertTrue(usedTokens > 0, "子代理用量仍要计入 dispatch 预算，实际 " + usedTokens);
     }
 
     private MultiAgentService service(ModelClient client) throws IOException {
         Files.createDirectories(workspace.resolve("src"));
         Files.writeString(workspace.resolve("src/A.java"), "class A {}\n");
-        AgentProperties agent = new AgentProperties(workspace.toString(), PermissionMode.AUTO, 8, 3, 5, 300, 2, 1,
-            60_000, true);
-        WorkspaceToolFactory factory = new WorkspaceToolFactory(agent,
-            new WebSearchProperties(false, "http://127.0.0.1:9", "", ""), SnapshotSink.none(), JsonMapper.builder()
-                .build());
+        AgentProperties agent =
+            new AgentProperties(workspace.toString(), PermissionMode.AUTO, 8, 3, 5, 300, 2, 1, 60_000, true);
+        WorkspaceToolFactory factory =
+            new WorkspaceToolFactory(agent, new WebSearchProperties(false, "http://127.0.0.1:9", "", ""),
+                SnapshotSink.none(), JsonMapper.builder().build());
         SandboxStore store = new SandboxStore(JsonMapper.builder().build(), new PilotDataDir(dataDir.toString()));
         MultiAgentProperties properties = new MultiAgentProperties(true, 2, 2, 8, 30, List.of(), null);
         VerificationGate gate = (root, base, changes) -> VerificationGate.Report.skipped("测试环境跳过编译");

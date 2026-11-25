@@ -25,6 +25,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
 import tools.jackson.databind.JsonNode;
@@ -69,9 +70,10 @@ class McpHttpTransportTest {
             }
             if ("tools/list".equals(method)) {
                 // 使用 text/event-stream 流式返回工具清单
-                String sse = "event: message\ndata: " + MAPPER.writeValueAsString(Map.of("jsonrpc", "2.0", "id", id,
-                    "result", Map.of("tools", List.of(Map.of("name", "ping_remote", "description", "Remote ping",
-                        "annotations", Map.of("readOnlyHint", true), "inputSchema", Map.of("type", "object"))))))
+                String sse = "event: message\ndata: "
+                    + MAPPER.writeValueAsString(Map.of("jsonrpc", "2.0", "id", id, "result",
+                        Map.of("tools", List.of(Map.of("name", "ping_remote", "description", "Remote ping",
+                            "annotations", Map.of("readOnlyHint", true), "inputSchema", Map.of("type", "object"))))))
                     + "\n\n";
                 byte[] bytes = sse.getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=utf-8");
@@ -91,8 +93,9 @@ class McpHttpTransportTest {
         server.start();
         try {
             String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/mcp";
-            Files.writeString(workspace.resolve(".mcp.json"), MAPPER.writeValueAsString(Map.of("mcpServers", Map.of(
-                "remote", Map.of("type", "http", "url", url, "headers", Map.of("Authorization", "Bearer top-secret"))))));
+            Files.writeString(workspace.resolve(".mcp.json"),
+                MAPPER.writeValueAsString(Map.of("mcpServers", Map.of("remote",
+                    Map.of("type", "http", "url", url, "headers", Map.of("Authorization", "Bearer top-secret"))))));
 
             try (McpManager manager = new McpManager(MAPPER, null, null, null)) {
                 McpServerConfig cfg = manager.servers(workspace).get("remote");
@@ -217,7 +220,7 @@ class McpHttpTransportTest {
         }
     }
 
-    private static void writeJson(com.sun.net.httpserver.HttpExchange exchange, Object body) throws IOException {
+    private static void writeJson(HttpExchange exchange, Object body) throws IOException {
         byte[] bytes = MAPPER.writeValueAsBytes(body);
         exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
         exchange.sendResponseHeaders(200, bytes.length);

@@ -133,7 +133,8 @@ class AgentLoopTest {
     void serverContextOverflowForcesRealShrinkEvenWhenLocalEstimateFits() {
         List<Message> history = new ArrayList<>();
         for (int round = 0; round < 3; round++) {
-            history.add(Message.assistant("", List.of(new ToolCall("call_" + round, "read_file", Map.of("path", "a.txt")))));
+            history.add(
+                Message.assistant("", List.of(new ToolCall("call_" + round, "read_file", Map.of("path", "a.txt")))));
             history.add(Message.tool("call_" + round, "旧的大块工具输出".repeat(600)));
         }
         List<List<Message>> requests = new ArrayList<>();

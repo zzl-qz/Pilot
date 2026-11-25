@@ -101,8 +101,8 @@ public class VoiceService {
         String mode = normalizeMode(update.mode() == null || update.mode().isBlank() ? mode() : update.mode());
         String key = Boolean.TRUE.equals(update.clearApiKey()) ? ""
             : update.apiKey() == null || update.apiKey().isBlank() ? key() : update.apiKey().strip();
-        store.saveAll(Map.of("voice.endpoint", endpoint, "voice.model", model, "voice.api-key", key, "voice.mode",
-            mode));
+        store.saveAll(
+            Map.of("voice.endpoint", endpoint, "voice.model", model, "voice.api-key", key, "voice.mode", mode));
         return settings();
     }
 

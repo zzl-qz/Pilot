@@ -615,8 +615,8 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                 }
                 return mapper.writeValueAsString(
                     Map.of("sources", sources, "decision", decision, "license", license, "sourceEvidence",
-                        state()
-                            .evidence().stream().filter(e -> sources.stream().anyMatch(s -> matchesFetchedSource(e, s)))
+                        state().evidence().stream()
+                            .filter(e -> sources.stream().anyMatch(s -> matchesFetchedSource(e, s)))
                             .map(TaskControlService.Evidence::id).toList()));
             }
         };

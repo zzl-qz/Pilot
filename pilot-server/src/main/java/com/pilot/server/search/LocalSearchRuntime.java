@@ -169,8 +169,7 @@ public class LocalSearchRuntime implements SmartLifecycle {
         Path logFile = root.resolve("searxng.log");
         boolean upToDate = isSettingsUpToDate(settings);
         if (host == null) {
-            String message = properties.local()
-                ? "当前 SearXNG 地址不是本机回环 HTTP 根地址，由外部服务自行管理"
+            String message = properties.local() ? "当前 SearXNG 地址不是本机回环 HTTP 根地址，由外部服务自行管理"
                 : "本机 SearXNG 自动拉起已关闭（pilot.web-search.local=false）";
             return new RuntimeStatus(properties.local(), false, isRunning(), false, upToDate, properties.endpoint(),
                 settings.toString(), logFile.toString(), message);
@@ -181,14 +180,12 @@ public class LocalSearchRuntime implements SmartLifecycle {
         boolean ownedAlive = current != null && current.isAlive();
         String message;
         if (ownedAlive && open) {
-            message = upToDate ? "本机 SearXNG 运行中（由 Pilot 托管）"
-                : "本机 SearXNG 运行中，但托管配置可升级至 v" + MANAGED_SETTINGS_VERSION;
+            message = upToDate ? "本机 SearXNG 运行中（由 Pilot 托管）" : "本机 SearXNG 运行中，但托管配置可升级至 v" + MANAGED_SETTINGS_VERSION;
         } else if (current != null && !current.isAlive() && !open) {
             message = "本机 SearXNG 进程已意外退出，请点击重启或查看日志";
         } else if (open) {
             message = upToDate ? "端口已监听（外部 SearXNG 进程）"
-                : "端口由外部 SearXNG 进程占用，且托管配置为旧版；建议停掉旧进程后重启以升级至 v"
-                    + MANAGED_SETTINGS_VERSION;
+                : "端口由外部 SearXNG 进程占用，且托管配置为旧版；建议停掉旧进程后重启以升级至 v" + MANAGED_SETTINGS_VERSION;
         } else {
             message = "本机 SearXNG 未运行";
         }
@@ -228,8 +225,8 @@ public class LocalSearchRuntime implements SmartLifecycle {
                     running = false;
                 } else {
                     RuntimeStatus current = status();
-                    String msg = (upgraded ? "已更新托管配置（v" + MANAGED_SETTINGS_VERSION + "），但" : "")
-                        + "端口 " + address.getPort() + " 当前由外部进程占用，请重启该 SearXNG 进程或重启 Pilot 使其生效";
+                    String msg = (upgraded ? "已更新托管配置（v" + MANAGED_SETTINGS_VERSION + "），但" : "") + "端口 "
+                        + address.getPort() + " 当前由外部进程占用，请重启该 SearXNG 进程或重启 Pilot 使其生效";
                     return new RuntimeStatus(current.localEnabled(), current.managed(), current.running(), true,
                         isSettingsUpToDate(settings), current.endpoint(), current.settingsPath(), current.logPath(),
                         msg);
@@ -375,19 +372,15 @@ public class LocalSearchRuntime implements SmartLifecycle {
                 int recordedPort = parts.length > 1 ? Integer.parseInt(parts[1]) : address.getPort();
                 if (recorded != currentPid && recordedPort == address.getPort()) {
                     ProcessHandle.of(recorded).filter(ProcessHandle::isAlive)
-                        .filter(h -> matchesManagedProcess(h, normalizedSource))
-                        .ifPresent(targets::add);
+                        .filter(h -> matchesManagedProcess(h, normalizedSource)).ifPresent(targets::add);
                 }
             } catch (IOException | NumberFormatException ignored) {
                 // 忽略损坏的 pid 文件
             }
         }
         if (targets.isEmpty() && address.getPort() == com.pilot.core.tool.WebSearchTool.DEFAULT_ENDPOINT.getPort()) {
-            ProcessHandle.allProcesses()
-                .filter(ProcessHandle::isAlive)
-                .filter(h -> h.pid() != currentPid)
-                .filter(h -> matchesManagedProcess(h, normalizedSource))
-                .forEach(targets::add);
+            ProcessHandle.allProcesses().filter(ProcessHandle::isAlive).filter(h -> h.pid() != currentPid)
+                .filter(h -> matchesManagedProcess(h, normalizedSource)).forEach(targets::add);
         }
         if (targets.isEmpty()) {
             return false;

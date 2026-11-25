@@ -45,9 +45,9 @@ public final class BrowserTool extends PromptedTool implements LocalInteraction 
     private static final Set<String> OBSERVATIONS =
         Set.of("navigate", "new_tab", "handoff", "reload", "back", "forward", "snapshot", "screenshot", "console",
             "network", "wait", "close", "text", "links", "tabs", "inspect", "resize", "record");
-    private static final Set<String> INTERACTIONS = Set.of("click", "dblclick", "right_click", "hover", "fill", "type",
-        "press", "select", "check", "uncheck", "scroll", "drag", "dialog", "batch", "upload", "download",
-        "switch_tab", "close_tab");
+    private static final Set<String> INTERACTIONS =
+        Set.of("click", "dblclick", "right_click", "hover", "fill", "type", "press", "select", "check", "uncheck",
+            "scroll", "drag", "dialog", "batch", "upload", "download", "switch_tab", "close_tab");
     /** 用户接管（paused）时拦截的动作：交互类 + 会打断用户的导航/新标签/关闭/脚本。观察类与 handoff 放行。 */
     private static final Set<String> PAUSED_BLOCKS = Set.of("navigate", "new_tab", "reload", "back", "forward", "close",
         "evaluate", "click", "dblclick", "right_click", "hover", "fill", "type", "press", "select", "check", "uncheck",
@@ -125,35 +125,34 @@ public final class BrowserTool extends PromptedTool implements LocalInteraction 
         Map<String, Object> properties = new LinkedHashMap<>();
         properties.put("action", Map.of("type", "string", "enum", allowEvaluate ? ACTIONS : ACTIONS_NO_EVALUATE,
             "description", "要执行的动作；先 navigate，再 snapshot 取得元素 ref，之后用 ref 精确操作（自动居中滚动与遮挡校验）"));
-        properties.put("url", ToolSchemas.string("navigate / new_tab 地址（默认回环；外网公开 HTTPS 需 external=true 和 purpose）；wait 时可作等待包含的 URL"));
+        properties.put("url",
+            ToolSchemas.string("navigate / new_tab 地址（默认回环；外网公开 HTTPS 需 external=true 和 purpose）；wait 时可作等待包含的 URL"));
         properties.put("external", ToolSchemas.bool("打开公开 HTTPS 时设 true。完全放行直接打开；其他档位仍要确认。登录和验证码仍要用户在页面上完成"));
         properties.put("expected_url", ToolSchemas.string("外网交互的当前完整页面 URL，审批后页面变化则拒绝执行"));
         properties.put("purpose", ToolSchemas.string("外网操作的目标、最终提交内容和影响；提交申请/发送前明确列出对象与内容"));
         properties.put("ref", ToolSchemas.string("元素引用，形如 e3，来自最近一次 snapshot；页面变化后旧 ref 可能失效，需要重新 snapshot"));
         properties.put("selector", ToolSchemas.string("ref 之外的备选：CSS 选择器（取第一个匹配）"));
         properties.put("frame", ToolSchemas.string("可选：目标所属同源 iframe 编号（如 f1 或 f1>f2）；来自 snapshot 输出，使用 ref 时可自动匹配"));
-        properties.put("x", Map.of("type", "integer", "minimum", 0, "maximum", 4096,
-            "description", "视觉坐标横坐标（CSS 像素）；Canvas/自定义控件无 DOM ref 时可作 click/hover/drag/scroll 坐标兜底"));
-        properties.put("y", Map.of("type", "integer", "minimum", 0, "maximum", 4096,
-            "description", "视觉坐标纵坐标（CSS 像素）"));
+        properties.put("x", Map.of("type", "integer", "minimum", 0, "maximum", 4096, "description",
+            "视觉坐标横坐标（CSS 像素）；Canvas/自定义控件无 DOM ref 时可作 click/hover/drag/scroll 坐标兜底"));
+        properties.put("y", Map.of("type", "integer", "minimum", 0, "maximum", 4096, "description", "视觉坐标纵坐标（CSS 像素）"));
         properties.put("targetRef", ToolSchemas.string("drag 终点元素引用（来自 snapshot）"));
         properties.put("targetSelector", ToolSchemas.string("drag 终点 CSS 选择器"));
-        properties.put("targetX", Map.of("type", "integer", "minimum", 0, "maximum", 4096,
-            "description", "drag 终点横坐标（CSS 像素）"));
-        properties.put("targetY", Map.of("type", "integer", "minimum", 0, "maximum", 4096,
-            "description", "drag 终点纵坐标（CSS 像素）"));
-        properties.put("dragSteps", Map.of("type", "integer", "minimum", 2, "maximum", 40,
-            "description", "drag 平滑移动步数，默认 12"));
+        properties.put("targetX",
+            Map.of("type", "integer", "minimum", 0, "maximum", 4096, "description", "drag 终点横坐标（CSS 像素）"));
+        properties.put("targetY",
+            Map.of("type", "integer", "minimum", 0, "maximum", 4096, "description", "drag 终点纵坐标（CSS 像素）"));
+        properties.put("dragSteps",
+            Map.of("type", "integer", "minimum", 2, "maximum", 40, "description", "drag 平滑移动步数，默认 12"));
         properties.put("accept", ToolSchemas.bool("dialog 预设下一次 confirm/prompt/alert 确认(true)或取消(false)"));
         properties.put("promptText", ToolSchemas.string("dialog 为 prompt 且 accept=true 时填入的文本"));
-        properties.put("steps", Map.of("type", "array",
-            "items", Map.of("type", "object"),
-            "description", "batch 批量子动作数组（1–50 项，每项含 action 与对应参数，如 click/fill/check/select/scroll/drag/wait/dialog）"));
+        properties.put("steps", Map.of("type", "array", "items", Map.of("type", "object"), "description",
+            "batch 批量子动作数组（1–50 项，每项含 action 与对应参数，如 click/fill/check/select/scroll/drag/wait/dialog）"));
         properties.put("stopOnError", ToolSchemas.bool("batch 单步失败时是否立即中止，默认 true"));
-        properties.put("delayMs", Map.of("type", "integer", "minimum", 0, "maximum", 1000,
-            "description", "batch 各步之间的等待毫秒数（0–1000）"));
-        properties.put("mode", Map.of("type", "string", "enum", List.of("start", "stop", "status"),
-            "description", "record 动作模式：start 开始录屏、stop 停止并保存可回放录像、status 查看录制计数"));
+        properties.put("delayMs",
+            Map.of("type", "integer", "minimum", 0, "maximum", 1000, "description", "batch 各步之间的等待毫秒数（0–1000）"));
+        properties.put("mode", Map.of("type", "string", "enum", List.of("start", "stop", "status"), "description",
+            "record 动作模式：start 开始录屏、stop 停止并保存可回放录像、status 查看录制计数"));
         properties.put("tabId", ToolSchemas.string("标签编号，来自 tabs 动作（用于 switch_tab / close_tab）"));
         properties.put("kind", Map.of("type", "string", "enum", List.of("auth", "captcha", "payment", "manual"),
             "description", "handoff 的接管类型：auth（登录/MFA）、captcha（人机验证）、payment（支付）、manual（人工协助）"));
@@ -165,10 +164,10 @@ public final class BrowserTool extends PromptedTool implements LocalInteraction 
             Map.of("type", "array", "items", Map.of("type", "string"), "description", "select 要选的选项（value 或可见文本）"));
         properties.put("direction", Map.of("type", "string", "enum", List.of("up", "down", "left", "right"),
             "description", "scroll 的滚动方向；仅传 ref/selector 不传 direction 时将该元素居中滚入视口"));
-        properties.put("amount", Map.of("type", "integer", "minimum", 1, "maximum", 5000,
-            "description", "scroll 的滚动像素距离（默认约为视口高度的 75%）"));
-        properties.put("state", Map.of("type", "string", "enum", List.of("visible", "hidden"),
-            "description", "wait 等待 text/selector 达到的状态：visible（默认，出现）或 hidden（消失）"));
+        properties.put("amount",
+            Map.of("type", "integer", "minimum", 1, "maximum", 5000, "description", "scroll 的滚动像素距离（默认约为视口高度的 75%）"));
+        properties.put("state", Map.of("type", "string", "enum", List.of("visible", "hidden"), "description",
+            "wait 等待 text/selector 达到的状态：visible（默认，出现）或 hidden（消失）"));
         properties.put("files", Map.of("type", "array", "items", Map.of("type", "string"), "description",
             "upload 的文件，工作区内的相对路径；ref 指向 <input type=file>"));
         properties.put("fullPage", ToolSchemas.bool("screenshot 是否截取整页，默认只截可视区域"));
@@ -335,7 +334,8 @@ public final class BrowserTool extends PromptedTool implements LocalInteraction 
         }
         if ("close".equals(action)) {
             backend.setAgentControl(sessionId, false, "");
-        } else if (PAUSED_BLOCKS.contains(action) && !("evaluate".equals(action) && backend.agentControlled(sessionId))) {
+        } else if (PAUSED_BLOCKS.contains(action)
+            && !("evaluate".equals(action) && backend.agentControlled(sessionId))) {
             backend.setAgentControl(sessionId, true, controlLabel(action, args));
         }
         BrowserBackend.Reply reply;
@@ -470,10 +470,10 @@ public final class BrowserTool extends PromptedTool implements LocalInteraction 
             if (meta.get("recording") instanceof Map<?, ?> rec) {
                 recPath = str(rec.get("path"));
             }
-            evidenceRecorder.record(new BrowserEvidenceRecord("ev_" + UUID.randomUUID().toString().substring(0, 12),
-                parentSessionId, sessionId, runId, agentId, Instant.now(), action, status, url, title, shortSummary,
-                screenshotPath, dlPath, dlName, dlMime, dlBytes, blocked, consoleErrors, failedRequests, gateKind,
-                recPath));
+            evidenceRecorder.record(
+                new BrowserEvidenceRecord("ev_" + UUID.randomUUID().toString().substring(0, 12), parentSessionId,
+                    sessionId, runId, agentId, Instant.now(), action, status, url, title, shortSummary, screenshotPath,
+                    dlPath, dlName, dlMime, dlBytes, blocked, consoleErrors, failedRequests, gateKind, recPath));
         } catch (RuntimeException ignored) {
             // 证据记录异常不阻断工具主执行
         }
@@ -525,9 +525,8 @@ public final class BrowserTool extends PromptedTool implements LocalInteraction 
     }
 
     public static Path nextRecordingFile(String browserSessionId) {
-        return nextRecordingDir(browserSessionId)
-            .resolve("rec-" + System.currentTimeMillis() + "-" + UUID.randomUUID().toString().substring(0, 6)
-                + ".replay.json");
+        return nextRecordingDir(browserSessionId).resolve(
+            "rec-" + System.currentTimeMillis() + "-" + UUID.randomUUID().toString().substring(0, 6) + ".replay.json");
     }
 
     /** 截图与下载目录只留最近若干份，防止长会话把数据目录撑满。 */

@@ -12,9 +12,9 @@ public record BrowserEvidenceRecord(String id, String sessionId, String browserS
     int consoleErrors, int failedRequests, String gateKind, String recordingPath) {
 
     public BrowserEvidenceRecord(String id, String sessionId, String browserSessionId, String runId, String agentId,
-        Instant timestamp, String action, String status, String url, String title, String summary, String screenshotPath,
-        String downloadPath, String downloadName, String downloadMime, long downloadBytes, List<String> blockedOrigins,
-        int consoleErrors, int failedRequests, String gateKind) {
+        Instant timestamp, String action, String status, String url, String title, String summary,
+        String screenshotPath, String downloadPath, String downloadName, String downloadMime, long downloadBytes,
+        List<String> blockedOrigins, int consoleErrors, int failedRequests, String gateKind) {
         this(id, sessionId, browserSessionId, runId, agentId, timestamp, action, status, url, title, summary,
             screenshotPath, downloadPath, downloadName, downloadMime, downloadBytes, blockedOrigins, consoleErrors,
             failedRequests, gateKind, "");

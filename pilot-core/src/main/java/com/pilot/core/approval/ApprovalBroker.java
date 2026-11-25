@@ -59,8 +59,8 @@ public interface ApprovalBroker {
             @Override
             public CompletableFuture<Boolean> register(String explicitSessionId, String callId, String toolName,
                 String argsSummary, Map<String, Object> args) {
-                String owner = explicitSessionId == null || explicitSessionId.isBlank()
-                    ? cleanSessionId : explicitSessionId.strip();
+                String owner = explicitSessionId == null || explicitSessionId.isBlank() ? cleanSessionId
+                    : explicitSessionId.strip();
                 return delegate.register(owner, callId, toolName, argsSummary, args);
             }
 

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -91,7 +92,7 @@ class GitReadToolsTest {
     }
 
     private static void git(Path dir, String... args) throws Exception {
-        List<String> cmd = new java.util.ArrayList<>();
+        List<String> cmd = new ArrayList<>();
         cmd.add("git");
         cmd.addAll(List.of(args));
         Process p = new ProcessBuilder(cmd).directory(dir.toFile()).redirectErrorStream(true).start();

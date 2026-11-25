@@ -387,8 +387,7 @@ class BrowserToolTest {
         assertEquals(Map.of("op", "wait", "url", "/dashboard", "selector", ".spinner", "state", "hidden", "ms", 1200L),
             backend.commands.get(4));
 
-        assertTrue(backend.execute(
-            "s1", Map.of("op", "snapshot"), Duration.ofSeconds(1)).text().equals("ok"));
+        assertTrue(backend.execute("s1", Map.of("op", "snapshot"), Duration.ofSeconds(1)).text().equals("ok"));
         assertTrue(backend.controlActive);
         assertEquals("输入 e2", backend.controlStatus);
 
@@ -405,18 +404,14 @@ class BrowserToolTest {
         backend.recording = true;
         BrowserTool browser = tool().withEvidenceRecorder(captured::add);
 
-        assertEquals("ok", browser.execute(
-            Map.of("action", "click", "x", 180, "y", 240)));
-        assertEquals("ok", browser.execute(
-            Map.of("action", "hover", "x", 90, "y", 110)));
-        assertEquals("ok", browser.execute(
-            Map.of("action", "scroll", "x", 200, "y", 300, "direction", "down", "amount", 160)));
-        assertEquals("ok", browser.execute(Map.of(
-            "action", "drag", "ref", "e1", "targetRef", "e2", "frame", "f1", "dragSteps", 10)));
-        assertEquals("ok", browser.execute(Map.of(
-            "action", "drag", "x", 40, "y", 50, "targetX", 220, "targetY", 150)));
-        assertEquals("ok", browser.execute(
-            Map.of("action", "dialog", "accept", true, "promptText", "确认口令")));
+        assertEquals("ok", browser.execute(Map.of("action", "click", "x", 180, "y", 240)));
+        assertEquals("ok", browser.execute(Map.of("action", "hover", "x", 90, "y", 110)));
+        assertEquals("ok",
+            browser.execute(Map.of("action", "scroll", "x", 200, "y", 300, "direction", "down", "amount", 160)));
+        assertEquals("ok",
+            browser.execute(Map.of("action", "drag", "ref", "e1", "targetRef", "e2", "frame", "f1", "dragSteps", 10)));
+        assertEquals("ok", browser.execute(Map.of("action", "drag", "x", 40, "y", 50, "targetX", 220, "targetY", 150)));
+        assertEquals("ok", browser.execute(Map.of("action", "dialog", "accept", true, "promptText", "确认口令")));
         assertEquals("ok", browser.execute(Map.of("action", "dialog")));
 
         assertEquals(Map.of("op", "click", "x", 180, "y", 240), backend.commands.get(0));
@@ -425,31 +420,27 @@ class BrowserToolTest {
             backend.commands.get(2));
         assertEquals(Map.of("op", "drag", "ref", "e1", "targetRef", "e2", "frame", "f1", "steps", 10),
             backend.commands.get(3));
-        assertEquals(Map.of("op", "drag", "x", 40, "y", 50, "targetX", 220, "targetY", 150),
-            backend.commands.get(4));
-        assertEquals(Map.of("op", "dialog", "accept", true, "promptText", "确认口令"),
-            backend.commands.get(5));
+        assertEquals(Map.of("op", "drag", "x", 40, "y", 50, "targetX", 220, "targetY", 150), backend.commands.get(4));
+        assertEquals(Map.of("op", "dialog", "accept", true, "promptText", "确认口令"), backend.commands.get(5));
         assertEquals(Map.of("op", "dialog"), backend.commands.get(6));
 
-        assertEquals("ok", browser.execute(Map.of(
-            "action", "batch",
-            "stopOnError", false,
-            "delayMs", 30,
-            "steps", List.of(
-                Map.of("action", "fill", "ref", "e3", "text", "batch-val"),
-                Map.of("action", "dblclick", "ref", "e4"),
-                Map.of("action", "wait", "ms", 20)))));
+        assertEquals("ok",
+            browser.execute(Map.of("action", "batch", "stopOnError", false, "delayMs", 30, "steps",
+                List.of(Map.of("action", "fill", "ref", "e3", "text", "batch-val"),
+                    Map.of("action", "dblclick", "ref", "e4"), Map.of("action", "wait", "ms", 20)))));
         Map<String, Object> batchCmd = backend.commands.get(7);
         assertEquals("batch", batchCmd.get("op"));
         assertEquals(false, batchCmd.get("stopOnError"));
         assertEquals(30, batchCmd.get("delayMs"));
 
         assertTrue(browser.execute(Map.of("action", "batch", "steps", List.of())).startsWith("ERROR:"));
-        assertTrue(browser.execute(Map.of(
-            "action", "batch", "steps", List.of(Map.of("action", "navigate", "url", "http://127.0.0.1"))))
+        assertTrue(browser
+            .execute(
+                Map.of("action", "batch", "steps", List.of(Map.of("action", "navigate", "url", "http://127.0.0.1"))))
             .startsWith("ERROR:"));
-        assertTrue(browser.execute(Map.of(
-            "action", "batch", "steps", List.of(Map.of("action", "click", "ref", "e1", "external", true))))
+        assertTrue(browser
+            .execute(
+                Map.of("action", "batch", "steps", List.of(Map.of("action", "click", "ref", "e1", "external", true))))
             .startsWith("ERROR:"));
 
         String prevArtifacts = System.getProperty("pilot.artifacts.dir");
@@ -461,8 +452,8 @@ class BrowserToolTest {
             String recPath = String.valueOf(backend.commands.getLast().get("path"));
             assertTrue(recPath.startsWith(artifacts.toString()), recPath);
             assertTrue(recPath.endsWith(".replay.json"), recPath);
-            assertTrue(captured.stream().anyMatch(
-                rec -> "record".equals(rec.action()) && recPath.equals(rec.recordingPath())));
+            assertTrue(captured.stream()
+                .anyMatch(rec -> "record".equals(rec.action()) && recPath.equals(rec.recordingPath())));
         } finally {
             if (prevArtifacts == null) {
                 System.clearProperty("pilot.artifacts.dir");

@@ -67,8 +67,8 @@ class SkillsApiTest {
             .andExpect(jsonPath("$.available[?(@.name == 'code-review')].source").value("builtin"))
             .andExpect(jsonPath("$.available[?(@.name == 'bug-triage')].source").value("builtin"))
             .andExpect(jsonPath("$.available[?(@.name == 'security-audit')].source").value("builtin"))
-            .andExpect(jsonPath("$.invalid").isEmpty())
-            .andExpect(jsonPath("$.projectRoot").isNotEmpty()).andExpect(jsonPath("$.userRoot").isNotEmpty());
+            .andExpect(jsonPath("$.invalid").isEmpty()).andExpect(jsonPath("$.projectRoot").isNotEmpty())
+            .andExpect(jsonPath("$.userRoot").isNotEmpty());
     }
 
     private void writeSkill(String name, String description, String command) throws Exception {

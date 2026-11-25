@@ -208,8 +208,7 @@ class ContextBudgetTest {
         assertEquals(0, calls.get(), "本地清理够用时不该调用摘要模型");
         assertTrue(
             messages.stream()
-                .anyMatch(message -> "tool".equals(message.role())
-                    && message.content().startsWith("[旧工具输出已清理")),
+                .anyMatch(message -> "tool".equals(message.role()) && message.content().startsWith("[旧工具输出已清理")),
             "旧的工具输出应被换成占位符");
         assertTrue(ContextBudget.usage(messages, 400_000, limit, 4_000) < 0.90, "清理后应压回预压线以下");
     }

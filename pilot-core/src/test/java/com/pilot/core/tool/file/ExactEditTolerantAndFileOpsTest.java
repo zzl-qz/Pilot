@@ -42,9 +42,9 @@ class ExactEditTolerantAndFileOpsTest {
         assertTrue(trailing.content().contains("        int a = 2;\n"));
 
         // 2. 整体缩进少 4 格仍唯一命中，且 new_string 按原文件缩进自动重排
-        ExactEditBatch.Applied reindented = ExactEditBatch.apply(source, List.of(new ExactEditBatch.Edit(
-            "    if (a > 0) {\n        System.out.println(a);\n    }",
-            "    if (a >= 0) {\n        System.out.println(a + 1);\n        return;\n    }")));
+        ExactEditBatch.Applied reindented = ExactEditBatch.apply(source,
+            List.of(new ExactEditBatch.Edit("    if (a > 0) {\n        System.out.println(a);\n    }",
+                "    if (a >= 0) {\n        System.out.println(a + 1);\n        return;\n    }")));
         assertEquals(1, reindented.tolerantMatches());
         assertTrue(reindented.content().contains(
             "        if (a >= 0) {\n            System.out.println(a + 1);\n            return;\n        }\n"));
@@ -70,8 +70,8 @@ class ExactEditTolerantAndFileOpsTest {
     @Test
     void tolerantMatchPreservesCrlfAndUtf8Bom() {
         String original = "\uFEFFclass A {\r\n    int x = 1;  \r\n}\r\n";
-        ExactEditBatch.Applied applied = ExactEditBatch.apply(original,
-            List.of(new ExactEditBatch.Edit("  int x = 1;\n", "  int x = 42;\n")));
+        ExactEditBatch.Applied applied =
+            ExactEditBatch.apply(original, List.of(new ExactEditBatch.Edit("  int x = 1;\n", "  int x = 42;\n")));
         assertEquals("\uFEFFclass A {\r\n    int x = 42;\r\n}\r\n", applied.content());
     }
 
@@ -102,8 +102,7 @@ class ExactEditTolerantAndFileOpsTest {
         assertFalse(ok.text().startsWith("ERROR:"));
         assertFalse(Files.exists(file));
         assertEquals(List.of("old.txt"), ok.changedPaths());
-        assertEquals(List.of(paths.resolve("old.txt").normalize()),
-            snapshotted.stream().map(Path::normalize).toList());
+        assertEquals(List.of(paths.resolve("old.txt").normalize()), snapshotted.stream().map(Path::normalize).toList());
     }
 
     @Test
@@ -132,8 +131,8 @@ class ExactEditTolerantAndFileOpsTest {
         assertEquals(2, snapshotted.size());
 
         // 显式 overwrite=true 允许覆盖
-        ToolResult overwritten = moveTool.executeResult(
-            Map.of("source", "nested/dir/b.txt", "destination", "existing.txt", "overwrite", true));
+        ToolResult overwritten = moveTool
+            .executeResult(Map.of("source", "nested/dir/b.txt", "destination", "existing.txt", "overwrite", true));
         assertFalse(overwritten.text().startsWith("ERROR:"));
         assertEquals("hello", Files.readString(existing, StandardCharsets.UTF_8));
     }

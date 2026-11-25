@@ -30,11 +30,11 @@ import tools.jackson.databind.ObjectMapper;
 @Component
 public class ModelCatalogService {
     private static final Duration LOCAL_SCAN_TIMEOUT = Duration.ofMillis(1200);
-    private static final List<LocalService> LOCAL_SERVICES = List.of(
-        new LocalService("Ollama", "http://127.0.0.1:11434/v1"),
-        new LocalService("LM Studio", "http://127.0.0.1:1234/v1"),
-        new LocalService("llama.cpp", "http://127.0.0.1:8080/v1"),
-        new LocalService("vLLM", "http://127.0.0.1:8000/v1"));
+    private static final List<LocalService> LOCAL_SERVICES =
+        List.of(new LocalService("Ollama", "http://127.0.0.1:11434/v1"),
+            new LocalService("LM Studio", "http://127.0.0.1:1234/v1"),
+            new LocalService("llama.cpp", "http://127.0.0.1:8080/v1"),
+            new LocalService("vLLM", "http://127.0.0.1:8000/v1"));
 
     private final ModelSettings settings;
     private final ObjectMapper objectMapper;
@@ -61,8 +61,7 @@ public class ModelCatalogService {
         if (targets == null || targets.isEmpty()) {
             return List.of();
         }
-        Duration effective = timeout == null || timeout.isNegative() || timeout.isZero()
-            ? LOCAL_SCAN_TIMEOUT : timeout;
+        Duration effective = timeout == null || timeout.isNegative() || timeout.isZero() ? LOCAL_SCAN_TIMEOUT : timeout;
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             List<CompletableFuture<LocalModelService>> probes = new ArrayList<>();
             for (LocalService service : targets) {
@@ -71,15 +70,14 @@ public class ModelCatalogService {
             return probes.stream()
                 .map(probe -> probe.completeOnTimeout(null, effective.toMillis() + 150L, TimeUnit.MILLISECONDS)
                     .exceptionally(error -> null).join())
-                .filter(Objects::nonNull)
-                .toList();
+                .filter(Objects::nonNull).toList();
         }
     }
 
     private LocalModelService probeLocal(LocalService service, Duration timeout) {
         try {
-            List<String> found = ModelCatalog.fetch(httpClient, objectMapper, URI.create(service.endpoint()), null,
-                timeout);
+            List<String> found =
+                ModelCatalog.fetch(httpClient, objectMapper, URI.create(service.endpoint()), null, timeout);
             return new LocalModelService(service.name(), service.endpoint(), found);
         } catch (RuntimeException e) {
             return null;

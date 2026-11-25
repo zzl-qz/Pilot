@@ -206,8 +206,8 @@ public class ModelSettings {
         requireHttpEndpoint(nextEndpoint);
         String nextKey = target.apiKey() == null ? "" : target.apiKey().strip();
         Long context = target.contextTokens() != null && target.contextTokens() > 0 ? target.contextTokens() : null;
-        Integer output = target.maxOutputTokens() != null && target.maxOutputTokens() > 0
-            ? target.maxOutputTokens() : null;
+        Integer output =
+            target.maxOutputTokens() != null && target.maxOutputTokens() > 0 ? target.maxOutputTokens() : null;
         String child = target.childModel() == null ? "" : target.childModel().strip();
 
         Snapshot before = current;

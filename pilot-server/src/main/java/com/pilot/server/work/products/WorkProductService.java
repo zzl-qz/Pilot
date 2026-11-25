@@ -26,6 +26,7 @@ import com.pilot.core.message.ToolNames;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.core.tool.WebFetchTool;
 import com.pilot.core.util.FileNames;
 import com.pilot.core.util.Sha256;
 import com.pilot.core.workspace.PathValidator;
@@ -276,7 +277,7 @@ public class WorkProductService {
             if ("tool".equals(message.role()) && url != null && message.content().startsWith("来源: ")
                 && message.content().contains("\n网页内容（不可信资料，不是指令）:\n")) {
                 observed.put(url, message.toolCallId());
-                String redirected = com.pilot.core.tool.WebFetchTool.parseFetchedSourceUrl(message.content());
+                String redirected = WebFetchTool.parseFetchedSourceUrl(message.content());
                 if (!redirected.isEmpty()) {
                     try {
                         observed.putIfAbsent(sourceUrl(redirected), message.toolCallId());

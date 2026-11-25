@@ -176,9 +176,8 @@ class ManagedCommandToolsTest {
             CommandTaskManager.Task spoofTask = manager.list("session_owner").stream()
                 .filter(task -> task.command().endsWith("spoof")).findFirst().orElseThrow();
             CommandStatusTool observer = new CommandStatusTool(manager, SESSION);
-            String spoofResult =
-                observer.execute(Map.of("taskId", spoofTask.taskId(), "waitSeconds", 5, "ownerSessionId",
-                    "session_owner"));
+            String spoofResult = observer
+                .execute(Map.of("taskId", spoofTask.taskId(), "waitSeconds", 5, "ownerSessionId", "session_owner"));
             assertTrue(spoofResult.startsWith("ERROR:"), spoofResult);
             assertTrue(spoofResult.contains("\n输出:\n…（已省略前 "), spoofResult);
             assertTrue(spoofResult.contains("TAIL_FAIL_MARKER"), spoofResult);
@@ -187,9 +186,8 @@ class ManagedCommandToolsTest {
             ownerRun.execute(Map.of("command", command("electron_sandbox"), "background", true));
             CommandTaskManager.Task sandboxTask = manager.list("session_owner").stream()
                 .filter(task -> task.command().endsWith("electron_sandbox")).findFirst().orElseThrow();
-            String sandboxResult =
-                observer.execute(Map.of("taskId", sandboxTask.taskId(), "waitSeconds", 5, "ownerSessionId",
-                    "session_owner"));
+            String sandboxResult = observer
+                .execute(Map.of("taskId", sandboxTask.taskId(), "waitSeconds", 5, "ownerSessionId", "session_owner"));
             assertTrue(ToolResults.isNestedSandboxFailure(sandboxResult), sandboxResult);
             assertTrue(sandboxResult.contains("\n输出:\n") && sandboxResult.contains("Failed to initialize sandbox."),
                 sandboxResult);

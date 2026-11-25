@@ -62,8 +62,8 @@ public final class FileOutline {
     private static final Pattern PYTHON_DECL = Pattern.compile("^(\\s*)(?:async\\s+)?(class|def)\\s+([A-Za-z_]\\w*)");
     private static final Pattern GO_TYPE = Pattern.compile("^\\s*type\\s+([A-Za-z_]\\w*)\\s+(struct|interface|\\S+)");
     private static final Pattern GO_FUNC = Pattern.compile("^\\s*func\\s+(?:\\(([^)]+)\\)\\s+)?([A-Za-z_]\\w*)\\s*\\(");
-    private static final Pattern RUST_TYPE = Pattern
-        .compile("^\\s*(?:pub(?:\\([^)]*\\))?\\s+)?(?:unsafe\\s+)?(struct|enum|trait|impl|mod|type)\\s+([A-Za-z_][\\w:]*)");
+    private static final Pattern RUST_TYPE = Pattern.compile(
+        "^\\s*(?:pub(?:\\([^)]*\\))?\\s+)?(?:unsafe\\s+)?(struct|enum|trait|impl|mod|type)\\s+([A-Za-z_][\\w:]*)");
     private static final Pattern RUST_FN = Pattern
         .compile("^\\s*(?:pub(?:\\([^)]*\\))?\\s+)?(?:async\\s+)?(?:unsafe\\s+)?(?:const\\s+)?fn\\s+([A-Za-z_]\\w*)");
     private static final Pattern MD_HEADING = Pattern.compile("^(#{1,3})\\s+(.+?)\\s*#*$");
@@ -220,8 +220,7 @@ public final class FileOutline {
             return "未找到匹配符号「" + needle + "」（已扫描 " + scannedFiles.get() + " 个文件"
                 + (capped.get() ? "，已达扫描上限，建议指定 path 或 glob 缩小范围" : "") + "）。";
         }
-        hits.sort(Comparator.comparingInt(SearchHit::score).reversed()
-            .thenComparing(SearchHit::path)
+        hits.sort(Comparator.comparingInt(SearchHit::score).reversed().thenComparing(SearchHit::path)
             .thenComparingInt(SearchHit::line));
         boolean truncated = hits.size() > MAX_SEARCH_RESULTS;
         List<SearchHit> shown = truncated ? hits.subList(0, MAX_SEARCH_RESULTS) : hits;
@@ -491,8 +490,8 @@ public final class FileOutline {
             }
             Matcher fnMatch = TS_FUNCTION.matcher(raw);
             if (fnMatch.find()) {
-                symbols.add(new Symbol(i + 1, fnMatch.group(1), "function",
-                    clipSignature(trimTrailingBrace(trimmed)), leadingSpaces(raw) >= 2));
+                symbols.add(new Symbol(i + 1, fnMatch.group(1), "function", clipSignature(trimTrailingBrace(trimmed)),
+                    leadingSpaces(raw) >= 2));
                 continue;
             }
             Matcher arrowMatch = TS_ARROW.matcher(raw);
@@ -533,8 +532,8 @@ public final class FileOutline {
             if (typeMatch.find()) {
                 String kind = "struct".equals(typeMatch.group(2)) || "interface".equals(typeMatch.group(2))
                     ? typeMatch.group(2) : "type";
-                symbols.add(new Symbol(i + 1, typeMatch.group(1), kind,
-                    clipSignature(trimTrailingBrace(raw.strip())), false));
+                symbols.add(
+                    new Symbol(i + 1, typeMatch.group(1), kind, clipSignature(trimTrailingBrace(raw.strip())), false));
                 continue;
             }
             Matcher fn = GO_FUNC.matcher(raw);
@@ -582,8 +581,8 @@ public final class FileOutline {
             Matcher heading = MD_HEADING.matcher(trimmed);
             if (heading.find()) {
                 String title = heading.group(2);
-                symbols.add(new Symbol(i + 1, title, "heading", heading.group(1) + " " + title,
-                    heading.group(1).length() > 1));
+                symbols.add(
+                    new Symbol(i + 1, title, "heading", heading.group(1) + " " + title, heading.group(1).length() > 1));
             }
         }
         return symbols;
@@ -656,8 +655,8 @@ public final class FileOutline {
             }
             String normalized = rawGlob.strip().replace('\\', '/');
             PathMatcher full = FileSystems.getDefault().getPathMatcher("glob:" + normalized);
-            PathMatcher name = normalized.contains("/") ? null
-                : FileSystems.getDefault().getPathMatcher("glob:" + normalized);
+            PathMatcher name =
+                normalized.contains("/") ? null : FileSystems.getDefault().getPathMatcher("glob:" + normalized);
             return new GlobFilter(full, name);
         }
 

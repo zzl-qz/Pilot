@@ -18,8 +18,8 @@ public final class WebSearchModels {
     public static final int MAX_COUNT = 15;
     public static final int MAX_PAGE = 5;
 
-    private static final Set<String> TRACKING_PARAMS = Set.of("spm", "fbclid", "gclid", "msclkid", "yclid", "mc_cid",
-        "mc_eid", "ref_src", "ref_url", "igshid", "si");
+    private static final Set<String> TRACKING_PARAMS =
+        Set.of("spm", "fbclid", "gclid", "msclkid", "yclid", "mc_cid", "mc_eid", "ref_src", "ref_url", "igshid", "si");
     private static final Set<String> STOP_WORDS = Set.of("the", "and", "for", "with", "how", "what", "why", "when",
         "where", "from", "into", "that", "this", "are", "was", "were", "can", "use", "using", "about", "site");
     private static final Pattern ASCII_TOKEN = Pattern.compile("[a-z0-9][a-z0-9._+-]{1,}");
@@ -215,8 +215,8 @@ public final class WebSearchModels {
             if (!normalizedSite.isEmpty() && !matchesSite(hit.url(), normalizedSite)) {
                 continue;
             }
-            String key = hit.url().isEmpty() ? "title:" + hit.title().toLowerCase(Locale.ROOT)
-                : canonicalUrl(hit.url());
+            String key =
+                hit.url().isEmpty() ? "title:" + hit.title().toLowerCase(Locale.ROOT) : canonicalUrl(hit.url());
             MergedHit existing = merged.get(key);
             if (existing == null) {
                 merged.put(key, new MergedHit(hit, index));

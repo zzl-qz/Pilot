@@ -624,10 +624,8 @@ public class MultiAgentService {
         UsageMeter meter = new UsageMeter();
         // 没有显式执行客户端时也不能落回裸客户端：至少保留子代理缓存组与降级委托
         ModelClient selected = dispatch.executionClient() == null
-            ? new MeteredModelClient(modelClient, dispatch.sessionId() + ":subagent", "subagent", List.of(),
-                report -> {
-                })
-            : dispatch.executionClient();
+            ? new MeteredModelClient(modelClient, dispatch.sessionId() + ":subagent", "subagent", List.of(), report -> {
+            }) : dispatch.executionClient();
         UsageSink usage = dispatch.usageSinkOrNull();
         ModelClient metered = MeteredModelClient.observeUsage(selected, usage::beforeRequest, usage::afterRequest);
         ModelClient budgeted = usageMetering(metered, meter, budget);

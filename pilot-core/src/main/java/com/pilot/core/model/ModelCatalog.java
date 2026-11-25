@@ -75,8 +75,8 @@ public final class ModelCatalog {
     /** 拉取端点上的可用模型清单，支持指定更短的请求超时（用于本机多端口并发扫描）。 */
     public static List<String> fetch(HttpClient httpClient, ObjectMapper objectMapper, URI endpoint, String apiKey,
         Duration timeout) {
-        Duration effectiveTimeout = timeout == null || timeout.isNegative() || timeout.isZero()
-            ? REQUEST_TIMEOUT : timeout;
+        Duration effectiveTimeout =
+            timeout == null || timeout.isNegative() || timeout.isZero() ? REQUEST_TIMEOUT : timeout;
         URI modelsUri = resolveModelsUri(endpoint);
         HttpRequest.Builder request =
             HttpRequest.newBuilder(modelsUri).timeout(effectiveTimeout).header("Accept", "application/json").GET();
