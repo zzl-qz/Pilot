@@ -32,9 +32,9 @@ public final class ReadTracker implements ReadGuard {
     /** 同一未变文件请求区间覆盖率达到该阈值即视为重复读取。 */
     public static final double OVERLAP_DEDUP_RATIO = 0.80;
     /** 单次读取不超过该行数视为小窗微读，用于给出温和的增大 line_count 建议。 */
-    public static final int TINY_READ_LINES = 25;
+    public static final int TINY_READ_LINES = 60;
     /** 同一未变文件非重叠小窗微读累计达到该次数时附带软提示。 */
-    public static final int TINY_READ_HINT_AT = 4;
+    public static final int TINY_READ_HINT_AT = 3;
 
     private final ConcurrentMap<Path, FileStamp> observed = new ConcurrentHashMap<>();
     private final ConcurrentMap<Path, DeliveredState> deliveredViews = new ConcurrentHashMap<>();

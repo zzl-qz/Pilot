@@ -27,7 +27,7 @@ public final class ModelRetryPolicy {
     /** 单次退避上限，避免长故障时等待过久。 */
     public static final long MAX_RETRY_DELAY_MS = 30_000L;
     /** 同一端点连续这么多次连接级失败就停止重试，不必等到退避预算耗尽。 */
-    public static final int CONNECTION_BREAKER_FAILURES = 3;
+    public static final int CONNECTION_BREAKER_FAILURES = 5;
     private static final Pattern HTTP_STATUS = Pattern.compile("HTTP (\\d+)");
     /** 连接级中断：握手失败、流被对端提前关闭、连接被重置。 */
     private static final Pattern CONNECTION_LOST = Pattern.compile("(?i)handshake|eof|connection reset");

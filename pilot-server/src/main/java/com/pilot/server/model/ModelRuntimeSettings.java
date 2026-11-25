@@ -26,7 +26,7 @@ import tools.jackson.databind.annotation.JsonDeserialize;
 @Component
 public final class ModelRuntimeSettings {
     private static final long DEFAULT_TIMEOUT_SECONDS = 900;
-    private static final long DEFAULT_IDLE_TIMEOUT_SECONDS = 600;
+    private static final long DEFAULT_IDLE_TIMEOUT_SECONDS = 150;
 
     public record Options(String provider, String cacheMode, String cacheTtl, Boolean instructionMessages,
         Boolean streamUsage, String compactionMode, String webSearchMode, ModelPricing pricing,

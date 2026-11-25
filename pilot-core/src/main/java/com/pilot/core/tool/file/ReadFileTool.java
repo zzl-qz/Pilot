@@ -157,7 +157,8 @@ public final class ReadFileTool implements Tool.ParallelReadOnly {
                     int deliveredLines = slice.endLine() - slice.startLine() + 1;
                     if (deliveredLines <= ReadTracker.TINY_READ_LINES && slice.endLine() < slice.totalLines()
                         && coverage.tinyReadCount() + 1 >= ReadTracker.TINY_READ_HINT_AT) {
-                        return slice.text() + "\n（提示：已多次小窗口读取此文件，建议增大 line_count 一次读取相关函数完整区间）";
+                        return slice.text()
+                            + "\n（提示：已多次小窗口读取此文件，建议增大 line_count（如 400–800）一次读取完整文件或函数区间，并尽量同轮并行读取多个文件）";
                     }
                 }
             }

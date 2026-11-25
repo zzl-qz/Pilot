@@ -44,6 +44,7 @@ import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.event.RunUsageUpdated;
 import com.pilot.core.event.SessionEvent;
+import com.pilot.core.loop.ModelRetryPolicy;
 import com.pilot.core.message.Attachment;
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
@@ -1629,7 +1630,7 @@ class AgentRunServiceTest {
     void autoReconnectsAndCompletesAfterTransientConnectionDropButNeverOnPermanentError() throws Exception {
         AtomicInteger flakyCalls = new AtomicInteger();
         ModelClient flaky = (messages, tools) -> {
-            if (flakyCalls.incrementAndGet() <= 3) {
+            if (flakyCalls.incrementAndGet() <= ModelRetryPolicy.CONNECTION_BREAKER_FAILURES) {
                 throw new ModelClientException(ModelFailureKind.NETWORK, "流式模型请求失败（10 ms）：connection reset",
                     new IOException("connection reset"));
             }
@@ -1650,7 +1651,7 @@ class AgentRunServiceTest {
             String runId = fixture.service.claimRun(fixture.sessionId).orElseThrow();
             fixture.sessions.publish(fixture.sessionId, runId, new RunStarted("分析目录结构"));
             fixture.service.start(fixture.sessionId, runId, "分析目录结构");
-            assertEquals("FAILED:MODEL_ERROR:true", statuses.poll(15, TimeUnit.SECONDS));
+            assertEquals("FAILED:MODEL_ERROR:true", statuses.poll(35, TimeUnit.SECONDS));
             assertEquals("COMPLETED", statuses.poll(15, TimeUnit.SECONDS), "可重试连接中断后应自动重连续跑直至完成");
             assertTrue(observedEvents.stream().filter(RunContinued.class::isInstance).map(RunContinued.class::cast)
                 .anyMatch(c -> c.reason().contains("自动重连续跑")));

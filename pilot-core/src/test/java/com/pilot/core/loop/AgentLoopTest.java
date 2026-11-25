@@ -1389,7 +1389,7 @@ class AgentLoopTest {
         assertTrue(delays.getLast() > delays.getFirst(), "连续失败应逐步放慢: " + delays);
     }
 
-    /** 同一端点连续握手失败/断流：3 次就熔断，不能让用户干等完退避预算。 */
+    /** 同一端点连续握手失败/断流：达到熔断阈值即停止重试，不能让用户干等完退避预算。 */
     @Test
     void stopsRetryingAfterThreeConnectionFailures() {
         AtomicInteger calls = new AtomicInteger();
@@ -1406,7 +1406,7 @@ class AgentLoopTest {
         AgentLoop.Result result = loop.run("你好", List.of(), events::add);
 
         assertEquals("MODEL_ERROR", result.failureCode());
-        assertEquals(3, calls.get(), "同一端点连续 3 次连接级失败就熔断，不再等到退避预算耗尽");
+        assertEquals(ModelRetryPolicy.CONNECTION_BREAKER_FAILURES, calls.get(), "同一端点连续达到熔断次数连接级失败即停止重试，不再等到退避预算耗尽");
         RunFailed failed =
             events.stream().filter(RunFailed.class::isInstance).map(RunFailed.class::cast).findFirst().orElseThrow();
         assertTrue(failed.retryable(), "熔断后进度已保存，可继续执行");
