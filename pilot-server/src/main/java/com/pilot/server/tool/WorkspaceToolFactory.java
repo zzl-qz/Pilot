@@ -200,6 +200,11 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
         return cache.computeIfAbsent(key, ignored -> create(root, null));
     }
 
+    /** 独立非缓存工具集：供子代理临时 worktree 使用，每次分配独立 ReadTracker 且不污染全局缓存。 */
+    public ToolRegistry uncachedRegistryFor(String workspace, List<Path> extraRoots) {
+        return create(resolve(workspace), null, extraRoots == null ? List.of() : extraRoots, "");
+    }
+
     /**
      * 会话级工具集：额外注册 {@code update_plan}（以及调用方随后追加的 spawn_agent）。
      *
@@ -302,13 +307,13 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
             registry.register(new CodeSymbolTool(validator));
         }
         if (view.allowsTool(GitStatusTool.NAME)) {
-            registry.register(new GitStatusTool(validator));
+            registry.register(new GitStatusTool(validator, view));
         }
         if (view.allowsTool(GitDiffTool.NAME)) {
-            registry.register(new GitDiffTool(validator));
+            registry.register(new GitDiffTool(validator, view));
         }
         if (view.allowsTool(GitLogTool.NAME)) {
-            registry.register(new GitLogTool(validator));
+            registry.register(new GitLogTool(validator, view));
         }
         if (view.allowsTool(ToolNames.WEB_SEARCH)) {
             registry.register(searchTool());

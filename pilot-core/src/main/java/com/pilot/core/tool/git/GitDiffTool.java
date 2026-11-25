@@ -10,6 +10,7 @@ import com.pilot.core.tool.Availability;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolSchemas;
 import com.pilot.core.tool.ToolSupport;
+import com.pilot.core.workspace.AgentScope;
 import com.pilot.core.workspace.PathValidator;
 
 /** 并行只读工具：查看工作区或暂存区 Git diff，带按路径过滤与行数截断保护。 */
@@ -18,9 +19,15 @@ public final class GitDiffTool implements Tool.ParallelReadOnly {
     private static final int DEFAULT_MAX_LINES = 200;
 
     private final PathValidator paths;
+    private final AgentScope scope;
 
     public GitDiffTool(PathValidator paths) {
+        this(paths, null);
+    }
+
+    public GitDiffTool(PathValidator paths, AgentScope scope) {
         this.paths = Objects.requireNonNull(paths, "paths must not be null");
+        this.scope = scope;
     }
 
     @Override
@@ -45,12 +52,13 @@ public final class GitDiffTool implements Tool.ParallelReadOnly {
 
     @Override
     public String execute(Map<String, Object> args) {
-        if (!GitReadSupport.isInsideGitRepo(paths.root())) {
-            return "ERROR: 当前工作区不是 Git 仓库";
+        String repositoryError = GitReadSupport.repositoryError(paths);
+        if (repositoryError != null) {
+            return repositoryError;
         }
         String pathspec;
         try {
-            pathspec = GitReadSupport.resolvePathspec(paths, ToolSupport.stringArg(args, "path"));
+            pathspec = GitReadSupport.resolveScopedPathspec(paths, scope, ToolSupport.stringArg(args, "path"));
         } catch (RuntimeException e) {
             return "ERROR: " + e.getMessage();
         }

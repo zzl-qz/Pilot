@@ -10,6 +10,7 @@ import com.pilot.core.tool.Availability;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolSchemas;
 import com.pilot.core.tool.ToolSupport;
+import com.pilot.core.workspace.AgentScope;
 import com.pilot.core.workspace.PathValidator;
 
 /** 并行只读工具：查看当前仓库或指定路径的最近提交历史。 */
@@ -19,9 +20,15 @@ public final class GitLogTool implements Tool.ParallelReadOnly {
     private static final int MAX_LINES = 250;
 
     private final PathValidator paths;
+    private final AgentScope scope;
 
     public GitLogTool(PathValidator paths) {
+        this(paths, null);
+    }
+
+    public GitLogTool(PathValidator paths, AgentScope scope) {
         this.paths = Objects.requireNonNull(paths, "paths must not be null");
+        this.scope = scope;
     }
 
     @Override
@@ -45,12 +52,13 @@ public final class GitLogTool implements Tool.ParallelReadOnly {
 
     @Override
     public String execute(Map<String, Object> args) {
-        if (!GitReadSupport.isInsideGitRepo(paths.root())) {
-            return "ERROR: 当前工作区不是 Git 仓库";
+        String repositoryError = GitReadSupport.repositoryError(paths);
+        if (repositoryError != null) {
+            return repositoryError;
         }
         String pathspec;
         try {
-            pathspec = GitReadSupport.resolvePathspec(paths, ToolSupport.stringArg(args, "path"));
+            pathspec = GitReadSupport.resolveScopedPathspec(paths, scope, ToolSupport.stringArg(args, "path"));
         } catch (RuntimeException e) {
             return "ERROR: " + e.getMessage();
         }

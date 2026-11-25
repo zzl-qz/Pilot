@@ -13,6 +13,7 @@ import java.util.concurrent.TimeoutException;
 import com.pilot.core.exec.EnvironmentSanitizer;
 import com.pilot.core.exec.ProcessSupport;
 import com.pilot.core.tool.Availability;
+import com.pilot.core.workspace.AgentScope;
 import com.pilot.core.workspace.PathValidator;
 
 /** 跨平台只读 Git 工具公共执行与安全校验。 */
@@ -25,6 +26,10 @@ final class GitReadSupport {
 
     static Availability availability(PathValidator paths) {
         return isInsideGitRepo(paths.root()) ? Availability.ready() : Availability.unavailable("当前工作区不是 Git 仓库");
+    }
+
+    static String repositoryError(PathValidator paths) {
+        return isInsideGitRepo(paths.root()) ? null : "ERROR: 当前工作区不是 Git 仓库";
     }
 
     static boolean isInsideGitRepo(Path start) {
@@ -47,6 +52,31 @@ final class GitReadSupport {
             return null;
         }
         return ":(literal)" + relative;
+    }
+
+    static String resolveScopedPathspec(PathValidator paths, AgentScope scope, String rawPath) {
+        if (scope == null) {
+            return resolvePathspec(paths, rawPath);
+        }
+        boolean restricted = !scope.allowFiles().isEmpty() || !scope.denyFiles().isEmpty();
+        if (rawPath == null || rawPath.isBlank()) {
+            if (restricted) {
+                throw new IllegalArgumentException("AgentScope 路径受限时必须指定 path");
+            }
+            return null;
+        }
+        String pathspec = resolvePathspec(paths, rawPath);
+        if (pathspec == null) {
+            if (restricted) {
+                throw new IllegalArgumentException("AgentScope 路径受限时必须指定具体的允许路径");
+            }
+            return null;
+        }
+        String relative = paths.display(paths.resolve(rawPath)).replace('\\', '/');
+        if (!scope.allowsPath(relative)) {
+            throw new IllegalArgumentException("路径不在 AgentScope 允许范围内");
+        }
+        return pathspec;
     }
 
     static RunResult run(Path workspace, List<String> gitArgs) {

@@ -13,6 +13,7 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.pilot.core.workspace.AgentScope;
 import com.pilot.core.workspace.PathValidator;
 
 class GitReadToolsTest {
@@ -89,6 +90,17 @@ class GitReadToolsTest {
         assertTrue(status.execute(Map.of("path", "../outside")).startsWith("ERROR:"));
         assertTrue(diff.execute(Map.of("path", "../outside")).startsWith("ERROR:"));
         assertTrue(log.execute(Map.of("path", "../outside")).startsWith("ERROR:"));
+
+        // AgentScope 路径受限时，省略 path 或传 "." 均不能绕过黑白名单
+        var scope = AgentScope.readOnly(List.of("a.txt"), List.of("b.txt"));
+        GitStatusTool scopedStatus = new GitStatusTool(paths, scope);
+        GitDiffTool scopedDiff = new GitDiffTool(paths, scope);
+        GitLogTool scopedLog = new GitLogTool(paths, scope);
+        assertTrue(scopedStatus.execute(Map.of()).startsWith("ERROR:"));
+        assertTrue(scopedStatus.execute(Map.of("path", ".")).startsWith("ERROR:"));
+        assertTrue(scopedDiff.execute(Map.of("path", "b.txt")).startsWith("ERROR:"));
+        assertTrue(scopedLog.execute(Map.of()).startsWith("ERROR:"));
+        assertTrue(scopedStatus.execute(Map.of("path", "a.txt")).contains("a.txt"));
     }
 
     private static void git(Path dir, String... args) throws Exception {
