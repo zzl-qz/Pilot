@@ -14,11 +14,13 @@
 
 ```
 工作区   = 父提交的完整检出（独立 git 仓库，只有一个 baseline 提交）
-任务说明 = 提交标题 + 约束（不含 diff、不含文件清单）
+任务说明 = 提交标题 + 提交正文（需求与现象）+ 约束；不含 diff、文件清单和实现细节
 隐藏用例 = 该提交改动过的测试文件，验收时才注入
 参考解   = 该提交的 diff，永不进入工作区
 通过条件 = 注入隐藏用例后该测试类通过
 ```
+
+任务说明必须包含提交正文，不能只有标题。实测过一版只用标题的批次：`S-05` 的标题是「修复部分交付提示重复」，模型把“提示重复”理解成重复发送事件、删掉了一处 `AssistantDelta`，而真实需求是“模型答复已说明未完成步骤时不再追加部分交付提示”。两种理解都合理，题面却只有一个答案——那就不是能力评测，是猜谜。补上正文后需求才唯一。
 
 模型看到的是**改动前**的测试；能证明它做对的断言在验收时才注入。因此：
 
@@ -75,6 +77,45 @@ A 的失败分两种：断言失败（题好，能验证行为）和编译失败
 | L-05 | L | `3ad9bef7` | 没有任何写入时，只读查看超过 16 次就不再返回新内容。 | pilot-core | 25 行 / 4 文件 | RunCommandPolicyTest | A=compile-fail / B=pass |
 | L-06 | L | `57071939` | 将非法工具调用参数 JSON 归类为有界可纠偏重试错误（D-020） | pilot-core | 26 行 / 4 文件 | AgentLoopTest, OpenAiCompatibleModelClientTest, OpenAiResponsesModelClientTest | A=compile-fail / B=pass |
 
+## 已跑结果（r2 批次，2026-11-26）
+
+模型 `gpt-6.1-sol`，权限档 `AUTO`，18 个任务各跑一次，完整数据见 [results-r2.md](results-r2.md)。
+
+| 指标 | 值 |
+| --- | --- |
+| pass@1 | **55.6%**（10 / 18） |
+| 分档通过 | S 5/6　M 3/6　L 2/6 |
+| 正常收尾 | 18 / 18 |
+| 误报完成率 | **44.4%**（8 / 18） |
+| 耗时 p50 / p95 | 321s / 808s |
+| 模型请求 | 356 次（平均 20 次/任务） |
+| 输入 token | 22,462,727（缓存命中 71.1%） |
+| 未命中输入 | 6,488,482（每成功任务 648,848） |
+
+三点观察：
+
+1. **难度梯度成立**：S 5/6、M 3/6、L 2/6。档位是按改动行数和文件数划分的，不是按模型表现事后贴标签。
+2. **误报完成是主要失败形态**：18 次全部正常收尾，8 次验收不通过。若只看“任务完成”状态，通过率会虚高到 100%。
+3. **改错方向多于改不对**：典型如 `S-05`，模型把“提示重复”理解成重复发送事件、删掉一处 `AssistantDelta`，而需求是“模型已说明未完成时不再追加提示”。这也是题面必须带提交正文的原因。
+
+作弊审计：18 个工作区都没有修改 `src/test` 下的文件，也没有 `pilot-core` / `pilot-server` 之外的改动，全部停留在注入前的 1 个 baseline 提交。
+
+## 工具
+
+| 脚本 | 作用 |
+| --- | --- |
+| `replay.mjs` | `list` / `verify`（A、B 校验）/ `setup`（导工作区）/ `accept`（还原隐藏用例后验收） |
+| `run-eval.mjs` | 批量跑 Pilot：建会话、发任务、轮询终态、逐个验收，写 `results.jsonl` 与 `summary.json` |
+| `reconcile.mjs` | 对账：断连或命令问题导致的记录，按会话真实终态与重新验收修正 |
+| `merge.mjs` | 把补跑批次并回主批次并重算汇总 |
+| `report.mjs` | 生成 Markdown 报告 |
+| `build-tasks.mjs` | 把筛选结果转成 `tasks.json` |
+
+踩过的两个坑，写在这里免得重犯：
+
+- Windows 上 `os.tmpdir()` 可能返回 8.3 短路径（`ZHUANG~1`），Maven 在短路径下解析 `-pl` 会报 `Could not find the selected project in the reactor`。验收前必须 `realpathSync`。
+- 用 `-pl pilot-server -am` 时，`-Dtest=XxxTest` 会同时作用于 `pilot-core`，匹配不到用例会让整批失败。必须加 `-Dsurefire.failIfNoSpecifiedTests=false`。
+
 ## 怎么跑
 
 先确认环境：JDK 25（`JAVA_HOME` 指向它）、Node 22、本地 Maven 仓库里已有本项目依赖。
@@ -94,6 +135,16 @@ node evaluation/replay/replay.mjs setup --task S-01 --out ../ws-S-01
 
 # 5. 验收：还原隐藏用例后跑测试
 node evaluation/replay/replay.mjs accept --task S-01 --workspace ../ws-S-01
+
+# 6. 整批跑：自动建会话、发任务、轮询终态、逐个验收
+node evaluation/replay/run-eval.mjs --batch r2 --parallel 2 --timeout 40
+
+# 7. 断连等基础设施问题用对账修正，补跑批次用合并并回
+node evaluation/replay/reconcile.mjs --batch r2
+node evaluation/replay/merge.mjs --into r2 --from r3
+
+# 8. 出报告
+node evaluation/replay/report.mjs --batch r2
 ```
 
 `accept` 会把工作区复制到临时目录、删掉 `src/test` 下被改动过的测试、写回提交里的原始版本，再执行该模块的测试。工作区里模型留下的任何测试改动都不会影响判定。

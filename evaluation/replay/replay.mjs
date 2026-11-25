@@ -60,9 +60,12 @@ function findTask(doc, id) {
 
 function acceptanceCommand(task) {
   const tests = task.testClasses.join(',');
-  // pilot-server 依赖 pilot-core，用 -am 从源码一起构建，避免本地仓库里的旧构件干扰
+  // pilot-server 依赖 pilot-core，用 -am 从源码一起构建，避免本地仓库里的旧构件干扰。
+  // -am 同时会跑 pilot-core 的 test 阶段，而 -Dtest 在该模块可能匹配不到用例，
+  // 必须用 surefire.failIfNoSpecifiedTests=false 让没有匹配的模块跳过而不是失败。
   const also = task.module === 'pilot-core' ? [] : ['-am'];
-  const args = ['-B', '-ntp', '-pl', task.module, ...also, `-Dtest=${tests}`, '-DfailIfNoTests=false', 'test'];
+  const args = ['-B', '-ntp', '-pl', task.module, ...also, `-Dtest=${tests}`,
+    '-DfailIfNoTests=false', '-Dsurefire.failIfNoSpecifiedTests=false', 'test'];
   return WIN
     ? { line: `mvnw.cmd ${args.join(' ')}`, display: `mvnw.cmd ${args.join(' ')}` }
     : { line: `sh mvnw ${args.join(' ')}`, display: `sh mvnw ${args.join(' ')}` };

@@ -5,7 +5,8 @@
     "repo": "https://github.com/zzl-qz/Pilot",
     "screen": "A = 父提交 + 隐藏用例必须失败；B = 父提交 + 参考解必须通过",
     "candidates": 129,
-    "valid": 32
+    "valid": 32,
+    "promptNote": "任务描述 = 提交标题 + 提交正文（需求侧描述），不含 diff、文件清单和实现细节"
   },
   "tasks": [
     {
@@ -32,7 +33,8 @@
         "testsB": 24,
         "secondsA": 45.6,
         "secondsB": 46.2
-      }
+      },
+      "body": "修复步数触顶后后台继续执行但会话仍显示失败的问题。使用现有继续任务标识保持原始目标，回归覆盖运行身份、事件顺序和排队消息交接，macOS 与 Linux 测试通过。"
     },
     {
       "id": "S-02",
@@ -58,7 +60,8 @@
         "testsB": 23,
         "secondsA": 39.6,
         "secondsB": 36.3
-      }
+      },
+      "body": "不再静默跳过空图片，避免图片位置与实际图片数不匹配以及先保存其它文件后才失败。补充空值、空字符串和空白内容回归，相关 57 项测试通过。"
     },
     {
       "id": "S-03",
@@ -84,7 +87,8 @@
         "testsB": 43,
         "secondsA": 67,
         "secondsB": 66.6
-      }
+      },
+      "body": "核验决策写回前重新读取最新执行状态，避免旧快照回退请求数、token 与活动时长。新增 COMPLETE、CONTINUE、WAIT 三条路径回归，验证核验费用占用后续真实预算；macOS 和 Linux 各 43 项策略测试通过。"
     },
     {
       "id": "S-04",
@@ -110,7 +114,8 @@
         "testsB": 9,
         "secondsA": 14.9,
         "secondsB": 12
-      }
+      },
+      "body": "- resolveEndpoint 原来只认裸 /v1，/api/llm/v1 这类自建网关写法被原样使用，\n  chat 请求 POST 到网关根，拿到与密钥无关的 401「用户未登录」\n  （api.scnet.cn 实测：无凭据打网关根即返回同款 401，正确路径返回 OpenAI 格式应答）\n- 规则放宽为「以 /v1 结尾（含尾斜杠）」即补 /chat/completions\n- /v11、/service-v1 等相近路径不误伤，补用例锁定"
     },
     {
       "id": "S-05",
@@ -136,7 +141,8 @@
         "testsB": 80,
         "secondsA": 23.8,
         "secondsB": 24.9
-      }
+      },
+      "body": "模型答复已说明未完成步骤时，不再重复追加部分交付提示。补充回归测试覆盖该收尾场景。"
     },
     {
       "id": "S-06",
@@ -162,7 +168,8 @@
         "testsB": 6,
         "secondsA": 32,
         "secondsB": 29.5
-      }
+      },
+      "body": "检查点被标成 INTERRUPTED 表示上一次启动已经接管过它，但 resumable()\n把 INTERRUPTED 也算作「可恢复」，于是每次启动都会把同一批旧运行再捞出来：\n\n    运行 run_xxx（会话 ses_xxx）上次未正常结束：运行已被取消…\n    启动恢复完成：已收敛 7 个遗留运行\n\n同一条旧账会在每一轮启动日志里重复出现，把真正的新中断淹没在噪音里。\n\n现在只上报上次退出时确实在跑的运行（RUNNING / PAUSED）；\n已经标成 INTERRUPTED 的检查点只顺手释放可能残留的租约，不进清单，\n记录本身仍然保留，用户还能看到「上次做到哪一步」。\n\nRunStateTrackerTest 新增用例：第一次恢复上报 1 条，第二次恢复不再重复上报。"
     },
     {
       "id": "M-01",
@@ -190,7 +197,8 @@
         "testsB": 17,
         "secondsA": 24.4,
         "secondsB": 25.6
-      }
+      },
+      "body": "将 code_diagnostics 从 ToolRegistry.DEFERRED 移出：无检查器的非代码仓库仍由 Availability.unavailable 自动隐藏，有编译/类型检查器的代码仓库默认直接暴露给模型；并在系统提示词 tools.md 中引导改动代码后优先跑 code_diagnostics 快速自检。"
     },
     {
       "id": "M-02",
@@ -216,7 +224,8 @@
         "testsB": 21,
         "secondsA": 18.8,
         "secondsB": 14
-      }
+      },
+      "body": "真实模型评测发现工具说明推荐测试管道，而完成检查不接受其退出码。移除矛盾示例，要求独立执行验证并通过日志工具分页读取输出，保留严格校验规则。补充管道不能放行、独立测试通过后可继续收尾的回归。macOS 与 Linux 各 107 项：106 通过、1 条件跳过。"
     },
     {
       "id": "M-03",
@@ -242,7 +251,8 @@
         "testsB": 9,
         "secondsA": 22.4,
         "secondsB": 22.7
-      }
+      },
+      "body": "进入明确审批时清除同一调用的旧只读快照，避免批准后仍被过期判定拒绝；工作区授权必须使用数组，并补真实执行器回归。"
     },
     {
       "id": "M-04",
@@ -270,7 +280,8 @@
         "testsB": 47,
         "secondsA": 42.1,
         "secondsB": 42.7
-      }
+      },
+      "body": "- CommandToolSupport.nestedSandboxHint 补充识别 Chromium/Electron 在 macOS Seatbelt 与 Linux 用户命名空间沙箱下的嵌套沙箱失败\n- CommandStatusTool 在后台命令以非 COMPLETED 状态结束时直接附带最多 2000 字符的尾部输出，并透传 ownerSessionId 检测跨会话任务的嵌套沙箱限制，避免模型漏看失败原因\n- 沿用「输出:」正文分隔符确保尾部输出无法伪造头部环境提示，并补充单元测试覆盖"
     },
     {
       "id": "M-05",
@@ -296,7 +307,8 @@
         "testsB": 64,
         "secondsA": 28.5,
         "secondsB": 22.2
-      }
+      },
+      "body": "发送前按模型安全输入预算收敛历史记录，避免长工具输出导致整轮失败，并补充回归测试。"
     },
     {
       "id": "M-06",
@@ -324,7 +336,8 @@
         "testsB": 35,
         "secondsA": 24.7,
         "secondsB": 23
-      }
+      },
+      "body": "此前 CommandChain.parse() 与 RunCommandTool.tokenize() 在双引号内未处理 \\\" 与 \\\\ 转义，导致含转义双引号和正则分支（如 grep -l \"failures=\\\"[1-9]\\|errors=\\\"[1-9]\"）的命令被提前闭合引号并误拆分为非法管道命令。\n\n本次仅在双引号内将 \\\" 与 \\\\ 识别为转义，其余反斜杠继续按字面保留以兼容正则与 Windows 路径；单引号内仍保持严格字面量语义。\n\n已补充 CommandChainTest 与 RunCommandToolTest 跨平台回归断言，并通过 pilot-core/pilot-server 全量单测、spotless、checkstyle 与 quality-gate 门禁。"
     },
     {
       "id": "L-01",
@@ -350,7 +363,8 @@
         "testsB": 2,
         "secondsA": 20.2,
         "secondsB": 23
-      }
+      },
+      "body": "统一质量扫描目录过滤规则，避免评测夹具污染审计结果，并补充排除断言。"
     },
     {
       "id": "L-02",
@@ -380,7 +394,8 @@
         "testsB": 35,
         "secondsA": 31.5,
         "secondsB": 38.1
-      }
+      },
+      "body": "推送、拉取和重置不再每次弹批准；发布包和全局安装仍要确认。"
     },
     {
       "id": "L-03",
@@ -410,7 +425,8 @@
         "testsB": 85,
         "secondsA": 21.8,
         "secondsB": 22.8
-      }
+      },
+      "body": "DeepSeek 默认走前缀压缩；系统提示还放得下时，先折叠历史，避免直接整组丢掉。"
     },
     {
       "id": "L-04",
@@ -436,7 +452,8 @@
         "testsB": 6,
         "secondsA": 21.6,
         "secondsB": 23.3
-      }
+      },
+      "body": "将悬挂工具调用修复拆分为无副作用的 repairedDanglingToolCalls，由 RequestBudget.enforce 返回修复后的消息列表并由 OpenAI Chat/Responses 与 Anthropic 三个端点适配器统一使用；保留 closeDanglingToolCalls 的原地修复契约。消除上游 8607c3a0 引入的 CacheWireTest.patchesMissingThinkingWhenHistoryHasNoSavedReasoning 运行时异常，并在 RequestBudgetRepairTest 补充不可变列表修复回归。"
     },
     {
       "id": "L-05",
@@ -462,7 +479,8 @@
         "testsB": 25,
         "secondsA": 18.9,
         "secondsB": 20.9
-      }
+      },
+      "body": ""
     },
     {
       "id": "L-06",
@@ -492,7 +510,9 @@
         "testsB": 108,
         "secondsA": 19,
         "secondsB": 23.2
-      }
+      },
+      "body": "在 T002（ses_acfeb9f3 第 70 轮）实测暴露：模型偶发返回非合法 JSON 的工具调用参数时，OpenAiResponsesModelClient 与 OpenAiCompatibleModelClient 将其抛出为 ModelFailureKind.PERMANENT，导致 AgentLoop 直接以 MODEL_ERROR 终结长达 70 步的正常任务。\n\n本次改动：\n1. ModelFailureKind 新增 MALFORMED_TOOL_CALL(retryable=true)，OpenAiResponsesModelClient 与 OpenAiCompatibleModelClient 解析工具调用 arguments JSON 失败时归类为该错误并附带脱敏片段；\n2. AgentLoop.callModel() 对 MALFORMED_TOOL_CALL 执行最多 3 次有界纠偏重试（附带临时 JSON 格式修正提示并作废半截预览），超过上限后有序停止并保留历史进度；\n3. 补充 OpenAiCompatibleModelClientTest、OpenAiResponsesModelClientTest 与 AgentLoopTest 恢复及上限回归测试，已通过全量 V1（pilot-core + pilot-server 1092 用例、spotless、checkstyle、quality-gate）。"
     }
-  ]
+  ],
+  "promptVersion": "subject+body+constraints"
 }

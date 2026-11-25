@@ -34,15 +34,26 @@ function parseArgs(argv) {
   return out;
 }
 
-async function api(base, path, init = {}) {
-  const res = await fetch(`${base}${path}`, {
-    signal: AbortSignal.timeout(30_000),
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) }
-  });
-  if (!res.ok) throw new Error(`${init.method ?? 'GET'} ${path} -> ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  const type = res.headers.get('content-type') ?? '';
-  return type.includes('application/json') ? res.json() : res.text();
+async function api(base, path, init = {}, attempts = 1) {
+  let lastError = null;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await fetch(`${base}${path}`, {
+        signal: AbortSignal.timeout(60_000),
+        ...init,
+        headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) }
+      });
+      if (!res.ok) throw new Error(`${init.method ?? 'GET'} ${path} -> ${res.status}: ${(await res.text()).slice(0, 300)}`);
+      const type = res.headers.get('content-type') ?? '';
+      return type.includes('application/json') ? res.json() : res.text();
+    } catch (error) {
+      // 只有网络层失败才重试；HTTP 错误直接抛出，避免掩盖真实问题
+      if (error.message.includes(' -> ')) throw error;
+      lastError = error;
+      if (i < attempts - 1) await new Promise(r => setTimeout(r, 2000 * (i + 1)));
+    }
+  }
+  throw lastError;
 }
 
 function git(args, encoding = 'utf8') {
@@ -74,16 +85,22 @@ async function exportWorktree(task, dir) {
 }
 
 function taskPrompt(task) {
-  return [
+  const lines = [
     `在仓库中定位并修复这个问题：${task.subject}`,
-    '',
+    ''
+  ];
+  if (task.body) {
+    lines.push('需求与现象：', task.body, '');
+  }
+  lines.push(
     '约束：',
     `1. 只改 ${task.module} 模块的实现代码，不要修改 src/test 下的任何测试文件。`,
     '2. 不要删除、跳过或弱化测试；验收会还原原始测试后重新运行。',
     '3. 不得访问当前工作区之外的路径，不得联网，不得克隆或查询远程仓库。',
     `4. 改完请运行 ${task.testClasses.join('、')} 确认通过。`,
     ''
-  ].join('\n');
+  );
+  return lines.join('\n');
 }
 
 async function runOne(ctx, task) {
@@ -102,19 +119,19 @@ async function runOne(ctx, task) {
     const session = await api(baseUrl, '/api/sessions', {
       method: 'POST',
       body: JSON.stringify({ title: `replay:${task.id}`, workspace: ws })
-    });
+    }, 3);
     record.sessionId = session.sessionId ?? session.id;
     await api(baseUrl, `/api/sessions/${record.sessionId}/messages`, {
       method: 'POST',
       body: JSON.stringify({ content: taskPrompt(task) })
-    });
+    }, 3);
     const deadline = Date.now() + timeoutMinutes * 60 * 1000;
     let last = null;
     while (Date.now() < deadline) {
       await new Promise(r => setTimeout(r, pollMs));
-      last = await api(baseUrl, `/api/sessions/${record.sessionId}/diagnostics`);
+      last = await api(baseUrl, `/api/sessions/${record.sessionId}/diagnostics`, {}, 3);
       if (TERMINAL.has(last.sessionStatus)) {
-        const active = await api(baseUrl, `/api/sessions/${record.sessionId}/runs/active`);
+        const active = await api(baseUrl, `/api/sessions/${record.sessionId}/runs/active`, {}, 3);
         if (Object.hasOwn(active, 'runId') && active.runId === null) break;
       }
     }
