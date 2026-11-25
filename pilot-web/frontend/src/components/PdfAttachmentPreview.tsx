@@ -2,11 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { Banner } from '@astryxdesign/core/Banner';
 import { Button } from '@astryxdesign/core/Button';
 import { IconButton } from '@astryxdesign/core/IconButton';
-import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy, type RenderTask } from 'pdfjs-dist';
+import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import './pdf-attachment.css';
-
-GlobalWorkerOptions.workerSrc = workerUrl;
 
 export default function PdfAttachmentPreview({ data, name }: { data: ArrayBuffer; name: string }) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -24,14 +22,20 @@ export default function PdfAttachmentPreview({ data, name }: { data: ArrayBuffer
 
   useEffect(() => {
     let active = true;
-    const task = getDocument({ data: new Uint8Array(data.slice(0)) });
+    let task: import('pdfjs-dist').PDFDocumentLoadingTask | undefined;
     setPdfDoc(null);
     setPage(1);
     setPainted(false);
     setLoadError('');
     setRenderError('');
     setRendering(true);
-    void task.promise.then(loaded => {
+    void import('pdfjs-dist').then(({ getDocument, GlobalWorkerOptions }) => {
+      if (!active) return;
+      GlobalWorkerOptions.workerSrc = workerUrl;
+      task = getDocument({ data: new Uint8Array(data.slice(0)) });
+      return task.promise;
+    }).then(loaded => {
+      if (!loaded) return;
       if (!active) return;
       setPdfDoc(loaded);
     }).catch(() => {
@@ -40,7 +44,7 @@ export default function PdfAttachmentPreview({ data, name }: { data: ArrayBuffer
         setRendering(false);
       }
     });
-    return () => { active = false; void task.destroy().catch(() => {}); };
+    return () => { active = false; if (task) void task.destroy().catch(() => {}); };
   }, [data, attempt]);
 
   /*

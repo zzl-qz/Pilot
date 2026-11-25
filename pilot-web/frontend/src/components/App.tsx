@@ -1,11 +1,8 @@
-import type { ApiResults } from '../types/api.js';
 import { errorInfo } from '../lib/errors.js';
 type ResizeKind = 'sidebar' | 'activity';
-import Notifications from './Notifications.jsx';
 import React, { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Button } from '@astryxdesign/core/Button';
 import { Dialog } from '@astryxdesign/core/Dialog';
-import { TextInput } from '@astryxdesign/core/TextInput';
 import { useStore } from '../store.js';
 import { formatClock } from '../thread-utils.js';
 import { RuntimeFooter } from './RuntimeFooter.jsx';
@@ -14,14 +11,11 @@ import { Icon } from './Icon.jsx';
 import { Sidebar } from './Sidebar.jsx';
 import { Thread } from './Thread.jsx';
 import { Composer } from './Composer.jsx';
-import { TaskContract, Modals } from './Modals.jsx';
-import { SelectionQuote } from './SideChat.jsx';
+import { SelectionQuote } from './SelectionQuote.jsx';
 import { ErrorBoundary } from './ErrorBoundary.jsx';
-import { resolveFolders, samePath } from '../lib/project/sessions.js';
 import { shortcut, runPhase, runTone, isShortcutModifier } from '../lib/interaction.js';
 import { classifyApprovalRisk } from '../lib/attention.js';
 import { installSoundUnlock, isDndActive } from '../lib/sound.js';
-import { api } from '../api.js';
 import { watchWorkbench } from '../lib/workbench-sync.js';
 import { dragWidth, readLayout, writeLayout } from '../lib/layout.js';
 import { UiProvider } from './UiProvider.js';
@@ -34,6 +28,10 @@ const RecurringPlans = lazy(() => import('./automation/RecurringPlans.jsx'));
 const MessageSearch = lazy(() => import('./MessageSearch.jsx'));
 const ResultInbox = lazy(() => import('./ResultInbox.jsx'));
 const IdeaLibrary = lazy(() => import('./IdeaLibrary.jsx'));
+const Notifications = lazy(() => import('./Notifications.jsx'));
+const WorkspaceDialog = lazy(() => import('./WorkspaceDialog.jsx'));
+const Modals = lazy(() => import('./Modals.jsx').then(module => ({ default: module.Modals })));
+const TaskContract = lazy(() => import('./Modals.jsx').then(module => ({ default: module.TaskContract })));
 const Inspector = lazy(() => import('./Inspector.jsx').then(module => ({ default: module.Inspector })));
 
 /** 应用外壳：左栏 + 主区（topbar / 通知 / 对话 / 输入） + 右侧工作区 + 弹层。 */
@@ -520,7 +518,7 @@ function Workbench() {
         {!embedded && <BackgroundAttentionBar />}
         <div className="stage">
           <section id="thread-pane" className="thread-pane">
-            <ErrorBoundary name="任务契约"><TaskContract /></ErrorBoundary>
+            <ErrorBoundary name="任务契约"><DeferredTaskContract /></ErrorBoundary>
             <ErrorBoundary name="消息流"><Thread /></ErrorBoundary>
             <ErrorBoundary name="输入框"><Composer /></ErrorBoundary>
           </section>
@@ -539,10 +537,10 @@ function Workbench() {
         <ErrorBoundary name="运行指标"><RuntimeFooter /></ErrorBoundary>
       </main>
       <SelectionQuote />
-      {workspaceOpen && <ErrorBoundary name="工作区"><WorkspaceDialog onClose={() => setWorkspaceOpen(false)} /></ErrorBoundary>}
+      {workspaceOpen && <DeferredDialog name="工作区" close={() => setWorkspaceOpen(false)}><WorkspaceDialog onClose={() => setWorkspaceOpen(false)} /></DeferredDialog>}
       <WorkbenchDialogs embedded={Boolean(embedded)} />
-      <ErrorBoundary name="结果通知"><Notifications /></ErrorBoundary>
-      <ErrorBoundary name="弹层"><Modals /></ErrorBoundary>
+      <ErrorBoundary name="结果通知"><DeferredNotifications /></ErrorBoundary>
+      <ErrorBoundary name="弹层"><DeferredModals /></ErrorBoundary>
     </div>
   );
 }
@@ -679,111 +677,31 @@ function InspectorPlaceholder({ failed = false }: { failed?: boolean }) {
   </aside>;
 }
 
-function WorkspaceDialog({ onClose }: { onClose: () => void }) {
-  const workspace = useStore((state) => state.workspace);
-  const projects = useStore((state) => state.projects);
-  const sessions = useStore((state) => state.sessions);
-  const sessionId = useStore((state) => state.sessionId);
-  const currentProjectId = useStore((state) => state.currentProjectId);
-  const projectId = currentProjectId || sessions.find((item) => item.id === sessionId)?.projectId || null;
-  const project = projects.find((item) => item.id === projectId) || null;
-  const folders = resolveFolders(project, workspace);
-  const [worktree, setWorktree] = useState<ApiResults['worktreeInfo'] | null>(null);
-  const [worktreeBranch, setWorktreeBranch] = useState('');
+function DeferredTaskContract() {
+  const hasTask = useStore((state) => Boolean(state.task));
+  if (!hasTask) return null;
+  return <Suspense fallback={null}><TaskContract /></Suspense>;
+}
 
-  const [inspectionError, setInspectionError] = useState('');
+function DeferredNotifications() {
+  const active = useStore((state) => Boolean(state.ui.notificationsOpen || state.notifyEnabled));
+  if (!active) return null;
+  return <Suspense fallback={null}><Notifications /></Suspense>;
+}
 
-  // 当前目录是不是某个 worktree：是的话给出分支与清理入口，否则遗留目录只能手工 rm
-  useEffect(() => {
-    let alive = true;
-    setWorktree(null);
-    setInspectionError('');
-    if (!workspace) {
-      return undefined;
-    }
-    api.worktreeInfo(workspace)
-      .then((info) => { if (alive) setWorktree(info?.worktree ? info : null); })
-      .catch(error => {
-        if (!alive) return;
-        setWorktree(null);
-        setInspectionError(errorInfo(error).message || '无法读取工作区状态');
-      });
-    return () => { alive = false; };
-  }, [workspace]);
-
-  return (
-    <Dialog isOpen onOpenChange={open => { if (!open) onClose(); }} purpose="form" width={560}
-      maxHeight="calc(100dvh - 32px)" className="workbench-workspace-dialog"
-      aria-labelledby="workbench-workspace-title" onKeyDown={event => event.stopPropagation()}>
-      <header className="workbench-workspace-heading">
-        <div>
-          <h2 id="workbench-workspace-title">工作区</h2>
-          <p>为当前对话选择文件夹，或创建独立检出。</p>
-        </div>
-        <Button label="关闭工作区" icon={<Icon name="close" />} isIconOnly variant="ghost" onClick={onClose} />
-      </header>
-      {folders.length > 0 && <div className="workbench-workspace-folders">
-        {folders.map(folder => {
-          const current = samePath(folder, workspace);
-          return <Button key={folder} label={folder} tooltip={folder}
-            variant={current ? 'secondary' : 'ghost'} className="workbench-workspace-folder"
-            aria-current={current ? 'true' : undefined}
-            onClick={() => {
-              onClose();
-              if (!current) void useStore.getState().switchWorkspace(folder);
-            }} />;
-        })}
-      </div>}
-      <Button label={folders.length ? '选择其他文件夹' : '选择文件夹'} icon={<Icon name="folder" />}
-        onClick={() => { onClose(); useStore.getState().setUi({ picker: { title: '切换工作区' } }); }} />
-      <section className="workbench-workspace-section" aria-labelledby="workbench-worktree-title">
-        <h3 id="workbench-worktree-title">独立检出</h3>
-        {inspectionError && <p role="alert">读取检出状态失败：{inspectionError}</p>}
-        <form className="workbench-worktree-form" onSubmit={event => {
-          event.preventDefault();
-          if (!workspace) return;
-          onClose();
-          void useStore.getState().openWorktree(worktreeBranch.trim());
-        }}>
-          <TextInput label="分支" placeholder="留空使用当前分支" value={worktreeBranch}
-            isDisabled={!workspace} onChange={setWorktreeBranch} onKeyDown={event => {
-              if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.keyCode === 229)) {
-                event.preventDefault();
-              }
-            }} />
-          <Button type="submit" label="创建 worktree" variant="primary" isDisabled={!workspace} />
-        </form>
-        {worktree && (
-          <>
-            <p title={worktree.path}>当前检出：{worktree.branch} · {(worktree.commit || '').slice(0, 7)}</p>
-            <div className="workbench-worktree-actions">
-              <Button label="把改动交回本地" isDisabled={!sessionId}
-                onClick={() => { onClose(); void useStore.getState().handoffWorktree(); }} />
-              <Button label="删除这个 worktree" variant="destructive"
-                onClick={() => {
-                  onClose();
-                  useStore.getState().askConfirm({
-                    title: '删除 worktree',
-                    message: `会删除 ${worktree.path} 这个检出目录（分支 ${worktree.branch} 保留）。未交回的改动会丢失，确定吗？`,
-                    confirmText: '删除',
-                    danger: true,
-                    onConfirm: async () => {
-                      try {
-                        await api.worktreeRemove(worktree.path);
-                        useStore.getState().showNotice('已删除 worktree');
-                        if (worktree.base) await useStore.getState().switchWorkspace(worktree.base);
-                      } catch (error) {
-                        useStore.getState().showNotice('删除 worktree 失败：' + errorInfo(error).message);
-                      }
-                    }
-                  });
-                }}
-              />
-            </div>
-          </>
-        )}
-      </section>
-    </Dialog>
-  );
+function DeferredModals() {
+  const active = useStore((state) => Boolean(
+    state.ui.picker
+    || state.ui.projectEditor
+    || state.ui.settingsOpen
+    || state.ui.exportCopy != null
+    || state.ui.paletteOpen
+    || state.ui.checkpointDialog
+    || state.ui.confirm
+    || state.ui.shortcutsOpen
+    || state.ui.mobileConnectionOpen
+  ));
+  if (!active) return null;
+  return <Suspense fallback={null}><Modals /></Suspense>;
 }
 

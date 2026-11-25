@@ -2,6 +2,25 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { fileURLToPath } from 'node:url';
 
+function isEntryStatic(id, getModuleInfo, cache, visiting = new Set()) {
+  if (cache.has(id)) return cache.get(id);
+  if (visiting.has(id)) return false;
+  visiting.add(id);
+  const info = getModuleInfo(id);
+  let staticHit = Boolean(info?.isEntry);
+  if (!staticHit && info) {
+    for (const importer of info.importers) {
+      if (isEntryStatic(importer, getModuleInfo, cache, visiting)) {
+        staticHit = true;
+        break;
+      }
+    }
+  }
+  visiting.delete(id);
+  cache.set(id, staticHit);
+  return staticHit;
+}
+
 /**
  * 前端工程配置。
  *
@@ -20,6 +39,11 @@ import { fileURLToPath } from 'node:url';
 export default defineConfig({
   root: fileURLToPath(new URL('.', import.meta.url)),
   plugins: [react()],
+  resolve: {
+    alias: [
+      { find: /^pdfjs-dist$/, replacement: 'pdfjs-dist/build/pdf.min.mjs' }
+    ]
+  },
   server: {
     port: 5173,
     proxy: {
@@ -33,13 +57,23 @@ export default defineConfig({
     rollupOptions: {
       input: fileURLToPath(new URL('./index.html', import.meta.url)),
       output: {
-        manualChunks(id) {
+        manualChunks(id, { getModuleInfo }) {
           if (!id.includes('node_modules')) return;
           if (/[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'vendor-react';
-          if (/[\\/](@astryxdesign|@stylexjs|@react-aria|@react-stately|@react-types|@internationalized|lucide-react)[\\/]/.test(id)) return 'vendor-ui';
           if (/[\\/](zustand|immer|dompurify|use-stick-to-bottom)[\\/]/.test(id)) return 'vendor-state';
+          if (/[\\/](lucide-react)[\\/]/.test(id)) return 'vendor-icons';
+          if (/[\\/]@astryxdesign[\\/]theme-neutral[\\/]/.test(id)) return 'vendor-theme';
+          if (/[\\/]@stylexjs[\\/]/.test(id)) return 'vendor-stylex';
+          if (/[\\/](@react-aria|@react-stately|@react-types|@internationalized)[\\/]/.test(id)) return 'vendor-aria';
+          if (/[\\/]@astryxdesign[\\/]core[\\/]|[\\/](@formatjs|intl-messageformat)[\\/]/.test(id)) {
+            const cache = manualChunkCache.get(getModuleInfo) ?? new Map();
+            manualChunkCache.set(getModuleInfo, cache);
+            return isEntryStatic(id, getModuleInfo, cache) ? 'vendor-ui' : 'vendor-ui-deferred';
+          }
         }
       }
     }
   }
 });
+
+const manualChunkCache = new WeakMap();

@@ -6,17 +6,13 @@ type QuickCommand = BuiltinCommand | SkillCommand;
 interface ReferenceMenu { items: string[]; message?: string; loading?: boolean }
 import { errorInfo } from '../lib/errors.js';
 import { formatCache } from '../lib/request-usage.js';
-import { ContextUsagePanel } from './RequestUsage.jsx';
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { api } from '../api.js';
 import { Icon } from './Icon.jsx';
-import { ImagePreview } from './ImagePreview.jsx';
 import { VoiceInput } from './VoiceInput.jsx';
 import { SubmissionNotice } from './SubmissionNotice.jsx';
-import { MessageQueue } from './MessageQueue.jsx';
 import { VerificationStrip } from './VerificationStrip.jsx';
-import { ResumeBar, ApprovalDock, QuestionDock, BrowserControlDock, BrowserHandoffDock, AgentDock, ComposerChangesStrip } from './composer/ComposerDocks.js';
 import { createComposerInput } from '../lib/composer-input.js';
 import { resolveComposerAction, resolveSteerEntry } from '../lib/composer-state.js';
 import { rankFileMatches } from '../lib/mention.js';
@@ -27,9 +23,49 @@ import { readAttachmentFile, readDesktopClipboardFiles } from '../lib/attachment
 import { checkIncomingFile, requireAttachmentLimits } from '../lib/attachments/attachments.js';
 import { writeDraft, readDraft, dropDraft, readDraftSnapshot, writeDraftSnapshot, dropDraftSnapshot } from '../lib/drafts.js';
 import { PERMISSION_MODES, normalizePermission, permissionLabel } from '../lib/permission.js';
-import { ModelPicker } from './model/ModelPicker.jsx';
 import { usageBudgetTitle, usageLevel, usagePercent } from '../lib/context-usage.js';
 import './conversation.css';
+
+const ContextUsagePanel = lazy(() => import('./RequestUsage.jsx').then(m => ({ default: m.ContextUsagePanel })));
+const ImagePreview = lazy(() => import('./ImagePreview.jsx').then(m => ({ default: m.ImagePreview })));
+const MessageQueue = lazy(() => import('./MessageQueue.jsx').then(m => ({ default: m.MessageQueue })));
+const ModelPicker = lazy(() => import('./model/ModelPicker.jsx').then(m => ({ default: m.ModelPicker })));
+const ComposerTopDocks = lazy(() => import('./composer/ComposerDocks.js').then(m => ({ default: m.ComposerTopDocks })));
+const AgentDock = lazy(() => import('./composer/ComposerDocks.js').then(m => ({ default: m.AgentDock })));
+const ComposerChangesStrip = lazy(() => import('./composer/ComposerDocks.js').then(m => ({ default: m.ComposerChangesStrip })));
+
+function DeferredTopDocks() {
+  const active = useStore((state) => Boolean(
+    Object.keys(state.pendingApprovals || {}).length
+    || Object.keys(state.pendingQuestions || {}).length
+    || state.ui.mirror.agentControlled
+    || state.ui.mirror.handoffs?.length
+    || state.lastOutcome === 'NEED_INPUT'
+    || state.thread?.rows?.length
+  ));
+  if (!active) return null;
+  return <Suspense fallback={null}><ComposerTopDocks /></Suspense>;
+}
+
+function DeferredMessageQueue() {
+  const active = useStore((state) => Boolean(
+    state.queueEntries.length || state.ui.queueEdit || state.queueHeld || state.queueWaitingReason
+  ));
+  if (!active) return null;
+  return <Suspense fallback={null}><MessageQueue /></Suspense>;
+}
+
+function DeferredAgentDock() {
+  const active = useStore((state) => Boolean(state.ui.agentsDockOpen && Object.keys(state.agents || {}).length));
+  if (!active) return null;
+  return <Suspense fallback={null}><AgentDock /></Suspense>;
+}
+
+function DeferredChangesStrip() {
+  const active = useStore((state) => Boolean(!state.embeddedSessionId && !state.ui.inspectorOpen && state.changeReport?.files?.length));
+  if (!active) return null;
+  return <Suspense fallback={null}><ComposerChangesStrip /></Suspense>;
+}
 
 /** 是否有真正阻止交互的模态弹窗；普通 <dialog open>（非模态）不算。 */
 function blockingDialogOpen() {
@@ -766,16 +802,12 @@ export function Composer() {
             inputRef.current?.focus();
           }} />
         </div>}
-        <ApprovalDock />
-        <QuestionDock />
-        <BrowserControlDock />
-        <BrowserHandoffDock />
-        <ResumeBar />
-        <MessageQueue />
-        <AgentDock />
+        <DeferredTopDocks />
+        <DeferredMessageQueue />
+        <DeferredAgentDock />
         {/* 验证结论放在输入框容器内侧：和输入框同宽，不会比它更靠外。 */}
         <VerificationStrip />
-        <ComposerChangesStrip />
+        <DeferredChangesStrip />
       </div>
       {/* 附件单独一排，排在输入框上方外侧：不挤占正文宽度，也不被输入框边框包住 */}
       <div className="composer-attachments" ref={railRef} hidden aria-label="待发送的附件" />
@@ -873,8 +905,10 @@ export function Composer() {
                 <span className="model-chip-name" title={currentModel || undefined}>{currentModel || '选择模型'}</span>
               </Button>
               {modelOpen && (
-                <ModelPicker key={currentEndpoint} models={modelOptions} initialModel={currentModel} initialEndpoint={currentEndpoint}
-                  onClose={() => { setToolbarPanel(null); document.getElementById('model-chip')?.focus(); }} />
+                <Suspense fallback={null}>
+                  <ModelPicker key={currentEndpoint} models={modelOptions} initialModel={currentModel} initialEndpoint={currentEndpoint}
+                    onClose={() => { setToolbarPanel(null); document.getElementById('model-chip')?.focus(); }} />
+                </Suspense>
               )}
             </div>
           </div>
@@ -885,11 +919,11 @@ export function Composer() {
                 aria-haspopup="dialog" aria-expanded={contextOpen} aria-controls={contextOpen ? 'context-menu' : undefined}
                 icon={<svg className="context-ring" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" opacity=".25" strokeWidth="2" /><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeWidth="2" pathLength="100" strokeDasharray={usagePercent(contextStatus) + ' 100'} transform="rotate(-90 10 10)" /></svg>}
                 onClick={() => toggleToolbarPanel('context')}>{contextPercent(contextStatus)}</Button></span>
-              {contextOpen && <ContextUsagePanel status={contextStatus} compacting={compacting}
+              {contextOpen && <Suspense fallback={null}><ContextUsagePanel status={contextStatus} compacting={compacting}
                 report={latestContextReport} reports={requestReports} usage={runUsage}
                 onClose={() => { setToolbarPanel(null); contextTriggerRef.current?.focus({ preventScroll: true }); }}
                 onCompact={(focus) => useStore.getState().compactContext(focus)}
-                onSettings={() => { setToolbarPanel(null); useStore.getState().setUi({ settingsOpen: true, settingsSection: 'model' }); }} />}
+                onSettings={() => { setToolbarPanel(null); useStore.getState().setUi({ settingsOpen: true, settingsSection: 'model' }); }} /></Suspense>}
             </div>
             <IconButton className="composer-icon schedule-compose" variant="ghost" label="定时执行" icon={<Icon name="clock" />}
               isDisabled={pendingFiles > 0 || submitting}
@@ -927,7 +961,7 @@ export function Composer() {
         </div>
         <div className="composer-voice-feedback" ref={voiceFeedbackRef} />
       </form>
-      {preview && <ImagePreview name={preview.name} src={preview.src} onClose={() => setPreview(null)} />}
+      {preview && <Suspense fallback={null}><ImagePreview name={preview.name} src={preview.src} onClose={() => setPreview(null)} /></Suspense>}
     </div>
   );
 }

@@ -1,12 +1,10 @@
 import type { ThreadRow, TurnRow, PlanRow, RunUsage } from "../types/thread.js";
 import type { RequestReport } from "../types/runtime.js";
 import type { ApiResults } from "../types/api.js";
-import { RequestList } from "./RequestUsage.jsx";
 import { cacheRatio, formatCache, totalCost } from "../lib/request-usage.js";
-import ThreadNavigator from "./ThreadNavigator.jsx";
 import { modifierKey, duplicateResult } from "../lib/interaction.js";
 import { buildThreadDisplay, type CompactionGroupRow, type DisplayThreadRow } from "../lib/thread-display.js";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@astryxdesign/core/Button";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Spinner } from "@astryxdesign/core/Spinner";
@@ -19,9 +17,15 @@ import { writeClipboard } from "../lib/clipboard.js";
 import { formatClock, formatCount, formatTime } from "../thread-utils.js";
 import { Icon } from "./Icon.jsx";
 import { UserMessage } from "./thread/UserMessageRow.js";
-import { ProcessChevron, ToolGroup, ThinkingBlock, AgentGroup, isSummaryClick, useSecondTick, elapsedSeconds } from "./thread/ProcessDetails.js";
-import { ResultCard, SandboxCard, ArbitrationCard } from "./thread/OutcomeCards.js";
+import { ProcessChevron, isSummaryClick, useSecondTick, elapsedSeconds } from "./thread/process-helpers.js";
 import "./conversation.css";
+
+const RequestList = lazy(() => import("./RequestUsage.jsx").then(m => ({ default: m.RequestList })));
+const ThreadNavigator = lazy(() => import("./ThreadNavigator.jsx"));
+const TurnProcess = lazy(() => import("./thread/ProcessDetails.js").then(m => ({ default: m.TurnProcess })));
+const ResultCard = lazy(() => import("./thread/OutcomeCards.js").then(m => ({ default: m.ResultCard })));
+const SandboxCard = lazy(() => import("./thread/OutcomeCards.js").then(m => ({ default: m.SandboxCard })));
+const ArbitrationCard = lazy(() => import("./thread/OutcomeCards.js").then(m => ({ default: m.ArbitrationCard })));
 
 /* 回到底部的弹簧参数：库的默认值在长距离上要 1s 以上，这里压到 ~200ms 收敛。 */
 const BACK_TO_LATEST = { stiffness: 0.2, damping: 0.9, mass: 1 };
@@ -256,7 +260,11 @@ export function Thread() {
           <PlanCard row={display.pinnedPlan} />
         </div>
       )}
-      <ThreadNavigator rows={rows} scrollRef={scrollRef} contentRef={contentRef} stopFollowing={stopScroll} beforeJump={beforeNavigation} />
+      {rows.length > 0 && (
+        <Suspense fallback={null}>
+          <ThreadNavigator rows={rows} scrollRef={scrollRef} contentRef={contentRef} stopFollowing={stopScroll} beforeJump={beforeNavigation} />
+        </Suspense>
+      )}
     </div>
   );
 }
@@ -410,9 +418,9 @@ const RowView = memo(function RowView({ row, isLast, duplicate, hasPrecedingRepl
     case 'user': return <UserMessage row={row} />;
     case 'turn': return <Turn row={row} isLast={isLast} />;
     case 'compaction-group': return <CompactionGroupCard row={row} />;
-    case 'result': return <ResultCard row={row} duplicate={duplicate} hasPrecedingReply={hasPrecedingReply} isLastResult={isLastResult} />;
-    case 'sandbox': return <SandboxCard row={row} />;
-    case 'arb': return <ArbitrationCard row={row} />;
+    case 'result': return <Suspense fallback={null}><ResultCard row={row} duplicate={duplicate} hasPrecedingReply={hasPrecedingReply} isLastResult={isLastResult} /></Suspense>;
+    case 'sandbox': return <Suspense fallback={null}><SandboxCard row={row} /></Suspense>;
+    case 'arb': return <Suspense fallback={null}><ArbitrationCard row={row} /></Suspense>;
     default: return null;
   }
 });
@@ -434,11 +442,9 @@ const Turn = memo(function Turn({ row, isLast }: { row: TurnRow; isLast: boolean
   return (
     <div className="turn-shell" data-run={row.runIds?.join(',') || undefined}>
       {hasProcess && (
-        <div className="turn-process">
-          {row.thinking && <ThinkingBlock thinking={row.thinking} />}
-          {row.tools.length > 0 && <ToolGroup tools={row.tools} />}
-          <AgentGroup agents={row.agents} />
-        </div>
+        <Suspense fallback={null}>
+          <TurnProcess thinking={row.thinking} tools={row.tools} agents={row.agents} />
+        </Suspense>
       )}
       {(replyText || row.reply.live) && (
         <article className={`msg msg-assistant${row.reply.live ? ' is-streaming' : ''}`}>
@@ -489,6 +495,7 @@ const CopyControl = memo(function CopyControl({ text, label }: { text: string; l
 const TurnStats = memo(function TurnStats({ stats, reports, agentCount }: { stats: RunUsage | null; reports?: RequestReport[]; agentCount: number }) {
   const liveRunId = useStore(state => state.running ? state.runId : null);
   const runStartedAt = useStore(state => state.runStartedAt);
+  const [open, setOpen] = useState(false);
   const live = Boolean(liveRunId) && (!stats?.runId || stats.runId === liveRunId);
   useSecondTick(live);
   if (!stats) {
@@ -523,7 +530,7 @@ const TurnStats = memo(function TurnStats({ stats, reports, agentCount }: { stat
     priceNote = `含压缩与子代理。可计价 ${priced}/${requests} 次${incomplete}。`;
   }
   return (
-    <details className="turn-stats-detail">
+    <details className="turn-stats-detail" onToggle={event => setOpen(event.currentTarget.open)}>
       <summary>
         <span>{elapsedLabel ? `${elapsedLabel} · ` : ''}用量详情</span>
         {cacheSeen && <span className="turn-cache" title={`本轮累计命中缓存 ${formatCount(stats.cachedInputTokens)} / 总输入 ${formatCount(stats.inputTokens)}`}>缓存命中 {cacheLabel}</span>}
@@ -543,7 +550,7 @@ const TurnStats = memo(function TurnStats({ stats, reports, agentCount }: { stat
       </span>
       <span className="turn-stat"><span>费用估算</span><b>{priced > 0 ? totalCost(stats.details) : '未返回'}</b></span>
       <span className="turn-stat-note">{priceNote}</span>
-    </div>{(reports?.length || 0) > 0 && <RequestList reports={reports} />}</details>
+    </div>{open && (reports?.length || 0) > 0 && <Suspense fallback={null}><RequestList reports={reports} /></Suspense>}</details>
   );
 });
 

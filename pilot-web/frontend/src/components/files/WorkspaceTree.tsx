@@ -44,14 +44,14 @@ function useDirectory(sessionId: string | null, workspace: string, path: string,
   return data;
 }
 
-export function WorkspaceTree() {
+export function WorkspaceTree({ defaultOpen = false }: { defaultOpen?: boolean } = {}) {
   const sessionId = useStore(state => state.sessionId);
   const workspace = useStore(state => state.workspace);
-  return <WorkspaceFiles key={`${sessionId || ''}:${workspace}`} sessionId={sessionId} workspace={workspace} />;
+  return <WorkspaceFiles key={`${sessionId || ''}:${workspace}`} sessionId={sessionId} workspace={workspace} defaultOpen={defaultOpen} />;
 }
 
-function WorkspaceFiles({ sessionId, workspace }: { sessionId: string | null; workspace: string }) {
-  const [open, setOpen] = useState(false);
+function WorkspaceFiles({ sessionId, workspace, defaultOpen }: { sessionId: string | null; workspace: string; defaultOpen: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   const [localRevision, setRevision] = useState(0);
   const [query, setQuery] = useState('');
   const [flatFiles, setFlatFiles] = useState<string[] | null>(null);

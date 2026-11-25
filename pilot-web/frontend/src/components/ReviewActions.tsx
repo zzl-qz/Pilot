@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useStore } from '../store.js';
 import { Icon } from './Icon.jsx';
-import { Modal } from './Modals.jsx';
+import { Modal } from './Modal.jsx';
 import { errorInfo } from '../lib/errors.js';
 
 /** 审阅时只露出常用操作；Git 操作按需打开，不挤占文件统计。 */

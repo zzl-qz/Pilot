@@ -10,9 +10,8 @@ import { sortChangeFiles, splitPath, statusKind } from '../../lib/changes.js';
 import { errorInfo } from '../../lib/errors.js';
 import { MarkdownBody } from '../MarkdownBody.jsx';
 import { StructuredDocumentView } from '../files/StructuredDocumentView.jsx';
-import {
-  ImageFileViewer, MediaFileViewer, PdfFileViewer, previewRawUrl, StructuredOfficeViewer
-} from './UniversalPreview.jsx';
+import { ImageFileViewer, MediaFileViewer, previewRawUrl } from './UniversalPreview.jsx';
+import { OfficePreview, PdfPreview } from './PreviewMedia.jsx';
 
 /* ---------- 通用文件预览面板（内置跨平台 kkFileView 体验） ---------- */
 
@@ -110,12 +109,12 @@ export function PreviewPanel() {
   function renderContent() {
     if (!data || loading) return null;
     if (kind === 'image' && rawUrl) return <ImageFileViewer url={rawUrl} name={activePath} />;
-    if (kind === 'pdf' && rawUrl) return <PdfFileViewer url={rawUrl} name={activePath} />;
+    if (kind === 'pdf' && rawUrl) return <PdfPreview url={rawUrl} name={activePath} />;
     if ((kind === 'audio' || kind === 'video') && rawUrl) {
       return <MediaFileViewer kind={kind} url={rawUrl} mimeType={data.mimeType} />;
     }
     if ((kind === 'docx' || kind === 'xlsx' || kind === 'pptx' || kind === 'archive') && data.structured) {
-      return <StructuredOfficeViewer structured={data.structured} />;
+      return <OfficePreview structured={data.structured} />;
     }
     if (data.binary || kind === 'binary') {
       return (

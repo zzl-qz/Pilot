@@ -1,13 +1,43 @@
 import type { SessionSummary } from '../types/core.js';
 import { TextInput } from '@astryxdesign/core/TextInput';
 import { shortcut } from '../lib/interaction.js';
-import { useMemo, useState } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import { useStore } from '../store.js';
-import { WorkspaceTree } from './files/WorkspaceTree.jsx';
 import { groupSessionsByProject } from '../lib/project/sessions.js';
 import { Icon } from './Icon.jsx';
-import { SessionMenu, SessionActionDialog, type SessionAction } from './SessionMenu.jsx';
+import { SessionMenu, type SessionAction } from './SessionMenu.jsx';
 import { sideChatsFor } from '../lib/side-chat.js';
+
+const WorkspaceTree = lazy(() => import('./files/WorkspaceTree.jsx').then(m => ({ default: m.WorkspaceTree })));
+const SessionActionDialog = lazy(() => import('./SessionActionDialog.jsx').then(m => ({ default: m.SessionActionDialog })));
+
+function DeferredWorkspaceTree() {
+  const [activated, setActivated] = useState(false);
+  if (!activated) {
+    return (
+      <section className="workspace-files" aria-label="工作区文件">
+        <header className="workspace-files-head">
+          <button type="button" className="workspace-files-toggle" aria-expanded={false} aria-controls="file-tree" onClick={() => setActivated(true)}>
+            <Icon name="chevron" /><span>工作区文件</span>
+          </button>
+        </header>
+      </section>
+    );
+  }
+  return (
+    <Suspense fallback={
+      <section className="workspace-files is-open" aria-label="工作区文件">
+        <header className="workspace-files-head">
+          <button type="button" className="workspace-files-toggle" aria-expanded={true} aria-controls="file-tree">
+            <Icon name="chevron" /><span>工作区文件</span>
+          </button>
+        </header>
+      </section>
+    }>
+      <WorkspaceTree defaultOpen />
+    </Suspense>
+  );
+}
 
 type SessionFilter = 'all' | 'running' | 'pending' | 'unread';
 
@@ -186,7 +216,7 @@ export function Sidebar() {
 
       </div>
 
-      <WorkspaceTree />
+      <DeferredWorkspaceTree />
       <div className="sidebar-foot rail-foot">
         <div id="connection" className={`conn is-${connection.status}`} role="status" title={syncError || connection.text}>
           <span className="dot" aria-hidden="true" />
@@ -196,7 +226,7 @@ export function Sidebar() {
           {workspace ? workspace.split(/[\\/]/).filter(Boolean).pop() : ''}
         </button>
       </div>
-      {action && <SessionActionDialog action={action} onClose={() => setAction(null)} />}
+      {action && <Suspense fallback={null}><SessionActionDialog action={action} onClose={() => setAction(null)} /></Suspense>}
     </aside>
   );
 }

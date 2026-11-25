@@ -20,14 +20,8 @@ import {
 } from "../../lib/tool-meta.js";
 import { agentMeta, agentTitle, manifestFacts, splitSubagentResult, summarizeAgents, agentStatusLabel, agentStatusDotVariant } from "../../lib/agents.js";
 import { formatClock } from "../../thread-utils.js";
-
-export function ProcessChevron() {
-  return (
-    <svg className="process-chevron-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="m6 3.5 4.5 4.5L6 12.5" />
-    </svg>
-  );
-}
+import { ProcessChevron, isSummaryClick, useSecondTick, elapsedSeconds } from "./process-helpers.js";
+export { ProcessChevron, isSummaryClick, useSecondTick, elapsedSeconds };
 
 export function ProcessKindIcon({ kind }: { kind: ToolIconKind }) {
   let content: React.ReactNode;
@@ -334,12 +328,6 @@ const TOOL_SEGMENT_STEP = 80;
  * 受控 <details> 的展开开关只看 summary 上的点击：Electron 内嵌 Chromium 与独立 Chromium 的 toggle 派发时机不一致，
  * 靠 onToggle 回写会出现“点了不开”；默认 toggle 也会和状态回写互相抵消，所以交给点处理阻止默认行为。
  */
-export function isSummaryClick(event: React.MouseEvent<HTMLDetailsElement>) {
-  if (!(event.target as HTMLElement).closest('summary')) return false;
-  event.preventDefault();
-  return true;
-}
-
 /** 只有失败和等待批准会在展开组内自动露出详情；「已中断」只是收尾常态，不替用户撑开行。 */
 const AUTO_REVEAL_STATUS = new Set(['error', 'wait']);
 
@@ -735,24 +723,6 @@ export const ThinkingBlock = memo(function ThinkingBlock({ thinking }: { thinkin
 });
 
 /** 每秒重渲染一次，给计时类文案（思考中 Ns、运行耗时）用。 */
-export function useSecondTick(active: boolean) {
-  const [, bump] = useState(0);
-  useEffect(() => {
-    if (!active) {
-      return undefined;
-    }
-    const timer = setInterval(() => bump((value) => value + 1), 1000);
-    return () => clearInterval(timer);
-  }, [active]);
-}
-
-export function elapsedSeconds(startedAt?: number, finishedAt?: number | null) {
-  if (startedAt == null || !Number.isFinite(startedAt)) {
-    return 0;
-  }
-  return Math.max(0, Math.floor(((finishedAt ?? Date.now()) - startedAt) / 1000));
-}
-
 export const AgentGroup = memo(function AgentGroup({ agents }: { agents: Record<string, AgentView> }) {
   const sessionLive = useStore(state => state.running);
   const list = Object.values(agents || {});
@@ -844,3 +814,13 @@ const AgentCard = memo(function AgentCard({ agent }: { agent: AgentView }) {
     </details>
   );
 });
+
+export function TurnProcess({ thinking, tools, agents }: { thinking: Thinking | null; tools: ToolView[]; agents: Record<string, AgentView> }) {
+  return (
+    <div className="turn-process">
+      {thinking && <ThinkingBlock thinking={thinking} />}
+      {tools.length > 0 && <ToolGroup tools={tools} />}
+      <AgentGroup agents={agents} />
+    </div>
+  );
+}

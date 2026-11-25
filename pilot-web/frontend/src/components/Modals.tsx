@@ -14,7 +14,7 @@ import { Icon, FileIcon } from './Icon.jsx';
 import { writeClipboard } from '../lib/clipboard.js';
 import { downloadSessionExport, exportFailureMessage, saveSessionMarkdown } from '../lib/session-export.js';
 import { buildTranscript } from '../lib/transcript.js';
-import { SessionActionDialog } from './SessionMenu.jsx';
+import { SessionActionDialog } from './SessionActionDialog.jsx';
 import { filterPaletteActions } from '../lib/commands.js';
 import { shortcut } from '../lib/interaction.js';
 import { verificationLabel, verificationHint, verificationTone, verificationNeedsRerun } from '../lib/verification/run.js';

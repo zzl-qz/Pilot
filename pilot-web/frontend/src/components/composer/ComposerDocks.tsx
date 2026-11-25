@@ -665,3 +665,15 @@ export function BrowserHandoffDock() {
   );
 }
 
+export function ComposerTopDocks() {
+  return (
+    <>
+      <ApprovalDock />
+      <QuestionDock />
+      <BrowserControlDock />
+      <BrowserHandoffDock />
+      <ResumeBar />
+    </>
+  );
+}
+
