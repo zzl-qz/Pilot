@@ -138,7 +138,7 @@ public final class ApplyPatchTool extends PromptedTool implements WritesFiles {
         Set<Path> seen = new HashSet<>();
         List<Planned> plan = new ArrayList<>();
         for (Operation op : operations) {
-            Path file = paths.resolve(op.path());
+            Path file = paths.resolveWritable(op.path());
             String shown = paths.display(file);
             if (!seen.add(file)) {
                 throw new PatchException("同一文件在补丁中出现多次：" + shown);
@@ -178,7 +178,7 @@ public final class ApplyPatchTool extends PromptedTool implements WritesFiles {
         Path target = file;
         String targetShown = shown;
         if (op.moveTo() != null && !op.moveTo().isBlank()) {
-            target = paths.resolve(op.moveTo());
+            target = paths.resolveWritable(op.moveTo());
             targetShown = paths.display(target);
             if (!target.equals(file) && Files.exists(target)) {
                 throw new PatchException("重命名目标已存在: " + targetShown);

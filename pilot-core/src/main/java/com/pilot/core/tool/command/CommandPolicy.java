@@ -47,10 +47,18 @@ final class CommandPolicy {
         "merge", "pull", "fetch", "stash", "tag", "cherry-pick", "revert");
     static final Set<String> INSPECTION_FLAGS =
         Set.of("-v", "--version", "-version", "version", "-h", "--help", "help");
+    private static final Set<String> INSPECTION_FLAG_DASHED_TOOLS = Set.of("git", "java", "javac", "mvn", "gradle",
+        "node", "npm", "npx", "pnpm", "yarn", "bun", "deno", "python", "python3", "pip", "pip3", "uv", "pytest", "ruby",
+        "bundle", "php", "composer", "dotnet", "go", "cargo", "rustc", "tsc", "make", "cmake", "ctest");
+    private static final Set<String> INSPECTION_SUBCOMMAND_TOOLS = Set.of("git", "mvn", "gradle", "npm", "pnpm", "yarn",
+        "bun", "deno", "pip", "pip3", "uv", "bundle", "composer", "dotnet", "go", "cargo", "rustc");
+    private static final Set<String> BLOCKED_PREFIX_ENV = Set.of("PATH", "PATHEXT", "HOME", "USERPROFILE", "HOMEDRIVE",
+        "HOMEPATH", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "LD_PRELOAD", "JAVA_TOOL_OPTIONS",
+        "NODE_OPTIONS", "GIT_CONFIG_GLOBAL", "GIT_SSH_COMMAND");
 
     /** 要做路径检查的工具；echo / which / pwd 的参数不是路径。 */
     private static final Set<String> PATH_CHECKED = Set.of("ls", "cat", "head", "tail", "wc", "rg", "grep", "find",
-        "tree", "stat", "file", "du", "diff", "sort", "uniq", "mkdir", "touch", "cp", "mv");
+        "tree", "stat", "file", "du", "diff", "sort", "uniq", "jq", "mkdir", "touch", "cp", "mv");
     private static final Set<String> FIND_EXECUTING =
         Set.of("-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls");
     private static final Set<String> GIT_BRANCH_READ_FLAGS =
@@ -139,15 +147,34 @@ final class CommandPolicy {
                 }
             }
             case "sort" -> {
-                for (String token : tokens) {
-                    if (token.equals("-o") || token.startsWith("--output") || token.startsWith("--compress-program")) {
+                for (int i = 1; i < tokens.size(); i++) {
+                    String token = tokens.get(i);
+                    if (token.equals("--")) {
+                        break;
+                    }
+                    if (token.equals("-o") || token.startsWith("--output") || token.startsWith("--compress-program")
+                        || (token.startsWith("-") && !token.startsWith("--") && !token.startsWith("-t")
+                            && token.substring(1).contains("o"))) {
                         return "sort 不允许 " + token + "（会写文件或执行程序）";
                     }
                 }
             }
             case "tree" -> {
-                if (tokens.contains("-o")) {
-                    return "tree 不允许 -o（会写文件）";
+                for (int i = 1; i < tokens.size(); i++) {
+                    String token = tokens.get(i);
+                    if (token.equals("--")) {
+                        break;
+                    }
+                    if (token.equals("-o")
+                        || (token.startsWith("-") && !token.startsWith("--") && token.substring(1).contains("o"))) {
+                        return "tree 不允许 -o 写文件选项";
+                    }
+                }
+            }
+            case "git" -> {
+                String problem = gitGlobalPathProblem(tokens, workdir, paths);
+                if (problem != null) {
+                    return problem;
                 }
             }
             case "uniq" -> {
@@ -168,17 +195,69 @@ final class CommandPolicy {
         return pathProblem(tokens, workdir, paths);
     }
 
+    private static String gitGlobalPathProblem(List<String> tokens, Path workdir, PathValidator paths) {
+        int subIndex = CommandRiskGuard.gitSubcommandIndex(tokens);
+        int limit = subIndex > 0 ? subIndex : tokens.size();
+        for (int i = 1; i < limit; i++) {
+            String token = tokens.get(i);
+            String flag = null;
+            String value = null;
+            if (token.equals("-C") || token.equals("--git-dir") || token.equals("--work-tree")) {
+                flag = token;
+                if (++i >= limit) {
+                    return "git " + flag + " 缺少路径参数";
+                }
+                value = tokens.get(i);
+            } else if (token.startsWith("--git-dir=")) {
+                flag = "--git-dir";
+                value = token.substring("--git-dir=".length());
+            } else if (token.startsWith("--work-tree=")) {
+                flag = "--work-tree";
+                value = token.substring("--work-tree=".length());
+            }
+            if (flag == null) {
+                continue;
+            }
+            try {
+                paths.resolve(workdir.resolve(value).toString());
+            } catch (RuntimeException e) {
+                return "git " + flag + " 的路径参数必须在工作区内：" + value;
+            }
+        }
+        return null;
+    }
+
     private static String pathProblem(List<String> tokens, Path workdir, PathValidator paths) {
         String executable = leaf(tokens.getFirst());
         boolean searchTool = executable.equals("grep") || executable.equals("rg");
+        boolean jqTool = executable.equals("jq");
         // grep / rg 的第一个位置参数是正则，不是路径；用 -e/-f 给出模式时则全部位置参数都是路径
-        boolean explicitPattern = tokens.stream().anyMatch(token -> token.equals("-e") || token.equals("-f")
-            || token.startsWith("--regexp") || token.startsWith("--file") || token.equals("--files"));
-        boolean patternPending = searchTool && !explicitPattern;
+        boolean explicitPattern =
+            searchTool && tokens.stream().anyMatch(token -> token.equals("-e") || token.equals("-f")
+                || token.startsWith("--regexp") || token.startsWith("--file") || token.equals("--files"));
+        boolean jqExplicitFilter = jqTool && tokens.stream()
+            .anyMatch(token -> token.equals("-f") || token.equals("--from-file") || token.startsWith("--from-file="));
+        boolean patternPending = (searchTool && !explicitPattern) || (jqTool && !jqExplicitFilter);
         boolean regexpValuePending = false;
+        boolean pathValuePending = false;
+        int skipValues = 0;
         boolean expression = false;
+        boolean findSeenPath = false;
         for (int i = 1; i < tokens.size(); i++) {
             String token = tokens.get(i);
+            if (skipValues > 0) {
+                skipValues--;
+                continue;
+            }
+            if (pathValuePending) {
+                pathValuePending = false;
+                try {
+                    paths.resolve(workdir.resolve(token).toString());
+                } catch (RuntimeException e) {
+                    return executable + " 的路径参数必须在工作区内：" + token;
+                }
+                continue;
+            }
             if (regexpValuePending) {
                 regexpValuePending = false;
                 continue;
@@ -190,11 +269,47 @@ final class CommandPolicy {
             if (searchTool && (token.startsWith("--regexp=") || token.startsWith("-e") && token.length() > 2)) {
                 continue;
             }
-            if (executable.equals("find") && (token.startsWith("-") || token.equals("(") || token.equals("!"))) {
-                expression = true;
+            if (jqTool) {
+                if (token.equals("--arg") || token.equals("--argjson")) {
+                    skipValues = 2;
+                    continue;
+                }
+                if (token.equals("--rawfile") || token.equals("--slurpfile") || token.equals("--argfile")) {
+                    skipValues = 1;
+                    pathValuePending = true;
+                    continue;
+                }
+                if (token.equals("-f") || token.equals("--from-file")) {
+                    pathValuePending = true;
+                    continue;
+                }
+                if (token.startsWith("--from-file=")) {
+                    String value = token.substring("--from-file=".length());
+                    try {
+                        paths.resolve(workdir.resolve(value).toString());
+                    } catch (RuntimeException e) {
+                        return executable + " 的路径参数必须在工作区内：" + value;
+                    }
+                    continue;
+                }
             }
-            if (expression) {
-                continue;
+            if (executable.equals("find")) {
+                if (!findSeenPath && !expression) {
+                    if (Set.of("-H", "-L", "-P").contains(token) || token.matches("-O[0-9]+")) {
+                        continue;
+                    }
+                    if (token.equals("-D")) {
+                        skipValues = 1;
+                        continue;
+                    }
+                }
+                if (token.startsWith("-") || token.equals("(") || token.equals("!")) {
+                    expression = true;
+                }
+                if (expression) {
+                    continue;
+                }
+                findSeenPath = true;
             }
             String value = null;
             if (token.startsWith("--") && token.contains("=")) {
@@ -228,13 +343,26 @@ final class CommandPolicy {
         }
         String executable = leaf(tokens.getFirst());
         if (tokens.size() == 2 && INSPECTION_FLAGS.contains(tokens.get(1))) {
-            return true;
+            return isSafeInspectionFlagCall(tokens.getFirst(), executable, tokens.get(1));
         }
         if (INSPECTION.contains(executable)) {
             return true;
         }
         if (executable.equals("git")) {
-            return tokens.size() > 1 && GIT_READONLY.contains(tokens.get(1)) && gitReadOnly(tokens);
+            int subIndex = CommandRiskGuard.gitSubcommandIndex(tokens);
+            if (subIndex <= 0) {
+                return false;
+            }
+            for (int i = 1; i < subIndex; i++) {
+                String globalFlag = tokens.get(i);
+                if (globalFlag.equals("-c") || globalFlag.equals("--config-env")
+                    || globalFlag.startsWith("--config-env=") || globalFlag.equals("--exec-path")
+                    || globalFlag.startsWith("--exec-path=") || globalFlag.equals("-p")
+                    || globalFlag.equals("--paginate")) {
+                    return false;
+                }
+            }
+            return GIT_READONLY.contains(tokens.get(subIndex)) && gitReadOnly(tokens, subIndex);
         }
         if (executable.equals("curl")) {
             return curl(tokens) == null && curlReadOnly(tokens);
@@ -242,10 +370,20 @@ final class CommandPolicy {
         return false;
     }
 
+    static boolean isSafeInspectionFlagCall(String rawExecutable, String executable, String flag) {
+        if (rawExecutable.contains("/") || rawExecutable.contains("\\")) {
+            return false;
+        }
+        if (flag.startsWith("-")) {
+            return INSPECTION.contains(executable) || INSPECTION_FLAG_DASHED_TOOLS.contains(executable);
+        }
+        return INSPECTION_SUBCOMMAND_TOOLS.contains(executable);
+    }
+
     /** git 的只读子命令里仍有会写东西的参数形态，这里逐个排除。 */
-    private static boolean gitReadOnly(List<String> tokens) {
-        String sub = tokens.get(1);
-        List<String> args = tokens.subList(2, tokens.size());
+    private static boolean gitReadOnly(List<String> tokens, int subIndex) {
+        String sub = tokens.get(subIndex);
+        List<String> args = tokens.subList(subIndex + 1, tokens.size());
         for (String arg : args) {
             if (arg.equals("--output") || arg.startsWith("--output=") || arg.equals("-O")
                 || arg.startsWith("--open-files-in-pager")) {
@@ -374,11 +512,8 @@ final class CommandPolicy {
 
     private static String unsafeEnv(String name) {
         String upper = name.toUpperCase(Locale.ROOT);
-        if (upper.equals("PATH") || upper.equals("PATHEXT")) {
-            return "禁止通过命令前缀覆盖 " + name;
-        }
-        if (upper.equals("LD_PRELOAD") || upper.startsWith("DYLD_")) {
-            return "禁止通过命令前缀设置 " + name;
+        if (BLOCKED_PREFIX_ENV.contains(upper) || upper.startsWith("DYLD_") || upper.startsWith("LD_")) {
+            return "禁止通过命令前缀覆盖或设置 " + name;
         }
         if (!EnvironmentSanitizer.defaults().allowed(name)) {
             return "不允许通过命令前缀设置 " + name;

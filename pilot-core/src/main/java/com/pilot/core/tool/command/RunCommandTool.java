@@ -679,6 +679,9 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         }
 
         AgentScope scope = paths.scope();
+        if (scope != null && !scope.writable() && segment.redirectTo() != null) {
+            return SegmentCheck.error("只读任务不允许输出重定向写文件");
+        }
         if (scope != null && !scope.allowsCommandArgs(tokens)) {
             return SegmentCheck.error(scope.commandHint(String.join(" ", tokens)));
         }
@@ -691,12 +694,14 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             return SegmentCheck.error(argumentProblem);
         }
 
-        boolean trackChanges = !(tokens.size() == 2 && CommandPolicy.INSPECTION_FLAGS.contains(tokens.get(1)));
+        boolean trackChanges = !(tokens.size() == 2 && CommandPolicy.INSPECTION_FLAGS.contains(tokens.get(1))
+            && CommandPolicy.isSafeInspectionFlagCall(tokens.getFirst(), executable, tokens.get(1)));
         if (CommandPolicy.INSPECTION.contains(executable) || "curl".equals(executable)) {
             trackChanges = false;
         }
         if ("git".equals(executable)) {
-            String sub = tokens.size() > 1 ? tokens.get(1).toLowerCase(Locale.ROOT) : "";
+            int subIndex = CommandRiskGuard.gitSubcommandIndex(tokens);
+            String sub = subIndex > 0 ? tokens.get(subIndex).toLowerCase(Locale.ROOT) : "";
             if (CommandPolicy.GIT_READONLY.contains(sub)) {
                 trackChanges = false;
             } else if (CommandPolicy.GIT_WRITE.contains(sub) || CommandPolicy.GIT_MUTATING.contains(sub)) {
@@ -704,7 +709,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
                     return SegmentCheck.error("只读任务不允许 git " + sub + "，改动请通过沙箱写工具提交");
                 }
                 if (CommandPolicy.GIT_WRITE.contains(sub)) {
-                    String problem = checkGitWrite(tokens, sub);
+                    String problem = checkGitWrite(tokens, sub, subIndex);
                     if (problem != null) {
                         return SegmentCheck.error(problem);
                     }
@@ -720,7 +725,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         Path redirect = null;
         if (segment.redirectTo() != null) {
             try {
-                redirect = paths.resolve(workdir.resolve(segment.redirectTo()).toString());
+                redirect = paths.resolveWritable(workdir.resolve(segment.redirectTo()).toString());
             } catch (RuntimeException e) {
                 return SegmentCheck.error("输出重定向必须写在工作区内：" + segment.redirectTo());
             }
@@ -776,14 +781,15 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     }
 
     /** 提交必须自带消息（否则会拉起编辑器卡到超时），且只允许操作工作区内的相对路径。 */
-    private static String checkGitWrite(List<String> tokens, String sub) {
-        boolean hasMessage = tokens.stream().anyMatch(token -> token.equals("-m") || token.equals("--message")
+    private static String checkGitWrite(List<String> tokens, String sub, int subIndex) {
+        List<String> subArgs = tokens.subList(subIndex + 1, tokens.size());
+        boolean hasMessage = subArgs.stream().anyMatch(token -> token.equals("-m") || token.equals("--message")
             || token.startsWith("--message=") || token.equals("-F") || token.equals("--file"));
         if ("commit".equals(sub) && !hasMessage) {
             return "git commit 必须带 -m \"提交说明\"，否则会打开编辑器并卡住";
         }
         boolean skipNext = false;
-        for (String token : tokens.subList(2, tokens.size())) {
+        for (String token : subArgs) {
             if (skipNext) {
                 skipNext = false;
                 continue;

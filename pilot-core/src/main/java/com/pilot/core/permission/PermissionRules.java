@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -135,13 +136,19 @@ public final class PermissionRules {
 
     /** 读取用户级与工作区级配置并合并；解析失败退化为「没有规则」，不影响原有档位。 */
     public static PermissionRules load(Path workspace) {
+        return load(userFile(), workspace);
+    }
+
+    static PermissionRules load(Path userSettingsFile, Path workspace) {
         List<Rule> allow = new ArrayList<>();
         List<Rule> deny = new ArrayList<>();
         List<Rule> ask = new ArrayList<>();
         List<String> loadIssues = new ArrayList<>();
-        merge(userFile(), allow, deny, ask, loadIssues);
+        if (userSettingsFile != null) {
+            merge(userSettingsFile, allow, deny, ask, loadIssues, false);
+        }
         if (workspace != null) {
-            merge(workspaceFile(workspace), allow, deny, ask, loadIssues);
+            merge(workspaceFile(workspace), allow, deny, ask, loadIssues, true);
         }
         return new PermissionRules(allow, deny, ask, loadIssues);
     }
@@ -167,7 +174,7 @@ public final class PermissionRules {
         List<Rule> ask = new ArrayList<>();
         List<String> loadIssues = new ArrayList<>();
         if (file != null) {
-            merge(file, allow, deny, ask, loadIssues);
+            merge(file, allow, deny, ask, loadIssues, false);
         }
         return new PermissionRules(allow, deny, ask, loadIssues);
     }
@@ -181,6 +188,11 @@ public final class PermissionRules {
     }
 
     private static void merge(Path file, List<Rule> allow, List<Rule> deny, List<Rule> ask, List<String> loadIssues) {
+        merge(file, allow, deny, ask, loadIssues, false);
+    }
+
+    private static void merge(Path file, List<Rule> allow, List<Rule> deny, List<Rule> ask, List<String> loadIssues,
+        boolean untrustedWorkspace) {
         if (!Files.isRegularFile(file)) {
             return;
         }
@@ -199,7 +211,13 @@ public final class PermissionRules {
             LOG.warn("{}", issue);
             return;
         }
-        collect(permissions.get("allow"), allow);
+        if (untrustedWorkspace && permissions.get("allow") instanceof List<?> configured && !configured.isEmpty()) {
+            String issue = "工作区权限配置中的 allow 规则不生效；请将 allow 规则移至用户级 ~/.pilot/settings.json";
+            loadIssues.add(issue);
+            LOG.warn("{}", issue);
+        } else {
+            collect(permissions.get("allow"), allow);
+        }
         collect(permissions.get("deny"), deny);
         collect(permissions.get("ask"), ask);
     }
@@ -241,21 +259,21 @@ public final class PermissionRules {
         if (isEmpty() || call == null) {
             return null;
         }
-        if (matches(deny, call)) {
+        if (matches(deny, call, false)) {
             return PermissionResult.deny("命中 deny 规则：" + describe(deny, call));
         }
-        if (matches(ask, call)) {
+        if (matches(ask, call, false)) {
             return PermissionResult.ask("命中 ask 规则：" + describe(ask, call));
         }
-        if (matches(allow, call)) {
+        if (matches(allow, call, true)) {
             return PermissionResult.allow();
         }
         return null;
     }
 
-    private static boolean matches(List<Rule> rules, ToolCall call) {
+    private static boolean matches(List<Rule> rules, ToolCall call, boolean allowRules) {
         for (Rule rule : rules) {
-            if (ruleMatches(rule, call)) {
+            if (ruleMatches(rule, call, allowRules)) {
                 return true;
             }
         }
@@ -264,14 +282,14 @@ public final class PermissionRules {
 
     private static String describe(List<Rule> rules, ToolCall call) {
         for (Rule rule : rules) {
-            if (ruleMatches(rule, call)) {
+            if (ruleMatches(rule, call, false)) {
                 return rule.specifier().isEmpty() ? rule.tool() : rule.tool() + "(" + rule.specifier() + ")";
             }
         }
         return "";
     }
 
-    private static boolean ruleMatches(Rule rule, ToolCall call) {
+    private static boolean ruleMatches(Rule rule, ToolCall call, boolean allowRule) {
         if (rule.tool().isEmpty()) {
             return false;
         }
@@ -290,6 +308,9 @@ public final class PermissionRules {
         }
         boolean command = ToolNames.RUN_COMMAND.equalsIgnoreCase(call.name());
         for (String target : targets) {
+            if (command && allowRule && hasCommandControl(target)) {
+                continue;
+            }
             if (command ? commandMatches(rule.specifier(), target) : globMatches(rule.specifier(), target)) {
                 return true;
             }
@@ -422,9 +443,23 @@ public final class PermissionRules {
         return normalized.equals(specifier.strip().replace('\\', '/'));
     }
 
+    private static boolean hasCommandControl(String command) {
+        return command.contains("&&") || command.contains("||") || command.contains(";") || command.contains("|")
+            || command.contains("\n") || command.contains("\r") || command.contains("`") || command.contains("$(")
+            || command.contains(">");
+    }
+
     /** 路径规则：{@code *} 不跨目录，{@code **} 跨目录，分隔符统一按 {@code /} 比较。 */
     public static boolean globMatches(String specifier, String target) {
-        String normalized = target.strip().replace('\\', '/');
+        String raw = target.strip().replace('\\', '/');
+        String normalized = raw;
+        if (!raw.contains("://")) {
+            try {
+                normalized = Path.of(raw).normalize().toString().replace('\\', '/');
+            } catch (InvalidPathException exception) {
+                normalized = raw;
+            }
+        }
         String pattern = specifier.strip().replace('\\', '/');
         while (pattern.startsWith("./")) {
             pattern = pattern.substring(2);

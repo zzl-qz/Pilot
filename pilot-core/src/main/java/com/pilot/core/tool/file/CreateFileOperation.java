@@ -44,7 +44,7 @@ abstract class CreateFileOperation extends PromptedTool {
 
         Path file;
         try {
-            file = paths.resolve(rawPath);
+            file = paths.resolveWritable(rawPath);
         } catch (RuntimeException e) {
             return "ERROR: " + e.getMessage();
         }

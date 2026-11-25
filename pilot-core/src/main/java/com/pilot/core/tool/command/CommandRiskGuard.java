@@ -210,7 +210,7 @@ final class CommandRiskGuard {
         return null;
     }
 
-    private static int gitSubcommandIndex(List<String> tokens) {
+    static int gitSubcommandIndex(List<String> tokens) {
         int i = 1;
         while (i < tokens.size()) {
             String token = tokens.get(i);

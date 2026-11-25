@@ -25,7 +25,13 @@ class PermissionRulesTest {
         Path dir = workspace.resolve(".pilot");
         Files.createDirectories(dir);
         Files.writeString(dir.resolve("settings.json"), json);
-        return PermissionRules.load(workspace);
+        return PermissionRules.load(workspace.resolve("missing-user.json"), workspace);
+    }
+
+    private PermissionRules userRules(String json) throws IOException {
+        Path file = workspace.resolve("user-settings.json");
+        Files.writeString(file, json);
+        return PermissionRules.load(file, workspace);
     }
 
     private static ToolCall command(String command) {
@@ -38,7 +44,7 @@ class PermissionRulesTest {
 
     @Test
     void denyBeatsAllowForSameTool() throws IOException {
-        PermissionRules rules = rules("""
+        PermissionRules rules = userRules("""
             {"permissions":{"allow":["run_command"],"deny":["run_command(rm -rf:*)"]}}
             """);
 
@@ -58,7 +64,7 @@ class PermissionRulesTest {
 
     @Test
     void pathGlobMatchesWorkspaceFiles() throws IOException {
-        PermissionRules rules = rules("""
+        PermissionRules rules = userRules("""
             {"permissions":{"deny":["edit_file(**/.env)"],"allow":["edit_file(src/*.java)"]}}
             """);
 
@@ -153,7 +159,7 @@ class PermissionRulesTest {
 
     @Test
     void browserRulesIsolateLoopbackPortsAndSupportDomainWildcards() throws IOException {
-        PermissionRules rules = rules(
+        PermissionRules rules = userRules(
             """
                 {"permissions":{"allow":["browser(http://localhost:5173)","browser(click:https://*.example.com)"],"deny":["browser(https://admin.example.com)"]}}
                 """);
@@ -174,5 +180,29 @@ class PermissionRulesTest {
         assertEquals(PermissionDecision.ALLOW, rules.evaluate(allowedWildcard).decision());
         assertNull(rules.evaluate(wrongActionWildcard));
         assertEquals(PermissionDecision.DENY, rules.evaluate(deniedAdmin).decision());
+    }
+
+    @Test
+    void workspaceAllowIsIgnoredButUserAllowRemainsEffective() throws IOException {
+        PermissionRules workspaceRules = rules("""
+            {"permissions":{"allow":["run_command(npm test:*)"]}}
+            """);
+        assertNull(workspaceRules.evaluate(command("npm test")));
+        assertTrue(workspaceRules.loadIssues().stream().anyMatch(issue -> issue.contains("allow")));
+        PermissionRules userAllowed = userRules("""
+            {"permissions":{"allow":["run_command(npm test:*)"]}}
+            """);
+        assertEquals(PermissionDecision.ALLOW, userAllowed.evaluate(command("npm test")).decision());
+        assertEquals(List.of("run_command(npm test:*)"), PermissionRules.loadWorkspace(workspace).allowRules());
+    }
+
+    @Test
+    void commandAllowDoesNotMatchChainedCommandAndPathsNormalizeParentSegments() throws IOException {
+        PermissionRules rules = userRules("""
+            {"permissions":{"allow":["run_command(npm test:*)"],"deny":["edit_file(.env)"]}}
+            """);
+        assertEquals(PermissionDecision.ALLOW, rules.evaluate(command("npm test")).decision());
+        assertNull(rules.evaluate(command("npm test && echo unsafe")));
+        assertEquals(PermissionDecision.DENY, rules.evaluate(edit("src/../.env")).decision());
     }
 }

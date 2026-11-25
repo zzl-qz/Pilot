@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
 
+import com.pilot.core.exec.EnvironmentSanitizer;
 import com.pilot.core.exec.ProcessSupport;
 import com.pilot.core.tool.Availability;
 import com.pilot.core.workspace.PathValidator;
@@ -49,14 +50,29 @@ final class GitReadSupport {
     }
 
     static RunResult run(Path workspace, List<String> gitArgs) {
-        List<String> command = new ArrayList<>(gitArgs.size() + 3);
+        List<String> command = new ArrayList<>(gitArgs.size() + 12);
         command.add("git");
         command.add("-c");
         command.add("core.quotepath=false");
-        command.addAll(gitArgs);
+        command.add("-c");
+        command.add("core.fsmonitor=false");
+        command.add("-c");
+        command.add("diff.external=");
+        command.add("-c");
+        command.add("core.hooksPath=");
+        if (!gitArgs.isEmpty() && "diff".equals(gitArgs.getFirst())) {
+            command.add("diff");
+            command.add("--no-ext-diff");
+            command.add("--no-textconv");
+            command.addAll(gitArgs.subList(1, gitArgs.size()));
+        } else {
+            command.addAll(gitArgs);
+        }
 
         ProcessBuilder builder = new ProcessBuilder(command).directory(workspace.toFile());
         Map<String, String> env = builder.environment();
+        env.clear();
+        env.putAll(EnvironmentSanitizer.defaults().inherit(System.getenv()));
         env.put("GIT_TERMINAL_PROMPT", "0");
         env.put("GIT_PAGER", "cat");
         try {

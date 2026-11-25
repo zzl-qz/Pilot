@@ -68,8 +68,8 @@ public final class MoveFileTool extends PromptedTool implements WritesFiles {
         Path source;
         Path dest;
         try {
-            source = paths.resolve(rawSource);
-            dest = paths.resolve(rawDest);
+            source = paths.resolveWritable(rawSource);
+            dest = paths.resolveWritable(rawDest);
         } catch (RuntimeException e) {
             return ToolResult.text("ERROR: " + e.getMessage());
         }

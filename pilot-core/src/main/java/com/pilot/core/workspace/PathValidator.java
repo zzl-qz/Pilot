@@ -112,6 +112,21 @@ public final class PathValidator {
         return resolved;
     }
 
+    /** 写入路径不能指向 Pilot 的仓库元数据或本地数据目录。 */
+    public Path resolveWritable(String rawPath) {
+        Path resolved = resolve(rawPath);
+        if (resolved.startsWith(root)) {
+            Path relative = root.relativize(resolved);
+            if (relative.getNameCount() > 0) {
+                String first = relative.getName(0).toString();
+                if (first.equalsIgnoreCase(".git") || first.equalsIgnoreCase(".pilot")) {
+                    throw new WorkspaceViolationException("禁止写入工作区的 .git 或 .pilot 受保护目录");
+                }
+            }
+        }
+        return resolved;
+    }
+
     /** 候选路径落在哪个可见根上：命中多个时取更具体的那个，都不命中时交给默认根统一报越界。 */
     private Path boundFor(Path candidate) {
         Path match = root;

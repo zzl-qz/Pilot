@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -18,6 +19,26 @@ class PathValidatorTest {
 
     @TempDir
     Path other;
+
+    @Test
+    void writableResolutionRejectsProtectedWorkspaceDirectoriesCaseInsensitively() {
+        PathValidator validator = new PathValidator(workspace);
+        for (String path : List.of(".git/config", ".PILOT/settings.json")) {
+            WorkspaceViolationException exception =
+                assertThrows(WorkspaceViolationException.class, () -> validator.resolveWritable(path));
+            Assertions.assertTrue(exception.getMessage().contains("禁止写入"));
+        }
+        Assertions.assertEquals(validator.resolve("src/new.txt"), validator.resolveWritable("src/new.txt"));
+    }
+
+    @Test
+    void writableResolutionRejectsProtectedPathsReachedThroughSymlinks() throws IOException {
+        Path git = Files.createDirectories(workspace.resolve(".git"));
+        symlink(workspace.resolve("git-alias"), git);
+        PathValidator validator = new PathValidator(workspace);
+        assertThrows(WorkspaceViolationException.class, () -> validator.resolveWritable("git-alias/config"));
+        assertThrows(WorkspaceViolationException.class, () -> validator.resolveWritable(".pilot/settings.json"));
+    }
 
     @Test
     void resolvesRelativePathInsideWorkspace() throws IOException {

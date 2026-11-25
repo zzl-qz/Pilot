@@ -57,7 +57,7 @@ public final class DeleteFileTool extends PromptedTool implements WritesFiles {
         }
         Path file;
         try {
-            file = paths.resolve(rawPath);
+            file = paths.resolveWritable(rawPath);
         } catch (RuntimeException e) {
             return ToolResult.text("ERROR: " + e.getMessage());
         }

@@ -197,6 +197,23 @@ class RunCommandPolicyTest {
     }
 
     @Test
+    void blocksSortTreeFindAndInterpreterInspectionFlagBypasses() {
+        for (String command : new String[] {"sort -oout.txt input.txt", "sort -uoout.txt input.txt",
+            "sort -roout.txt input.txt", "tree -aoout.txt", "find -L /etc -name passwd", "jq . /etc/passwd",
+            "jq -f /etc/passwd data.json", "git -C /etc status", "HTTP_PROXY=http://evil.test ls", "HOME=/tmp ls"}) {
+            String result = tool.execute(Map.of("command", command));
+            assertTrue(result.startsWith("ERROR: "), command + " -> " + result);
+        }
+        for (String command : new String[] {"sh help", "bash --version", "python3 help", "node help",
+            "./evil.sh --version", "./node --version", "./mvnw --version", "git -c core.fsmonitor=evil status"}) {
+            assertFalse(readOnly(command), command);
+        }
+        assertTrue(readOnly("git --version"));
+        assertTrue(readOnly("node --version"));
+        assertTrue(readOnly("python3 --help"));
+    }
+
+    @Test
     void curlOnlyReachesLoopbackAndNeverTouchesLocalFiles() {
         for (String command : new String[] {"curl https://example.com", "curl -o out.html http://localhost:3000",
             "curl -d @secret.txt http://localhost:3000", "curl -x http://proxy http://localhost:3000", "curl",

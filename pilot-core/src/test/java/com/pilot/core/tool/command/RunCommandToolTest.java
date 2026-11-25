@@ -348,6 +348,15 @@ class RunCommandToolTest {
     }
 
     @Test
+    void readOnlyScopeRejectsRedirectAndGitGlobalOptionEscape() {
+        AgentScope scope = AgentScope.readOnly(List.of(), List.of()).withCommands(List.of("git"), List.of());
+        RunCommandTool tool = new RunCommandTool(new PathValidator(workspace, scope));
+        assertTrue(tool.execute(Map.of("command", "echo data > output.txt")).contains("只读任务不允许输出重定向写文件"));
+        assertTrue(tool.execute(Map.of("command", "git -C /tmp add .")).startsWith("ERROR: "));
+        assertTrue(tool.execute(Map.of("command", "git --git-dir=/tmp/.git status")).startsWith("ERROR: "));
+    }
+
+    @Test
     void writableScopeStillAllowsGitWriteChecks() {
         AgentScope scope = AgentScope.readWrite(List.of(), List.of()).withCommands(List.of("git commit"), List.of());
         RunCommandTool tool = new RunCommandTool(new PathValidator(workspace, scope));
