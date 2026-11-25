@@ -32,6 +32,7 @@ import com.pilot.core.permission.PolicyPermissionGate;
 import com.pilot.core.tool.Availability;
 import com.pilot.core.tool.ToolResult;
 import com.pilot.core.workspace.PathValidator;
+import com.pilot.server.multi.BrowserSubagentTool;
 import com.pilot.server.multi.SpawnAgentTool;
 
 import tools.jackson.databind.ObjectMapper;
@@ -62,10 +63,10 @@ class BrowserSubagentToolTest {
             return new ModelResponse("已完成移动端验收，页面渲染正常。", List.of());
         };
 
-        BrowserSubagentTool subagent = new BrowserSubagentTool(backend, "ses_main", "run_1",
-            new PathValidator(workspace), client, new PolicyPermissionGate(PermissionMode.ASK),
+        BrowserSubagentTool subagent = new BrowserSubagentTool(new BrowserSubagentTool.Dependencies(backend, "ses_main",
+            "run_1", new PathValidator(workspace), client, new PolicyPermissionGate(PermissionMode.ASK),
             ApprovalBroker.denyAll(), new AgentLoop.Config(10, 4, "parent"), events::add, () -> false,
-            SpawnAgentTool.UsageSink.none(), new BrowserHandoffBroker(), evidence);
+            SpawnAgentTool.UsageSink.none(), new BrowserHandoffBroker(), evidence));
 
         ToolResult result =
             subagent.executeResult(Map.of("task", "检查首页并截图", "url", "http://127.0.0.1:5173/", "label", "首页巡检"));
@@ -93,11 +94,11 @@ class BrowserSubagentToolTest {
             promptsSeen.add(request.getLast().content());
             return new ModelResponse("第 " + promptsSeen.size() + " 次完成", List.of());
         };
-        BrowserSubagentTool subagent = new BrowserSubagentTool(backend, "ses_2", "run_2", new PathValidator(workspace),
-            client, new PolicyPermissionGate(PermissionMode.READ_ONLY), ApprovalBroker.denyAll(),
-            new AgentLoop.Config(6, 4, "sys"), event -> {
-            }, () -> false, SpawnAgentTool.UsageSink.none(), new BrowserHandoffBroker(), null,
-            new BrowserSubagentTool.Budget(8, 1, 2));
+        BrowserSubagentTool.Dependencies dependencies = new BrowserSubagentTool.Dependencies(backend, "ses_2", "run_2",
+            new PathValidator(workspace), client, new PolicyPermissionGate(PermissionMode.READ_ONLY),
+            ApprovalBroker.denyAll(), new AgentLoop.Config(6, 4, "sys"), event -> {
+            }, () -> false, SpawnAgentTool.UsageSink.none(), new BrowserHandoffBroker(), null);
+        BrowserSubagentTool subagent = new BrowserSubagentTool(dependencies, new BrowserSubagentTool.Budget(8, 1, 2));
 
         String first = subagent.execute(Map.of("task", "打开登录页"));
         String agentId = first.lines().filter(l -> l.startsWith("agent_id: ")).findFirst().orElseThrow()
@@ -124,19 +125,20 @@ class BrowserSubagentToolTest {
         String prevArtifacts = System.getProperty("pilot.artifacts.dir");
         System.setProperty("pilot.artifacts.dir", temp.resolve("artifacts-rec").toString());
         try {
-            BrowserSubagentTool subagent = new BrowserSubagentTool(backend, "ses_rec", "run_rec",
-                new PathValidator(workspace), client, new PolicyPermissionGate(PermissionMode.ASK),
-                ApprovalBroker.denyAll(), new AgentLoop.Config(6, 4, "parent"), event -> {
-                }, () -> false, SpawnAgentTool.UsageSink.none(), new BrowserHandoffBroker(), evidence);
+            BrowserSubagentTool subagent =
+                new BrowserSubagentTool(new BrowserSubagentTool.Dependencies(backend, "ses_rec", "run_rec",
+                    new PathValidator(workspace), client, new PolicyPermissionGate(PermissionMode.ASK),
+                    ApprovalBroker.denyAll(), new AgentLoop.Config(6, 4, "parent"), event -> {
+                    }, () -> false, SpawnAgentTool.UsageSink.none(), new BrowserHandoffBroker(), evidence));
 
             String output = subagent.execute(Map.of("task", "记录测试过程", "label", "自动录屏"));
-            String recordingLine = output.lines().filter(l -> l.startsWith("recording_path:")).findFirst()
-                .orElseThrow();
+            String recordingLine =
+                output.lines().filter(l -> l.startsWith("recording_path:")).findFirst().orElseThrow();
             assertTrue(recordingLine.endsWith(".replay.json"), recordingLine);
-            assertTrue(backend.commands.stream().anyMatch(
-                c -> "record".equals(c.get("op")) && "start".equals(c.get("mode"))));
-            assertTrue(backend.commands.stream().anyMatch(
-                c -> "record".equals(c.get("op")) && "stop".equals(c.get("mode"))));
+            assertTrue(
+                backend.commands.stream().anyMatch(c -> "record".equals(c.get("op")) && "start".equals(c.get("mode"))));
+            assertTrue(
+                backend.commands.stream().anyMatch(c -> "record".equals(c.get("op")) && "stop".equals(c.get("mode"))));
             assertTrue(evidence.list("ses_rec", "run_rec", 10).stream().anyMatch(
                 rec -> "record".equals(rec.action()) && rec.recordingPath() != null && !rec.recordingPath().isBlank()));
         } finally {

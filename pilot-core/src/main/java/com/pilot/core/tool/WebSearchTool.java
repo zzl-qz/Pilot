@@ -29,8 +29,8 @@ import tools.jackson.databind.ObjectMapper;
  * 以及免密钥官方公开只读 API 兜底（Wikipedia / GitHub / StackOverflow / arXiv）。
  */
 public final class WebSearchTool implements Tool {
-    public static final URI DEFAULT_ENDPOINT = URI.create("http://127.0.0.1:8888");
-    public static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(20);
+    public static final URI DEFAULT_ENDPOINT = WebSearchConfig.DEFAULT_ENDPOINT;
+    public static final Duration DEFAULT_TIMEOUT = WebSearchConfig.DEFAULT_TIMEOUT;
     private static final Duration COOLDOWN_DURATION = Duration.ofSeconds(45);
     private static final int MAX_COOLDOWN_ENTRIES = 64;
 
@@ -94,8 +94,8 @@ public final class WebSearchTool implements Tool {
             "description", "搜索分类：general（综合）、news（新闻）、it（技术/代码）、science（学术）"));
         properties.put("time_range", Map.of("type", "string", "enum", List.of("day", "week", "month", "year"),
             "description", "时间范围过滤：day、week、month 或 year"));
-        properties.put("language", Map.of("type", "string", "enum", List.of("zh", "en", "all"),
-            "description", "语言偏好：zh（中文）、en（英文）或 all"));
+        properties.put("language",
+            Map.of("type", "string", "enum", List.of("zh", "en", "all"), "description", "语言偏好：zh（中文）、en（英文）或 all"));
         properties.put("site", ToolSchemas.string("限定站点域名，例如 docs.spring.io 或 github.com"));
         properties.put("page", ToolSchemas.integer("结果页码，1 到 5，默认 1"));
         return ToolSchemas.object(properties, List.of("query"));
@@ -146,11 +146,11 @@ public final class WebSearchTool implements Tool {
                     cooldowns.remove(fp);
                     boolean augmented = false;
                     if (current == WebSearchProvider.SEARXNG && config.fallbackEnabled()
-                        && outcome.hits().size() < Math.min(3, request.count())
-                        && i + 1 < plan.size() && plan.get(i + 1) == WebSearchProvider.PUBLIC) {
+                        && outcome.hits().size() < Math.min(3, request.count()) && i + 1 < plan.size()
+                        && plan.get(i + 1) == WebSearchProvider.PUBLIC) {
                         tried.add(WebSearchProvider.PUBLIC.id());
-                        ProviderOutcome supplement = WebSearchClients.execute(client, mapper, config,
-                            WebSearchProvider.PUBLIC, request);
+                        ProviderOutcome supplement =
+                            WebSearchClients.execute(client, mapper, config, WebSearchProvider.PUBLIC, request);
                         if (!supplement.hits().isEmpty()) {
                             outcome = mergeSupplementalOutcome(outcome, supplement, request);
                             augmented = true;
@@ -216,8 +216,8 @@ public final class WebSearchTool implements Tool {
         List<SearchHit> combined = new ArrayList<>(primary.hits().size() + supplement.hits().size());
         combined.addAll(primary.hits());
         combined.addAll(supplement.hits());
-        List<SearchHit> merged = WebSearchModels.deduplicateAndRank(combined, request.count(), request.query(),
-            request.site());
+        List<SearchHit> merged =
+            WebSearchModels.deduplicateAndRank(combined, request.count(), request.query(), request.site());
         List<String> warnings = new ArrayList<>(primary.warnings());
         warnings.add("主源命中偏少，已合并公开只读知识源结果补齐");
         return new ProviderOutcome(primary.sourceId() + "+" + supplement.sourceId(),
@@ -292,8 +292,8 @@ public final class WebSearchTool implements Tool {
             String title = hit.title().isEmpty() ? "(无标题)" : hit.title();
             out.append(i + 1).append(". ");
             if (!hit.url().isEmpty()) {
-                out.append('[').append(escapeMarkdownText(title)).append("](")
-                    .append(escapeMarkdownUrl(hit.url())).append(')');
+                out.append('[').append(escapeMarkdownText(title)).append("](").append(escapeMarkdownUrl(hit.url()))
+                    .append(')');
             } else {
                 out.append(title);
             }
@@ -348,8 +348,8 @@ public final class WebSearchTool implements Tool {
             ProviderOutcome only = outcomes.get(0);
             if (only.error() != null) {
                 return new SearchReport(false, only.sourceId(), only.sourceLabel(), List.copyOf(tried), List.of(),
-                    List.of(), List.of(), List.of(), List.copyOf(allWarnings), only.error(),
-                    "ERROR: " + only.error(), elapsedMs);
+                    List.of(), List.of(), List.of(), List.copyOf(allWarnings), only.error(), "ERROR: " + only.error(),
+                    elapsedMs);
             }
             StringBuilder msg = new StringBuilder("未找到网页结果。");
             if (!only.warnings().isEmpty()) {
@@ -358,8 +358,8 @@ public final class WebSearchTool implements Tool {
             if (!only.suggestions().isEmpty()) {
                 msg.append("\n相关搜索建议: ").append(String.join(" / ", only.suggestions()));
             }
-            return new SearchReport(true, only.sourceId(), only.sourceLabel(), List.copyOf(tried), List.of(),
-                List.of(), List.of(), only.suggestions(), List.copyOf(allWarnings), null, msg.toString(), elapsedMs);
+            return new SearchReport(true, only.sourceId(), only.sourceLabel(), List.copyOf(tried), List.of(), List.of(),
+                List.of(), only.suggestions(), List.copyOf(allWarnings), null, msg.toString(), elapsedMs);
         }
 
         List<String> summaryParts = new ArrayList<>();
@@ -375,8 +375,7 @@ public final class WebSearchTool implements Tool {
         }
         String hint = "建议：可在「设置 → 搜索」配置博查/Tavily/Brave/Serper/Exa 搜索 API 密钥，或检查网络代理与本机 SearXNG 状态。";
         if (anySuccessResponse) {
-            StringBuilder text = new StringBuilder("未找到网页结果。\n已尝试来源: ")
-                .append(String.join("；", summaryParts));
+            StringBuilder text = new StringBuilder("未找到网页结果。\n已尝试来源: ").append(String.join("；", summaryParts));
             if (!suggestions.isEmpty()) {
                 text.append("\n相关搜索建议: ").append(String.join(" / ", suggestions));
             }

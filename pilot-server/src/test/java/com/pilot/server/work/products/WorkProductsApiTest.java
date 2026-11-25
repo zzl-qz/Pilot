@@ -103,7 +103,7 @@ class WorkProductsApiTest {
         mvc.perform(post(base + "/approve").contentType("application/json").content("{\"version\":1}"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("APPROVED"));
         mvc.perform(get("/api/skills").param("sessionId", session))
-            .andExpect(jsonPath("$.available[0].name").value("report-check"));
+            .andExpect(jsonPath("$.available[?(@.name == 'report-check')].source").value("project"));
         mvc.perform(post(base + "/approve").contentType("application/json").content("{\"version\":1}"))
             .andExpect(status().isConflict());
         Files.writeString(workspace.resolve(".pilot/skills/report-check/SKILL.md"), "用户新版本");

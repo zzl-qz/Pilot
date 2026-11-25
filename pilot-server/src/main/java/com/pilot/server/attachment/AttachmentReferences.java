@@ -18,7 +18,6 @@ import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.store.SqliteStore;
-import com.pilot.server.workspace.RunSnapshotService;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -26,6 +25,13 @@ import tools.jackson.databind.ObjectMapper;
 /** 同一份上传附件可能被会话分支和对话检查点共同引用。 */
 @Component
 public class AttachmentReferences {
+    public interface Checkpoints {
+        RunCheckpoint load(String runId);
+    }
+
+    public record RunCheckpoint(List<Message> messages) {
+    }
+
     public record Reference(String owner, String filename) {
     }
 
@@ -37,16 +43,16 @@ public class AttachmentReferences {
     private final ObjectMapper mapper;
     private final SessionService sessions;
     private final ConversationRepository conversations;
-    private final RunSnapshotService snapshots;
+    private final Checkpoints checkpoints;
     private final AttachmentService attachments;
 
     public AttachmentReferences(ObjectProvider<SqliteStore> store, ObjectMapper mapper, SessionService sessions,
-        ConversationRepository conversations, RunSnapshotService snapshots, AttachmentService attachments) {
+        ConversationRepository conversations, Checkpoints checkpoints, AttachmentService attachments) {
         this.sqlite = store.getIfAvailable();
         this.mapper = mapper;
         this.sessions = sessions;
         this.conversations = conversations;
-        this.snapshots = snapshots;
+        this.checkpoints = checkpoints;
         this.attachments = attachments;
     }
 
@@ -90,7 +96,7 @@ public class AttachmentReferences {
             runs.addAll(sqlite.activeRunIds());
         }
         for (String run : runs) {
-            var checkpoint = snapshots.conversation(run);
+            var checkpoint = checkpoints.load(run);
             if (checkpoint != null) {
                 collectMessages(references, checkpoint.messages(), root());
             }

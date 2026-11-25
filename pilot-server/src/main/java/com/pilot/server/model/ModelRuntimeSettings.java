@@ -13,7 +13,6 @@ import com.pilot.core.model.MeteredModelClient;
 import com.pilot.core.model.ModelPricing;
 import com.pilot.core.model.ModelProfile;
 import com.pilot.core.model.NativeCapability;
-import com.pilot.server.search.WebSearchSettings;
 import com.pilot.server.store.SettingsStore;
 
 import tools.jackson.core.JsonParser;
@@ -75,7 +74,7 @@ public final class ModelRuntimeSettings {
     private final ObjectMapper mapper;
     private final RequestTimeouts timeoutDefaults;
     private ModelCapabilityDiscovery discovery;
-    private WebSearchSettings webSearchSettings;
+    private SearchPreference searchPreference;
 
     @org.springframework.beans.factory.annotation.Autowired
     public void setCapabilityDiscovery(ModelCapabilityDiscovery discovery) {
@@ -84,8 +83,8 @@ public final class ModelRuntimeSettings {
     }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
-    public void setWebSearchSettings(WebSearchSettings webSearchSettings) {
-        this.webSearchSettings = webSearchSettings;
+    public void setSearchPreference(SearchPreference searchPreference) {
+        this.searchPreference = searchPreference;
     }
 
     @jakarta.annotation.PostConstruct
@@ -179,7 +178,7 @@ public final class ModelRuntimeSettings {
      */
     public Set<NativeCapability> nativeCapabilities(ModelSettings.Snapshot model) {
         Set<NativeCapability> resolved = resolveNativeCapabilities(model);
-        if (webSearchSettings != null && webSearchSettings.preferPilotSearch()
+        if (searchPreference != null && searchPreference.preferPilotSearch()
             && resolved.contains(NativeCapability.WEB_SEARCH)) {
             return resolved.stream().filter(cap -> cap != NativeCapability.WEB_SEARCH)
                 .collect(Collectors.toUnmodifiableSet());
@@ -287,7 +286,7 @@ public final class ModelRuntimeSettings {
         if (report != null) {
             source = report.message();
         }
-        if (webSearchSettings != null && webSearchSettings.preferPilotSearch()) {
+        if (searchPreference != null && searchPreference.preferPilotSearch()) {
             source = "已在「设置 → 搜索」开启优先使用 Pilot 自配置搜索";
         }
         return new View(model.model(), model.endpoint(), options, profile(model, options), names, source, report,

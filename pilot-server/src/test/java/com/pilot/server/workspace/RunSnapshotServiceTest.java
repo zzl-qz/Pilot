@@ -388,9 +388,14 @@ class RunSnapshotServiceTest {
         Files.writeString(buildNoise, "artifact");
 
         CommandChangeTracker.Result changes = snapshots.finish(handle);
+        Path commandDir = storage.resolve("command_run/commands").resolve(handle.id());
+        assertFalse(Files.exists(commandDir.resolve("files")), "单条命令结算后应立即释放整仓临时副本");
+        assertFalse(Files.exists(commandDir.resolve("baseline.json")), "单条命令结算后应移除 baseline.json");
+        assertEquals(changes, snapshots.finish(handle), "同轮重复结算命令应保持幂等返回缓存结果");
         snapshots.finish();
         snapshots.clear();
 
+        assertFalse(Files.exists(storage.resolve("command_run/commands")), "完成运行后应回收全部命令临时目录");
         assertTrue(changes.complete(), changes.warning());
         assertEquals(List.of("generated/B.java", "src/A.java", "src/Delete.java"), changes.changedPaths());
         assertFalse(changes.changedPaths().contains("target/generated.bin"));
@@ -400,6 +405,7 @@ class RunSnapshotServiceTest {
         assertEquals(2, diff.removed());
         RunSnapshotService.RollbackReport rollback = snapshots.rollback("command_run");
         assertTrue(rollback.failed().isEmpty(), rollback.failed().toString());
+        assertTrue(rollback.conflicts().isEmpty());
         assertEquals("class A { }\n", Files.readString(changed));
         assertEquals("class Delete { }\n", Files.readString(deleted));
         assertFalse(Files.exists(created));

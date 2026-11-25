@@ -50,7 +50,8 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Component
 @Slf4j
-public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
+public class RunSnapshotService
+    implements SnapshotSink, CommandChangeTracker, com.pilot.server.attachment.AttachmentReferences.Checkpoints {
     private static final String META_FILE = "meta.json";
     private static final String CHANGES_FILE = "changes.json";
     /** 轮末另存一份完成态内容，之后磁盘再被改动也能算出这一轮到底改了什么。 */
@@ -70,10 +71,10 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
      */
     private static final long COMMAND_BASELINE_BUDGET_NANOS = TimeUnit.SECONDS.toNanos(3);
     private static final long GIT_IGNORE_TIMEOUT_MILLIS = 2_000L;
-    private static final Set<String> COMMAND_IGNORED_DIRECTORIES =
-        Set.of(".git", ".pilot", ".gradle", ".idea", ".vscode", ".next", ".nuxt", ".turbo", ".cache", "coverage",
-            "node_modules", "target", "build", "dist", "out", "__pycache__", ".pytest_cache", ".mypy_cache",
-            ".ruff_cache", ".venv", "venv", ".analysis", ".parcel-cache", ".pnpm-store", ".yarn", "profiles");
+    private static final Set<String> COMMAND_IGNORED_DIRECTORIES = Set.of(".git", ".pilot", ".gradle", ".idea",
+        ".vscode", ".next", ".nuxt", ".turbo", ".cache", "coverage", "node_modules", "target", "build", "dist", "out",
+        "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".venv", "venv", ".analysis", ".parcel-cache",
+        ".pnpm-store", ".yarn", "profiles", ".pilot-eval", ".pilot-maintenance");
 
     private final ObjectMapper mapper;
     private final Path root;
@@ -134,6 +135,13 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         }
     }
 
+    @Override
+    public com.pilot.server.attachment.AttachmentReferences.RunCheckpoint load(String runId) {
+        ConversationCheckpoint checkpoint = conversation(runId);
+        return checkpoint == null ? null
+            : new com.pilot.server.attachment.AttachmentReferences.RunCheckpoint(checkpoint.messages());
+    }
+
     public record RollbackReport(String runId, String workspace, List<String> restored, List<String> deleted,
         List<String> failed, List<String> conflicts) {
     }
@@ -174,6 +182,7 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         } catch (IOException | RuntimeException e) {
             log.warn("保存本轮差异失败 {}", context.runId, e);
         }
+        cleanupCommandSnapshots(context);
     }
 
     public void clear() {
@@ -264,6 +273,27 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
         }
     }
 
+    private void cleanupCommandSnapshots(Context context) {
+        Path commands = context.directory.resolve("commands");
+        if (!Files.isDirectory(commands)) {
+            return;
+        }
+        try (Stream<Path> entries = Files.list(commands)) {
+            for (Path entry : entries.toList()) {
+                if (!Files.exists(entry.resolve("baseline.json"))) {
+                    FileTrees.delete(entry);
+                }
+            }
+            try (Stream<Path> remaining = Files.list(commands)) {
+                if (remaining.findAny().isEmpty()) {
+                    Files.deleteIfExists(commands);
+                }
+            }
+        } catch (IOException e) {
+            log.warn("清理命令快照失败 {}", context.runId, e);
+        }
+    }
+
     @Override
     public synchronized CommandChangeTracker.Result finish(CommandChangeTracker.Handle handle) {
         if (handle == null || !handle.active()) {
@@ -276,10 +306,13 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
                 return mapper.readValue(Files.readString(resultFile), CommandChangeTracker.Result.class);
             } catch (IOException e) {
                 return new CommandChangeTracker.Result(List.of(), false, "命令变更结果损坏");
+            } finally {
+                pruneCommandBaseline(directory);
             }
         }
         Path baselineFile = directory.resolve("baseline.json");
         if (!Files.isRegularFile(baselineFile)) {
+            pruneCommandBaseline(directory);
             return new CommandChangeTracker.Result(List.of(), false, "命令前文件基线不存在或已过期");
         }
         try {
@@ -332,6 +365,18 @@ public class RunSnapshotService implements SnapshotSink, CommandChangeTracker {
             } catch (IOException ignored) {
             }
             return result;
+        } finally {
+            pruneCommandBaseline(directory);
+        }
+    }
+
+    /** 释放占磁盘的整仓 files/ 副本与 baseline.json，保留轻量的 result.json 供同轮幂等重复查询。 */
+    private void pruneCommandBaseline(Path directory) {
+        try {
+            FileTrees.delete(directory.resolve("files"));
+            Files.deleteIfExists(directory.resolve("baseline.json"));
+        } catch (IOException e) {
+            log.warn("清理命令临时快照副本失败 {}", directory, e);
         }
     }
 

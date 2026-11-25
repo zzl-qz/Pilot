@@ -9,27 +9,24 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
-import com.pilot.core.tool.WebSearchTool;
-
 /**
  * 联网搜索运行时配置。
  *
- * <p>覆盖 {@link #toString()} 以避免日志或异常堆栈输出明文 API Key。
+ * <p>覆盖 {@code toString()} 以避免日志或异常堆栈输出明文 API Key。
  */
 public record WebSearchConfig(WebSearchProvider provider, String apiKey, URI apiEndpoint, URI searxngEndpoint,
-    Duration timeout, boolean fallbackEnabled, Map<WebSearchProvider, String> providerKeys,
-    PublicSources publicSources, Map<WebSearchProvider, URI> providerEndpoints) {
+    Duration timeout, boolean fallbackEnabled, Map<WebSearchProvider, String> providerKeys, PublicSources publicSources,
+    Map<WebSearchProvider, URI> providerEndpoints) {
+    public static final URI DEFAULT_ENDPOINT = URI.create("http://127.0.0.1:8888");
+    public static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(20);
 
     /** 免密钥公开只读官方 API 的基址集合；测试可替换为本机模拟服务。 */
     public record PublicSources(URI wikipediaZh, URI wikipediaEn, URI github, URI stackExchange, URI arxiv,
         URI hackerNews, URI openAlex) {
-        public static final PublicSources DEFAULT = new PublicSources(
-            URI.create("https://zh.wikipedia.org/w/api.php"),
-            URI.create("https://en.wikipedia.org/w/api.php"),
-            URI.create("https://api.github.com/search/repositories"),
+        public static final PublicSources DEFAULT = new PublicSources(URI.create("https://zh.wikipedia.org/w/api.php"),
+            URI.create("https://en.wikipedia.org/w/api.php"), URI.create("https://api.github.com/search/repositories"),
             URI.create("https://api.stackexchange.com/2.3/search/advanced"),
-            URI.create("https://export.arxiv.org/api/query"),
-            URI.create("https://hn.algolia.com/api/v1/search"),
+            URI.create("https://export.arxiv.org/api/query"), URI.create("https://hn.algolia.com/api/v1/search"),
             URI.create("https://api.openalex.org/works"));
 
         public PublicSources(URI wikipediaZh, URI wikipediaEn, URI github, URI stackExchange, URI arxiv) {
@@ -48,17 +45,16 @@ public record WebSearchConfig(WebSearchProvider provider, String apiKey, URI api
         provider = provider == null ? WebSearchProvider.AUTO : provider;
         apiKey = apiKey == null ? "" : apiKey.strip();
         apiEndpoint = apiEndpoint == null ? null : stripTrailingSlash(apiEndpoint);
-        searxngEndpoint =
-            searxngEndpoint == null ? WebSearchTool.DEFAULT_ENDPOINT : stripTrailingSlash(searxngEndpoint);
-        timeout = Objects.requireNonNull(timeout == null ? WebSearchTool.DEFAULT_TIMEOUT : timeout);
+        searxngEndpoint = searxngEndpoint == null ? DEFAULT_ENDPOINT : stripTrailingSlash(searxngEndpoint);
+        timeout = Objects.requireNonNull(timeout == null ? DEFAULT_TIMEOUT : timeout);
         if (timeout.isZero() || timeout.isNegative()) {
             throw new IllegalArgumentException("搜索请求超时必须为正数");
         }
         Map<WebSearchProvider, String> cleanedKeys = new EnumMap<>(WebSearchProvider.class);
         if (providerKeys != null) {
             for (Map.Entry<WebSearchProvider, String> entry : providerKeys.entrySet()) {
-                if (entry.getKey() != null && entry.getKey().requiresApiKey()
-                    && entry.getValue() != null && !entry.getValue().isBlank()) {
+                if (entry.getKey() != null && entry.getKey().requiresApiKey() && entry.getValue() != null
+                    && !entry.getValue().isBlank()) {
                     cleanedKeys.put(entry.getKey(), entry.getValue().strip());
                 }
             }
@@ -134,8 +130,8 @@ public record WebSearchConfig(WebSearchProvider provider, String apiKey, URI api
         if (target != null && providerEndpoints.containsKey(target)) {
             return providerEndpoints.get(target);
         }
-        if (apiEndpoint != null && (target == provider
-            || (provider == WebSearchProvider.AUTO && inferGenericApiProvider() == target))) {
+        if (apiEndpoint != null
+            && (target == provider || (provider == WebSearchProvider.AUTO && inferGenericApiProvider() == target))) {
             return apiEndpoint;
         }
         if (target != null && !target.defaultEndpoint().isBlank()) {
@@ -198,9 +194,9 @@ public record WebSearchConfig(WebSearchProvider provider, String apiKey, URI api
 
     @Override
     public String toString() {
-        return "WebSearchConfig[provider=" + provider + ", apiKey=" + maskSecret(apiKey)
-            + ", apiEndpoint=" + apiEndpoint + ", providerEndpoints=" + providerEndpoints.keySet()
-            + ", searxngEndpoint=" + searxngEndpoint + ", timeout=" + timeout
-            + ", fallbackEnabled=" + fallbackEnabled + ", providerKeys=" + providerKeys.keySet() + "]";
+        return "WebSearchConfig[provider=" + provider + ", apiKey=" + maskSecret(apiKey) + ", apiEndpoint="
+            + apiEndpoint + ", providerEndpoints=" + providerEndpoints.keySet() + ", searxngEndpoint=" + searxngEndpoint
+            + ", timeout=" + timeout + ", fallbackEnabled=" + fallbackEnabled + ", providerKeys="
+            + providerKeys.keySet() + "]";
     }
 }

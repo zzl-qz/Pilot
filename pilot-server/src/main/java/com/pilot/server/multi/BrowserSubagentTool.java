@@ -1,4 +1,4 @@
-package com.pilot.server.browser;
+package com.pilot.server.multi;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -50,7 +50,7 @@ import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.ToolResult;
 import com.pilot.core.tool.ToolSchemas;
 import com.pilot.core.workspace.PathValidator;
-import com.pilot.server.multi.SpawnAgentTool;
+import com.pilot.server.browser.BrowserRuntime;
 
 /**
  * {@code browser_agent}：独立隔离的浏览器子代理工具。
@@ -81,6 +81,12 @@ public final class BrowserSubagentTool extends PromptedTool {
     private record SubagentContext(String agentId, String browserSessionId, String label, List<Message> messages) {
     }
 
+    public record Dependencies(BrowserBackend backend, String sessionId, String runId, PathValidator paths,
+        ModelClient client, PermissionGate permissionGate, ApprovalBroker approvals, AgentLoop.Config config,
+        Consumer<SessionEvent> events, BooleanSupplier cancelled, SpawnAgentTool.UsageSink usageSink,
+        com.pilot.core.browser.BrowserHandoffBroker handoffs, BrowserEvidenceRecorder evidenceSink) {
+    }
+
     private final BrowserBackend backend;
     private final String sessionId;
     private final String runId;
@@ -100,19 +106,25 @@ public final class BrowserSubagentTool extends PromptedTool {
     private final Map<String, SubagentContext> contexts = new LinkedHashMap<>();
     private final Deque<String> contextOrder = new ArrayDeque<>();
 
-    public BrowserSubagentTool(BrowserBackend backend, String sessionId, String runId, PathValidator paths,
-        ModelClient client, PermissionGate permissionGate, ApprovalBroker approvals, AgentLoop.Config config,
-        Consumer<SessionEvent> events, BooleanSupplier cancelled, SpawnAgentTool.UsageSink usageSink,
-        com.pilot.core.browser.BrowserHandoffBroker handoffs, BrowserEvidenceRecorder evidenceSink) {
-        this(backend, sessionId, runId, paths, client, permissionGate, approvals, config, events, cancelled, usageSink,
-            handoffs, evidenceSink, Budget.DEFAULT);
+    public BrowserSubagentTool(Dependencies dependencies) {
+        this(dependencies, Budget.DEFAULT);
     }
 
-    public BrowserSubagentTool(BrowserBackend backend, String sessionId, String runId, PathValidator paths,
-        ModelClient client, PermissionGate permissionGate, ApprovalBroker approvals, AgentLoop.Config config,
-        Consumer<SessionEvent> events, BooleanSupplier cancelled, SpawnAgentTool.UsageSink usageSink,
-        com.pilot.core.browser.BrowserHandoffBroker handoffs, BrowserEvidenceRecorder evidenceSink, Budget budget) {
+    public BrowserSubagentTool(Dependencies dependencies, Budget budget) {
         super(ToolNames.BROWSER_AGENT);
+        BrowserBackend backend = dependencies.backend();
+        String sessionId = dependencies.sessionId();
+        String runId = dependencies.runId();
+        PathValidator paths = dependencies.paths();
+        ModelClient client = dependencies.client();
+        PermissionGate permissionGate = dependencies.permissionGate();
+        ApprovalBroker approvals = dependencies.approvals();
+        AgentLoop.Config config = dependencies.config();
+        Consumer<SessionEvent> events = dependencies.events();
+        BooleanSupplier cancelled = dependencies.cancelled();
+        SpawnAgentTool.UsageSink usageSink = dependencies.usageSink();
+        com.pilot.core.browser.BrowserHandoffBroker handoffs = dependencies.handoffs();
+        BrowserEvidenceRecorder evidenceSink = dependencies.evidenceSink();
         this.backend = Objects.requireNonNull(backend, "backend must not be null");
         this.sessionId = sessionId == null || sessionId.isBlank() ? "default" : sessionId.strip();
         this.runId = runId == null ? "" : runId.strip();
@@ -160,41 +172,24 @@ public final class BrowserSubagentTool extends PromptedTool {
 
     @Override
     public ToolResult executeResult(Map<String, Object> args) {
-        String task = str(args == null ? null : args.get("task"));
-        if (task.isBlank()) {
-            return ToolResult.text("ERROR: task 不能为空");
+        Invocation invocation = invocation(args);
+        if (invocation.error() != null) {
+            return ToolResult.text(invocation.error());
         }
-        String url = str(args == null ? null : args.get("url"));
-        boolean external = args != null && Boolean.TRUE.equals(args.get("external"));
-        String purpose = str(args == null ? null : args.get("purpose"));
-        String resumeId = str(args == null ? null : args.get("resume_agent_id"));
-        String requestedLabel = str(args == null ? null : args.get("label"));
+        return runSubagent(invocation);
+    }
 
-        SubagentContext resumed = null;
-        if (!resumeId.isBlank()) {
-            synchronized (contexts) {
-                resumed = contexts.get(resumeId);
-            }
-            if (resumed == null) {
-                return ToolResult.text("ERROR: 没有找到浏览器子代理 " + resumeId + " 的已有上下文，无法续跑");
-            }
-        } else {
-            int spawn = runSpawns.incrementAndGet();
-            if (spawn > budget.maxSpawnsPerRun()) {
-                return ToolResult.text("ERROR: 本轮浏览器子代理创建次数已达上限 " + budget.maxSpawnsPerRun()
-                    + " 次；请基于现有结果汇总交付，或传入 resume_agent_id 复用已有浏览器子代理。");
-            }
-        }
-
-        String agentId = resumed != null ? resumed.agentId() : "bagent_" + UUID.randomUUID().toString().substring(0, 8);
-        String browserSessionId = resumed != null ? resumed.browserSessionId() : sessionId + "::browser::" + agentId;
-        String label = !requestedLabel.isBlank() ? requestedLabel : resumed != null && !resumed.label().isBlank()
-            ? resumed.label() : task.length() > 16 ? task.substring(0, 16) + "…" : task;
-        List<Message> priorHistory = resumed != null ? resumed.messages() : List.of();
-
-        if (backend instanceof BrowserRuntime runtime) {
-            runtime.registerChildSession(sessionId, browserSessionId, agentId, label);
-        }
+    private ToolResult runSubagent(Invocation invocation) {
+        String task = invocation.task();
+        String url = invocation.url();
+        boolean external = invocation.external();
+        String purpose = invocation.purpose();
+        SubagentContext resumed = invocation.resumed();
+        String agentId = invocation.agentId();
+        String browserSessionId = invocation.browserSessionId();
+        String label = invocation.label();
+        List<Message> priorHistory = invocation.priorHistory();
+        registerChildSession(browserSessionId, agentId, label);
 
         events.accept(new SubagentStarted(agentId, task, label));
         CopyOnWriteArrayList<BrowserEvidenceRecord> captured = new CopyOnWriteArrayList<>();
@@ -219,30 +214,7 @@ public final class BrowserSubagentTool extends PromptedTool {
             String prompt = buildPrompt(task, url, external, purpose, resumed != null);
             AgentLoop.Result result =
                 loop.run(prompt, priorHistory, event -> forwardChildEvent(event, completion, agentId));
-            rememberContext(agentId, browserSessionId, label, result);
-            if (recordingStarted) {
-                stopProcessRecording(browserSessionId, agentId, localRecorder, !captured.isEmpty());
-                recordingStarted = false;
-            }
-
-            String hostFacts = buildHostFacts(agentId, browserSessionId, captured);
-            List<Attachment> attachments = latestScreenshotAttachment(captured);
-            String closing = truncateSummary(result.finalText());
-            if (result.failed()) {
-                String code = result.failureCode() == null ? "UNKNOWN" : result.failureCode();
-                if (hasAuthoredConclusion(closing, code)) {
-                    String report = "[浏览器子代理阶段结算：" + code + "]\n\n" + closing + hostFacts + "\nagent_id: " + agentId;
-                    events.accept(new SubagentFinished(agentId, report, false, code, true));
-                    return resultWith(report, attachments);
-                }
-                String report = "ERROR: 浏览器子代理未完成：" + code + hostFacts + "\nagent_id: " + agentId;
-                events.accept(new SubagentFinished(agentId, report, false, code, false));
-                return resultWith(report, attachments);
-            }
-            String body = closing.isBlank() ? "浏览器子代理已完成操作。" : closing;
-            String report = body + hostFacts + "\nagent_id: " + agentId;
-            events.accept(new SubagentFinished(agentId, report, true, "COMPLETED", false));
-            return resultWith(report, attachments);
+            return completeSubagent(result, invocation, captured, localRecorder, recordingStarted);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             String report = "ERROR: 浏览器子代理等待执行槽位时被中断";
@@ -265,6 +237,70 @@ public final class BrowserSubagentTool extends PromptedTool {
             if (slotHeld) {
                 parallelSlots.release();
             }
+        }
+    }
+
+    private ToolResult completeSubagent(AgentLoop.Result result, Invocation invocation,
+        List<BrowserEvidenceRecord> captured, BrowserEvidenceRecorder recorder, boolean recordingStarted) {
+        String agentId = invocation.agentId();
+        String browserSessionId = invocation.browserSessionId();
+        rememberContext(agentId, browserSessionId, invocation.label(), result);
+        if (recordingStarted) {
+            stopProcessRecording(browserSessionId, agentId, recorder, !captured.isEmpty());
+        }
+        String hostFacts = buildHostFacts(agentId, browserSessionId, captured);
+        List<Attachment> attachments = latestScreenshotAttachment(captured);
+        String closing = truncateSummary(result.finalText());
+        if (result.failed()) {
+            String code = result.failureCode() == null ? "UNKNOWN" : result.failureCode();
+            boolean authored = hasAuthoredConclusion(closing, code);
+            String report = authored ? "[浏览器子代理阶段结算：" + code + "]\n\n" + closing + hostFacts
+                : "ERROR: 浏览器子代理未完成：" + code + hostFacts;
+            events.accept(new SubagentFinished(agentId, report, false, code, authored));
+            return resultWith(report + "\nagent_id: " + agentId, attachments);
+        }
+        String body = closing.isBlank() ? "浏览器子代理已完成操作。" : closing;
+        String report = body + hostFacts + "\nagent_id: " + agentId;
+        events.accept(new SubagentFinished(agentId, report, true, "COMPLETED", false));
+        return resultWith(report, attachments);
+    }
+
+    private record Invocation(String task, String url, boolean external, String purpose, SubagentContext resumed,
+        String agentId, String browserSessionId, String label, List<Message> priorHistory, String error) {
+    }
+
+    private Invocation invocation(Map<String, Object> args) {
+        String task = str(args == null ? null : args.get("task"));
+        if (task.isBlank()) {
+            return new Invocation(task, "", false, "", null, "", "", "", List.of(), "ERROR: task 不能为空");
+        }
+        String resumeId = str(args == null ? null : args.get("resume_agent_id"));
+        SubagentContext resumed = null;
+        if (!resumeId.isBlank()) {
+            synchronized (contexts) {
+                resumed = contexts.get(resumeId);
+            }
+            if (resumed == null) {
+                return new Invocation(task, "", false, "", null, "", "", "", List.of(),
+                    "ERROR: 没有找到浏览器子代理 " + resumeId + " 的已有上下文，无法续跑");
+            }
+        } else if (runSpawns.incrementAndGet() > budget.maxSpawnsPerRun()) {
+            return new Invocation(task, "", false, "", null, "", "", "", List.of(), "ERROR: 本轮浏览器子代理创建次数已达上限 "
+                + budget.maxSpawnsPerRun() + " 次；请基于现有结果汇总交付，或传入 resume_agent_id 复用已有浏览器子代理。");
+        }
+        String agentId = resumed != null ? resumed.agentId() : "bagent_" + UUID.randomUUID().toString().substring(0, 8);
+        String browserSessionId = resumed != null ? resumed.browserSessionId() : sessionId + "::browser::" + agentId;
+        String requestedLabel = str(args == null ? null : args.get("label"));
+        String label = !requestedLabel.isBlank() ? requestedLabel : resumed != null && !resumed.label().isBlank()
+            ? resumed.label() : task.length() > 16 ? task.substring(0, 16) + "…" : task;
+        return new Invocation(task, str(args == null ? null : args.get("url")),
+            args != null && Boolean.TRUE.equals(args.get("external")), str(args == null ? null : args.get("purpose")),
+            resumed, agentId, browserSessionId, label, resumed == null ? List.of() : resumed.messages(), null);
+    }
+
+    private void registerChildSession(String browserSessionId, String agentId, String label) {
+        if (backend instanceof BrowserRuntime runtime) {
+            runtime.registerChildSession(sessionId, browserSessionId, agentId, label);
         }
     }
 
@@ -431,8 +467,8 @@ public final class BrowserSubagentTool extends PromptedTool {
             }
             if (!recPath.isBlank()) {
                 recorder.record(new BrowserEvidenceRecord("ev_" + UUID.randomUUID().toString().substring(0, 12),
-                    sessionId, browserSessionId, runId, agentId, Instant.now(), "record", "ok",
-                    str(meta.get("url")), str(meta.get("title")), reply.text(), "", "", "", "", 0L, List.of(),
+                    sessionId, browserSessionId, runId, agentId, Instant.now(), "record", "ok", str(meta.get("url")),
+                    str(meta.get("title")), reply.text(), "", "", "", "", 0L, List.of(),
                     meta.get("consoleErrors") instanceof Number n ? n.intValue() : 0,
                     meta.get("failedRequests") instanceof Number n ? n.intValue() : 0, "", recPath));
             }

@@ -78,6 +78,24 @@
             </resource>
         </resources>
         <plugins>
+            <!-- 删除上次构建遗留的带 hash 资源，避免增量复制累积旧 bundle。 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>clean-static-assets</id>
+                        <phase>generate-resources</phase>
+                        <goals><goal>run</goal></goals>
+                        <configuration>
+                            <target>
+                                <delete dir="${project.build.outputDirectory}/static/assets" quiet="true"/>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <!-- 在复制静态资源前检查锁定的依赖，并按需构建前端。 -->
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>

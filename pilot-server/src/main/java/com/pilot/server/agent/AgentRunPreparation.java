@@ -68,7 +68,6 @@ import com.pilot.core.workspace.AgentScope;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.browser.BrowserEvidenceService;
 import com.pilot.server.browser.BrowserRuntime;
-import com.pilot.server.browser.BrowserSubagentTool;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.MultiAgentProperties;
 import com.pilot.server.git.GitWorktrees;
@@ -76,6 +75,7 @@ import com.pilot.server.git.GitWorktrees.Created;
 import com.pilot.server.git.GitWorktrees.Handoff;
 import com.pilot.server.model.ModelClientProvider;
 import com.pilot.server.model.ModelSettings;
+import com.pilot.server.multi.BrowserSubagentTool;
 import com.pilot.server.multi.DispatchAgentsTool;
 import com.pilot.server.multi.MultiAgentService;
 import com.pilot.server.multi.SpawnAgentTool;
@@ -326,9 +326,9 @@ public final class AgentRunPreparation {
             }
             tools.register(spawnAgent);
             if (!planMode && browserRuntime != null) {
-                tools.register(new BrowserSubagentTool(browserRuntime, sessionId, runId,
-                    new PathValidator(toolFactory.resolve(workspace), extraRoots), measuredChild, sessionGate,
-                    approvals, config, sink, cancelled, childUsage, browserHandoffs, browserEvidence));
+                tools.register(new BrowserSubagentTool(new BrowserSubagentTool.Dependencies(browserRuntime, sessionId,
+                    runId, new PathValidator(toolFactory.resolve(workspace), extraRoots), measuredChild, sessionGate,
+                    approvals, config, sink, cancelled, childUsage, browserHandoffs, browserEvidence)));
             }
             if (multiProperties.enabled() && !planMode) {
                 tools.register(new DispatchAgentsTool(multiAgent, sessionId, runId, workspace, sink, cancelled,

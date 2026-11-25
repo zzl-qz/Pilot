@@ -223,7 +223,8 @@ class WorkServicesTest {
         assertFalse(Files.exists(skillFile()));
         var accepted = drafts.decide(session, draft.id(), draft.version(), "approve");
         drafts.decide(session, draft.id(), accepted.version(), "revert");
-        assertTrue(skills.catalogFor(workspace.toString()).list().isEmpty());
+        assertTrue(skills.catalogFor(workspace.toString()).list().stream()
+            .noneMatch(skill -> skill.source().equals("project")));
         assertTrue(skills.catalogFor(workspace.toString()).invalid().isEmpty());
         var rejected = drafts.propose(session, "other-run", "other-skill", "拒绝", "步骤", "依据");
         assertEquals("REJECTED", drafts.decide(session, rejected.id(), rejected.version(), "reject").status());
