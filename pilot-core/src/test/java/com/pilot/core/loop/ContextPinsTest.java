@@ -67,7 +67,25 @@ class ContextPinsTest {
             assertTrue(metadata.endsWith(END), metadata);
             assertEquals(1, occurrences(metadata, MARKER));
             assertEquals(goal, requests(metadata).get(0));
+            assertTrue(requests(metadata).size() >= 2 && requests(metadata).getLast().contains("第 " + round + " 轮用户纠正"),
+                "超预算时应淘汰中间旧请求并保留最新一轮用户纠正：" + requests(metadata));
         }
+    }
+
+    @Test
+    void preservesOriginalGoalAndLatestSteeringByDroppingMiddleRequestsFirst() {
+        String goal = "最初目标：完成订单重构";
+        String mid1 = "中间补充一：" + "甲".repeat(300);
+        String mid2 = "中间补充二：" + "乙".repeat(300);
+        String latest = "最新纠正：不要改数据库字段名";
+        String pins = ContextPins.capture(List.of(Message.system("s"), Message.user(goal), Message.user(mid1),
+            Message.user(mid2), Message.user(latest)), 5, "hash");
+
+        String fitted = ContextPins.limit(pins, 400);
+
+        List<String> kept = requests(fitted);
+        assertEquals(List.of(goal, latest), kept);
+        assertTrue(fitted.length() <= 400);
     }
 
     @Test

@@ -48,7 +48,8 @@ final class ContextPins {
     }
 
     /**
-     * 超长时先丢已读引用，再丢靠后的请求，最后在首条请求字段内部截断。
+     * 超长时先丢最旧的已读引用，再淘汰中间较早的请求（保住原始目标与最新用户指令/中途纠正），
+     * 仍超限时先在最新指令字段内截断，最后才在首条原始目标字段内部截断。
      * 输出永远是闭合的元数据块且长度不超过 {@code max}，绝不在闭合标签外拼尾巴。
      */
     static String limit(String pins, int max) {
@@ -67,16 +68,53 @@ final class ContextPins {
         metadata.path("evidence_refs").forEach(item -> references.add(item.asText()));
         metadata.path("user_requests").forEach(item -> requests.add(item.asText()));
         while (!references.isEmpty() && rendered(metadata, requests, references).length() > max) {
-            references.remove(references.size() - 1);
+            references.remove(0);
         }
-        while (requests.size() > 1 && rendered(metadata, requests, references).length() > max) {
-            requests.remove(requests.size() - 1);
+        while (requests.size() > 2 && rendered(metadata, requests, references).length() > max) {
+            requests.remove(1);
         }
         if (requests.isEmpty()) {
             return emptyMetadata(max);
         }
         String fitted = rendered(metadata, requests, references);
-        return fitted.length() <= max ? fitted : truncateGoal(metadata, references, requests.get(0), max);
+        if (fitted.length() <= max) {
+            return fitted;
+        }
+        if (requests.size() == 2) {
+            String withLatest = truncateLatest(metadata, references, requests.get(0), requests.get(1), max);
+            if (!withLatest.isEmpty()) {
+                return withLatest;
+            }
+            requests.remove(1);
+            fitted = rendered(metadata, requests, references);
+            if (fitted.length() <= max) {
+                return fitted;
+            }
+        }
+        return truncateGoal(metadata, references, requests.get(0), max);
+    }
+
+    /** 同时保留原始目标与最新用户指令的头尾摘录；空间放不下两条时返回空串，回落到只保留原始目标。 */
+    private static String truncateLatest(JsonNode metadata, List<String> references, String goal, String latest,
+        int max) {
+        int minKeep = Math.min(32, latest.length());
+        if (minKeep <= 0 || rendered(metadata, List.of(goal, excerpt(latest, minKeep)), references).length() > max) {
+            return "";
+        }
+        int low = minKeep;
+        int high = latest.length();
+        String fitted = "";
+        while (low <= high) {
+            int keep = (low + high) >>> 1;
+            String candidate = rendered(metadata, List.of(goal, excerpt(latest, keep)), references);
+            if (candidate.length() <= max) {
+                fitted = candidate;
+                low = keep + 1;
+            } else {
+                high = keep - 1;
+            }
+        }
+        return fitted;
     }
 
     private static String rendered(JsonNode metadata, List<String> requests, List<String> references) {

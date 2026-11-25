@@ -613,7 +613,7 @@ public final class AgentLoop {
             }
             completionGate.baseline(List.copyOf(checks));
         }
-        UsageTracker usage = new UsageTracker(events, this::noteUsage);
+        UsageTracker usage = new UsageTracker(events, this::noteUsage, client::capacity);
         DynamicPollTracker dynamicPolls = new DynamicPollTracker(config.repeatRemindAt(), config.repeatAbortAt());
         planGate.reset();
         RuntimeGuidance runtimeGuidance = new RuntimeGuidance();
@@ -655,7 +655,8 @@ public final class AgentLoop {
                         messages.add(Message.assistant(turn.stop().finalText(), List.of()));
                         events.accept(new AssistantDelta(turn.stop().finalText()));
                         events.accept(new RunFailed(RunFailureCode.CONTEXT_TOO_LARGE, turn.stop().finalText(), false));
-                        return new Result(turn.stop().finalText(), turn.stop().failureCode(), conversation(messages));
+                        return new Result(turn.stop().finalText(), turn.stop().failureCode(), conversation(messages),
+                            List.copyOf(changedFiles), List.copyOf(checks), planSnapshot());
                     }
                     return finalizeFailure(messages, events, usage, turn.stop().failureCode(), "模型请求未能完成；已有进度保留。",
                         false, changedFiles, checks);
@@ -868,9 +869,9 @@ public final class AgentLoop {
             executionPolicy != null && executionPolicy.independentCompletionReview(changedFiles),
             qualityChanges(changedFiles), qualityWorkspace, independentCodeReviewer, content);
         if (nudge != null && !nudge.halt()
-            && CompletionPressure.tooFull(messages, tools.definitions(), contextLimit())) {
+            && CompletionPressure.tooFull(messages, tools.definitions(), contextLimit(), client.capacity())) {
             fitHistoryToInputBudget(messages, events, null);
-            if (CompletionPressure.tooFull(messages, tools.definitions(), contextLimit())) {
+            if (CompletionPressure.tooFull(messages, tools.definitions(), contextLimit(), client.capacity())) {
                 content = content + "\n\n上下文接近上限，已跳过非阻断收尾催办。";
                 messages.set(messages.size() - 1, Message.assistant(content, List.of(), reasoning));
                 events.accept(new RunContinued(1, 1, "上下文接近上限，已跳过非阻断收尾催办"));
@@ -1052,7 +1053,7 @@ public final class AgentLoop {
                 request.add(
                     Message.user("[系统收尾要求] 本轮必须现在结束，禁止调用工具，也不要假装任务已经完成。" + "请基于已有对话和证据给用户一份可直接阅读的阶段交付：先说明实际完成了什么和证据，"
                         + "再说明未完成项；最后写明停止原因与恢复所需条件。停止代码：" + code + "；停止原因：" + reason));
-                if (!RequestBudget.assessRequest(request, List.of(), contextLimit()).fits()) {
+                if (!RequestBudget.assessRequest(request, List.of(), contextLimit(), client.capacity()).fits()) {
                     throw new IllegalStateException("收尾请求超出安全上下文预算");
                 }
                 usage.start(request, contextLimit());
@@ -1231,22 +1232,25 @@ public final class AgentLoop {
             ContextCompactor.truncateLongToolOutputs(messages, messages.size());
         }
         if (!requestFits(messages, guidance) && historyCanShrink(messages)) {
-            int wireLimit = (int)Math.min(Integer.MAX_VALUE, RequestBudget
-                .assessRequest(requestMessages(messages, guidance), tools.definitions(), contextLimit()).inputLimit());
+            int wireLimit =
+                (int)Math.min(Integer.MAX_VALUE, RequestBudget.assessRequest(requestMessages(messages, guidance),
+                    tools.definitions(), contextLimit(), client.capacity()).inputLimit());
+            int beforeSize = messages.size();
             budget.apply(messages, Math.max(1, wireLimit), contextLimit(), fixedOverheadTokens(messages), events,
                 observedThroughIndex);
-            observedThroughIndex = Math.min(observedThroughIndex, messages.size());
+            observedThroughIndex = shiftObservedBoundary(observedThroughIndex, beforeSize, messages.size());
         }
         int guard = messages.size() + 1;
         while (guard-- > 0 && !requestFits(messages, guidance)) {
             int chars = ContextCompactor.totalChars(messages);
             int tokens = ContextCompactor.estimateTokens(messages);
+            int beforeSize = messages.size();
             int dropped = ContextCompactor.dropOldestGroups(messages, Math.max(8_000, chars * 2 / 3),
                 Math.max(2_000, tokens * 2 / 3));
             if (dropped == 0) {
                 break;
             }
-            observedThroughIndex = Math.min(observedThroughIndex, messages.size());
+            observedThroughIndex = shiftObservedBoundary(observedThroughIndex, beforeSize, messages.size());
         }
         // 只剩最近几组、又没有任何一条长到截断阈值时，整组丢弃会停住。再差一点就中断任务。
         // 这里改截短最长的历史正文，或去掉最早的工具图片，直到放得下。系统提示不动。
@@ -1282,13 +1286,15 @@ public final class AgentLoop {
         ContextCompactor.truncateLongToolOutputs(messages, messages.size());
         if (overTarget(messages, targetChars, targetTokens)) {
             // 按新水位当预算，等价于「一定会触发」的压缩轮：正常水位下不会因为够松而跳过摘要。
+            int beforeSize = messages.size();
             budget.apply(messages, targetTokens, targetChars, fixedOverheadTokens(messages), events,
                 observedThroughIndex);
-            observedThroughIndex = Math.min(observedThroughIndex, messages.size());
+            observedThroughIndex = shiftObservedBoundary(observedThroughIndex, beforeSize, messages.size());
         }
         if (overTarget(messages, targetChars, targetTokens)) {
+            int beforeSize = messages.size();
             ContextCompactor.dropOldestGroups(messages, targetChars, targetTokens);
-            observedThroughIndex = Math.min(observedThroughIndex, messages.size());
+            observedThroughIndex = shiftObservedBoundary(observedThroughIndex, beforeSize, messages.size());
         }
         shaveWhile(messages, () -> overTarget(messages, targetChars, targetTokens));
         observedThroughIndex = Math.min(observedThroughIndex, messages.size());
@@ -1297,6 +1303,12 @@ public final class AgentLoop {
         }
         notifyContextShrink();
         return true;
+    }
+
+    /** 折叠/裁剪从历史前缀移除消息后，同步左移已观察边界，避免把尾部未观察的新工具结果/截图误标成已观察。 */
+    private static int shiftObservedBoundary(int observed, int beforeSize, int afterSize) {
+        int removed = Math.max(0, beforeSize - afterSize);
+        return Math.max(0, Math.min(afterSize, observed - removed));
     }
 
     private static boolean overTarget(List<Message> messages, int targetChars, int targetTokens) {
@@ -1374,11 +1386,13 @@ public final class AgentLoop {
         if (messages.isEmpty()) {
             return false;
         }
-        return RequestBudget.assessRequest(List.of(messages.get(0)), tools.definitions(), contextLimit()).fits();
+        return RequestBudget
+            .assessRequest(List.of(messages.get(0)), tools.definitions(), contextLimit(), client.capacity()).fits();
     }
 
     private boolean requestFits(List<Message> messages, String guidance) {
-        return RequestBudget.assessRequest(requestMessages(messages, guidance), tools.definitions(), contextLimit())
+        return RequestBudget
+            .assessRequest(requestMessages(messages, guidance), tools.definitions(), contextLimit(), client.capacity())
             .fits();
     }
 
@@ -1501,7 +1515,7 @@ public final class AgentLoop {
 
     /** 估算工具定义、协议头与图片附件带来的非正文固定 token 开销，与 RequestBudget 保持同一口径。 */
     private int fixedOverheadTokens(List<Message> messages) {
-        long full = RequestBudget.assess(messages, tools.definitions(), ModelCapacity.active()).estimatedInputTokens();
+        long full = RequestBudget.assess(messages, tools.definitions(), client.capacity()).estimatedInputTokens();
         long body = ContextCompactor.estimateTokens(messages);
         return (int)Math.max(0L, Math.min(Integer.MAX_VALUE, full - body));
     }
@@ -1646,13 +1660,14 @@ public final class AgentLoop {
                 RequestBudget.closeDanglingToolCalls(messages);
                 List<Message> request = requestMessages(messages, retainedGuidance);
                 RequestBudget.Assessment admission =
-                    RequestBudget.assessRequest(request, tools.definitions(), contextLimit());
+                    RequestBudget.assessRequest(request, tools.definitions(), contextLimit(), client.capacity());
                 if (!admission.fits()) {
                     // 本地字符预算比发送线松，长对话会在这里才发现超窗。先折掉更早的记录再发，
                     // 不把整轮停成失败。系统提示和工具定义本身都放不下时，折叠也没有用。
                     fitHistoryToInputBudget(messages, events, retainedGuidance);
                     request = requestMessages(messages, retainedGuidance);
-                    admission = RequestBudget.assessRequest(request, tools.definitions(), contextLimit());
+                    admission =
+                        RequestBudget.assessRequest(request, tools.definitions(), contextLimit(), client.capacity());
                 }
                 if (!admission.fits()
                     && (retainedGuidance != null && !retainedGuidance.isBlank() || phaseHint != null)) {
@@ -1661,7 +1676,8 @@ public final class AgentLoop {
                     clearPhaseHint();
                     fitHistoryToInputBudget(messages, events, null);
                     request = requestMessages(messages, null);
-                    admission = RequestBudget.assessRequest(request, tools.definitions(), contextLimit());
+                    admission =
+                        RequestBudget.assessRequest(request, tools.definitions(), contextLimit(), client.capacity());
                 }
                 if (!admission.fits()) {
                     throw new ExecutionPolicy.Stop(RunFailureCode.CONTEXT_TOO_LARGE,
@@ -1830,6 +1846,9 @@ public final class AgentLoop {
                     decision.elapsedMs(), decision.remainingMs(), retryBudget.maxAttempts()));
                 // 上一次尝试可能已经推过一段预览：重试会重新输出全文，旧片段必须先作废。
                 events.accept(AssistantPreview.discarded());
+                if (reasoningPreviewVisible.getAndSet(false)) {
+                    events.accept(AssistantReasoning.discarded());
+                }
                 if (!pause(decision.delayMs(), clockMark, events)) {
                     return new ModelTurn(null, stopForCancellation(messages, events));
                 }
@@ -1953,7 +1972,7 @@ public final class AgentLoop {
 
     /** 真正会拿去发给模型的输入上限。界面和日常压缩都用这一口径，避免本地 40 万字符预算把 10 万的发送线挡住。 */
     int admissionLimit() {
-        long wire = ModelCapacity.active().inputBudget();
+        long wire = client.capacity().inputBudget();
         long local = (long)(contextLimit() * 0.80);
         return (int)Math.max(1, Math.min(Integer.MAX_VALUE, Math.min(local, wire)));
     }
@@ -2113,6 +2132,7 @@ public final class AgentLoop {
         private final Consumer<SessionEvent> events;
         /** 每拿到一次端点用量就回传，用来记录本 run 是否出现过缓存命中。 */
         private final Consumer<ModelUsage> observer;
+        private final Supplier<ModelCapacity> capacity;
         private int requests;
         private long inputTokens;
         private long outputTokens;
@@ -2122,9 +2142,11 @@ public final class AgentLoop {
         private int contextLimit = 1;
         private boolean allExact = true;
 
-        private UsageTracker(Consumer<SessionEvent> events, Consumer<ModelUsage> observer) {
+        private UsageTracker(Consumer<SessionEvent> events, Consumer<ModelUsage> observer,
+            Supplier<ModelCapacity> capacity) {
             this.events = events;
             this.observer = observer;
+            this.capacity = capacity;
         }
 
         private void start(List<Message> messages, int limit) {
@@ -2132,7 +2154,7 @@ public final class AgentLoop {
         }
 
         private void start(List<Message> messages, int limit, List<ToolDefinition> tools) {
-            pendingInput = RequestBudget.assessRequest(messages, tools, limit).estimatedInputTokens();
+            pendingInput = RequestBudget.assessRequest(messages, tools, limit, capacity.get()).estimatedInputTokens();
             contextTokens = (int)Math.min(Integer.MAX_VALUE, pendingInput);
             contextLimit = Math.max(1, limit);
             requests++;

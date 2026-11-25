@@ -203,9 +203,6 @@ public final class ContextCompactor {
         }
 
         int end = groups.get(start)[0];
-        if (messages.subList(1, end).stream().anyMatch(ContextCompactor::isUnarchivedToolOutput)) {
-            return Outcome.none(beforeChars);
-        }
         String pins = ContextPins.capture(messages, end, sourceFingerprint(messages.subList(0, end)));
         int pinLimit = Math.min(SUMMARY_INPUT_CHARS / 2, Math.max(4_000, targetChars / 3));
         if (pins.length() > pinLimit) {
@@ -459,6 +456,7 @@ public final class ContextCompactor {
         }
         int pinnedTokens = estimateTokens(pinnedState);
         int dropped = 0;
+        boolean droppedUnarchived = false;
         LinkedHashMap<String, Attachment> pinnedAttachments = new LinkedHashMap<>();
         // 兜底上限：即使分组逻辑写错也不能把调用方卡死
         int guard = messages.size() + 1;
@@ -471,7 +469,7 @@ public final class ContextCompactor {
             // 参数是 [start, end)：要删的是第一组本体，取它的结束下标，别取开始下标
             int end = groups.get(0)[1];
             if (messages.subList(1, end).stream().anyMatch(ContextCompactor::isUnarchivedToolOutput)) {
-                break;
+                droppedUnarchived = true;
             }
             for (Attachment attachment : attachments(messages, 1, end)) {
                 pinnedAttachments.putIfAbsent(attachment.path(), attachment);
@@ -481,8 +479,11 @@ public final class ContextCompactor {
         }
         if (dropped > 0) {
             PinnedAttachments pinned = boundedAttachments(List.copyOf(pinnedAttachments.values()));
+            String unarchivedNote = droppedUnarchived ? "（其中包含未归档的工具输出）" : "";
             messages.add(1,
-                Message.user("[更早的 " + dropped + " 条消息已因上下文超限丢弃]" + pinned.omittedNote() + pinnedState, pinned.kept()));
+                Message.user(
+                    "[更早的 " + dropped + " 条消息已因上下文超限丢弃" + unarchivedNote + "]" + pinned.omittedNote() + pinnedState,
+                    pinned.kept()));
         }
         return dropped;
     }
@@ -546,7 +547,7 @@ public final class ContextCompactor {
             }
         }
         List<Message> request = List.of(Message.system(SUMMARY_PROMPT + focus), Message.user(transcript));
-        if (!RequestBudget.assessRequest(request, List.of(), tokenBudget).fits()) {
+        if (!RequestBudget.assessRequest(request, List.of(), tokenBudget, client.capacity()).fits()) {
             return "";
         }
         ModelResponse response =

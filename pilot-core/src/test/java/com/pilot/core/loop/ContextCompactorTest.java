@@ -492,6 +492,28 @@ class ContextCompactorTest {
         assertEquals(2, coldRequests.getFirst().size(), "未命中缓存前仍走短摘录压缩");
     }
 
+    @Test
+    void unarchivedToolOutputDoesNotPermanentlyBlockCompactionOrHardDrop() {
+        ArrayList<Message> messages = new ArrayList<>();
+        messages.add(Message.system("sys"));
+        messages.add(Message.assistant("step 0", List.of(new ToolCall("c0", "read_file", Map.of("path", "f0")))));
+        messages.add(Message.tool("c0", "x".repeat(4_000) + "\n[工具输出未归档，禁止清理原文]"));
+        for (int i = 1; i < 8; i++) {
+            messages.add(
+                Message.assistant("step " + i, List.of(new ToolCall("c" + i, "read_file", Map.of("path", "f" + i)))));
+            messages.add(Message.tool("c" + i, "y".repeat(3_000)));
+        }
+
+        List<Message> forCompact = new ArrayList<>(messages);
+        assertTrue(new ContextCompactor(summarizing("含未归档输出的摘要"), 2).compact(forCompact, 10_000).compacted(),
+            "单条未归档工具输出不应成为毒丸永久阻断摘要压缩");
+
+        List<Message> forDrop = new ArrayList<>(messages);
+        int dropped = ContextCompactor.dropOldestGroups(forDrop, 7_000);
+        assertTrue(dropped > 0, "硬裁剪遇到未归档工具输出时也不能永久卡死直至 CONTEXT_TOO_LARGE");
+        assertTrue(forDrop.get(1).content().contains("未归档"));
+    }
+
     private static List<Message> history(int groups, int charsPerTool) {
         ArrayList<Message> messages = new ArrayList<Message>();
         messages.add(Message.system("sys"));
