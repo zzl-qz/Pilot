@@ -1,10 +1,27 @@
 import { createServer } from 'node:http';
 
+const MAX_BODY_BYTES = 1024 * 1024;
+
 function readBody(request) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    request.on('data', (chunk) => chunks.push(chunk));
+    let bytes = 0;
+    let tooLarge = false;
+    request.on('data', (chunk) => {
+      if (tooLarge) return;
+      bytes += chunk.length;
+      if (bytes > MAX_BODY_BYTES) {
+        tooLarge = true;
+        chunks.length = 0;
+        return;
+      }
+      chunks.push(chunk);
+    });
     request.on('end', () => {
+      if (tooLarge) {
+        reject(Object.assign(new Error('请求体超过 1 MiB'), { statusCode: 413 }));
+        return;
+      }
       if (chunks.length === 0) {
         resolve({});
         return;
@@ -32,8 +49,26 @@ export function startBrowserControl(token, actions, options = {}) {
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1');
     if (request.method === 'GET' && url.pathname.startsWith('/marker/')) {
-      const id = decodeURIComponent(url.pathname.slice('/marker/'.length));
-      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      let id = '';
+      let valid = true;
+      try {
+        id = decodeURIComponent(url.pathname.slice('/marker/'.length));
+      } catch {
+        valid = false;
+      }
+      if (!valid || !/^[a-zA-Z0-9_-]{1,64}$/.test(id)) {
+        response.writeHead(400, {
+          'content-security-policy': "default-src 'none'",
+          'x-content-type-options': 'nosniff'
+        });
+        response.end('invalid marker id');
+        return;
+      }
+      response.writeHead(200, {
+        'content-type': 'text/html; charset=utf-8',
+        'content-security-policy': "default-src 'none'",
+        'x-content-type-options': 'nosniff'
+      });
       response.end(`<!doctype html><title>新标签</title><body style="margin:0;background:#111"><p id="ready" data-tab="${id}" hidden>pilot-tab-${id}</p></body>`);
       return;
     }
@@ -58,7 +93,7 @@ export function startBrowserControl(token, actions, options = {}) {
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(JSON.stringify(result));
     } catch (error) {
-      response.writeHead(500);
+      response.writeHead(error.statusCode || 500);
       response.end(String(error.message || error));
     }
   });

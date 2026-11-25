@@ -66,6 +66,8 @@ test('下载文件名清理路径穿越并识别危险扩展名', () => {
   assert.equal(sanitizeDownloadFilename('../../evil/setup.exe'), 'setup.exe');
   assert.equal(sanitizeDownloadFilename('..'), 'download.bin');
   assert.equal(isDangerousDownloadExtension('setup.EXE'), true);
+  assert.equal(isDangerousDownloadExtension('payload.exe.'), true);
+  assert.equal(isDangerousDownloadExtension('app.desktop'), true);
   assert.equal(isDangerousDownloadExtension('script.ps1'), true);
   assert.equal(isDangerousDownloadExtension('report.pdf'), false);
 });
@@ -118,6 +120,18 @@ test('桌面控制端口支持 POST /control 令牌校验与控制态更新', as
     assert.equal(body.agentControlled, true);
     assert.equal(body.controlStatus, '填写 e3');
     assert.equal(lastControl.sessionId, 's1');
+    const marker = await fetch(`http://127.0.0.1:${port}/marker/tab_1`);
+    assert.equal(marker.status, 200);
+    assert.equal(marker.headers.get('content-security-policy'), "default-src 'none'");
+    assert.equal(marker.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal((await fetch(`http://127.0.0.1:${port}/marker/%25`)).status, 400);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/marker/a%2Fb`)).status, 400);
+    const oversized = await fetch(`http://127.0.0.1:${port}/control`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-pilot-token': 'secret-token' },
+      body: JSON.stringify({ value: 'x'.repeat(1024 * 1024 + 1) })
+    });
+    assert.equal(oversized.status, 413);
   } finally {
     await new Promise((resolve) => server?.close(resolve));
   }

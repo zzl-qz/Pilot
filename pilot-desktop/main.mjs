@@ -6,12 +6,12 @@ import { app, BrowserWindow, WebContentsView, ipcMain, session, Menu, Tray, glob
 import { createDesktopAlertManager } from './desktop-alerts.mjs';
 import { buildTrayMenuTemplate, createOfflineReconnector, createPowerAwakeController, normalizeWindowBounds } from './desktop-shell.mjs';
 import { startBrowserControl } from './browser-control.mjs';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomInt } from 'node:crypto';
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { hostname } from 'node:os';
+import { hostname, homedir } from 'node:os';
 import {
   formatPageLogs,
   isDangerousDownloadExtension,
@@ -55,7 +55,15 @@ function browserHome() {
   return join(here, '.pilot', 'browser');
 }
 
-const cdpPort = Number(process.env.PILOT_DESKTOP_CDP_PORT) || (42000 + (process.pid % 1000));
+function defaultEndpointFile() {
+  if (process.env.PILOT_DESKTOP_ENDPOINT) return process.env.PILOT_DESKTOP_ENDPOINT;
+  if (process.env.PILOT_BROWSER_HOME) return join(process.env.PILOT_BROWSER_HOME, 'desktop-browser.json');
+  const base = process.platform === 'win32' && process.env.LOCALAPPDATA
+    ? join(process.env.LOCALAPPDATA, 'Pilot') : join(homedir(), '.pilot');
+  return join(base, 'run', 'desktop-browser.json');
+}
+
+const cdpPort = Number(process.env.PILOT_DESKTOP_CDP_PORT) || (42000 + randomInt(20000));
 app.commandLine.appendSwitch('remote-debugging-port', String(cdpPort));
 app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1');
 
@@ -68,7 +76,7 @@ let workspace = '';
 let endpointFile = '';
 const recents = [];
 const tabsByContentsId = new Map();
-let pageHooksReady = false;
+const hookedSessions = new WeakSet();
 
 const workbench = workbenchIpc(ipcMain, () => shell, workbenchUrl);
 
@@ -217,8 +225,8 @@ function pushLog(list, item) {
 }
 
 function hookPageSession(ses) {
-  if (pageHooksReady) return;
-  pageHooksReady = true;
+  if (hookedSessions.has(ses)) return;
+  hookedSessions.add(ses);
   const note = (details) => {
     const tab = details.webContentsId == null ? null : tabsByContentsId.get(details.webContentsId);
     if (!tab || !details.url || details.url.startsWith('data:')) return;
@@ -567,9 +575,8 @@ async function startControl() {
 }
 
 function writeEndpoint() {
-  const home = browserHome();
-  mkdirSync(home, { recursive: true });
-  endpointFile = join(home, 'desktop-browser.json');
+  endpointFile = defaultEndpointFile();
+  mkdirSync(dirname(endpointFile), { recursive: true, mode: 0o700 });
   writeFileSync(endpointFile, JSON.stringify({
     pid: process.pid,
     // 进程启动时刻：后端据此识别「PID 被系统复用」的残留端点，避免误判窗口已开。
@@ -578,7 +585,7 @@ function writeEndpoint() {
     controlPort,
     token,
     host: hostname()
-  }));
+  }), { mode: 0o600 });
 }
 
 function clearEndpoint() {

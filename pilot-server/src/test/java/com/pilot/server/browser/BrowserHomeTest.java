@@ -132,6 +132,21 @@ class BrowserHomeTest {
             BrowserHome.resolve(SourceLayout.workingDirectory(), fallback, relative.toString(), false));
     }
 
+    @Test
+    void defaultDesktopEndpointLivesInPrivateUserRunDirOutsideWorkspace() {
+        Path fakeHome = root.resolve("user-home").toAbsolutePath().normalize();
+        Path fakeLocalAppData = root.resolve("local-app-data").toAbsolutePath().normalize();
+        BrowserHome unixHome =
+            new BrowserHome(new PilotDataDir(null), null, null, null, "Mac OS X", null, fakeHome.toString());
+        assertEquals(fakeHome.resolve(".pilot").resolve("run").resolve("desktop-browser.json"),
+            unixHome.desktopEndpoint());
+
+        BrowserHome winHome = new BrowserHome(new PilotDataDir(null), null, null, null, "Windows 11",
+            fakeLocalAppData.toString(), fakeHome.toString());
+        assertEquals(fakeLocalAppData.resolve("Pilot").resolve("run").resolve("desktop-browser.json"),
+            winHome.desktopEndpoint());
+    }
+
     private Path module() throws Exception {
         Path repo = Files.createDirectory(root.resolve("repo"));
         Files.createFile(repo.resolve("pom.xml"));

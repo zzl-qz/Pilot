@@ -112,6 +112,7 @@ public class DesktopWindowLauncher {
             builder.environment().remove("ELECTRON_RUN_AS_NODE");
             builder.environment().put("PILOT_URL", url);
             builder.environment().put("PILOT_BROWSER_HOME", browserHome.directory().toString());
+            builder.environment().put("PILOT_DESKTOP_ENDPOINT", browserHome.desktopEndpoint().toString());
             builder.redirectErrorStream(true);
             builder.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile.toFile()));
             Process process = builder.start();

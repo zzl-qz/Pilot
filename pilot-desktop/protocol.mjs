@@ -77,7 +77,7 @@ const DANGEROUS_DOWNLOAD_EXTENSIONS = new Set([
   '.exe', '.bat', '.cmd', '.com', '.msi', '.scr', '.pif', '.vbs', '.vbe',
   '.js', '.jse', '.wsf', '.wsh', '.ps1', '.psm1', '.sh', '.bash', '.zsh',
   '.command', '.app', '.dmg', '.pkg', '.deb', '.rpm', '.appimage', '.run',
-  '.jar', '.lnk', '.reg', '.hta', '.cpl', '.msc'
+  '.jar', '.lnk', '.reg', '.hta', '.cpl', '.msc', '.desktop', '.url', '.webloc'
 ]);
 
 const SENSITIVE_PARAM_PATTERN = /([?&#])(token|access_token|id_token|refresh_token|auth|code|password|passwd|key|api_key|apikey|secret|sig|signature|session|sessionid|sid|jwt|credential|oauth_token)=([^&#\s]*)/gi;
@@ -108,7 +108,7 @@ export function sanitizeDownloadFilename(raw) {
 }
 
 export function isDangerousDownloadExtension(filename) {
-  const clean = String(filename || '').trim().toLowerCase();
+  const clean = String(filename || '').trim().toLowerCase().replace(/[\s.]+$/, '');
   const dot = clean.lastIndexOf('.');
   return dot >= 0 && DANGEROUS_DOWNLOAD_EXTENSIONS.has(clean.slice(dot));
 }
