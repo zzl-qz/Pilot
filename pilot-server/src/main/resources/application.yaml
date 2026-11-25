@@ -4,11 +4,6 @@
 server:
   # 本机页面和接口都走这个端口
   port: 9999
-  error:
-    # 4xx 把校验原因带回响应体，界面能直接看到「端点必须是 http/https」这类说明
-    include-message: always
-    # 堆栈只写日志，不回给前端（本机接口也可能通过远程访问开关暴露出去）
-    include-stacktrace: never
 
 spring:
   servlet:
@@ -22,6 +17,9 @@ spring:
   profiles:
     active: ${PILOT_PROFILE:local}
   web:
+    error:
+      include-message: always
+      include-stacktrace: never
     resources:
       cache:
         cachecontrol:
