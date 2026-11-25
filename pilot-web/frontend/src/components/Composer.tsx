@@ -56,7 +56,11 @@ function DeferredMessageQueue() {
 }
 
 function DeferredAgentDock() {
-  const active = useStore((state) => Boolean(state.ui.agentsDockOpen && Object.keys(state.agents || {}).length));
+  const active = useStore((state) => {
+    const list = Object.values(state.agents || {});
+    if (!list.length) return false;
+    return Boolean(state.ui.agentsDockOpen || list.some((agent) => agent?.status === 'running'));
+  });
   if (!active) return null;
   return <Suspense fallback={null}><AgentDock /></Suspense>;
 }
@@ -190,11 +194,28 @@ export function Composer() {
       onRemove: (id) => draftFilesRef.current.delete(id),
       onPreview: setPreview,
       onChange: () => {
-        writeDraft(localStorage, useStore.getState().sessionId, input.getText());
-        scheduleSnapshot();
+        const currentSession = useStore.getState().sessionId;
+        writeDraft(localStorage, currentSession, input.getText());
+        if (!input.attachmentIds().length) {
+          if (snapshotTimer.current) {
+            window.clearTimeout(snapshotTimer.current);
+            snapshotTimer.current = null;
+          }
+          dropDraftSnapshot(localStorage, currentSession);
+        } else {
+          scheduleSnapshot();
+        }
         setSendAction(sendState());
       }
     });
+    const flushSnapshotOnUnload = () => {
+      if (snapshotTimer.current) {
+        window.clearTimeout(snapshotTimer.current);
+        snapshotTimer.current = null;
+        persistSnapshot();
+      }
+    };
+    window.addEventListener('pagehide', flushSnapshotOnUnload);
     inputRef.current = input;
     let composing = false;
     const startComposition = () => { composing = true; };
@@ -229,6 +250,7 @@ export function Composer() {
       focus: () => input.focus()
     } });
     return () => {
+      window.removeEventListener('pagehide', flushSnapshotOnUnload);
       if (snapshotTimer.current) {
         window.clearTimeout(snapshotTimer.current);
         snapshotTimer.current = null;
