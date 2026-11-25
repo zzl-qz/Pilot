@@ -48,6 +48,51 @@ class EditFileToolTest {
     }
 
     @Test
+    void closestExcerptUsesFullMultiLineContextInsteadOfOnlyFirstLine() throws IOException {
+        Files.writeString(workspace.resolve("Client.java"), """
+            class Client {
+                void sync() {
+                    try {
+                        callSync();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw syncError(e);
+                    }
+                }
+                void stream() {
+                    try {
+                        callStream();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw streamError(e);
+                    } catch (IOException e) {
+                        // 流式响应读到一半断开
+                        throw ioError(e);
+                    }
+                }
+            }
+            """);
+
+        String result = tool.execute(Map.of("path", "Client.java", "old_string",
+            "} catch (InterruptedException e) {\n        Thread.currentThread().interrupt();\n        throw streamError(e);\n    } catch (IOException e) {\n        // 流式响应读到一半断开\n        throw wrongName(e);",
+            "new_string", "fixed"));
+
+        assertTrue(result.contains("streamError"), "多行失配片段应命中真正所在的 stream 方法而不是第 1 个同名 catch：" + result);
+        assertTrue(result.contains("流式响应读到一半断开"), result);
+    }
+
+    @Test
+    void multiMatchReportsLineNumbersAndSuccessReportsResultLineRanges() throws IOException {
+        Files.writeString(workspace.resolve("dup.txt"), "a\nval = 1;\nb\nval = 1;\nc\n");
+
+        String dup = tool.execute(Map.of("path", "dup.txt", "old_string", "val = 1;", "new_string", "val = 2;"));
+        assertTrue(dup.contains("匹配到多处") && dup.contains("2、4"), dup);
+
+        String ok = tool.execute(Map.of("path", "dup.txt", "old_string", "b\nval = 1;", "new_string", "b\nval = 2;"));
+        assertTrue(ok.contains("L3-L4"), "成功修改后应回传变更行段：" + ok);
+    }
+
+    @Test
     void replacesUniqueTailInFileLargerThanFormerCeiling() throws IOException {
         Path file = workspace.resolve("big.txt");
         byte[] prefix = "a".repeat(512 * 1024).getBytes(StandardCharsets.UTF_8);

@@ -183,7 +183,46 @@ class ApplyPatchToolTest {
             """);
 
         assertTrue(result.text().contains("匹配到多处"), result.text());
+        assertTrue(result.text().contains("1、3"), "多处命中应明确列出全部命中行号：" + result.text());
         assertEquals("x = 1\nfoo\nx = 1\nbar\n", Files.readString(workspace.resolve("a.txt")));
+    }
+
+    @Test
+    void matchesPublicFinalClassHeaderAndUnifiedDiffLineHeader() throws IOException {
+        write("src/Demo.java", """
+            public final class Demo implements Runnable {
+                void first() {
+                    int x = 1;
+                }
+                void second() {
+                    int x = 1;
+                }
+            }
+            """);
+
+        ToolResult byClassHeader = apply("""
+            *** Begin Patch
+            *** Update File: src/Demo.java
+            @@ class Demo
+            @@ void second()
+            -        int x = 1;
+            +        int x = 2;
+            *** End Patch
+            """);
+        assertTrue(byClassHeader.text().startsWith("已应用补丁"), byClassHeader.text());
+        assertTrue(byClassHeader.text().contains("L6"), "返回摘要应包含变更行段：" + byClassHeader.text());
+        assertTrue(Files.readString(workspace.resolve("src/Demo.java")).contains("int x = 2;"));
+
+        ToolResult byUnifiedHeader = apply("""
+            *** Begin Patch
+            *** Update File: src/Demo.java
+            @@ -2,3 +2,3 @@ void first()
+            -        int x = 1;
+            +        int x = 9;
+            *** End Patch
+            """);
+        assertTrue(byUnifiedHeader.text().startsWith("已应用补丁"), byUnifiedHeader.text());
+        assertTrue(Files.readString(workspace.resolve("src/Demo.java")).contains("int x = 9;"));
     }
 
     @Test

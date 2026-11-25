@@ -19,8 +19,10 @@ import java.util.function.LongSupplier;
  * 这个类只管「值得重试的失败还要不要继续等」。
  */
 public final class RetryBudget {
-    /** 单次服务端 Retry-After 提示上限（2 分钟）。 */
+    /** 单次服务端 Retry-After 提示上限（429 限流最多 2 分钟；5xx 网关故障首试 15 秒、后续 30 秒，避免一次 504 干等 2 分钟）。 */
     private static final long MAX_RETRY_AFTER_HINT_MS = 120_000L;
+    private static final long MAX_SERVER_ERROR_RETRY_AFTER_FIRST_MS = 15_000L;
+    private static final long MAX_SERVER_ERROR_RETRY_AFTER_MS = 30_000L;
     private static final long RATE_LIMIT_MIN_BASE_MS = 2_000L;
     private static final long RATE_LIMIT_MIN_MAX_MS = 60_000L;
     private static final long SERVER_ERROR_MIN_MAX_MS = 45_000L;
@@ -171,7 +173,9 @@ public final class RetryBudget {
         Tier effectiveTier = tier == null ? Tier.DEFAULT : tier;
         long delay = delayFor(Math.max(1, consecutiveFailures), effectiveTier);
         if (retryAfterMs > 0) {
-            long hinted = Math.min(MAX_RETRY_AFTER_HINT_MS, retryAfterMs);
+            long hintCap = effectiveTier == Tier.RATE_LIMIT ? MAX_RETRY_AFTER_HINT_MS
+                : consecutiveFailures <= 1 ? MAX_SERVER_ERROR_RETRY_AFTER_FIRST_MS : MAX_SERVER_ERROR_RETRY_AFTER_MS;
+            long hinted = Math.min(hintCap, retryAfterMs);
             delay = Math.max(delay, hinted);
         }
 

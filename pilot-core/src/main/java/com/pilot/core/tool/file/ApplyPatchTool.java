@@ -186,18 +186,22 @@ public final class ApplyPatchTool extends PromptedTool implements WritesFiles {
         }
         boolean moved = !target.equals(file);
         List<String> changed = moved ? List.of(shown, targetShown) : List.of(shown);
+        String rangeNote = updated.lineRanges().isEmpty() ? "" : "，" + String.join(", ", updated.lineRanges());
         String summary = (moved ? "重命名 " + shown + " → " + targetShown : "修改 " + shown) + "（+" + updated.added() + " -"
-            + updated.removed() + "）";
+            + updated.removed() + rangeNote + "）";
         return new Planned(Kind.UPDATE, file, moved ? target : null, content, updated.text(), summary, changed);
     }
 
-    private record PatchedText(String text, int added, int removed) {
+    private static final java.util.regex.Pattern UNIFIED_HEADER =
+        java.util.regex.Pattern.compile("^-(\\d+)(?:,\\d+)?\\s+\\+\\d+(?:,\\d+)?(?:\\s*@@\\s*(.*))?$");
+
+    private record PatchedText(String text, int added, int removed, List<String> lineRanges) {
     }
 
     private static PatchedText applyHunks(String original, List<Hunk> hunks, String shown) {
         String bom = original.startsWith("\uFEFF") ? "\uFEFF" : "";
         String body = bom.isEmpty() ? original : original.substring(1);
-        String eol = body.contains("\r\n") ? "\r\n" : body.contains("\r") ? "\r" : "\n";
+        String eol = ExactEditBatch.dominantEol(body);
         String normalized = body.replace("\r\n", "\n").replace('\r', '\n');
         boolean trailingNewline = normalized.endsWith("\n");
         List<String> lines = new ArrayList<>(normalized.isEmpty() ? List.of() : List.of(normalized.split("\n", -1)));
@@ -208,20 +212,24 @@ public final class ApplyPatchTool extends PromptedTool implements WritesFiles {
         int cursor = 0;
         int added = 0;
         int removed = 0;
+        List<String> lineRanges = new ArrayList<>(hunks.size());
         for (int i = 0; i < hunks.size(); i++) {
             Hunk hunk = hunks.get(i);
             int start = cursor;
+            boolean headerAnchored = false;
             if (hunk.header() != null && !hunk.header().isBlank()) {
-                int at = indexOfLine(lines, hunk.header(), cursor);
-                if (at < 0) {
+                int at = resolveHeaderStart(lines, hunk.header(), cursor);
+                if (at >= 0) {
+                    start = at;
+                    headerAnchored = true;
+                } else if (hunk.oldLines().isEmpty()) {
                     throw new PatchException(shown + " 的 hunk " + (i + 1) + " 找不到定位行 @@ " + hunk.header());
                 }
-                start = at + 1;
             }
             int position;
             if (hunk.oldLines().isEmpty()) {
                 // 纯新增：有定位行就插在它后面，否则追加到文件末尾
-                position = hunk.header() != null && !hunk.header().isBlank() ? start : lines.size();
+                position = headerAnchored ? start : lines.size();
             } else {
                 position = locate(lines, hunk, start, shown, i + 1);
             }
@@ -238,15 +246,18 @@ public final class ApplyPatchTool extends PromptedTool implements WritesFiles {
                 lines.remove(position);
             }
             lines.addAll(position, replacement);
+            int startLine = position + 1;
+            int endLine = replacement.isEmpty() ? startLine : position + replacement.size();
+            lineRanges.add(startLine == endLine ? "L" + startLine : "L" + startLine + "-L" + endLine);
             cursor = position + replacement.size();
             removed += hunk.oldLines().size();
             added += hunk.newLineCount();
         }
         String text = bom + String.join("\n", lines) + (trailingNewline && !lines.isEmpty() ? "\n" : "");
-        return new PatchedText(text.replace("\n", eol), added, removed);
+        return new PatchedText(text.replace("\n", eol), added, removed, List.copyOf(lineRanges));
     }
 
-    /** 唯一命中：先精确，再忽略行尾空白，再忽略首尾空白；同一档位命中多处直接报错。 */
+    /** 唯一命中：先精确，再忽略行尾空白，再忽略首尾空白；同一档位命中多处报错并列出全部命中行号。 */
     private static int locate(List<String> lines, Hunk hunk, int from, String shown, int number) {
         List<UnaryOperator<String>> modes = List.of(line -> line, String::stripTrailing, String::strip);
         List<String> wanted = hunk.oldLines();
@@ -258,18 +269,22 @@ public final class ApplyPatchTool extends PromptedTool implements WritesFiles {
                 }
                 continue;
             }
-            int first = -1;
+            List<Integer> hits = new ArrayList<>();
             for (int at = from; at + wanted.size() <= lines.size(); at++) {
                 if (!matches(lines, wanted, at, mode)) {
                     continue;
                 }
-                if (first >= 0) {
-                    throw new PatchException(shown + " 的 hunk " + number + " 匹配到多处，无法唯一定位。请增加上下文行，或用 @@ 指定所在的函数/类");
+                hits.add(at);
+                if (hits.size() >= 8) {
+                    break;
                 }
-                first = at;
             }
-            if (first >= 0) {
-                return first;
+            if (hits.size() > 1) {
+                throw new PatchException(shown + " 的 hunk " + number + " 匹配到多处（第 "
+                    + ExactEditBatch.formatZeroBasedLines(hits) + " 行），无法唯一定位。请增加上下文行，或用 @@ 指定所在的函数/类");
+            }
+            if (hits.size() == 1) {
+                return hits.getFirst();
             }
         }
         String firstLine = wanted.getFirst();
@@ -287,14 +302,40 @@ public final class ApplyPatchTool extends PromptedTool implements WritesFiles {
         return true;
     }
 
+    /** 支持标准 unified diff 行号头（@@ -L,N +L,N @@）及符号定位头（精确 / 前缀 / 子串三档，兼容 public final class Foo）。 */
+    private static int resolveHeaderStart(List<String> lines, String header, int from) {
+        String trimmed = header.strip();
+        var unified = UNIFIED_HEADER.matcher(trimmed);
+        if (unified.matches()) {
+            int lineNum = Integer.parseInt(unified.group(1));
+            int approx = Math.max(from, Math.min(lines.size(), Math.max(0, lineNum - 15)));
+            String trailing = unified.group(2);
+            if (trailing != null && !trailing.isBlank()) {
+                int found = indexOfLine(lines, trailing, approx);
+                if (found >= 0) {
+                    return found + 1;
+                }
+            }
+            return approx;
+        }
+        int at = indexOfLine(lines, trimmed, from);
+        return at >= 0 ? at + 1 : -1;
+    }
+
     private static int indexOfLine(List<String> lines, String header, int from) {
+        String needle = header.strip();
         for (int i = from; i < lines.size(); i++) {
-            if (lines.get(i).strip().equals(header.strip())) {
+            if (lines.get(i).strip().equals(needle)) {
                 return i;
             }
         }
         for (int i = from; i < lines.size(); i++) {
-            if (lines.get(i).strip().startsWith(header.strip())) {
+            if (lines.get(i).strip().startsWith(needle)) {
+                return i;
+            }
+        }
+        for (int i = from; i < lines.size(); i++) {
+            if (lines.get(i).strip().contains(needle)) {
                 return i;
             }
         }

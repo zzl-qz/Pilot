@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 一次验证并应用同一文件里的多个替换；任何一处失败都不产生部分修改。
@@ -19,9 +20,14 @@ final class ExactEditBatch {
     record Edit(String oldText, String newText) {
     }
 
-    record Applied(String content, int count, int oldLines, int newLines, int tolerantMatches) {
+    record Applied(String content, int count, int oldLines, int newLines, int tolerantMatches,
+        List<String> lineRanges) {
         Applied(String content, int count, int oldLines, int newLines) {
-            this(content, count, oldLines, newLines, 0);
+            this(content, count, oldLines, newLines, 0, List.of());
+        }
+
+        Applied(String content, int count, int oldLines, int newLines, int tolerantMatches) {
+            this(content, count, oldLines, newLines, tolerantMatches, List.of());
         }
     }
 
@@ -71,7 +77,7 @@ final class ExactEditBatch {
     static Applied apply(String original, List<Edit> edits) {
         String bom = original.startsWith("\uFEFF") ? "\uFEFF" : "";
         String body = bom.isEmpty() ? original : original.substring(1);
-        String eol = body.contains("\r\n") ? "\r\n" : body.contains("\r") ? "\r" : "\n";
+        String eol = dominantEol(body);
         String normalized = normalize(body);
         List<LineSpan> spans = null;
         List<Match> matches = new ArrayList<>(edits.size());
@@ -110,14 +116,62 @@ final class ExactEditBatch {
             }
         }
         StringBuilder updated = new StringBuilder(normalized.length());
+        List<String> lineRanges = new ArrayList<>(matches.size());
         int cursor = 0;
+        int lineNumber = 1;
         for (Match match : matches) {
-            updated.append(normalized, cursor, match.start()).append(match.replacement());
+            String gap = normalized.substring(cursor, match.start());
+            updated.append(gap);
+            lineNumber += countNewlines(gap);
+            int startLine = lineNumber;
+            String repl = match.replacement();
+            updated.append(repl);
+            int addedNewlines = countNewlines(repl);
+            int endLine = repl.isEmpty() ? startLine
+                : startLine + Math.max(0, repl.endsWith("\n") ? addedNewlines - 1 : addedNewlines);
+            lineRanges.add(startLine == endLine ? "L" + startLine : "L" + startLine + "-L" + endLine);
+            lineNumber += addedNewlines;
             cursor = match.end();
         }
         updated.append(normalized, cursor, normalized.length());
         String result = bom + updated.toString().replace("\n", eol);
-        return new Applied(result, edits.size(), oldLines, newLines, tolerantMatches);
+        return new Applied(result, edits.size(), oldLines, newLines, tolerantMatches, List.copyOf(lineRanges));
+    }
+
+    static String dominantEol(String body) {
+        int crlf = 0;
+        int lf = 0;
+        int cr = 0;
+        for (int i = 0; i < body.length(); i++) {
+            char c = body.charAt(i);
+            if (c == '\r') {
+                if (i + 1 < body.length() && body.charAt(i + 1) == '\n') {
+                    crlf++;
+                    i++;
+                } else {
+                    cr++;
+                }
+            } else if (c == '\n') {
+                lf++;
+            }
+        }
+        if (crlf > 0 && crlf >= lf && crlf >= cr) {
+            return "\r\n";
+        }
+        if (cr > 0 && cr > lf) {
+            return "\r";
+        }
+        return "\n";
+    }
+
+    private static int countNewlines(String text) {
+        int count = 0;
+        for (int i = 0; i < text.length(); i++) {
+            if (text.charAt(i) == '\n') {
+                count++;
+            }
+        }
+        return count;
     }
 
     private static Match locateExact(String normalized, String search, String replacement, int editIndex) {
@@ -125,8 +179,16 @@ final class ExactEditBatch {
         if (start < 0) {
             return null;
         }
-        if (normalized.indexOf(search, start + search.length()) >= 0) {
-            throw new IllegalArgumentException("edits[" + editIndex + "] 的 old_string 匹配到多处，无法唯一定位。请扩大上下文。");
+        int second = normalized.indexOf(search, start + search.length());
+        if (second >= 0) {
+            List<Integer> lines = new ArrayList<>();
+            int pos = start;
+            while (pos >= 0 && lines.size() < 8) {
+                lines.add(lineNumberAt(normalized, pos));
+                pos = normalized.indexOf(search, pos + Math.max(1, search.length()));
+            }
+            throw new IllegalArgumentException(
+                "edits[" + editIndex + "] 的 old_string 匹配到多处（第 " + formatLineNumbers(lines) + " 行），无法唯一定位。请扩大上下文。");
         }
         return new Match(start, start + search.length(), replacement, false);
     }
@@ -144,20 +206,24 @@ final class ExactEditBatch {
         }
 
         // 档位 2：逐行忽略行尾空白
-        int trailingMatchStart = -1;
+        List<Integer> trailingMatches = new ArrayList<>();
         for (int i = 0; i <= spans.size() - windowSize; i++) {
             if (endsWithNewline && !spans.get(i + windowSize - 1).hasNewline()) {
                 continue;
             }
             if (matchesTrimmedTrailing(spans, i, needleLines)) {
-                if (trailingMatchStart >= 0) {
-                    throw new IllegalArgumentException(
-                        "edits[" + editIndex + "] 的 old_string（忽略行尾空白后）匹配到多处，无法唯一定位。请扩大上下文。");
+                trailingMatches.add(i);
+                if (trailingMatches.size() >= 8) {
+                    break;
                 }
-                trailingMatchStart = i;
             }
         }
-        if (trailingMatchStart >= 0) {
+        if (trailingMatches.size() > 1) {
+            throw new IllegalArgumentException("edits[" + editIndex + "] 的 old_string（忽略行尾空白后）匹配到多处（第 "
+                + formatZeroBasedLines(trailingMatches) + " 行），无法唯一定位。请扩大上下文。");
+        }
+        if (trailingMatches.size() == 1) {
+            int trailingMatchStart = trailingMatches.getFirst();
             int startOffset = spans.get(trailingMatchStart).start();
             LineSpan last = spans.get(trailingMatchStart + windowSize - 1);
             int endOffset = last.end() + (endsWithNewline ? 1 : 0);
@@ -173,7 +239,7 @@ final class ExactEditBatch {
         if (dedentedNeedle == null) {
             return null;
         }
-        int indentMatchStart = -1;
+        List<Integer> indentMatches = new ArrayList<>();
         String matchedFileIndent = null;
         for (int i = 0; i <= spans.size() - windowSize; i++) {
             if (endsWithNewline && !spans.get(i + windowSize - 1).hasNewline()) {
@@ -181,15 +247,21 @@ final class ExactEditBatch {
             }
             String fileIndent = matchRelativeIndent(spans, i, dedentedNeedle);
             if (fileIndent != null) {
-                if (indentMatchStart >= 0) {
-                    throw new IllegalArgumentException(
-                        "edits[" + editIndex + "] 的 old_string（忽略整体缩进差异后）匹配到多处，无法唯一定位。请扩大上下文。");
+                indentMatches.add(i);
+                if (matchedFileIndent == null) {
+                    matchedFileIndent = fileIndent;
                 }
-                indentMatchStart = i;
-                matchedFileIndent = fileIndent;
+                if (indentMatches.size() >= 8) {
+                    break;
+                }
             }
         }
-        if (indentMatchStart >= 0) {
+        if (indentMatches.size() > 1) {
+            throw new IllegalArgumentException("edits[" + editIndex + "] 的 old_string（忽略整体缩进差异后）匹配到多处（第 "
+                + formatZeroBasedLines(indentMatches) + " 行），无法唯一定位。请扩大上下文。");
+        }
+        if (indentMatches.size() == 1) {
+            int indentMatchStart = indentMatches.getFirst();
             int startOffset = spans.get(indentMatchStart).start();
             LineSpan last = spans.get(indentMatchStart + windowSize - 1);
             int endOffset = last.end() + (endsWithNewline ? 1 : 0);
@@ -332,17 +404,68 @@ final class ExactEditBatch {
         return value.replace("\r\n", "\n").replace('\r', '\n');
     }
 
+    /** 多行滑动窗口打分：综合全部非空检索行定位最接近片段，避免仅按首行（如 } / catch / import）误指到文件开头或其他方法。 */
     static String closestExcerpt(String content, String search) {
         String[] sourceLines = content.split("\\R", -1);
         String[] searchLines = search.split("\\R", -1);
-        String needle = searchLines.length == 0 ? search : searchLines[0].strip();
+        List<String> anchors = new ArrayList<>();
+        String longestAnchor = "";
+        for (String line : searchLines) {
+            String trimmed = line.strip();
+            if (!trimmed.isEmpty()) {
+                anchors.add(trimmed);
+                if (trimmed.length() > longestAnchor.length()) {
+                    longestAnchor = trimmed;
+                }
+                if (anchors.size() >= 12) {
+                    break;
+                }
+            }
+        }
+        if (anchors.isEmpty()) {
+            anchors.add(search.strip());
+        }
+        int windowSpan = Math.max(4, Math.min(24, searchLines.length + 3));
+        String[] strippedSource = new String[sourceLines.length];
+        for (int i = 0; i < sourceLines.length; i++) {
+            strippedSource[i] = sourceLines[i].strip();
+        }
         int bestLine = 0;
         int bestScore = -1;
         for (int i = 0; i < sourceLines.length; i++) {
-            String candidate = sourceLines[i].strip();
-            int score = commonPrefix(candidate, needle);
-            if (!needle.isEmpty() && candidate.contains(needle)) {
-                score += needle.length();
+            int end = Math.min(sourceLines.length, i + windowSpan);
+            int score = 0;
+            int searchCursor = i;
+            for (String anchor : anchors) {
+                int lineBest = 0;
+                int matchedAt = -1;
+                for (int j = searchCursor; j < end; j++) {
+                    String candidate = strippedSource[j];
+                    if (candidate.isEmpty()) {
+                        continue;
+                    }
+                    int s = lineSimilarity(candidate, anchor);
+                    if (s > lineBest) {
+                        lineBest = s;
+                        matchedAt = j;
+                        if (candidate.equals(anchor)) {
+                            break;
+                        }
+                    }
+                }
+                if (lineBest > 0) {
+                    score += lineBest;
+                    if (anchor.equals(longestAnchor) && lineBest >= anchor.length()) {
+                        score += anchor.length();
+                    }
+                    if (matchedAt >= 0) {
+                        searchCursor = Math.min(end, matchedAt + 1);
+                    }
+                }
+            }
+            // 同分时偏爱首行最贴合当前起点的位置
+            if (!anchors.isEmpty()) {
+                score += lineSimilarity(strippedSource[i], anchors.getFirst()) / 2;
             }
             if (score > bestScore) {
                 bestScore = score;
@@ -350,7 +473,7 @@ final class ExactEditBatch {
             }
         }
         int from = Math.max(0, bestLine - 2);
-        int to = Math.min(sourceLines.length, bestLine + Math.max(4, searchLines.length + 2));
+        int to = Math.min(sourceLines.length, bestLine + Math.min(24, Math.max(6, searchLines.length + 3)));
         StringBuilder out = new StringBuilder();
         for (int i = from; i < to; i++) {
             if (!out.isEmpty()) {
@@ -359,6 +482,38 @@ final class ExactEditBatch {
             out.append(i + 1).append(": ").append(sourceLines[i]);
         }
         return out.toString();
+    }
+
+    private static int lineSimilarity(String candidate, String needle) {
+        if (needle.isEmpty() || candidate.isEmpty()) {
+            return 0;
+        }
+        if (candidate.equals(needle)) {
+            return 16 + needle.length() * 2;
+        }
+        int score = commonPrefix(candidate, needle);
+        if (candidate.contains(needle) || needle.contains(candidate)) {
+            score += Math.min(candidate.length(), needle.length());
+        }
+        return score;
+    }
+
+    static String formatLineNumbers(List<Integer> oneBasedLines) {
+        return oneBasedLines.stream().map(String::valueOf).collect(Collectors.joining("、"));
+    }
+
+    static String formatZeroBasedLines(List<Integer> zeroBasedLines) {
+        return zeroBasedLines.stream().map(i -> String.valueOf(i + 1)).collect(Collectors.joining("、"));
+    }
+
+    private static int lineNumberAt(String text, int offset) {
+        int line = 1;
+        for (int i = 0; i < offset && i < text.length(); i++) {
+            if (text.charAt(i) == '\n') {
+                line++;
+            }
+        }
+        return line;
     }
 
     private static int commonPrefix(String left, String right) {

@@ -107,8 +107,9 @@ public final class EditFileTool extends PromptedTool implements WritesFiles {
             reads.observed(file);
             reads.noteWrite();
             String note = applied.tolerantMatches() > 0 ? "，含 " + applied.tolerantMatches() + " 处缩进/行尾空白自动对齐" : "";
+            String rangeNote = applied.lineRanges().isEmpty() ? "" : "，行段 " + String.join(", ", applied.lineRanges());
             return "已修改 " + paths.display(file) + "：替换 " + applied.count() + " 处（" + applied.oldLines() + " 行 → "
-                + applied.newLines() + " 行" + note + "）";
+                + applied.newLines() + " 行" + rangeNote + note + "）";
         } catch (IOException e) {
             return "ERROR: 写入失败: " + e.getMessage();
         }

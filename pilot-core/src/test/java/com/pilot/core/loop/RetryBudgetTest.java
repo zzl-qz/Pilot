@@ -121,7 +121,13 @@ class RetryBudgetTest {
         assertEquals(12_000L, hinted.delayMs());
 
         RetryBudget.Decision hugeHint = rateLimit.afterFailure("HTTP 429", RetryBudget.Tier.RATE_LIMIT, 999_000L);
-        assertEquals(120_000L, hugeHint.delayMs(), "超大 Retry-After 应封顶到 120s");
+        assertEquals(120_000L, hugeHint.delayMs(), "429 超大 Retry-After 应封顶到 120s");
+
+        RetryBudget serverHint = budget(new RetryBudget.Settings(10, 600_000, 1_000, 30_000, 0), clock, 1.0);
+        assertEquals(15_000L, serverHint.afterFailure("HTTP 504", RetryBudget.Tier.SERVER_ERROR, 120_000L).delayMs(),
+            "5xx 网关超时首次重试不应因 Retry-After 干等 120s");
+        assertEquals(30_000L, serverHint.afterFailure("HTTP 504", RetryBudget.Tier.SERVER_ERROR, 120_000L).delayMs(),
+            "5xx 后续重试 Retry-After 封顶 30s");
     }
 
     @Test

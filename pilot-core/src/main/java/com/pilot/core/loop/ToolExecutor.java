@@ -12,7 +12,10 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -108,6 +111,8 @@ public final class ToolExecutor {
     private volatile Path lintWorkspace;
     /** 本轮写入提示：每个文件一次，超过上限就不再扫，避免反复对照把改写拖成循环。 */
     private final SiblingHints siblingHints = new SiblingHints();
+    /** 连续编辑/补丁失配计数：同一路径连续失败 >=2 次时自动附加自纠偏提示，打断反复猜测原文的死循环。 */
+    private final ConcurrentMap<String, AtomicInteger> editFailureStreaks = new ConcurrentHashMap<>();
     private ExecutionBackends.Selection hookExecution;
 
     /** 写入成功后立刻跑仓库 lint，把修正指令贴进这次工具结果。 */
@@ -235,6 +240,7 @@ public final class ToolExecutor {
             // 名字对照不是失败，也不计入 lint 打回次数；空结果或已提示过则什么都不加。
             result = result + siblingHints.note(lintWorkspace, changedPaths);
         }
+        result = trackEditFailures(call, result, changedPaths);
         remember(call, replayed, result, changedPaths, checks);
 
         long latencyMs = Math.max(0L, (System.nanoTime() - startedAt) / 1_000_000L);
@@ -276,6 +282,57 @@ public final class ToolExecutor {
         // 结构化子结果里的历史检查不决定外层工具本身成败；外层状态只看正文与本工具自产检查。
         List<Attachment> images = succeeded(result) && !blocked(result) ? execution.images() : List.of();
         return new Outcome(call.name(), result, changedPaths, checks, status, images);
+    }
+
+    /** 跟踪同一路径的连续编辑失配；读文件或写入成功后立即清零，连错 >=2 次主动提醒先精确读取行段再改。 */
+    private String trackEditFailures(ToolCall call, String result, List<String> changedPaths) {
+        String name = call.name();
+        if (ToolNames.READ_FILE.equals(name) && succeeded(result)) {
+            String path = call.args() == null ? null : String.valueOf(call.args().getOrDefault("path", "")).strip();
+            if (path != null && !path.isEmpty()) {
+                editFailureStreaks.remove(path);
+            }
+            return result;
+        }
+        if (!ToolNames.EDIT_FILE.equals(name) && !ToolNames.APPLY_PATCH.equals(name)) {
+            return result;
+        }
+        if (succeeded(result)) {
+            for (String changed : changedPaths) {
+                editFailureStreaks.remove(changed);
+            }
+            String path = call.args() == null ? null : String.valueOf(call.args().getOrDefault("path", "")).strip();
+            if (path != null && !path.isEmpty()) {
+                editFailureStreaks.remove(path);
+            }
+            return result;
+        }
+        String key = editTargetKey(call);
+        int streak = editFailureStreaks.computeIfAbsent(key, ignored -> new AtomicInteger()).incrementAndGet();
+        if (streak >= 2) {
+            return result + "\n\n[自纠偏提示] 同一文件已连续编辑失败 " + streak
+                + " 次，不要继续猜原文或重发整份大补丁：请先 read_file 精确读取目标行段（或按错误中的匹配行号定位），再改用聚焦的 edit_file 完成修改。";
+        }
+        return result;
+    }
+
+    private static String editTargetKey(ToolCall call) {
+        if (call.args() == null) {
+            return call.name();
+        }
+        Object path = call.args().get("path");
+        if (path instanceof String s && !s.isBlank()) {
+            return s.strip();
+        }
+        Object patch = call.args().get("patch");
+        if (patch instanceof String p) {
+            for (String line : p.lines().toList()) {
+                if (line.startsWith("*** Update File: ")) {
+                    return line.substring("*** Update File: ".length()).strip();
+                }
+            }
+        }
+        return call.name();
     }
 
     /** 只对写文件类工具重放：命令重跑是预期行为，不能当成重复调用。 */
