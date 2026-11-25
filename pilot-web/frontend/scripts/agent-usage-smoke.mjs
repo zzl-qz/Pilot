@@ -81,6 +81,7 @@ async function run(page, name) {
   await sub.locator(':scope > summary').focus(); await page.keyboard.press('Space');
   assert.equal(await sub.locator('.request-item:visible').count(), 0);
   await page.locator('.agent-group > summary').click();
+  await page.locator('.agent-card:visible').first().waitFor();
   assert.equal(await page.locator('.agent-card:visible').count(), 2);
   assert.equal(await page.locator('.agent-body').count(), 0, '智能体卡收起时不挂载正文');
   const agent = page.locator('.agent-card.is-failed');
@@ -88,6 +89,7 @@ async function run(page, name) {
   await page.locator('.agent-group > summary').click();
   const dock = page.locator('#agents-dock');
   await page.locator('#agents-chip').focus(); await page.keyboard.press('Enter');
+  await dock.locator('.agents-dock-list li').first().waitFor();
   assert.equal(await dock.locator('.agents-dock-list li').count(), 2);
   assert.doesNotMatch(await dock.innerText(), /运行中/);
   await dock.locator('button.agents-dock-head').focus(); await page.keyboard.press('Space');
@@ -99,6 +101,7 @@ async function run(page, name) {
   assert.equal(await sub.locator('.request-item').count(), 70);
   assert.ok((await sub.locator('.request-list').boundingBox()).height <= 321, '长请求列表在内部滚动');
   await page.locator('.agent-group > summary').click();
+  await page.locator('.agent-card:visible').first().waitFor();
   assert.ok((await page.locator('.agent-group-list').boundingBox()).height <= 281, '长智能体列表在内部滚动');
   await page.locator('.agent-group > summary').click();
   await page.evaluate(() => { store.getState().setTheme('light'); seed(16, 2); });
@@ -116,6 +119,7 @@ async function run(page, name) {
   assert.equal(await stats.locator('.request-group').count(), 0);
   assert.equal(await stats.locator('.turn-cache').count(), 0, '没有缓存观测时不显示命中率占位');
   await page.evaluate(() => send('subagent.started', { agentId: 'running', task: '检查剩余文件' }));
+  await dock.waitFor();
   assert.match(await dock.innerText(), /1 运行中/);
   await page.evaluate(() => send('run.failed', { code: 'CANCELLED' }));
   assert.equal(await dock.count(), 0, '主任务取消后不能残留运行中的子任务');

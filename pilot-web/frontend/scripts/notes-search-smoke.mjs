@@ -37,7 +37,6 @@ createRoot(document.getElementById('root')).render(React.createElement(SessionNo
 </script></body></html>`;
 
 const server = await createServer({
-  configFile: false,
   root,
   publicDir: '../src/main/resources/static',
   server: { host: '127.0.0.1', port: 0, hmr: false, proxy: {} },
@@ -72,8 +71,8 @@ browser = await chromium.launch(browserOptions({ headless: true }));
   await searchButton.click();
   await page.waitForFunction(() => window.calls.length === 1);
   assert.deepEqual(await page.evaluate(() => window.calls[0]), { projectId: 'project-a', q: '登录' });
-  const hits = page.locator('.notes-search-hits li button');
-  await page.waitForFunction(() => document.querySelectorAll('.notes-search-hits li button').length === 2);
+  const hits = page.locator('.notes-search-hits li');
+  await page.waitForFunction(() => document.querySelectorAll('.notes-search-hits li').length === 2);
   assert.match(await hits.first().innerText(), /项目一的一号会话/);
   assert.match(await hits.first().innerText(), /登录失败路径要覆盖/);
 
@@ -91,13 +90,13 @@ browser = await chromium.launch(browserOptions({ headless: true }));
   // 点击结果：切换会话并定位想法
   await input.fill('登录');
   await searchButton.click();
-  await page.waitForFunction(() => document.querySelectorAll('.notes-search-hits li button').length === 2);
+  await page.waitForFunction(() => document.querySelectorAll('.notes-search-hits li').length === 2);
   await page.evaluate(() => {
     window.scrolled = [];
     const original = Element.prototype.scrollIntoView;
     Element.prototype.scrollIntoView = function (...args) { window.scrolled.push(this.getAttribute('data-note-id')); return original.apply(this, args); };
   });
-  await hits.nth(1).click();
+  await hits.nth(1).getByRole('button', { name: '打开那条对话', exact: true }).click();
   await page.waitForFunction(() => window.activated === 's1b');
   await page.waitForFunction(() => window.scrolled?.includes('n2'));
   assert.equal(await page.evaluate(() => document.querySelector('[data-note-id="n2"]').classList.contains('is-note-focus')), true);

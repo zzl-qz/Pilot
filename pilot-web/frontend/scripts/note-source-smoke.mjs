@@ -49,7 +49,6 @@ createRoot(document.getElementById('root')).render(React.createElement(SessionNo
 </script></body></html>`;
 
 const server = await createServer({
-  configFile: false,
   root,
   publicDir: '../src/main/resources/static',
   server: { host: '127.0.0.1', port: 0, hmr: false, proxy: {} },
@@ -99,7 +98,7 @@ browser = await chromium.launch(browserOptions({ headless: true }));
   await input.waitFor();
   assert.equal(await input.inputValue(), '建议补一条并发测试');
   assert.match(await page.locator('.note-source.is-seed').innerText(), /第 4 条消息/);
-  await page.getByRole('button', { name: '保存想法' }).click();
+  await page.getByRole('button', { name: '保存', exact: true }).click();
   await page.waitForFunction(() => window.calls.length === 1);
   const call = await page.evaluate(() => window.calls[0]);
   assert.equal(call.session, 's1');

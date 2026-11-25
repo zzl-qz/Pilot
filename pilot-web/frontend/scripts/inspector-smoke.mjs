@@ -17,7 +17,7 @@ const listen=(name,callback)=>{listeners[name]=callback;if(name==='state')queueM
 window.browserState={tabs:[{id:'one',title:'新标签',url:'http://localhost/marker/one'}],activeId:'one',url:'http://localhost/marker/one',canGoBack:false,canGoForward:false,recents:[]};
 if(new URL(location.href).searchParams.has('desktop'))window.pilotDesktop={setWorkspace:value=>calls.push(['workspace',value]),ensureTab:async id=>calls.push(['ensure',id]),onState:callback=>listen('state',callback),focusAddress:callback=>listen('focus',callback),onDownload:callback=>listen('download',callback),onQuote:callback=>listen('quote',callback),onLog:callback=>listen('log',callback),setBounds:bounds=>calls.push(['bounds',bounds]),
 navigate:async url=>{calls.push(['navigate',url]);browserState={...browserState,url,tabs:[{id:'one',title:'本地预览',url}],canGoBack:true};listeners.state?.(browserState);},back:()=>calls.push(['back']),forward:()=>calls.push(['forward']),reload:()=>calls.push(['reload']),stop:()=>calls.push(['stop']),newTab:()=>calls.push(['new']),closeTab:id=>calls.push(['close',id]),selectTab:id=>calls.push(['select',id]),openMenu:async()=>menuAction,find:text=>calls.push(['find',text]),pick:async()=>({ok:true,text:'选中的元素'}),logs:async()=>({ok:true,text:'第一条日志'}),detach:()=>calls.push(['detach']),devtools:()=>calls.push(['devtools']),resetEmulation:()=>calls.push(['reset'])};
-api.openBrowserWindow=async()=>({ok:false,message:'浏览器暂不可用，请重试'});api.browserStatus=async()=>({capable:false,reason:'没有浏览器进程'});
+api.browserNavigate=async(_session,url)=>{calls.push(['web-navigate',url]);return{ok:true};};api.openBrowserWindow=async()=>({ok:false,message:'浏览器暂不可用，请重试'});api.browserStatus=async()=>({capable:false,reason:'没有浏览器进程'});
 useStore.setState({sessionId:'inspector',workspace:'/workspace/pilot',composerApi:{getText:()=>quoted,setText:text=>{quoted=text;},appendText:text=>{quoted+=text;},focus:()=>{}},timeline:[{key:'t',sequence:1,type:'tool.started',kind:'tool',tone:'tool',status:'执行中',title:'读取配置',detail:'config.ts'},{key:'u1',sequence:2,type:'run.usage',kind:'usage',tone:'text',status:'用量'},{key:'u2',sequence:3,type:'run.usage',kind:'usage',tone:'text',status:'用量'}]});
 useStore.getState().setUi({inspectorOpen:true,inspectorTab:'browser'});createRoot(document.getElementById('root')).render(React.createElement(UiProvider,null,React.createElement(Inspector)));
 </script></body></html>`;
@@ -29,10 +29,11 @@ let browser, desktop;
 async function run(page, name) {
   const errors = []; page.on('pageerror', error => errors.push(error.message)); page.setDefaultTimeout(8000);
   await page.setViewportSize({ width: 1440, height: 900 }); await page.goto(url);
-  await page.getByRole('button', { name: '打开内置浏览器', exact: true }).click();
-  await page.getByRole('alert').filter({ hasText: '浏览器暂不可用，请重试' }).waitFor();
-  await page.evaluate(() => store.getState().setUi({ mirror: { ...store.getState().ui.mirror, url: 'https://example.test/guide' } }));
-  assert.equal(await page.getByRole('link', { name: '在新标签页打开当前网址' }).getAttribute('href'), 'https://example.test/guide');
+  const webAddress = page.getByRole('textbox', { name: '地址栏', exact: true });
+  await webAddress.waitFor();
+  await webAddress.fill('https://example.test/guide');
+  await webAddress.press('Enter');
+  await page.waitForFunction(() => calls.some(row => row[0] === 'web-navigate' && row[1] === 'https://example.test/guide'));
   await page.goto(url + '?desktop');
   await page.getByRole('textbox', { name: '地址栏', exact: true }).fill('localhost:1234/中文');
   await page.getByRole('textbox', { name: '地址栏', exact: true }).press('Enter');

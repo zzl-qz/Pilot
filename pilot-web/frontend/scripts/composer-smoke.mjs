@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const temp = await mkdtemp(join(artifactDirectory(), 'pilot-composer-'));
-const server = await createServer({ configFile: false, root, publicDir: '../src/main/resources/static', server: { host: '127.0.0.1', port: 0, hmr: false, proxy: {} }, plugins: [{ name: 'composer-fixture', configureServer(server) {
+const server = await createServer({ root, publicDir: '../src/main/resources/static', server: { host: '127.0.0.1', port: 0, hmr: false, proxy: {} }, plugins: [{ name: 'composer-fixture', configureServer(server) {
   server.middlewares.use('/__composer', async (_req, res) => {
     res.setHeader('Content-Type', 'text/html');
     res.end(await server.transformIndexHtml('/__composer', `<html><head><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">

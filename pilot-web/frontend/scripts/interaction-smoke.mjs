@@ -65,7 +65,7 @@ api.sendMessage=async(_id,body)=>{entries.push({content:body.content});return {s
 }
 createRoot(document.getElementById('root')).render(React.createElement(App));
 </script></body></html>`;
-const server = await createServer({ configFile:false, root, optimizeDeps:{include:['react/jsx-dev-runtime','pdfjs-dist']}, server:{host:'127.0.0.1',port:0,hmr:false,proxy:{}},plugins:[{name:'interaction-fixture',configureServer(server){
+const server = await createServer({ root, optimizeDeps:{include:['react/jsx-dev-runtime','pdfjs-dist']}, server:{host:'127.0.0.1',port:0,hmr:false,proxy:{}},plugins:[{name:'interaction-fixture',configureServer(server){
   server.middlewares.use('/__interaction',async(_req,res)=>{res.setHeader('Content-Type','text/html');res.end(await server.transformIndexHtml('/__interaction',fixture));});
   server.middlewares.use('/api/sessions/ui-audit/commands',(_req,res)=>{res.setHeader('Content-Type','application/json');res.end('{"tasks":[]}');});
 }}]});

@@ -21,7 +21,6 @@ createRoot(document.getElementById('root')).render(React.createElement('div', nu
 </script></body></html>`;
 
 const server = await createServer({
-  configFile: false,
   root,
   publicDir: '../src/main/resources/static',
   server: { host: '127.0.0.1', port: 0, hmr: false, proxy: {} },

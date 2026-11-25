@@ -20,7 +20,7 @@ setMarkdownNotifier(text=>notices.push(text));setMarkdownContext({getWorkspace:(
 window.render=text=>document.getElementById('target').replaceChildren(renderMarkdown(text));
 window.stream=createBlockStreamRenderer(document.getElementById('stream'),{parse:markdownBlockRecords});window.ready=true;
 </script></html>`;
-const server = await createServer({ configFile: false, root, server: { host: '127.0.0.1', port: 0, hmr: false, proxy: {} }, plugins: [{ name: 'markdown-fixture', configureServer(server) {
+const server = await createServer({ root, server: { host: '127.0.0.1', port: 0, hmr: false, proxy: {} }, plugins: [{ name: 'markdown-fixture', configureServer(server) {
   server.middlewares.use('/__markdown', async (_request, response) => { response.setHeader('Content-Type', 'text/html;charset=utf-8'); response.end(await server.transformIndexHtml('/__markdown', fixture)); });
 } }] });
 let browser, desktop;

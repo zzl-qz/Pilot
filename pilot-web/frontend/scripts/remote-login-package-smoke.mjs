@@ -18,7 +18,7 @@ let logs = '', browser, child;
 try {
   child = spawn(java, ['--enable-native-access=ALL-UNNAMED','-jar',jar,'--server.address=127.0.0.1','--server.port=0',
     `--pilot.data.dir=${join(output,'data')}`,`--pilot.agent.workspace=${workspace}`,
-    '--pilot.runtime.provision=false','--pilot.web-search.local=false','--pilot.model.api-key=',
+    '--pilot.runtime.provision=false','--pilot.desktop.launch=false','--pilot.web-search.local=false','--pilot.model.api-key=',
     '--pilot.model.endpoint=http://127.0.0.1:9/v1/chat/completions','--pilot.security.mode=token',`--pilot.security.token=${token}`],
   {cwd:output,stdio:['ignore','pipe','pipe']});
   const base = await new Promise((accept, reject) => {
