@@ -1,0 +1,498 @@
+{
+  "version": 1,
+  "generatedAt": "2026-11-25T17:18:05.630Z",
+  "source": {
+    "repo": "https://github.com/zzl-qz/Pilot",
+    "screen": "A = 父提交 + 隐藏用例必须失败；B = 父提交 + 参考解必须通过",
+    "candidates": 129,
+    "valid": 32
+  },
+  "tasks": [
+    {
+      "id": "S-01",
+      "tier": "S",
+      "commit": "fc9da3094314a676af39a73f68bd2f11c075d11e",
+      "parent": "348616d90c53e7ce04139feb102fc73c490ae674",
+      "subject": "为自动续跑发布新一轮开始事件",
+      "module": "pilot-server",
+      "mainFiles": 1,
+      "srcAdded": 1,
+      "testPaths": [
+        "pilot-server/src/test/java/com/pilot/server/session/AgentRunServiceTest.java"
+      ],
+      "testClasses": [
+        "AgentRunServiceTest"
+      ],
+      "discriminatesBy": "assertion",
+      "verified": {
+        "A": "assertion-fail",
+        "B": "pass",
+        "testsA": 24,
+        "failuresA": 1,
+        "testsB": 24,
+        "secondsA": 45.6,
+        "secondsB": 46.2
+      }
+    },
+    {
+      "id": "S-02",
+      "tier": "S",
+      "commit": "972d571b48ca6319560ae01b93aa8bf93b7ff7d3",
+      "parent": "3a7a04aebb23702b2bb41d5a0f1d430984313a9e",
+      "subject": "在落盘前拒绝缺失内容的混合附件",
+      "module": "pilot-server",
+      "mainFiles": 1,
+      "srcAdded": 2,
+      "testPaths": [
+        "pilot-server/src/test/java/com/pilot/server/session/AttachmentServiceTest.java"
+      ],
+      "testClasses": [
+        "AttachmentServiceTest"
+      ],
+      "discriminatesBy": "assertion",
+      "verified": {
+        "A": "assertion-fail",
+        "B": "pass",
+        "testsA": 23,
+        "failuresA": 1,
+        "testsB": 23,
+        "secondsA": 39.6,
+        "secondsB": 36.3
+      }
+    },
+    {
+      "id": "S-03",
+      "tier": "S",
+      "commit": "0a374180fed6c2a960f439196730459a9c96dc7a",
+      "parent": "43dd5bede739e1dc84ebeddc1345e6ca18849bd6",
+      "subject": "保留独立核验调用消耗的请求与用量",
+      "module": "pilot-server",
+      "mainFiles": 1,
+      "srcAdded": 2,
+      "testPaths": [
+        "pilot-server/src/test/java/com/pilot/server/session/GoalExecutionPolicyTest.java"
+      ],
+      "testClasses": [
+        "GoalExecutionPolicyTest"
+      ],
+      "discriminatesBy": "assertion",
+      "verified": {
+        "A": "assertion-fail",
+        "B": "pass",
+        "testsA": 43,
+        "failuresA": 3,
+        "testsB": 43,
+        "secondsA": 67,
+        "secondsB": 66.6
+      }
+    },
+    {
+      "id": "S-04",
+      "tier": "S",
+      "commit": "6daaa4bf69771d7993d59652ca4f7e02f707a56b",
+      "parent": "59d32f5e8a6e430da729f5bcbfd8fde5c9bc5af9",
+      "subject": "fix(core): 带 /v1 前缀的端点一律按兼容层基址补全 chat/completions",
+      "module": "pilot-core",
+      "mainFiles": 1,
+      "srcAdded": 4,
+      "testPaths": [
+        "pilot-core/src/test/java/com/pilot/core/model/OpenAiCompatibleModelClientTest.java"
+      ],
+      "testClasses": [
+        "OpenAiCompatibleModelClientTest"
+      ],
+      "discriminatesBy": "assertion",
+      "verified": {
+        "A": "assertion-fail",
+        "B": "pass",
+        "testsA": 9,
+        "failuresA": 1,
+        "testsB": 9,
+        "secondsA": 14.9,
+        "secondsB": 12
+      }
+    },
+    {
+      "id": "S-05",
+      "tier": "S",
+      "commit": "03d97bc369aedae451b7eb796803d2b751490ee8",
+      "parent": "d75e62482b524067bbb5445aec8ec130edc332a8",
+      "subject": "修复部分交付提示重复",
+      "module": "pilot-core",
+      "mainFiles": 1,
+      "srcAdded": 7,
+      "testPaths": [
+        "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java"
+      ],
+      "testClasses": [
+        "AgentLoopTest"
+      ],
+      "discriminatesBy": "assertion",
+      "verified": {
+        "A": "assertion-fail",
+        "B": "pass",
+        "testsA": 80,
+        "failuresA": 1,
+        "testsB": 80,
+        "secondsA": 23.8,
+        "secondsB": 24.9
+      }
+    },
+    {
+      "id": "S-06",
+      "tier": "S",
+      "commit": "3bc979fa1bb0bf268516dd3237ddafe84e9b5811",
+      "parent": "977515019d4c5b93fdd7785debd9b67907d4e88d",
+      "subject": "fix(server): 启动恢复不再重复上报上次已经收敛过的运行",
+      "module": "pilot-server",
+      "mainFiles": 1,
+      "srcAdded": 8,
+      "testPaths": [
+        "pilot-server/src/test/java/com/pilot/server/session/RunStateTrackerTest.java"
+      ],
+      "testClasses": [
+        "RunStateTrackerTest"
+      ],
+      "discriminatesBy": "assertion",
+      "verified": {
+        "A": "assertion-fail",
+        "B": "pass",
+        "testsA": 6,
+        "failuresA": 1,
+        "testsB": 6,
+        "secondsA": 32,
+        "secondsB": 29.5
+      }
+    },
+    {
+      "id": "M-01",
+      "tier": "M",
+      "commit": "1d43404e17a96ef9651ff4d4da8a9503809d1a82",
+      "parent": "fe3fcd23387d01e4dc73f571c3eed2854fa85223",
+      "subject": "将 code_diagnostics 升为核心可见工具并补齐改后自检指引",
+      "module": "pilot-core",
+      "mainFiles": 2,
+      "srcAdded": 2,
+      "testPaths": [
+        "pilot-core/src/test/java/com/pilot/core/tool/ToolRegistryTest.java",
+        "pilot-core/src/test/java/com/pilot/core/tool/code/CodeDiagnosticsToolTest.java"
+      ],
+      "testClasses": [
+        "ToolRegistryTest",
+        "CodeDiagnosticsToolTest"
+      ],
+      "discriminatesBy": "assertion",
+      "verified": {
+        "A": "assertion-fail",
+        "B": "pass",
+        "testsA": 17,
+        "failuresA": 2,
+        "testsB": 17,
+        "secondsA": 24.4,
+        "secondsB": 25.6
+      }
+    },
+    {
+      "id": "M-02",
+      "tier": "M",
+      "commit": "02edcb05f37814ec8b62de35f056757bce6c3483",
+      "parent": "f586eaa15b92abb24d6e0cb82c28683a3012c932",
+      "subject": "统一测试命令指引并明确管道结果不能作为校验证据",
+      "module": "pilot-core",
+      "mainFiles": 2,
+      "srcAdded": 3,
+      "testPaths": [
+        "pilot-core/src/test/java/com/pilot/core/loop/CompletionGateTest.java"
+      ],
+      "testClasses": [
+        "CompletionGateTest"
+      ],
+      "discriminatesBy": "assertion",
+      "verified": {
+        "A": "assertion-fail",
+        "B": "pass",
+        "testsA": 21,
+        "failuresA": 1,
+        "testsB": 21,
+        "secondsA": 18.8,
+        "secondsB": 14
+      }
+    },
+    {
+      "id": "M-03",
+      "tier": "M",
+      "commit": "86c028f869f628a67d83a8fc764ea5262633582f",
+      "parent": "d7bc30b79258505a9bd4c48739680896a7ba6839",
+      "subject": "让明确审批替代旧的 MCP 只读判断",
+      "module": "pilot-core",
+      "mainFiles": 2,
+      "srcAdded": 10,
+      "testPaths": [
+        "pilot-core/src/test/java/com/pilot/core/mcp/McpPermissionsTest.java"
+      ],
+      "testClasses": [
+        "McpPermissionsTest"
+      ],
+      "discriminatesBy": "assertion",
+      "verified": {
+        "A": "assertion-fail",
+        "B": "pass",
+        "testsA": 9,
+        "failuresA": 1,
+        "testsB": 9,
+        "secondsA": 22.4,
+        "secondsB": 22.7
+      }
+    },
+    {
+      "id": "M-04",
+      "tier": "M",
+      "commit": "ebfef42a1edd4c79e078b4fe175542827d5c4727",
+      "parent": "3ab5ce9dc27469c05d0c2bba47a46d900382dd16",
+      "subject": "增强命令状态工具的失败尾部输出与浏览器嵌套沙箱识别",
+      "module": "pilot-core",
+      "mainFiles": 2,
+      "srcAdded": 31,
+      "testPaths": [
+        "pilot-core/src/test/java/com/pilot/core/tool/command/ManagedCommandToolsTest.java",
+        "pilot-core/src/test/java/com/pilot/core/tool/command/RunCommandToolTest.java"
+      ],
+      "testClasses": [
+        "ManagedCommandToolsTest",
+        "RunCommandToolTest"
+      ],
+      "discriminatesBy": "assertion",
+      "verified": {
+        "A": "assertion-fail",
+        "B": "pass",
+        "testsA": 47,
+        "failuresA": 3,
+        "testsB": 47,
+        "secondsA": 42.1,
+        "secondsB": 42.7
+      }
+    },
+    {
+      "id": "M-05",
+      "tier": "M",
+      "commit": "236725546550ff07bf35eb704e136a35efdbdf77",
+      "parent": "53ebd51042a1f2b33a3871f3dfc5392423fcf9ae",
+      "subject": "超窗时折叠较早对话",
+      "module": "pilot-core",
+      "mainFiles": 1,
+      "srcAdded": 31,
+      "testPaths": [
+        "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java"
+      ],
+      "testClasses": [
+        "AgentLoopTest"
+      ],
+      "discriminatesBy": "assertion",
+      "verified": {
+        "A": "assertion-fail",
+        "B": "pass",
+        "testsA": 64,
+        "failuresA": 1,
+        "testsB": 64,
+        "secondsA": 28.5,
+        "secondsB": 22.2
+      }
+    },
+    {
+      "id": "M-06",
+      "tier": "M",
+      "commit": "0cfdc0b137949fc0b30f823d4aaf3647de51089c",
+      "parent": "63de65f2059ae3a5b8fc8182f8a0d37783e4c768",
+      "subject": "修复 CommandChain 双引号内转义引号与反斜杠解析（D-015）",
+      "module": "pilot-core",
+      "mainFiles": 2,
+      "srcAdded": 31,
+      "testPaths": [
+        "pilot-core/src/test/java/com/pilot/core/tool/command/CommandChainTest.java",
+        "pilot-core/src/test/java/com/pilot/core/tool/command/RunCommandToolTest.java"
+      ],
+      "testClasses": [
+        "CommandChainTest",
+        "RunCommandToolTest"
+      ],
+      "discriminatesBy": "assertion",
+      "verified": {
+        "A": "assertion-fail",
+        "B": "pass",
+        "testsA": 35,
+        "failuresA": 2,
+        "testsB": 35,
+        "secondsA": 24.7,
+        "secondsB": 23
+      }
+    },
+    {
+      "id": "L-01",
+      "tier": "L",
+      "commit": "e725d09607f3d4a3b588cc755697b3ce0c292cfe",
+      "parent": "02a052acfe5c81b746e40c2b81050b789466d96e",
+      "subject": "排除审计工作区生成目录",
+      "module": "pilot-core",
+      "mainFiles": 4,
+      "srcAdded": 21,
+      "testPaths": [
+        "pilot-core/src/test/java/com/pilot/core/quality/CodebaseAuditorTest.java"
+      ],
+      "testClasses": [
+        "CodebaseAuditorTest"
+      ],
+      "discriminatesBy": "assertion",
+      "verified": {
+        "A": "assertion-fail",
+        "B": "pass",
+        "testsA": 2,
+        "failuresA": 1,
+        "testsB": 2,
+        "secondsA": 20.2,
+        "secondsB": 23
+      }
+    },
+    {
+      "id": "L-02",
+      "tier": "L",
+      "commit": "733a18e8a201da5252b3b63fc331e65128446a4c",
+      "parent": "dee8e6fe675343f33bd7d39f9c85907e87ddd5e0",
+      "subject": "完全放行时直接执行普通 git 命令。",
+      "module": "pilot-core",
+      "mainFiles": 4,
+      "srcAdded": 23,
+      "testPaths": [
+        "pilot-core/src/test/java/com/pilot/core/tool/command/ManagedCommandToolsTest.java",
+        "pilot-core/src/test/java/com/pilot/core/tool/command/RunCommandToolTest.java",
+        "pilot-core/src/test/java/com/pilot/core/tool/command/SandboxCommandToolTest.java"
+      ],
+      "testClasses": [
+        "ManagedCommandToolsTest",
+        "RunCommandToolTest",
+        "SandboxCommandToolTest"
+      ],
+      "discriminatesBy": "assertion",
+      "verified": {
+        "A": "assertion-fail",
+        "B": "pass",
+        "testsA": 35,
+        "failuresA": 4,
+        "testsB": 35,
+        "secondsA": 31.5,
+        "secondsB": 38.1
+      }
+    },
+    {
+      "id": "L-03",
+      "tier": "L",
+      "commit": "cf3d04183031b834183e986709b8519bcd54814c",
+      "parent": "2953cb5c0978265485808ce535f10913624b1bb4",
+      "subject": "超窗时先交接摘要，再丢较早对话。",
+      "module": "pilot-core",
+      "mainFiles": 4,
+      "srcAdded": 35,
+      "testPaths": [
+        "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+        "pilot-core/src/test/java/com/pilot/core/loop/ContextCompactorTest.java",
+        "pilot-core/src/test/java/com/pilot/core/model/ModelProfileTest.java"
+      ],
+      "testClasses": [
+        "AgentLoopTest",
+        "ContextCompactorTest",
+        "ModelProfileTest"
+      ],
+      "discriminatesBy": "assertion",
+      "verified": {
+        "A": "assertion-fail",
+        "B": "pass",
+        "testsA": 85,
+        "failuresA": 2,
+        "testsB": 85,
+        "secondsA": 21.8,
+        "secondsB": 22.8
+      }
+    },
+    {
+      "id": "L-04",
+      "tier": "L",
+      "commit": "1b4a368cf440f0c04f6380b913aa04329d2c4ee8",
+      "parent": "303915b82944125f1f6eb1ea8e5d3961a2182b62",
+      "subject": "修复 RequestBudget.enforce 就地修改不可变消息列表导致 UnsupportedOperationException",
+      "module": "pilot-core",
+      "mainFiles": 4,
+      "srcAdded": 21,
+      "testPaths": [
+        "pilot-core/src/test/java/com/pilot/core/model/RequestBudgetRepairTest.java"
+      ],
+      "testClasses": [
+        "RequestBudgetRepairTest"
+      ],
+      "discriminatesBy": "compile",
+      "verified": {
+        "A": "compile-fail",
+        "B": "pass",
+        "testsA": 0,
+        "failuresA": 0,
+        "testsB": 6,
+        "secondsA": 21.6,
+        "secondsB": 23.3
+      }
+    },
+    {
+      "id": "L-05",
+      "tier": "L",
+      "commit": "3ad9bef76015aa7c072ea31d5c92f172cae47974",
+      "parent": "d8bc3152c4e803cbf73dfea666d61d2cafaa6995",
+      "subject": "没有任何写入时，只读查看超过 16 次就不再返回新内容。",
+      "module": "pilot-core",
+      "mainFiles": 4,
+      "srcAdded": 25,
+      "testPaths": [
+        "pilot-core/src/test/java/com/pilot/core/tool/command/RunCommandPolicyTest.java"
+      ],
+      "testClasses": [
+        "RunCommandPolicyTest"
+      ],
+      "discriminatesBy": "compile",
+      "verified": {
+        "A": "compile-fail",
+        "B": "pass",
+        "testsA": 0,
+        "failuresA": 0,
+        "testsB": 25,
+        "secondsA": 18.9,
+        "secondsB": 20.9
+      }
+    },
+    {
+      "id": "L-06",
+      "tier": "L",
+      "commit": "5707193911c658dc7bb4ad70940dbe3af6d0aec6",
+      "parent": "05b30bf41a92e1b323d4989a7a40986fa85c24ca",
+      "subject": "将非法工具调用参数 JSON 归类为有界可纠偏重试错误（D-020）",
+      "module": "pilot-core",
+      "mainFiles": 4,
+      "srcAdded": 26,
+      "testPaths": [
+        "pilot-core/src/test/java/com/pilot/core/loop/AgentLoopTest.java",
+        "pilot-core/src/test/java/com/pilot/core/model/OpenAiCompatibleModelClientTest.java",
+        "pilot-core/src/test/java/com/pilot/core/model/OpenAiResponsesModelClientTest.java"
+      ],
+      "testClasses": [
+        "AgentLoopTest",
+        "OpenAiCompatibleModelClientTest",
+        "OpenAiResponsesModelClientTest"
+      ],
+      "discriminatesBy": "compile",
+      "verified": {
+        "A": "compile-fail",
+        "B": "pass",
+        "testsA": 0,
+        "failuresA": 0,
+        "testsB": 108,
+        "secondsA": 19,
+        "secondsB": 23.2
+      }
+    }
+  ]
+}
