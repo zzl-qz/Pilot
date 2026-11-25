@@ -136,6 +136,7 @@ class OpenAiCompatibleModelClientTest {
             assertEquals("可以拖", response.content());
             assertEquals("可以拖", answer.toString());
             assertEquals("先看分隔条再核对宽度", reasoning.toString());
+            assertEquals("先看分隔条再核对宽度", response.reasoningContent(), "流式 <think> 推理正文也必须写入 ModelResponse 缓冲");
         } finally {
             server.stop(0);
         }
@@ -591,6 +592,140 @@ class OpenAiCompatibleModelClientTest {
             assertTrue(exception.getMessage().contains("SSE"), exception.getMessage());
         } finally {
             server.stop(0);
+        }
+    }
+
+    /** 流式工具参数 JSON 非法时必须归类为 MALFORMED_TOOL_CALL，让 AgentLoop 触发纠偏重试而非直接判死。 */
+    @Test
+    void classifiesStreamingMalformedToolArgumentsAsRetryableMalformedToolCall() throws IOException {
+        HttpServer server = startServer(new AtomicReference<>(), 200,
+            """
+                data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read_file","arguments":"{broken"}}]},"finish_reason":"tool_calls"}]}
+
+                data: [DONE]
+
+                """);
+        server.start();
+        try {
+            ModelClientException exception = assertThrows(ModelClientException.class,
+                () -> client(server).chat(List.of(Message.user("读文件")), List.of(), ignored -> {
+                }));
+            assertEquals(ModelFailureKind.MALFORMED_TOOL_CALL, exception.kind());
+            assertTrue(exception.kind().retryable());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    /** 流式工具调用兼容：空字符串参数、缺失 index（含续片）、JSON 对象型 arguments 及数值型 id/字符串 index。 */
+    @Test
+    void parsesStreamingToolCallsWithEmptyArgsMissingIndexObjectArgsAndTypeDrift() throws IOException {
+        HttpServer server = startServer(new AtomicReference<>(), 200,
+            """
+                data: {"error":null,"choices":[{"delta":{"tool_calls":[{"id":"c1","function":{"name":"git_status","arguments":""}}]},"finish_reason":null}]}
+
+                data: {"choices":[{"delta":{"tool_calls":[{"id":2,"function":{"name":"read_file","arguments":"{\\"path\\":"}}]},"finish_reason":null}]}
+
+                data: {"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"\\"pom.xml\\"}"}}]},"finish_reason":null}]}
+
+                data: {"choices":[{"delta":{"tool_calls":[{"index":"2","id":"c3","function":{"name":"list_dir","arguments":{"path":"."}}}]},"finish_reason":"tool_calls"}]}
+
+                data: [DONE]
+
+                """);
+        server.start();
+        try {
+            ModelResponse response = client(server).chat(List.of(Message.user("检查")), List.of(), ignored -> {
+            });
+            assertEquals(3, response.toolCalls().size());
+            assertEquals("git_status", response.toolCalls().get(0).name());
+            assertEquals(Map.of(), response.toolCalls().get(0).args());
+            assertEquals("2", response.toolCalls().get(1).callId());
+            assertEquals("pom.xml", response.toolCalls().get(1).args().get("path"));
+            assertEquals(".", response.toolCalls().get(2).args().get("path"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    /** 流式半截 JSON 帧归为 INCOMPLETE 可重试；SSE error 帧与 200 HTML 网关页立即归为 PERMANENT 停重试。 */
+    @Test
+    void classifiesTruncatedJsonFrameErrorFrameAndHtmlGatewayPage() throws IOException {
+        HttpServer truncated =
+            startServer(new AtomicReference<>(), 200, "data: {\"choices\":[{\"delta\":{\"content\":\"hi\n");
+        truncated.start();
+        try {
+            ModelClientException e = assertThrows(ModelClientException.class,
+                () -> client(truncated).chat(List.of(Message.user("hi")), List.of(), ignored -> {
+                }));
+            assertEquals(ModelFailureKind.INCOMPLETE, e.kind());
+        } finally {
+            truncated.stop(0);
+        }
+
+        HttpServer errFrame = startServer(new AtomicReference<>(), 200,
+            "data: {\"error\":{\"message\":\"invalid api key\",\"type\":\"auth_error\"}}\n\n");
+        errFrame.start();
+        try {
+            ModelClientException e = assertThrows(ModelClientException.class,
+                () -> client(errFrame).chat(List.of(Message.user("hi")), List.of(), ignored -> {
+                }));
+            assertEquals(ModelFailureKind.PERMANENT, e.kind());
+            assertTrue(e.getMessage().contains("invalid api key"));
+        } finally {
+            errFrame.stop(0);
+        }
+
+        HttpServer htmlPage =
+            startServer(new AtomicReference<>(), 200, "<!DOCTYPE html><html><body>502 Bad Gateway</body></html>");
+        htmlPage.start();
+        try {
+            ModelClientException e = assertThrows(ModelClientException.class,
+                () -> client(htmlPage).chat(List.of(Message.user("hi")), List.of(), ignored -> {
+                }));
+            assertEquals(ModelFailureKind.PERMANENT, e.kind());
+            assertTrue(e.getMessage().contains("HTML"));
+        } finally {
+            htmlPage.stop(0);
+        }
+    }
+
+    /** 代码块和行内反引号里的 <think> 字面量不应被误拆进推理通道。 */
+    @Test
+    void ignoresLiteralThinkTagInsideMarkdownCodeFenceAndInlineBackticks() throws IOException {
+        HttpServer server = startServer(new AtomicReference<>(), 200,
+            """
+                data: {"choices":[{"delta":{"content":"用 `<think>` 或：\\n```xml\\n<think>示例</think>\\n```\\n完成"},"finish_reason":"stop"}]}
+
+                data: [DONE]
+
+                """);
+        server.start();
+        try {
+            StringBuilder answer = new StringBuilder();
+            StringBuilder reasoning = new StringBuilder();
+            ModelResponse response =
+                client(server).chat(List.of(Message.user("解释标签")), List.of(), answer::append, reasoning::append);
+            assertEquals("", reasoning.toString());
+            assertEquals("", response.reasoningContent());
+            assertTrue(response.content().contains("<think>示例</think>"));
+            assertTrue(response.content().contains("`<think>`"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    /** 显式绑定 ModelCapacity 的客户端不受全局 ModelCapacity.active() 影响。 */
+    @Test
+    void boundCapacityOverridesGlobalActiveCapacity() {
+        ModelCapacity.activate(ModelCapacity.of(200_000L, 16_000));
+        try {
+            var bound = new OpenAiCompatibleModelClient(HttpClient.newHttpClient(), json,
+                URI.create("https://gateway.test/v1/chat/completions"), "key", "backup")
+                .withCapacity(ModelCapacity.of(32_000L, 4_000));
+            assertEquals(4_000, bound.requestBody(List.of(Message.user("hi")), List.of(), false).get("max_tokens"));
+        } finally {
+            ModelCapacity.activate(null);
         }
     }
 

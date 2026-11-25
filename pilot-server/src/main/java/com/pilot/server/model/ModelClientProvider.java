@@ -9,6 +9,7 @@ import java.util.function.Function;
 
 import com.pilot.core.loop.ModelRetryPolicy;
 import com.pilot.core.message.Message;
+import com.pilot.core.model.ModelCapacity;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelClientException;
 import com.pilot.core.model.ModelFailureKind;
@@ -78,6 +79,11 @@ public final class ModelClientProvider implements ModelClient {
     }
 
     @Override
+    public ModelCapacity capacity() {
+        return client().capacity();
+    }
+
+    @Override
     public java.util.Set<com.pilot.core.model.NativeCapability> nativeCapabilities() {
         return client().nativeCapabilities();
     }
@@ -136,7 +142,8 @@ public final class ModelClientProvider implements ModelClient {
             if (status == 400 || status == 422) {
                 return false;
             }
-            if (status == 401 || status == 402 || status == 403 || status == 408 || status == 429 || status >= 500) {
+            if (status == 401 || status == 402 || status == 403 || status == 404 || status == 408 || status == 429
+                || status >= 500) {
                 return true;
             }
         }
@@ -155,6 +162,11 @@ public final class ModelClientProvider implements ModelClient {
         @Override
         public ModelProfile profile() {
             return snapshot().profile();
+        }
+
+        @Override
+        public ModelCapacity capacity() {
+            return snapshot().capacity();
         }
 
         @Override

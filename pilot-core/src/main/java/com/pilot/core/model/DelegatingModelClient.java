@@ -27,6 +27,11 @@ public abstract class DelegatingModelClient implements ModelClient {
     }
 
     @Override
+    public ModelCapacity capacity() {
+        return delegate.capacity();
+    }
+
+    @Override
     public Set<NativeCapability> nativeCapabilities() {
         return delegate.nativeCapabilities();
     }

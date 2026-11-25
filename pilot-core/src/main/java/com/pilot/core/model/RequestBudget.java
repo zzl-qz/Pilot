@@ -34,8 +34,14 @@ public final class RequestBudget {
 
     /** 同时尊重本地上下文水位和端点容量；后者包含输出预留、协议和图片开销。 */
     public static Assessment assessRequest(List<Message> messages, List<ToolDefinition> tools, int localLimit) {
+        return assessRequest(messages, tools, localLimit, ModelCapacity.active());
+    }
+
+    /** 同时尊重本地上下文水位和指定客户端的模型容量（避免备用模型/子代理沿用主模型全局窗口）。 */
+    public static Assessment assessRequest(List<Message> messages, List<ToolDefinition> tools, int localLimit,
+        ModelCapacity capacity) {
         Assessment local = assess(messages, tools, localLimit);
-        Assessment wire = assess(messages, tools, ModelCapacity.active());
+        Assessment wire = assess(messages, tools, capacity == null ? ModelCapacity.active() : capacity);
         long inputLimit = Math.min(local.inputLimit(), wire.inputLimit());
         return new Assessment(wire.estimatedInputTokens(), inputLimit, wire.attachments(),
             wire.estimatedInputTokens() <= inputLimit);

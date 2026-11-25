@@ -28,6 +28,7 @@ public final class OpenAiResponsesModelClient implements ModelClient {
     private Duration idleTimeout;
     private final ModelProfile profile;
     private final Set<NativeCapability> capabilities;
+    private volatile ModelCapacity capacityOverride;
     private volatile boolean cacheParametersDisabled;
 
     public OpenAiResponsesModelClient(HttpClient httpClient, ObjectMapper mapper, URI endpoint, String apiKey,
@@ -55,6 +56,17 @@ public final class OpenAiResponsesModelClient implements ModelClient {
     public OpenAiResponsesModelClient withIdleTimeout(Duration value) {
         this.idleTimeout = java.util.Objects.requireNonNull(value);
         return this;
+    }
+
+    public OpenAiResponsesModelClient withCapacity(ModelCapacity value) {
+        this.capacityOverride = value;
+        return this;
+    }
+
+    @Override
+    public ModelCapacity capacity() {
+        ModelCapacity override = capacityOverride;
+        return override != null ? override : ModelCapacity.active();
     }
 
     @Override
@@ -148,7 +160,7 @@ public final class OpenAiResponsesModelClient implements ModelClient {
     }
 
     Map<String, Object> requestBody(List<Message> messages, List<ToolDefinition> definitions) {
-        ModelCapacity capacity = ModelCapacity.active();
+        ModelCapacity capacity = capacity();
         messages = RequestBudget.enforce(messages, definitions, capacity);
         List<Map<String, Object>> input = new ArrayList<>();
         for (Message message : messages) {

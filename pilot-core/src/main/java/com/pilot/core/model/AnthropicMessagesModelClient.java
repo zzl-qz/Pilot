@@ -37,6 +37,7 @@ public final class AnthropicMessagesModelClient implements ModelClient {
     private Duration idleTimeout;
     private final Set<NativeCapability> nativeCapabilities;
     private final ModelProfile profile;
+    private volatile ModelCapacity capacityOverride;
     private volatile boolean cacheParametersDisabled;
 
     public AnthropicMessagesModelClient(HttpClient httpClient, ObjectMapper mapper, URI endpoint, String apiKey,
@@ -59,6 +60,17 @@ public final class AnthropicMessagesModelClient implements ModelClient {
     public AnthropicMessagesModelClient withIdleTimeout(Duration value) {
         this.idleTimeout = java.util.Objects.requireNonNull(value);
         return this;
+    }
+
+    public AnthropicMessagesModelClient withCapacity(ModelCapacity value) {
+        this.capacityOverride = value;
+        return this;
+    }
+
+    @Override
+    public ModelCapacity capacity() {
+        ModelCapacity override = capacityOverride;
+        return override != null ? override : ModelCapacity.active();
     }
 
     @Override
@@ -305,7 +317,7 @@ public final class AnthropicMessagesModelClient implements ModelClient {
     }
 
     Map<String, Object> requestBody(List<Message> messages, List<ToolDefinition> definitions, boolean stream) {
-        ModelCapacity capacity = ModelCapacity.active();
+        ModelCapacity capacity = capacity();
         messages = RequestBudget.enforce(messages, definitions, capacity);
         String topSystem =
             messages.isEmpty() || !"system".equals(messages.getFirst().role()) ? "" : messages.getFirst().content();

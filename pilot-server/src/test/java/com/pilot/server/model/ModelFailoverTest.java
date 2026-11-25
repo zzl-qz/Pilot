@@ -19,6 +19,7 @@ import com.pilot.core.event.SessionEvent;
 import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.loop.RetryBudget;
 import com.pilot.core.message.Message;
+import com.pilot.core.model.ModelCapacity;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelClientException;
 import com.pilot.core.model.ModelFailureKind;
@@ -136,9 +137,50 @@ class ModelFailoverTest {
         ModelClient badRequestRun = provider.forRun();
         assertEquals("", badRequestRun.failover(
             ModelClientException.httpError(ModelFailureKind.PERMANENT, 400, -1L, "HTTP 400 invalid_request")));
+        assertTrue(
+            ModelClientProvider.isFailoverEligible(
+                ModelClientException.httpError(ModelFailureKind.PERMANENT, 404, -1L, "HTTP 404 model_not_found")),
+            "主模型下线返回 404 时应允许切换备用预设");
         assertFalse(ModelClientProvider.isFailoverEligible(
             new ModelClientException(ModelFailureKind.CONTEXT_OVERFLOW, "context_length_exceeded")));
         assertFalse(ModelClientProvider
             .isFailoverEligible(new ModelClientException(ModelFailureKind.INTERRUPTED, "cancelled")));
+    }
+
+    @Test
+    void failoverUsesBackupProfileCapacityInsteadOfPrimaryGlobalCapacity() {
+        SettingsStore store = memoryStore();
+        ModelSettings settings = new ModelSettings(
+            new ModelProperties("sk-primary", "https://free.example/v1", "big-primary", List.of()), store);
+        settings.updateWindow(200_000L, 16_000);
+        try {
+            ModelProfileStore profiles = new ModelProfileStore(store, settings, MAPPER);
+            String backupId = profiles.create(new ModelProfileStore.SaveRequest("小窗备模", "http://127.0.0.1:11434/v1",
+                "small-backup", "", true, false, 32_000L, 4_000, "", false)).profiles().getFirst().id();
+            profiles.setFallback(backupId);
+
+            ModelClientProvider provider = new ModelClientProvider(settings, snap -> new ModelClient() {
+                @Override
+                public ModelCapacity capacity() {
+                    return snap.capacity();
+                }
+
+                @Override
+                public ModelResponse chat(List<Message> messages, List<ToolDefinition> tools) {
+                    return new ModelResponse("ok", List.of(), ModelUsage.unknown(), ModelResponse.FinishReason.STOP);
+                }
+            }).withFallback(profiles::fallbackTarget);
+
+            ModelClient runClient = provider.forRun();
+            assertEquals(16_000, runClient.capacity().outputTokens());
+            assertFalse(runClient
+                .failover(ModelClientException.httpError(ModelFailureKind.PERMANENT, 404, -1L, "model not found"))
+                .isBlank());
+            assertEquals(32_000L, runClient.capacity().contextTokens());
+            assertEquals(4_000, runClient.capacity().outputTokens());
+            assertEquals(16_000, settings.snapshot().capacity().outputTokens(), "故障转移后全局主模型容量保持不变");
+        } finally {
+            ModelCapacity.activate(null);
+        }
     }
 }

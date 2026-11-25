@@ -9,6 +9,7 @@ import java.util.function.Consumer;
 
 import com.pilot.core.message.Message;
 import com.pilot.core.model.AnthropicMessagesModelClient;
+import com.pilot.core.model.ModelCapacity;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelProfile;
 import com.pilot.core.model.ModelResponse;
@@ -55,6 +56,11 @@ final class DiscoveredModelClient implements ModelClient {
     @Override
     public synchronized ModelProfile profile() {
         return applied != null ? applied.profile() : profile;
+    }
+
+    @Override
+    public ModelCapacity capacity() {
+        return target.capacity();
     }
 
     @Override
@@ -135,22 +141,24 @@ final class DiscoveredModelClient implements ModelClient {
             return applied;
         }
         URI endpoint = URI.create(target.endpoint());
+        ModelCapacity boundCapacity = target.capacity();
         if (messages) {
             endpoint = ModelCapabilityDiscovery.endpoint(target.endpoint(), ModelProtocols.ANTHROPIC_MESSAGES);
             applied = new AnthropicMessagesModelClient(http, mapper, endpoint, target.apiKey(), target.model(), timeout,
-                profile, capabilities).withIdleTimeout(idleTimeout);
+                profile, capabilities).withIdleTimeout(idleTimeout).withCapacity(boundCapacity);
         } else if (capabilities.contains(NativeCapability.WEB_SEARCH)
             || ModelProtocols.OPENAI_RESPONSES.equals(protocol)) {
             endpoint = ModelCapabilityDiscovery.endpoint(target.endpoint(), ModelProtocols.OPENAI_RESPONSES);
             applied = new OpenAiResponsesModelClient(http, mapper, endpoint, target.apiKey(), target.model(), timeout,
-                profile, capabilities).withIdleTimeout(idleTimeout);
+                profile, capabilities).withIdleTimeout(idleTimeout).withCapacity(boundCapacity);
         } else {
             // 原有自定义聊天完整路径必须原样保留；只替换明确的其他协议后缀。
             if (endpoint.getPath().endsWith("/messages") || endpoint.getPath().endsWith("/responses")) {
                 endpoint = ModelCapabilityDiscovery.endpoint(target.endpoint(), ModelProtocols.CHAT_COMPLETIONS);
             }
             applied = new OpenAiCompatibleModelClient(http, mapper, endpoint, target.apiKey(), target.model(), timeout)
-                .withProfile(profile).withPromptCaching(promptCaching).withIdleTimeout(idleTimeout);
+                .withProfile(profile).withPromptCaching(promptCaching).withIdleTimeout(idleTimeout)
+                .withCapacity(boundCapacity);
         }
         appliedPlan = plan;
         return applied;

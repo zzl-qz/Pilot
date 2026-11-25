@@ -44,6 +44,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     private final String apiKey;
     private final String model;
     private final Duration requestTimeout;
+    private volatile ModelCapacity capacityOverride;
     private Duration idleTimeout;
     /** 是否给 system 提示词打显式缓存标记；默认关闭，只在端点支持 cache_control 时启用。 */
     private volatile boolean promptCaching;
@@ -99,6 +100,17 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         return this;
     }
 
+    public OpenAiCompatibleModelClient withCapacity(ModelCapacity value) {
+        this.capacityOverride = value;
+        return this;
+    }
+
+    @Override
+    public ModelCapacity capacity() {
+        ModelCapacity override = capacityOverride;
+        return override != null ? override : ModelCapacity.active();
+    }
+
     @Override
     public ModelProfile profile() {
         ModelProfile p = profile;
@@ -142,7 +154,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
 
     private Map<String, Object> requestBody(List<Message> messages, List<ToolDefinition> definitions, boolean streaming,
         ReasoningReplay replay) {
-        ModelCapacity capacity = ModelCapacity.active();
+        ModelCapacity capacity = capacity();
         messages = RequestBudget.enforce(messages, definitions, capacity);
         List<Map<String, Object>> items = messageItems(messages, replay);
         List<Map<String, Object>> tools = definitions == null ? new ArrayList<>()
@@ -418,19 +430,46 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                         "模型接口返回 HTTP " + response.statusCode() + "：" + errorBody);
                 }
             }
+            String contentType =
+                response.headers().firstValue("content-type").orElse("").toLowerCase(java.util.Locale.ROOT);
+            if (contentType.contains("text/html")) {
+                String snippet = ModelHttp
+                    .snippet(new String(response.body().readNBytes(BoundedHttp.ERROR_BYTES), StandardCharsets.UTF_8));
+                throw new ModelClientException(ModelFailureKind.PERMANENT, "流式模型端点返回了 HTML 页面而非 SSE 数据：" + snippet);
+            }
             StringBuilder content = new StringBuilder();
             StringBuilder reasoning = new StringBuilder();
             ThinkSplit thoughts = new ThinkSplit();
             LinkedHashMap<Integer, Map<String, Object>> toolParts = new LinkedHashMap<Integer, Map<String, Object>>();
+            int nextToolIndex = 0;
             ModelUsage reportedUsage = null;
             ModelResponse.FinishReason finishReason = ModelResponse.FinishReason.UNKNOWN;
+            boolean sawEvent = false;
             try (BufferedReader reader =
                 new java.io.BufferedReader(new java.io.InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = BoundedHttp.readLine(reader, BoundedHttp.SSE_LINE_CHARS)) != null) {
+                    if (!sawEvent) {
+                        String trimmed = line.stripLeading();
+                        String lower = trimmed.toLowerCase(java.util.Locale.ROOT);
+                        if (lower.startsWith("<html") || lower.startsWith("<!doctype html")) {
+                            throw new ModelClientException(ModelFailureKind.PERMANENT,
+                                "流式模型端点返回了 HTML 页面而非 SSE 数据：" + ModelHttp.snippet(trimmed));
+                        }
+                        if (trimmed.startsWith("{")) {
+                            StringBuilder rawJson = new StringBuilder(trimmed);
+                            String extra;
+                            while (rawJson.length() < BoundedHttp.ERROR_BYTES
+                                && (extra = BoundedHttp.readLine(reader, BoundedHttp.SSE_LINE_CHARS)) != null) {
+                                rawJson.append('\n').append(extra);
+                            }
+                            throwNonSseJsonError(rawJson.toString());
+                        }
+                    }
                     if (!line.startsWith("data:")) {
                         continue;
                     }
+                    sawEvent = true;
                     String data = line.substring(5).strip();
                     if (data.isEmpty()) {
                         continue;
@@ -438,7 +477,16 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                     if (data.equals("[DONE]")) {
                         break;
                     }
-                    JsonNode root = objectMapper.readTree(data);
+                    JsonNode root;
+                    try {
+                        root = objectMapper.readTree(data);
+                    } catch (RuntimeException e) {
+                        throw new ModelClientException(ModelFailureKind.INCOMPLETE, "流式模型返回了不完整的 JSON 帧", e);
+                    }
+                    JsonNode error = root.get("error");
+                    if (error != null && !error.isNull()) {
+                        throw streamError(error, data);
+                    }
                     ModelUsage chunkUsage = reportedUsage(root.get("usage"));
                     if (chunkUsage != null) {
                         reportedUsage = chunkUsage;
@@ -457,31 +505,39 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                         reasoning.append(thought);
                         emit(reasoningDelta, thought);
                     }
-                    JsonNode text = delta.get("content");
-                    if (text != null && text.isString()) {
-                        thoughts.accept(text.asString(), piece -> {
+                    JsonNode textNode = delta.get("content");
+                    if (textNode != null && textNode.isString()) {
+                        thoughts.accept(textNode.asString(), piece -> {
                             content.append(piece);
                             emit(textDelta, piece);
-                        }, piece -> emit(reasoningDelta, piece));
+                        }, piece -> {
+                            reasoning.append(piece);
+                            emit(reasoningDelta, piece);
+                        });
                     }
                     JsonNode calls = delta.path("tool_calls");
                     if (calls.isArray()) {
                         for (JsonNode call : calls) {
-                            int index = call.path("index").asInt();
+                            String idPiece = text(call.get("id"));
+                            JsonNode function = call.path("function");
+                            String namePiece = text(function.get("name"));
+                            int fallbackIndex = !idPiece.isEmpty() || !namePiece.isEmpty() || toolParts.isEmpty()
+                                ? nextToolIndex : Math.max(0, nextToolIndex - 1);
+                            int index = toolCallIndex(call, fallbackIndex);
+                            nextToolIndex = Math.max(nextToolIndex, index + 1);
                             @SuppressWarnings("unchecked")
                             Map<String, Object> part =
                                 toolParts.computeIfAbsent(index, ignored -> new LinkedHashMap<>());
-                            JsonNode id = call.get("id");
-                            if (id != null) {
-                                part.put("id", part.getOrDefault("id", "") + id.asString());
+                            if (!idPiece.isEmpty()) {
+                                part.put("id", part.getOrDefault("id", "") + idPiece);
                             }
-                            JsonNode function = call.path("function");
-                            if (function.has("name")) {
-                                part.put("name", part.getOrDefault("name", "") + function.path("name").asString());
+                            if (!namePiece.isEmpty()) {
+                                part.put("name", part.getOrDefault("name", "") + namePiece);
                             }
-                            if (function.has("arguments")) {
-                                part.put("arguments",
-                                    part.getOrDefault("arguments", "") + function.path("arguments").asString());
+                            JsonNode argsNode = function.get("arguments");
+                            if (argsNode != null && !argsNode.isNull()) {
+                                String argsPiece = argsNode.isString() ? argsNode.asString() : argsNode.toString();
+                                part.put("arguments", part.getOrDefault("arguments", "") + argsPiece);
                             }
                         }
                     }
@@ -493,24 +549,18 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             thoughts.finish(piece -> {
                 content.append(piece);
                 emit(textDelta, piece);
-            }, piece -> emit(reasoningDelta, piece));
+            }, piece -> {
+                reasoning.append(piece);
+                emit(reasoningDelta, piece);
+            });
             List<ToolCall> calls = !usable(finishReason) ? List.of() : toolParts.values().stream().map(part -> {
-                try {
-                    String id = (String)part.getOrDefault("id", "");
-                    String name = (String)part.getOrDefault("name", "");
-                    if (id.isBlank() || name.isBlank()) {
-                        throw new ModelClientException(ModelFailureKind.PERMANENT,
-                            "流式 tool_call 缺少 id 或 function.name");
-                    }
-                    String args = (String)part.getOrDefault("arguments", "{}");
-                    JsonNode parsed = objectMapper.readTree(args);
-                    if (parsed == null || !parsed.isObject()) {
-                        throw new ModelClientException(ModelFailureKind.PERMANENT, "流式工具参数必须为 JSON 对象");
-                    }
-                    return new ToolCall(id, name, objectMapper.convertValue(parsed, Map.class));
-                } catch (Exception e) {
-                    throw new ModelClientException(ModelFailureKind.PERMANENT, "流式工具参数不是合法 JSON", e);
+                String id = (String)part.getOrDefault("id", "");
+                String name = (String)part.getOrDefault("name", "");
+                if (id.isBlank() || name.isBlank()) {
+                    throw new ModelClientException(ModelFailureKind.PERMANENT, "流式 tool_call 缺少 id 或 function.name");
                 }
+                String args = (String)part.getOrDefault("arguments", "");
+                return new ToolCall(id, name, parseArguments(args));
             }).toList();
             ModelUsage finalUsage =
                 reportedUsage != null ? reportedUsage : estimatedUsage(messages, content.toString(), calls);
@@ -661,16 +711,80 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             return Map.of();
         }
         String raw = node.isString() ? node.asString() : node.toString();
-        if (raw.isBlank()) {
+        return parseArguments(raw);
+    }
+
+    private Map<String, Object> parseArguments(String raw) {
+        if (raw == null || raw.isBlank()) {
             return Map.of();
         }
         try {
-            return objectMapper.readValue(raw,
+            JsonNode parsed = objectMapper.readTree(raw);
+            if (parsed == null || !parsed.isObject()) {
+                throw new ModelClientException(ModelFailureKind.MALFORMED_TOOL_CALL,
+                    "工具调用参数必须为 JSON 对象：" + ModelHttp.snippet(raw));
+            }
+            return objectMapper.convertValue(parsed,
                 objectMapper.getTypeFactory().constructMapType(LinkedHashMap.class, String.class, Object.class));
+        } catch (ModelClientException e) {
+            throw e;
         } catch (RuntimeException e) {
             throw new ModelClientException(ModelFailureKind.MALFORMED_TOOL_CALL,
                 "工具调用参数不是合法 JSON：" + ModelHttp.snippet(raw), e);
         }
+    }
+
+    private void throwNonSseJsonError(String raw) {
+        try {
+            JsonNode root = objectMapper.readTree(raw);
+            JsonNode error = root == null ? null : root.get("error");
+            if (error != null && !error.isNull()) {
+                throw streamError(error, raw);
+            }
+        } catch (ModelClientException e) {
+            throw e;
+        } catch (RuntimeException ignored) {
+            // 非合法 JSON，走通用非 SSE 响应失败
+        }
+        throw new ModelClientException(ModelFailureKind.PERMANENT, "流式模型端点返回了非 SSE 响应：" + ModelHttp.snippet(raw));
+    }
+
+    private static ModelClientException streamError(JsonNode error, String raw) {
+        String detail = error.isObject() ? text(error.get("message")) : text(error);
+        String errType = error.isObject() ? text(error.get("type")) : "";
+        String errCode = error.isObject() ? text(error.get("code")) : "";
+        String summary = detail.isBlank() ? ModelHttp.snippet(raw) : ModelHttp.snippet(detail);
+        String probe = (errType + " " + errCode + " " + summary).toLowerCase(java.util.Locale.ROOT);
+        ModelFailureKind kind;
+        if (ModelFailureSignals.contextOverflow(400, probe)) {
+            kind = ModelFailureKind.CONTEXT_OVERFLOW;
+        } else if (ModelFailureSignals.billingOrQuota(probe)) {
+            kind = ModelFailureKind.PERMANENT;
+        } else if (probe.contains("rate_limit") || probe.contains("overloaded") || probe.contains("server_error")
+            || probe.contains("temporarily")) {
+            kind = ModelFailureKind.TRANSIENT;
+        } else {
+            kind = ModelFailureKind.PERMANENT;
+        }
+        return new ModelClientException(kind, "流式模型返回错误帧：" + summary);
+    }
+
+    private static int toolCallIndex(JsonNode call, int fallback) {
+        JsonNode node = call.get("index");
+        if (node == null || node.isNull()) {
+            return fallback;
+        }
+        if (node.isIntegralNumber()) {
+            return node.intValue();
+        }
+        if (node.isString()) {
+            try {
+                return Integer.parseInt(node.asString().strip());
+            } catch (NumberFormatException ignored) {
+                return fallback;
+            }
+        }
+        return fallback;
     }
 
     private static ModelFailureKind httpFailure(IOException error) {
@@ -737,23 +851,62 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     private static final class ThinkSplit {
         private static final String OPEN = "<think>";
         private static final String CLOSE = "</think>";
+        private static final String FENCE = "```";
         private boolean inside;
+        private boolean inFence;
         private String held = "";
 
         private void accept(String chunk, Consumer<String> answer, Consumer<String> reasoning) {
             held += chunk == null ? "" : chunk;
             while (!held.isEmpty()) {
-                String tag = inside ? CLOSE : OPEN;
-                int at = held.indexOf(tag);
-                if (at < 0) {
-                    int keep = unfinished(held, tag);
-                    emit(inside ? reasoning : answer, held.substring(0, held.length() - keep));
+                if (inside) {
+                    int at = held.indexOf(CLOSE);
+                    if (at < 0) {
+                        int keep = unfinished(held, CLOSE);
+                        emit(reasoning, held.substring(0, held.length() - keep));
+                        held = held.substring(held.length() - keep);
+                        return;
+                    }
+                    emit(reasoning, held.substring(0, at));
+                    held = held.substring(at + CLOSE.length());
+                    inside = false;
+                    continue;
+                }
+                if (inFence) {
+                    int fenceAt = held.indexOf(FENCE);
+                    if (fenceAt < 0) {
+                        int keep = unfinished(held, FENCE);
+                        emit(answer, held.substring(0, held.length() - keep));
+                        held = held.substring(held.length() - keep);
+                        return;
+                    }
+                    emit(answer, held.substring(0, fenceAt + FENCE.length()));
+                    held = held.substring(fenceAt + FENCE.length());
+                    inFence = false;
+                    continue;
+                }
+                int fenceAt = held.indexOf(FENCE);
+                int openAt = held.indexOf(OPEN);
+                if (fenceAt < 0 && openAt < 0) {
+                    int keep = Math.max(unfinished(held, OPEN), unfinished(held, FENCE));
+                    emit(answer, held.substring(0, held.length() - keep));
                     held = held.substring(held.length() - keep);
                     return;
                 }
-                emit(inside ? reasoning : answer, held.substring(0, at));
-                held = held.substring(at + tag.length());
-                inside = !inside;
+                if (fenceAt >= 0 && (openAt < 0 || fenceAt < openAt)) {
+                    emit(answer, held.substring(0, fenceAt + FENCE.length()));
+                    held = held.substring(fenceAt + FENCE.length());
+                    inFence = true;
+                    continue;
+                }
+                if (openAt > 0 && held.charAt(openAt - 1) == '`') {
+                    emit(answer, held.substring(0, openAt + OPEN.length()));
+                    held = held.substring(openAt + OPEN.length());
+                    continue;
+                }
+                emit(answer, held.substring(0, openAt));
+                held = held.substring(openAt + OPEN.length());
+                inside = true;
             }
         }
 
@@ -774,6 +927,9 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     }
 
     private static String text(JsonNode node) {
-        return node == null || node.isNull() ? "" : node.asString();
+        if (node == null || node.isNull() || node.isMissingNode()) {
+            return "";
+        }
+        return node.isString() ? node.asString() : node.toString();
     }
 }

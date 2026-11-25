@@ -16,6 +16,11 @@ public interface ModelClient {
         return ModelProfile.generic();
     }
 
+    /** 当前客户端对应的模型容量窗口；未显式绑定时回落全局 {@link ModelCapacity#active()}。 */
+    default ModelCapacity capacity() {
+        return ModelCapacity.active();
+    }
+
     /** Provider-side capabilities handled inside the model request rather than by Pilot tools. */
     default Set<NativeCapability> nativeCapabilities() {
         return Set.of();
