@@ -3,16 +3,19 @@ package com.pilot.server.agent;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import com.pilot.core.exec.ProcessSupport;
 import com.pilot.core.lint.ProjectLint;
 import com.pilot.core.message.Message;
 import com.pilot.core.prompt.PromptLibrary;
@@ -107,7 +110,7 @@ final class RepositoryContext {
     }
 
     private static RepoState repoState(Path root) {
-        if (!Files.isDirectory(root.resolve(".git"))) {
+        if (!Files.exists(root.resolve(".git"), LinkOption.NOFOLLOW_LINKS)) {
             return new RepoState(false, NON_GIT, null, "");
         }
         String status = runGit(root, "status", "--porcelain=v1", "-uall");
@@ -187,35 +190,44 @@ final class RepositoryContext {
     }
 
     private static String branchName(Path root) {
-        try {
-            String head = Files.readString(root.resolve(".git").resolve("HEAD"), StandardCharsets.UTF_8).strip();
-            String prefix = "ref: refs/heads/";
-            if (head.startsWith(prefix)) {
-                return head.substring(prefix.length());
+        Path dotGit = root.resolve(".git");
+        if (Files.isDirectory(dotGit)) {
+            try {
+                String head = Files.readString(dotGit.resolve("HEAD"), StandardCharsets.UTF_8).strip();
+                String prefix = "ref: refs/heads/";
+                if (head.startsWith(prefix)) {
+                    return head.substring(prefix.length());
+                }
+                return head.isEmpty() ? "unknown" : "detached@" + head.substring(0, Math.min(7, head.length()));
+            } catch (IOException ignored) {
+                // 回退到 git rev-parse
             }
-            return head.isEmpty() ? "unknown" : "detached@" + head.substring(0, Math.min(7, head.length()));
-        } catch (IOException e) {
+        }
+        String ref = runGit(root, "rev-parse", "--abbrev-ref", "HEAD");
+        if (ref == null || ref.isBlank()) {
             return "unknown";
         }
+        String trimmed = ref.strip();
+        if ("HEAD".equals(trimmed)) {
+            String sha = runGit(root, "rev-parse", "--short=7", "HEAD");
+            return sha == null || sha.isBlank() ? "detached" : "detached@" + sha.strip();
+        }
+        return trimmed;
     }
 
     private static String runGit(Path root, String... args) {
         List<String> command = new ArrayList<>();
         command.add("git");
+        command.add("-c");
+        command.add("core.quotepath=false");
         command.add("--no-pager");
         command.addAll(List.of(args));
         ProcessBuilder builder = new ProcessBuilder(command);
         builder.directory(root.toFile());
-        builder.redirectErrorStream(true);
         builder.environment().put("GIT_OPTIONAL_LOCKS", "0");
         try {
-            Process process = builder.start();
-            if (!process.waitFor(GIT_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
-                process.destroyForcibly();
-                return null;
-            }
-            return new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        } catch (IOException e) {
+            return ProcessSupport.captureUtf8(builder, Duration.ofMillis(GIT_TIMEOUT_MS), 256 * 1024).output();
+        } catch (IOException | TimeoutException e) {
             return null;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

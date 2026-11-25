@@ -143,12 +143,15 @@ public final class ReadFileTool implements Tool.ParallelReadOnly {
                 return "文件未变化，沿用刚才读过的 " + displayPath + "（请求" + requested + "已有 " + pct + "% 覆盖；已交付区间："
                     + ReadGuard.LineRange.formatAll(coverage.delivered()) + "）。如需查看其他部分，请指定未覆盖的 start_line。";
             }
+            if (proposal == null && Files.size(file) > 16L * 1024 * 1024) {
+                return "ERROR: 文件超过 16 MB 文本读取上限（" + Files.size(file) + " 字节），请改用 search_text 定位或用脚本分段查看: " + rawPath;
+            }
             ReadResult slice =
                 proposal == null ? readSlice(file, startLine, lineCount) : readText(proposal, startLine, lineCount);
-            // 只有实际返回文件行才解锁编辑，越界读取和空文件提示不算观察过内容。
-            if (slice.hasLines()) {
+            // 实际返回文件行，或文件本身为 0 字节空文件（如 __init__.py）时，均记录观察态以允许编辑/删除；越界读取仍不解锁。
+            if (slice.hasLines() || slice.totalLines() == 0) {
                 reads.observed(file);
-                if (proposal == null) {
+                if (proposal == null && slice.hasLines()) {
                     String currentStamp = reads.observationStamp(file);
                     reads.recordDelivered(file, currentStamp, slice.startLine(), slice.endLine(), slice.totalLines());
                     int deliveredLines = slice.endLine() - slice.startLine() + 1;

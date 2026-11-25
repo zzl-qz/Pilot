@@ -57,7 +57,7 @@ public final class DeleteFileTool extends PromptedTool implements WritesFiles {
         }
         Path file;
         try {
-            file = paths.resolveWritable(rawPath);
+            file = paths.resolveWritableLeaf(rawPath);
         } catch (RuntimeException e) {
             return ToolResult.text("ERROR: " + e.getMessage());
         }
@@ -77,6 +77,7 @@ public final class DeleteFileTool extends PromptedTool implements WritesFiles {
         try {
             snapshots.beforeWrite(file);
             Files.delete(file);
+            snapshots.afterWrite(file);
             reads.noteWrite();
             return new ToolResult("已删除 " + shown, List.of(shown), List.of());
         } catch (IOException e) {

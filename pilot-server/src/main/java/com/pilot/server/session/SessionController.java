@@ -474,6 +474,7 @@ public class SessionController {
         if (request == null || request.content() == null || request.content().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "content must not be blank");
         }
+        requireContentWithinLimit(request.content());
         RunStarter.QueueRequirements requirements = request.constraints() == null && request.acceptance() == null ? null
             : new RunStarter.QueueRequirements(request.constraints(), request.acceptance());
         if (!runStarter.editQueued(id, index, request.content(), requirements, request.revision())) {
@@ -542,6 +543,7 @@ public class SessionController {
         if (request.content() == null || request.content().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "content must not be blank");
         }
+        requireContentWithinLimit(request.content());
         List<EventEnvelope> events = sessions.events(id);
         String original = null;
         for (EventEnvelope event : events) {
@@ -602,11 +604,20 @@ public class SessionController {
         if (request == null || request.content() == null || request.content().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "引导内容不能为空");
         }
+        requireContentWithinLimit(request.content());
         String runId = request.runId() == null ? runStarter.activeRun(id).orElse(null) : request.runId();
         if (runId == null || !runStarter.steer(id, runId, request.content())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "当前任务已结束或正在停止，引导未发送");
         }
         return ResponseEntity.accepted().body(new MessageResponse(id, runId));
+    }
+
+    private static final int MAX_MESSAGE_CONTENT_BYTES = 4 * 1024 * 1024;
+
+    private static void requireContentWithinLimit(String content) {
+        if (content != null && content.getBytes(StandardCharsets.UTF_8).length > MAX_MESSAGE_CONTENT_BYTES) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "消息正文超过 4 MB 上限，请拆分发送或改用附件上传");
+        }
     }
 
     public record SteerRequest(String content, String runId) {
@@ -620,6 +631,7 @@ public class SessionController {
         if (request == null || ((request.content() == null || request.content().isBlank()) && !hasAttachments)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "content must not be blank");
         }
+        requireContentWithinLimit(request.content());
         String skill = request.skill() == null || request.skill().isBlank() ? null : request.skill().strip();
         String mode = normalizeMode(request.mode());
         if (skill != null) {

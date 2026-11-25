@@ -311,4 +311,15 @@ class ReadFileToolTest {
         assertFalse(result.contains("401 | line 401"), result);
         assertTrue(result.contains("从第 401 行继续"), result);
     }
+
+    @Test
+    void readingEmptyZeroByteFileRecordsObservationForWriteTools() throws IOException {
+        Path empty = Files.createFile(workspace.resolve("__init__.py"));
+        ReadTracker tracker = new ReadTracker();
+        ReadFileTool trackedRead = new ReadFileTool(new PathValidator(workspace), tracker);
+
+        String output = trackedRead.execute(Map.of("path", "__init__.py"));
+        assertTrue(output.contains("空文件"), output);
+        assertTrue(tracker.isObserved(empty.toRealPath()), "读取 0 字节文件后必须记录观察态，允许后续编辑/删除");
+    }
 }

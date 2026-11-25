@@ -21,6 +21,7 @@ import java.util.stream.Stream;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.tool.command.CommandTaskManager;
+import com.pilot.core.util.FileTrees;
 import com.pilot.core.util.Sha256;
 import com.pilot.server.run.RunRegistry;
 import com.pilot.server.store.PilotDataDir;
@@ -68,6 +69,9 @@ public class GitWorktrees {
     public Created create(Path workspace, String branch) {
         Path root = toplevel(workspace);
         String selected = branch == null ? "" : branch.strip();
+        if (selected.startsWith("-")) {
+            throw new IllegalArgumentException("分支名不能以 - 开头：" + selected);
+        }
         if (selected.isEmpty()) {
             Exec current = git(root, "rev-parse", "--abbrev-ref", "HEAD");
             if (current.exit != 0) {
@@ -91,6 +95,10 @@ public class GitWorktrees {
         }
         Exec added = git(root, "worktree", "add", "--detach", destination.toString(), commit.output.strip());
         if (added.exit != 0) {
+            try {
+                FileTrees.delete(destination);
+            } catch (IOException ignored) {
+            }
             throw new IllegalArgumentException("创建 worktree 失败：" + added.output.strip());
         }
         Meta meta = new Meta(id, destination.toString(), root.toString(), selected, commit.output.strip());
@@ -283,9 +291,15 @@ public class GitWorktrees {
         return result.output;
     }
 
-    public void remove(Path worktree) {
+    public synchronized void remove(Path worktree) {
         Meta meta = findByPath(worktree).orElseThrow(() -> new IllegalArgumentException("这不是 worktree 对话"));
-        checked(git(Path.of(meta.base), "worktree", "remove", "--force", meta.path));
+        Path base = Path.of(meta.base);
+        Path target = Path.of(meta.path);
+        if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+            checked(git(base, "worktree", "remove", "--force", meta.path));
+        } else {
+            git(base, "worktree", "prune");
+        }
         try {
             Files.deleteIfExists(registryDir().resolve(meta.id + ".properties"));
         } catch (IOException e) {

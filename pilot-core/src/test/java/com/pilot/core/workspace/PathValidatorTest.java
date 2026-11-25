@@ -186,4 +186,19 @@ class PathValidatorTest {
         assertThrows(WorkspaceViolationException.class,
             () -> validator.resolve(other.resolve("shared.txt").toString()));
     }
+
+    @Test
+    void resolveWritableLeafPreservesSymlinkWithoutDereferencingTarget() throws IOException {
+        Path real = Files.writeString(workspace.resolve("real.txt"), "keep");
+        Path link = workspace.resolve("link.txt");
+        try {
+            Files.createSymbolicLink(link, real);
+        } catch (UnsupportedOperationException | IOException e) {
+            return;
+        }
+        PathValidator validator = new PathValidator(workspace);
+        Path leaf = validator.resolveWritableLeaf("link.txt");
+        Assertions.assertTrue(Files.isSymbolicLink(leaf), "末段软链不得被解引用为真实目标");
+        assertEquals("link.txt", leaf.getFileName().toString());
+    }
 }

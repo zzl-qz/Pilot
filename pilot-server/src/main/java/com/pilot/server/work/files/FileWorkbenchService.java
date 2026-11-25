@@ -43,6 +43,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 文件工作台：工作区里的真实 Office 文件就是唯一源，这里只做索引、预览、批注与交付。
@@ -50,6 +51,7 @@ import lombok.RequiredArgsConstructor;
  * <p>对标 Codex 的审阅模式：不维护第二套「可编辑源」，不把文件复制进私有目录；
  * 用户可以随时用本机应用改同一个文件，工作台通过 sha256 感知改动。
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class FileWorkbenchService {
@@ -444,6 +446,12 @@ public class FileWorkbenchService {
                     }
                 }
                 return files.size() >= MAX_FILES ? FileVisitResult.TERMINATE : FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFileFailed(Path file, IOException error) {
+                log.warn("跳过无法访问的工作区文件 {}: {}", file, error.toString());
+                return FileVisitResult.CONTINUE;
             }
         });
         return files;

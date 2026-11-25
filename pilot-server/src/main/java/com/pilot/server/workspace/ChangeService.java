@@ -7,6 +7,7 @@ import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -147,7 +148,8 @@ public class ChangeService {
             return new ChangeReport(root, false, List.of(), "", false, null);
         }
 
-        String status = exec(workspace, List.of("git", "status", "--porcelain=v1", "-uall"));
+        String status =
+            exec(workspace, List.of("git", "-c", "core.quotePath=false", "status", "--porcelain=v1", "-z", "-uall"));
         // 相对 HEAD 取补丁，已暂存的改动才不会在工作区审阅面板里消失。
         boolean head = hasHead(workspace);
         ArrayList<String> diffCommand =
@@ -163,22 +165,22 @@ public class ChangeService {
 
         ArrayList<FileChange> files = new ArrayList<FileChange>();
         boolean truncated = false;
-        for (String line : status.lines().toList()) {
-            if (line.length() < 3) {
+        String[] records = status.split("\0", -1);
+        for (int i = 0; i < records.length; i++) {
+            String record = records[i];
+            if (record.length() < 4) {
                 continue;
             }
             if (files.size() >= MAX_FILES) {
                 truncated = true;
                 break;
             }
-            String code = line.substring(0, 2).strip();
-            String path = line.substring(3).strip();
-            int renameMark = path.indexOf(" -> ");
-            if (renameMark > 0) {
-                path = path.substring(renameMark + 4);
-            }
-            if (code.isEmpty()) {
-                code = "?";
+            String rawCode = record.substring(0, 2);
+            String code = statusCode(rawCode.strip());
+            String path = record.substring(3);
+            if ((rawCode.indexOf('R') >= 0 || rawCode.indexOf('C') >= 0) && i + 1 < records.length) {
+                // git status -z 中重命名/复制记录格式为 "XY newPath\0oldPath\0"，跳过旧路径。
+                i++;
             }
             int[] stat = stats.get(path);
             if (stat == null && countsAsWholeFile(code)) {
@@ -431,6 +433,10 @@ public class ChangeService {
                 continue;
             }
             // 未跟踪文件不在 HEAD 里，撤销就是删掉它；新增（A）同理，先出暂存区再删文件
+            if ("U".equals(code)) {
+                failed.add(new RestoreFailure(path, "文件处于合并冲突状态，请先手动解决冲突，拒绝自动删除"));
+                continue;
+            }
             if (code.indexOf('?') >= 0 || code.indexOf('A') >= 0) {
                 if (code.indexOf('A') >= 0) {
                     run(root, List.of("git", "rm", "--cached", "--force", "--", ":(literal)" + path));
@@ -478,6 +484,9 @@ public class ChangeService {
         String code = statuses(root).codes().get(path);
         if (code == null) {
             return new GitOperationResult(false, "该文件没有未提交改动");
+        }
+        if ("U".equals(code)) {
+            return new GitOperationResult(false, "文件处于合并冲突状态，请先手动解决冲突，拒绝自动删除");
         }
         if ("??".equals(code)) {
             return new GitOperationResult(false, "未跟踪的新文件不支持放弃未暂存改动");
@@ -563,6 +572,10 @@ public class ChangeService {
     private static String statusCode(String raw) {
         if (raw.isEmpty()) {
             return "?";
+        }
+        if (raw.indexOf('U') >= 0 || "AA".equals(raw) || "DD".equals(raw) || "AU".equals(raw) || "UA".equals(raw)
+            || "DU".equals(raw) || "UD".equals(raw)) {
+            return "U";
         }
         if (raw.indexOf('R') >= 0) {
             return "R";
@@ -760,7 +773,7 @@ public class ChangeService {
 
     /** 新增文件：git diff 看不到它，按当前内容合成一份全「+」的补丁。 */
     private static SyntheticDiff untrackedDiff(Path absolute, String path) {
-        if (!Files.isRegularFile(absolute) || isBinary(absolute)) {
+        if (!Files.isRegularFile(absolute, LinkOption.NOFOLLOW_LINKS) || isBinary(absolute)) {
             return new SyntheticDiff("", 0, false);
         }
         String text;
