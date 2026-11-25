@@ -66,7 +66,8 @@ public final class LocalExecutionBackend implements ExecutionBackend {
         }
 
         CompletableFuture<Captured> output =
-            CompletableFuture.supplyAsync(() -> read(process.getInputStream(), request.limits().maxOutputBytes()));
+            CompletableFuture.supplyAsync(() -> read(process.getInputStream(), request.limits().maxOutputBytes()),
+                task -> Thread.ofVirtual().start(task));
         boolean finished;
         try {
             long timeout = request.limits().timeoutSeconds();
@@ -78,10 +79,10 @@ public final class LocalExecutionBackend implements ExecutionBackend {
         }
         if (!finished) {
             killTree(process);
-            Captured captured = await(output);
+            Captured captured = await(output, process);
             return new ExecutionResult(-1, captured.text(), true, captured.truncated(), id(), isolation(), "");
         }
-        Captured captured = await(output);
+        Captured captured = await(output, process);
         return new ExecutionResult(process.exitValue(), captured.text(), false, captured.truncated(), id(), isolation(),
             "");
     }
@@ -108,37 +109,41 @@ public final class LocalExecutionBackend implements ExecutionBackend {
         process.destroyForcibly();
     }
 
-    private static Captured await(CompletableFuture<Captured> future) {
+    private static Captured await(CompletableFuture<Captured> future, Process process) {
         try {
             return future.get(5, TimeUnit.SECONDS);
         } catch (Exception e) {
+            try {
+                process.getInputStream().close();
+            } catch (IOException ignored) {
+                // 超时收尾释放残留输出流
+            }
             future.cancel(true);
             return new Captured("", false);
         }
     }
 
     private static Captured read(InputStream stream, int limit) {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        boolean truncated = false;
         try (InputStream input = stream) {
-            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
             byte[] chunk = new byte[8_192];
-            boolean truncated = false;
             int read;
             while ((read = input.read(chunk)) >= 0) {
                 int remaining = limit - buffer.size();
                 if (remaining <= 0) {
                     truncated = true;
-                    break;
+                    continue;
                 }
                 buffer.write(chunk, 0, Math.min(read, remaining));
                 if (read > remaining) {
                     truncated = true;
-                    break;
                 }
             }
-            return new Captured(ProcessSupport.decode(buffer.toByteArray()), truncated);
-        } catch (IOException e) {
-            return new Captured("", false);
+        } catch (IOException ignored) {
+            // 超时或流提前关闭时保留已读输出
         }
+        return new Captured(ProcessSupport.decode(buffer.toByteArray()), truncated);
     }
 
     private record Captured(String text, boolean truncated) {

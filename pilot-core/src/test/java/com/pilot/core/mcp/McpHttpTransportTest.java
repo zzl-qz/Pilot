@@ -15,6 +15,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -121,6 +122,56 @@ class McpHttpTransportTest {
     }
 
     @Test
+    void expiredSessionIsReinitializedAndOriginalRequestRetriedOnce() throws Exception {
+        AtomicBoolean expired = new AtomicBoolean();
+        List<String> methods = new CopyOnWriteArrayList<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/mcp", exchange -> {
+            JsonNode message = MAPPER.readTree(exchange.getRequestBody().readAllBytes());
+            String method = message.path("method").asString();
+            methods.add(method);
+            long id = message.path("id").asLong();
+            if ("initialize".equals(method)) {
+                exchange.getResponseHeaders().set("Mcp-Session-Id", "session-" + methods.size());
+                writeJson(exchange, Map.of("jsonrpc", "2.0", "id", id, "result",
+                    Map.of("protocolVersion", "2025-06-18", "capabilities", Map.of())));
+            } else if ("notifications/initialized".equals(method)) {
+                exchange.sendResponseHeaders(202, -1);
+                exchange.close();
+            } else if ("tools/list".equals(method)) {
+                writeJson(exchange, Map.of("jsonrpc", "2.0", "id", id, "result",
+                    Map.of("tools", List.of(Map.of("name", "ping_remote", "inputSchema", Map.of("type", "object"))))));
+            } else if ("tools/call".equals(method)) {
+                if (!expired.getAndSet(true)) {
+                    exchange.sendResponseHeaders(404, -1);
+                    exchange.close();
+                } else {
+                    writeJson(exchange, Map.of("jsonrpc", "2.0", "id", id, "result",
+                        Map.of("content", List.of(Map.of("type", "text", "text", "ok")))));
+                }
+            } else {
+                exchange.sendResponseHeaders(202, -1);
+                exchange.close();
+            }
+        });
+        server.start();
+        try {
+            String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/mcp";
+            Files.writeString(workspace.resolve(".mcp.json"),
+                MAPPER.writeValueAsString(Map.of("mcpServers", Map.of("remote", Map.of("type", "http", "url", url)))));
+            try (McpManager manager = new McpManager(MAPPER, null, null, null)) {
+                assertEquals(1, manager.tools(workspace, "remote").size());
+                assertEquals("ok", manager.call(workspace, "remote", "ping_remote", Map.of()).path("content").get(0)
+                    .path("text").asString());
+                assertEquals(List.of("initialize", "notifications/initialized", "tools/list", "tools/call",
+                    "initialize", "notifications/initialized", "tools/call"), methods);
+            }
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void legacySseAndAutomatic405FallbackWorkEndToEnd() throws Exception {
         BlockingQueue<String> events = new LinkedBlockingQueue<>();
         AtomicBoolean sseOpen = new AtomicBoolean(true);
@@ -147,6 +198,8 @@ class McpHttpTransportTest {
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+            } catch (IOException ignored) {
+                // Manager closes the SSE stream after completing the test call.
             }
         });
         server.createContext("/messages", exchange -> {

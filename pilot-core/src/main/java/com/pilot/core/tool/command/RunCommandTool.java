@@ -1,5 +1,6 @@
 package com.pilot.core.tool.command;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -76,6 +77,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     private int missingCommandFailures;
     private static final int MAX_TOKENS = 64;
     private static final int MAX_OUTPUT_CHARS = 12_000;
+    private static final int MAX_SYNC_OUTPUT_BYTES = 1024 * 1024;
     private static final int HEAD_CHARS = 4_000;
     private static final long DEFAULT_TIMEOUT_MS = 120_000L;
     private static final long MAX_TIMEOUT_MS = 600_000L;
@@ -1055,17 +1057,19 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             // stdin 关闭失败不影响执行
         }
 
-        CompletableFuture<byte[]> output = CompletableFuture.supplyAsync(() -> readAll(process));
+        CompletableFuture<CapturedOutput> output =
+            CompletableFuture.supplyAsync(() -> readLimited(process), task -> Thread.ofVirtual().start(task));
         boolean finished;
         try {
             finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            process.destroyForcibly();
+            destroyTree(process);
+            closeQuietly(process.getInputStream());
             return "ERROR: 命令执行被中断";
         }
         if (!finished) {
-            process.destroyForcibly();
+            destroyTree(process);
             try {
                 process.waitFor(2, TimeUnit.SECONDS);
             } catch (InterruptedException e) {
@@ -1073,7 +1077,11 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             }
         }
 
-        String text = decode(await(output));
+        CapturedOutput captured = await(output, process);
+        String text = decode(captured.bytes());
+        if (captured.truncated()) {
+            text += "\n… 输出已截断（同步执行上限 " + MAX_SYNC_OUTPUT_BYTES + " 字节）…";
+        }
         long latencyMs = Math.max(0L, (System.nanoTime() - startedAt) / 1_000_000L);
         String rendered =
             render(String.join(" ", displayTokens), command, finished ? exitCode(process) : -1, latencyMs, text);
@@ -1253,21 +1261,57 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         return tokens;
     }
 
-    private static byte[] readAll(Process process) {
+    private static CapturedOutput readLimited(Process process) {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        boolean truncated = false;
         try (InputStream stream = process.getInputStream()) {
-            return stream.readAllBytes();
-        } catch (IOException e) {
-            return new byte[0];
+            byte[] chunk = new byte[8_192];
+            int count;
+            while ((count = stream.read(chunk)) != -1) {
+                int remaining = MAX_SYNC_OUTPUT_BYTES - output.size();
+                if (remaining <= 0) {
+                    truncated = true;
+                    continue;
+                }
+                output.write(chunk, 0, Math.min(count, remaining));
+                truncated |= count > remaining;
+            }
+        } catch (IOException ignored) {
+            // 流被超时关闭时仍保留已读出的前缀输出，避免丢失已捕获日志
         }
+        return new CapturedOutput(output.toByteArray(), truncated);
     }
 
-    private static byte[] await(CompletableFuture<byte[]> future) {
+    private static CapturedOutput await(CompletableFuture<CapturedOutput> future, Process process) {
         try {
             return future.get(5, TimeUnit.SECONDS);
         } catch (Exception e) {
+            closeQuietly(process.getInputStream());
             future.cancel(true);
-            return new byte[0];
+            return new CapturedOutput(new byte[0], false);
         }
+    }
+
+    private static void closeQuietly(InputStream stream) {
+        try {
+            stream.close();
+        } catch (IOException ignored) {
+            // 释放超时或异常退出后的管道句柄
+        }
+    }
+
+    private static void destroyTree(Process process) {
+        process.descendants().forEach(handle -> {
+            try {
+                handle.destroyForcibly();
+            } catch (RuntimeException ignored) {
+                // 子进程可能已退出
+            }
+        });
+        process.destroyForcibly();
+    }
+
+    private record CapturedOutput(byte[] bytes, boolean truncated) {
     }
 
     private static int exitCode(Process process) {

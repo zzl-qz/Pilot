@@ -80,6 +80,24 @@ class McpToolsTest {
     }
 
     @Test
+    void deletingWorkspaceConfigurationStopsTheCachedClient() throws IOException {
+        discover("fake");
+        var process = manager.selection(workspace, "fake").client();
+        assertTrue(manager.running(workspace, "fake"));
+        Files.writeString(workspace.resolve(".mcp.json"), mapper.writeValueAsString(Map.of("mcpServers", Map.of())));
+        assertFalse(manager.running(workspace, "fake"));
+        assertFalse(process.running());
+    }
+
+    @Test
+    void remoteApprovalDescriptionShowsTheConfiguredUrl() {
+        String detail = listing.approvalDescription(Map.of("server", "remote"));
+        assertTrue(detail.contains("传输：http"), detail);
+        assertTrue(detail.contains("URL：https://example.com/mcp"), detail);
+        assertFalse(detail.contains("命令：null"), detail);
+    }
+
+    @Test
     void discoversServersThenToolsThenSchemaOnDemand() {
         String servers = listing.execute(Map.of());
         assertTrue(servers.contains("- fake：未启动（未信任；首次使用会请求你批准）"), servers);

@@ -108,9 +108,16 @@ public final class McpToolsTool implements Tool {
             return config == null ? "MCP 服务器配置不存在" : "MCP 服务器不可用：" + config.unsupported();
         }
         StringBuilder text = new StringBuilder("启动 MCP 服务器 ").append(server).append('\n');
-        text.append("命令：").append(config.command());
-        for (String arg : config.args()) {
-            text.append(' ').append(arg);
+        if (config.isRemote()) {
+            text.append("传输：").append(config.transport()).append('\n').append("URL：").append(config.url());
+            if (!config.headers().isEmpty()) {
+                text.append('\n').append("请求头（仅名称）：").append(String.join(", ", config.headers().keySet()));
+            }
+        } else {
+            text.append("命令：").append(config.command());
+            for (String arg : config.args()) {
+                text.append(' ').append(arg);
+            }
         }
         text.append('\n');
         if (!config.env().isEmpty()) {
@@ -234,7 +241,7 @@ public final class McpToolsTool implements Tool {
         boolean hadRecord = manager.trustStore() != null && manager.trustStore().record(workspace, name).isPresent();
         boolean stale = !trusted && hadRecord;
         if (manager.configurationChanged(workspace, name)) {
-            return "配置已变更，重启 Pilot 服务后生效；旧连接不再接受新调用（" + (stale ? "信任失效：配置已变化" : trusted ? "已信任" : "未信任") + "）";
+            return "配置已变更，旧连接已停用；重新发现工具将按新配置启动（" + (stale ? "信任失效：配置已变化" : trusted ? "已信任" : "未信任") + "）";
         }
         if (manager.running(workspace, name)) {
             String note = manager.trustNote(workspace, name);

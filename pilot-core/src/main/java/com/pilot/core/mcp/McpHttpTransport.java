@@ -2,11 +2,13 @@ package com.pilot.core.mcp;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
@@ -14,6 +16,7 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -21,6 +24,11 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+
+import javax.net.ssl.SSLSession;
+
+import com.pilot.core.http.BoundedHttp;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -44,6 +52,7 @@ final class McpHttpTransport implements AutoCloseable {
     private final Runnable onToolsListChanged;
     private final HttpClient http;
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final AtomicLong requestIds = new AtomicLong();
     private final Map<Long, CompletableFuture<JsonNode>> ssePending = new ConcurrentHashMap<>();
 
     private volatile boolean connected;
@@ -96,6 +105,9 @@ final class McpHttpTransport implements AutoCloseable {
             postStreamable(initializeId, "initialize", initParams, deadline, new AtomicBoolean(), true);
             sendNotification("notifications/initialized", deadline);
             connected = true;
+        } catch (ExpiredSessionException expired) {
+            initializeExpiredSession(requestIds.incrementAndGet(), initParams, deadline, expired.sessionId);
+            connected = true;
         } catch (FallbackToLegacySseException fallback) {
             legacySseMode = true;
             startLegacySse(deadline);
@@ -115,23 +127,53 @@ final class McpHttpTransport implements AutoCloseable {
         if (legacySseMode) {
             return requestLegacySse(id, method, params, deadline, dispatched);
         }
-        return postStreamable(id, method, params, deadline, dispatched, false);
+        try {
+            return postStreamable(id, method, params, deadline, dispatched, false);
+        } catch (ExpiredSessionException expired) {
+            initializeExpiredSession(requestIds.incrementAndGet(), initializeParams(), deadline, expired.sessionId);
+            return postStreamable(id, method, params, deadline, dispatched, false, false);
+        }
+    }
+
+    private synchronized void initializeExpiredSession(long id, Map<String, Object> params, long deadline,
+        String failedSessionId) {
+        String current = sessionId;
+        if (current != null && !current.isBlank() && !current.equals(failedSessionId)) {
+            return;
+        }
+        sessionId = null;
+        postStreamable(id, "initialize", params, deadline, new AtomicBoolean(), false, false);
+        sendNotification("notifications/initialized", deadline);
+    }
+
+    private static Map<String, Object> initializeParams() {
+        return Map.of("protocolVersion", McpClient.PROTOCOL_VERSION, "capabilities", Map.of(), "clientInfo",
+            Map.of("name", "pilot", "version", "1"));
     }
 
     private JsonNode postStreamable(long id, String method, Map<String, Object> params, long deadline,
         AtomicBoolean dispatched, boolean allowSseFallback) {
+        return postStreamable(id, method, params, deadline, dispatched, allowSseFallback, true);
+    }
+
+    private JsonNode postStreamable(long id, String method, Map<String, Object> params, long deadline,
+        AtomicBoolean dispatched, boolean allowSseFallback, boolean retryExpiredSession) {
         byte[] payload = encodeRequest(id, method, params);
         HttpRequest.Builder req = baseRequest(baseUri, remainingDuration(deadline))
             .header("Content-Type", "application/json").header("Accept", "application/json, text/event-stream")
             .header("MCP-Protocol-Version", McpClient.PROTOCOL_VERSION)
             .POST(HttpRequest.BodyPublishers.ofByteArray(payload));
-        if (sessionId != null && !sessionId.isBlank()) {
-            req.header("Mcp-Session-Id", sessionId);
+        String sentSessionId = sessionId;
+        if (sentSessionId != null && !sentSessionId.isBlank()) {
+            req.header("Mcp-Session-Id", sentSessionId);
         }
         dispatched.set(true);
         HttpResponse<InputStream> response = send(req.build(), method);
         try (InputStream body = response.body()) {
             int code = response.statusCode();
+            if (code == 404 && retryExpiredSession && sentSessionId != null && !sentSessionId.isBlank()) {
+                throw new ExpiredSessionException(sentSessionId);
+            }
             if (allowSseFallback && code == 405) {
                 throw new FallbackToLegacySseException();
             }
@@ -209,10 +251,12 @@ final class McpHttpTransport implements AutoCloseable {
     }
 
     private void runLegacySseLoop(CompletableFuture<URI> endpointFuture) {
-        HttpRequest req = baseRequest(baseUri, null).header("Accept", "text/event-stream")
+        HttpRequest req = baseRequest(baseUri, Duration.ofDays(365)).header("Accept", "text/event-stream")
             .header("Cache-Control", "no-cache").GET().build();
         try {
-            HttpResponse<InputStream> response = http.send(req, HttpResponse.BodyHandlers.ofInputStream());
+            // 长连接 SSE 空闲期间不能因 30s 空闲超时断开，也无整条连接累计字节上限；
+            // 单行和单事件大小由 BoundedHttp.readLine 与 McpJson.MAX_FRAME_BYTES 逐条限幅。
+            HttpResponse<InputStream> response = boundedSend(req, Duration.ofDays(365), Integer.MAX_VALUE);
             int code = response.statusCode();
             if (code < 200 || code >= 300) {
                 try (InputStream err = response.body()) {
@@ -228,7 +272,7 @@ final class McpHttpTransport implements AutoCloseable {
                 String eventName = "";
                 StringBuilder data = new StringBuilder();
                 String line;
-                while (!closed.get() && (line = reader.readLine()) != null) {
+                while (!closed.get() && (line = BoundedHttp.readLine(reader, BoundedHttp.SSE_LINE_CHARS)) != null) {
                     if (line.isEmpty()) {
                         dispatchSseEvent(eventName, data.toString(), endpointFuture);
                         eventName = "";
@@ -375,7 +419,7 @@ final class McpHttpTransport implements AutoCloseable {
             StringBuilder data = new StringBuilder();
             long totalBytes = 0;
             String line;
-            while ((line = reader.readLine()) != null) {
+            while ((line = BoundedHttp.readLine(reader, BoundedHttp.SSE_LINE_CHARS)) != null) {
                 if (System.nanoTime() >= deadline) {
                     throw new McpException("远程 MCP 流式响应读取超时");
                 }
@@ -465,7 +509,8 @@ final class McpHttpTransport implements AutoCloseable {
 
     private HttpResponse<InputStream> send(HttpRequest request, String method) {
         try {
-            return http.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            Duration idleTimeout = request.timeout().orElse(Duration.ofSeconds(30));
+            return boundedSend(request, idleTimeout, McpJson.MAX_FRAME_BYTES);
         } catch (java.net.http.HttpTimeoutException e) {
             throw new McpException("远程 MCP 服务器 " + name + " 调用超时（" + method + "）");
         } catch (InterruptedException e) {
@@ -474,6 +519,58 @@ final class McpHttpTransport implements AutoCloseable {
         } catch (IOException e) {
             throw new McpException("无法连接远程 MCP 服务器 " + name + "：" + e.getMessage());
         }
+    }
+
+    private HttpResponse<InputStream> boundedSend(HttpRequest request, Duration idleTimeout, int maxBytes)
+        throws IOException, InterruptedException {
+        BoundedHttp.Exchange exchange = BoundedHttp.open(http, request, idleTimeout, maxBytes);
+        InputStream body = new FilterInputStream(exchange.body()) {
+            @Override
+            public void close() throws IOException {
+                exchange.close();
+            }
+        };
+        return new HttpResponse<>() {
+            @Override
+            public int statusCode() {
+                return exchange.statusCode();
+            }
+
+            @Override
+            public HttpRequest request() {
+                return request;
+            }
+
+            @Override
+            public Optional<HttpResponse<InputStream>> previousResponse() {
+                return Optional.empty();
+            }
+
+            @Override
+            public HttpHeaders headers() {
+                return exchange.headers();
+            }
+
+            @Override
+            public InputStream body() {
+                return body;
+            }
+
+            @Override
+            public Optional<SSLSession> sslSession() {
+                return Optional.empty();
+            }
+
+            @Override
+            public URI uri() {
+                return request.uri();
+            }
+
+            @Override
+            public HttpClient.Version version() {
+                return HttpClient.Version.HTTP_1_1;
+            }
+        };
     }
 
     private HttpRequest.Builder baseRequest(URI target, Duration timeout) {
@@ -569,21 +666,34 @@ final class McpHttpTransport implements AutoCloseable {
         }
         failAllPending(new McpException("远程 MCP 服务器 " + name + " 已关闭"));
         if (sid != null && !sid.isBlank() && !legacySseMode) {
-            Thread cleanup = new Thread(() -> {
-                try {
-                    HttpRequest deleteReq =
-                        baseRequest(baseUri, Duration.ofSeconds(3)).header("Mcp-Session-Id", sid).DELETE().build();
-                    http.send(deleteReq, HttpResponse.BodyHandlers.discarding());
-                } catch (IOException | InterruptedException | RuntimeException ignored) {
-                    if (ignored instanceof InterruptedException) {
-                        Thread.currentThread().interrupt();
-                    }
+            try {
+                HttpRequest deleteReq =
+                    baseRequest(baseUri, Duration.ofSeconds(3)).header("Mcp-Session-Id", sid).DELETE().build();
+                try (var ignored = BoundedHttp.open(http, deleteReq, Duration.ofSeconds(3), BoundedHttp.ERROR_BYTES)) {
+                    // 仅需完成受限 DELETE 通知，响应体直接丢弃关闭
                 }
-            }, "pilot-mcp-http-close-" + name);
-            cleanup.setDaemon(true);
-            cleanup.start();
+            } catch (IOException | InterruptedException | RuntimeException ignored) {
+                if (ignored instanceof InterruptedException) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        }
+        if (http instanceof AutoCloseable closeable) {
+            try {
+                closeable.close();
+            } catch (Exception ignored) {
+                // JDK 25 HttpClient supports close; this remains compatible with older JDKs.
+            }
         }
     }
 
     private static final class FallbackToLegacySseException extends RuntimeException {}
+
+    private static final class ExpiredSessionException extends RuntimeException {
+        private final String sessionId;
+
+        private ExpiredSessionException(String sessionId) {
+            this.sessionId = sessionId;
+        }
+    }
 }

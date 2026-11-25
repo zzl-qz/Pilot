@@ -41,15 +41,21 @@ class McpConfigurationTest {
         save("one");
         try (McpManager manager = new McpManager(mapper, null, null, null)) {
             manager.tools(workspace, "fake");
+            McpClient previous = manager.selection(workspace, "fake").client();
             assertEquals("one",
                 manager.call(workspace, "fake", "first", Map.of()).path("content").get(0).path("text").asString());
             save("two");
             McpException error =
                 assertThrows(McpException.class, () -> manager.call(workspace, "fake", "first", Map.of()));
-            assertTrue(error.getMessage().contains("重启"), error.getMessage());
+            assertTrue(error.getMessage().contains("配置已变更"), error.getMessage());
+            assertFalse(previous.running(), "配置变更后旧子进程必须立即停用，不得残留");
             assertFalse(manager.running(workspace, "fake"));
             assertTrue(manager.knownTools(workspace, "fake").isEmpty());
             assertTrue(new McpToolsTool(manager, workspace).execute(Map.of()).contains("配置已变更"));
+            // 无需重启整个 Pilot，重新发现即可按新配置热替换连接
+            manager.tools(workspace, "fake");
+            assertEquals("two",
+                manager.call(workspace, "fake", "first", Map.of()).path("content").get(0).path("text").asString());
         }
         try (McpManager restarted = new McpManager(mapper, null, null, null)) {
             restarted.tools(workspace, "fake");
@@ -91,8 +97,37 @@ class McpConfigurationTest {
                 Files.writeString(workspace.resolve(".mcp.json"),
                     mapper.writeValueAsString(Map.of("mcpServers", Map.of("fake", next))));
                 assertTrue(manager.configurationChanged(workspace, "fake"), field);
-                assertThrows(McpException.class, () -> manager.tools(workspace, "fake"));
+                assertThrows(McpException.class, () -> manager.call(workspace, "fake", "first", Map.of()));
+                if (!field.equals("runtimePath")) {
+                    assertThrows(McpException.class, () -> manager.tools(workspace, "fake"));
+                } else {
+                    manager.tools(workspace, "fake");
+                    assertTrue(manager.running(workspace, "fake"));
+                }
             }
+        }
+    }
+
+    @Test
+    void savingUserConfigRetiresModifiedAndDeletedServersWithoutLockingSameName() throws Exception {
+        Path user = workspace.resolve("user-mcp.json");
+        try (McpManager manager = new McpManager(mapper, user, null, null)) {
+            manager.saveUserConfig(mapper.valueToTree(Map.of("mcpServers", Map.of("fake", config("v1")))));
+            manager.tools(workspace, "fake");
+            McpClient first = manager.selection(workspace, "fake").client();
+            assertEquals("v1",
+                manager.call(workspace, "fake", "first", Map.of()).path("content").get(0).path("text").asString());
+
+            manager.saveUserConfig(mapper.valueToTree(Map.of("mcpServers", Map.of("fake", config("v2")))));
+            assertFalse(first.running(), "修改用户级 MCP 配置后旧进程应立即关闭");
+            manager.tools(workspace, "fake");
+            assertEquals("v2",
+                manager.call(workspace, "fake", "first", Map.of()).path("content").get(0).path("text").asString());
+
+            McpClient second = manager.selection(workspace, "fake").client();
+            manager.saveUserConfig(mapper.valueToTree(Map.of("mcpServers", Map.of())));
+            assertFalse(second.running(), "删除用户级 MCP 配置后旧进程应立即关闭");
+            assertFalse(manager.running(workspace, "fake"));
         }
     }
 

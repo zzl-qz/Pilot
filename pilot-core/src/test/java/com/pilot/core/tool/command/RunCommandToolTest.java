@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
@@ -510,6 +511,86 @@ class RunCommandToolTest {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return false;
+        }
+    }
+
+    @Test
+    void synchronousOutputIsBoundedAndDrained() throws IOException {
+        Path source = workspace.resolve("Burst.java");
+        Files.writeString(source, """
+            public class Burst {
+                public static void main(String[] args) {
+                    byte[] block = new byte[8192];
+                    java.util.Arrays.fill(block, (byte)'x');
+                    for (int i = 0; i < 160; i++) {
+                        System.out.write(block, 0, block.length);
+                    }
+                    System.out.flush();
+                }
+            }
+            """);
+        String javaBin = Path
+            .of(System.getProperty("java.home"), "bin",
+                System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win") ? "java.exe" : "java")
+            .toString();
+        String previous = System.getProperty("pilot.os.sandbox");
+        System.setProperty("pilot.os.sandbox", "false");
+        try {
+            String result = tool().execute(Map.of("command", "\"" + javaBin + "\" Burst.java", "timeoutSeconds", 60));
+            assertTrue(result.contains("同步执行上限"), result);
+            assertTrue(result.contains("退出码: 0"), result);
+        } finally {
+            if (previous == null) {
+                System.clearProperty("pilot.os.sandbox");
+            } else {
+                System.setProperty("pilot.os.sandbox", previous);
+            }
+        }
+    }
+
+    @Test
+    void timeoutDestroysDescendantProcessTree() throws Exception {
+        Path pidFile = workspace.resolve("grandchild.pid");
+        Path source = workspace.resolve("SpawnTree.java");
+        String javaBin = Path
+            .of(System.getProperty("java.home"), "bin",
+                System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win") ? "java.exe" : "java")
+            .toString();
+        Files.writeString(source, """
+            import java.nio.file.*;
+            public class SpawnTree {
+                public static void main(String[] args) throws Exception {
+                    if (args.length > 0 && "child".equals(args[0])) {
+                        Thread.sleep(60_000L);
+                        return;
+                    }
+                    Process child = new ProcessBuilder(args[0], args[1], "child").start();
+                    Files.writeString(Path.of(args[2]), Long.toString(child.pid()));
+                    Thread.sleep(60_000L);
+                }
+            }
+            """);
+        String previous = System.getProperty("pilot.os.sandbox");
+        System.setProperty("pilot.os.sandbox", "false");
+        try {
+            String command = "\"" + javaBin + "\" SpawnTree.java \"" + javaBin + "\" SpawnTree.java grandchild.pid";
+            String result = tool().execute(Map.of("command", command, "timeoutSeconds", 3));
+            assertTrue(result.contains("超时") || result.contains("退出码: -1"), result);
+            assertTrue(Files.isRegularFile(pidFile), "父进程应在超时前已拉起子进程并写出 grandchild.pid");
+            long childPid = Long.parseLong(Files.readString(pidFile).strip());
+            long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+            while (System.nanoTime() < deadline
+                && ProcessHandle.of(childPid).map(ProcessHandle::isAlive).orElse(false)) {
+                Thread.sleep(50L);
+            }
+            assertFalse(ProcessHandle.of(childPid).map(ProcessHandle::isAlive).orElse(false),
+                "超时终止主进程时必须一并清理子孙进程，残留 PID=" + childPid);
+        } finally {
+            if (previous == null) {
+                System.clearProperty("pilot.os.sandbox");
+            } else {
+                System.setProperty("pilot.os.sandbox", previous);
+            }
         }
     }
 

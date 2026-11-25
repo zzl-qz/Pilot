@@ -10,8 +10,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Map;
 import java.util.concurrent.TimeoutException;
 
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -27,6 +29,16 @@ class ProcessSupportTest {
         assertEquals(7, output.exitCode());
         assertEquals("x".repeat(16), output.output());
         assertEquals(7, ProcessSupport.runDiscarded(child("output"), Duration.ofSeconds(10)));
+    }
+
+    @Test
+    void localBackendDrainsAfterOutputLimitWithoutFailingTheChild() {
+        var request = new ExecutionRequest(child("output").command().stream().toList(), "", directory, directory,
+            Map.of(), false, new ExecutionLimits(10, 1_024, 64, 1, 8));
+        var result = new LocalExecutionBackend(null).run(request);
+        assertEquals(7, result.exitCode());
+        assertEquals(1_024, result.output().length());
+        Assertions.assertTrue(result.truncated());
     }
 
     @Test
