@@ -48,6 +48,15 @@ public final class DispatchAgentsTool implements Tool {
     private final SpawnAgentTool.UsageSink usageSink;
     /** 父会话所属项目绑定的其他文件夹；子 Agent 的读写范围跟着一起走。 */
     private List<Path> extraRoots = List.of();
+    private java.util.function.Supplier<String> childRoute = () -> "";
+    private java.util.function.Function<String, com.pilot.core.model.ModelClient> routedModels = name -> null;
+
+    public DispatchAgentsTool withChildRoute(java.util.function.Supplier<String> route,
+        java.util.function.Function<String, com.pilot.core.model.ModelClient> models) {
+        childRoute = route == null ? () -> "" : route;
+        routedModels = models == null ? name -> null : models;
+        return this;
+    }
 
     public DispatchAgentsTool withExtraRoots(List<Path> roots) {
         this.extraRoots = roots == null ? List.of() : List.copyOf(roots);
@@ -149,9 +158,9 @@ public final class DispatchAgentsTool implements Tool {
             return "ERROR: 任务计划不合法：" + e.getMessage();
         }
         try {
-            MultiAgentService.Result result =
-                service.dispatch(new MultiAgentService.Dispatch(sessionId, runId, workspace, specs, events, cancelled,
-                    executionClient, usageSink).withParentPermission(parentPermission).withExtraRoots(extraRoots));
+            MultiAgentService.Result result = service.dispatch(new MultiAgentService.Dispatch(sessionId, runId,
+                workspace, specs, events, cancelled, executionClient, usageSink).withParentPermission(parentPermission)
+                .withExtraRoots(extraRoots).withChildRoute(childRoute.get(), routedModels));
             return result.report();
         } catch (IllegalArgumentException e) {
             return "ERROR: 任务计划不合法：" + e.getMessage();

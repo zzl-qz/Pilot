@@ -14,11 +14,24 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.pilot.core.model.ModelClient;
 import com.pilot.core.multi.TaskSpec;
 import com.pilot.core.multi.profile.AgentProfileCatalog;
 import com.pilot.core.workspace.AgentScope;
 
 class DispatchAgentsToolTest {
+
+    @Test
+    void childModelRouteIsCapturedInDispatchSnapshot() {
+        ModelClient routed = (messages, tools) -> null;
+        MultiAgentService.Dispatch dispatch =
+            new MultiAgentService.Dispatch("session", "run", ".", List.of(), event -> {
+            }, () -> false).withChildRoute("child-model", name -> "child-model".equals(name) ? routed : null);
+
+        assertEquals("child-model", dispatch.childModel());
+        assertEquals(routed, dispatch.routedModels().apply("child-model"));
+        assertTrue(dispatch.routedModels().apply("other-model") == null);
+    }
 
     @Test
     void parsesCommandWhitelistIntoScope() {

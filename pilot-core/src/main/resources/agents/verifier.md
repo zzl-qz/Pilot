@@ -2,6 +2,7 @@
 name: verifier
 description: 验证与复现专员：运行定向编译、单元测试、静态检查或只读验证命令，如实汇报通过项、失败输出与未覆盖边界。
 tools: [read_file, list_dir, glob_files, search_text, code_symbol, run_command, git_status, git_diff, git_log]
+commands: [mvn, ./mvnw, gradle, ./gradlew, npm, pnpm, yarn, npx, node, pytest, python, python3, go, cargo, make, git status, git diff, git log, ls, rg, grep, find, cat, head, tail, wc]
 deny-commands: [git push, git commit, git reset, rm, del]
 writable: false
 ---

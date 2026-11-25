@@ -187,11 +187,15 @@ public class GitWorktrees {
     }
 
     public synchronized Handoff handoff(Path worktree, String expectedRevision) {
+        return handoff(worktree, expectedRevision, null);
+    }
+
+    public synchronized Handoff handoff(Path worktree, String expectedRevision, String parentRunId) {
         Meta meta = findByPath(worktree).orElseThrow(() -> new IllegalArgumentException("这不是 worktree 对话"));
         String operation = "handoff_" + UUID.randomUUID();
         try {
             if (registry != null && (!registry.lockWorkspace(operation, Path.of(meta.path))
-                || !registry.lockWorkspace(operation, Path.of(meta.base)))) {
+                || !registry.lockWorkspace(operation, Path.of(meta.base), parentRunId))) {
                 throw new IllegalStateException("执行目录或原目录仍有任务运行，请等待结束后交回");
             }
             if (commands != null && (commands.hasRunningInWorkspace(Path.of(meta.path))

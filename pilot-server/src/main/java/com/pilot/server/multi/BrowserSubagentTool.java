@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import com.pilot.core.approval.ApprovalBroker;
 import com.pilot.core.browser.BrowserBackend;
@@ -102,6 +103,8 @@ public final class BrowserSubagentTool extends PromptedTool {
     private final BrowserEvidenceRecorder evidenceSink;
     private final Budget budget;
     private final Semaphore parallelSlots;
+    private Supplier<String> childRoute = () -> "";
+    private java.util.function.Function<String, ModelClient> routedModels = name -> null;
     private final AtomicInteger runSpawns = new AtomicInteger();
     private final Map<String, SubagentContext> contexts = new LinkedHashMap<>();
     private final Deque<String> contextOrder = new ArrayDeque<>();
@@ -140,6 +143,13 @@ public final class BrowserSubagentTool extends PromptedTool {
         this.evidenceSink = evidenceSink == null ? BrowserEvidenceRecorder.none() : evidenceSink;
         this.budget = budget == null ? Budget.DEFAULT : budget;
         this.parallelSlots = new Semaphore(this.budget.maxConcurrent());
+    }
+
+    public BrowserSubagentTool withChildRoute(Supplier<String> route,
+        java.util.function.Function<String, ModelClient> models) {
+        childRoute = route == null ? () -> "" : route;
+        routedModels = models == null ? name -> null : models;
+        return this;
     }
 
     @Override
@@ -209,8 +219,13 @@ public final class BrowserSubagentTool extends PromptedTool {
             recordingStarted = startProcessRecording(browserSessionId);
             ToolRegistry childTools = isolatedChildTools(browserSessionId, agentId, localRecorder);
             AgentLoop.Config childConfig = subagentConfig(parentConfig, budget.maxSteps());
-            AgentLoop loop = new AgentLoop(boundedClient(client), childTools, permissionGate, approvals, childConfig,
-                cancelled::getAsBoolean);
+            String route = childRoute.get();
+            ModelClient childClient = route == null || route.isBlank() ? client : routedModels.apply(route.strip());
+            if (childClient == null) {
+                throw new IllegalStateException("子代理模型 " + route.strip() + " 未能创建");
+            }
+            AgentLoop loop = new AgentLoop(boundedClient(childClient), childTools, permissionGate, approvals,
+                childConfig, cancelled::getAsBoolean);
             String prompt = buildPrompt(task, url, external, purpose, resumed != null);
             AgentLoop.Result result =
                 loop.run(prompt, priorHistory, event -> forwardChildEvent(event, completion, agentId));

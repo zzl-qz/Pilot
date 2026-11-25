@@ -21,6 +21,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 import org.springframework.stereotype.Component;
 
@@ -174,7 +175,8 @@ public class MultiAgentService {
      */
     public record Dispatch(String sessionId, String runId, String workspace, List<TaskSpec> specs,
         Consumer<SessionEvent> events, BooleanSupplier cancelled, ModelClient executionClient, UsageSink usageSink,
-        String dispatchId, PermissionMode parentPermission, List<Path> extraRoots) {
+        String dispatchId, PermissionMode parentPermission, List<Path> extraRoots, String childModel,
+        Function<String, ModelClient> routedModels) {
         public Dispatch {
             extraRoots = extraRoots == null ? List.of() : List.copyOf(extraRoots);
         }
@@ -183,19 +185,25 @@ public class MultiAgentService {
             Consumer<SessionEvent> events, BooleanSupplier cancelled, ModelClient executionClient, UsageSink usageSink,
             String dispatchId) {
             this(sessionId, runId, workspace, specs, events, cancelled, executionClient, usageSink, dispatchId, null,
-                List.of());
+                List.of(), "", name -> null);
+        }
+
+        public Dispatch withChildRoute(String model, Function<String, ModelClient> models) {
+            return new Dispatch(sessionId, runId, workspace, specs, events, cancelled, executionClient, usageSink,
+                dispatchId, parentPermission, extraRoots, model == null ? "" : model,
+                models == null ? name -> null : models);
         }
 
         /** 父 run 的显式授权快照；模型参数不能设置该字段。 */
         public Dispatch withParentPermission(PermissionMode permission) {
             return new Dispatch(sessionId, runId, workspace, specs, events, cancelled, executionClient, usageSink,
-                dispatchId, permission, extraRoots);
+                dispatchId, permission, extraRoots, childModel, routedModels);
         }
 
         /** 项目附加目录：由父会话的工具准备阶段注入，模型参数不能设置该字段。 */
         public Dispatch withExtraRoots(List<Path> roots) {
             return new Dispatch(sessionId, runId, workspace, specs, events, cancelled, executionClient, usageSink,
-                dispatchId, parentPermission, roots);
+                dispatchId, parentPermission, roots, childModel, routedModels);
         }
 
         public Dispatch(String sessionId, String runId, String workspace, List<TaskSpec> specs,
@@ -217,7 +225,7 @@ public class MultiAgentService {
         /** 绑定持久化编号：调度开始时才生成，之前为空表示「还没落库」。 */
         public Dispatch withDispatchId(String id) {
             return new Dispatch(sessionId, runId, workspace, specs, events, cancelled, executionClient, usageSink,
-                id == null ? "" : id, parentPermission, extraRoots);
+                id == null ? "" : id, parentPermission, extraRoots, childModel, routedModels);
         }
 
         UsageSink usageSinkOrNull() {
@@ -626,6 +634,13 @@ public class MultiAgentService {
         ModelClient selected = dispatch.executionClient() == null
             ? new MeteredModelClient(modelClient, dispatch.sessionId() + ":subagent", "subagent", List.of(), report -> {
             }) : dispatch.executionClient();
+        if (dispatch.childModel() != null && !dispatch.childModel().isBlank()) {
+            ModelClient routed = dispatch.routedModels().apply(dispatch.childModel().strip());
+            if (routed == null) {
+                throw new IllegalStateException("子代理模型 " + dispatch.childModel().strip() + " 未能创建");
+            }
+            selected = routed;
+        }
         UsageSink usage = dispatch.usageSinkOrNull();
         ModelClient metered = MeteredModelClient.observeUsage(selected, usage::beforeRequest, usage::afterRequest);
         ModelClient budgeted = usageMetering(metered, meter, budget);

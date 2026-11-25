@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -187,6 +189,7 @@ class SpawnAgentToolTest {
             }, () -> false);
 
         assertTrue(tool.readOnly());
+        assertFalse(tool.readOnly(Map.of("mode", "write")), "写隔离派生必须进入写操作审批路径");
         assertTrue(
             new PolicyPermissionGate(PermissionMode.READ_ONLY)
                 .check(new ToolCall("call_1", "spawn_agent", Map.of("task", "只读盘点")), tool).isAllowed(),
@@ -576,6 +579,60 @@ class SpawnAgentToolTest {
             release.countDown();
             pool.shutdownNow();
         }
+    }
+
+    @Test
+    void enforcesProfileScopeExcludesAskUserAndReleasesCheckoutWhenMaxSpawnsExceeded(
+        @org.junit.jupiter.api.io.TempDir Path tempDir) throws Exception {
+        Files.writeString(tempDir.resolve("scoped.md"), """
+            ---
+            name: scoped
+            description: 受限代理
+            tools: [read_file, ask_user]
+            files: [src/**]
+            deny-files: [src/secret.txt]
+            writable: false
+            ---
+            只看 src
+            """);
+        var catalog = AgentProfileCatalog.scan(List.of(tempDir));
+        ToolRegistry parent = new ToolRegistry();
+        parent.register(named("read_file"));
+        parent.register(named("ask_user"));
+
+        List<String> toolOutputs = new ArrayList<>();
+        AtomicInteger step = new AtomicInteger();
+        ModelClient client = (request, definitions) -> {
+            assertFalse(definitions.stream().anyMatch(d -> "ask_user".equals(d.name())), "子代理不得暴露 ask_user");
+            int n = step.incrementAndGet();
+            if (n == 1) {
+                return new ModelResponse("",
+                    List.of(new ToolCall("c1", "read_file", Map.of("path", "src/secret.txt"))));
+            }
+            request.stream().filter(m -> "tool".equals(m.role())).map(Message::content).forEach(toolOutputs::add);
+            return new ModelResponse("done", List.of());
+        };
+
+        Path fakeCheckout = Path.of("tmp-checkout");
+        SubagentCheckouts checkouts = new SubagentCheckouts(ws -> new SubagentCheckouts.Opened(fakeCheckout, "", ""));
+        SpawnAgentTool tool = new SpawnAgentTool(client, parent, new PolicyPermissionGate(PermissionMode.AUTO),
+            ApprovalBroker.denyAll(), new AgentLoop.Config(6, 0, 4, "sys"), List::of, event -> {
+            }, () -> false, SpawnAgentTool.UsageSink.none(), catalog, new SpawnAgentTool.Budget(6, 1, 12))
+            .withCheckouts(Path.of("."), checkouts);
+
+        // 1) profile denyFiles 拦截 src/secret.txt
+        String first = tool.execute(Map.of("task", "检查", "agent", "scoped"));
+        assertTrue(first.contains("done"), first);
+        assertTrue(toolOutputs.stream().anyMatch(out -> out.contains("不在代理 scoped 允许范围内")), toolOutputs.toString());
+
+        // 2) readonly profile 禁止以 mode=write 运行
+        String deniedWrite = tool.execute(Map.of("task", "修改", "agent", "scoped", "mode", "write"));
+        assertTrue(deniedWrite.startsWith("ERROR:") && deniedWrite.contains("writable=false"), deniedWrite);
+
+        // 3) 超过 maxSpawnsPerRun 时已创建的 worktree 检出仍必须被 release
+        String overBudget = tool.execute(Map.of("task", "第二次写派生", "mode", "write", "isolation", "worktree"));
+        assertTrue(overBudget.startsWith("ERROR:") && overBudget.contains("派生次数已达到"), overBudget);
+        assertEquals(0, checkouts.openCount(), "超限返回时必须释放已获取的 worktree 检出");
     }
 
     private static Tool writing(String name) {

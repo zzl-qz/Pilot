@@ -303,7 +303,8 @@ public final class AgentRunPreparation {
         }
         if (!reviewActive) {
             SpawnAgentTool spawnAgent = new SpawnAgentTool(measuredChild, tools, sessionGate, approvals, config,
-                () -> conversations.load(sessionId), sink, cancelled, childUsage, profiles);
+                () -> conversations.load(sessionId), sink, cancelled, childUsage, profiles).withScopedTools(
+                    scope -> toolFactory.registryForScope(workspace, scope, SandboxSink.rejectAll(), extraRoots));
             if (routedChild != null) {
                 spawnAgent.withChildRoute(() -> modelSettings.snapshot().childModel(), routedChild);
             }
@@ -319,21 +320,31 @@ public final class AgentRunPreparation {
                         return new Opened(null, "", failure.getMessage() == null ? "无法创建独立检出" : failure.getMessage());
                     }
                 }));
-                spawnAgent.withWorkspaceTools(path -> toolFactory.registryFor(path.toString()), path -> {
-                    Handoff handed = worktrees.handoff(path);
-                    return handed.note();
-                });
+                spawnAgent.withWorkspaceTools(path -> toolFactory.uncachedRegistryFor(path.toString(), extraRoots),
+                    path -> {
+                        Handoff handed = worktrees.handoff(path, null, runId);
+                        return handed.note();
+                    });
             }
             tools.register(spawnAgent);
             if (!planMode && browserRuntime != null) {
-                tools.register(new BrowserSubagentTool(new BrowserSubagentTool.Dependencies(browserRuntime, sessionId,
-                    runId, new PathValidator(toolFactory.resolve(workspace), extraRoots), measuredChild, sessionGate,
-                    approvals, config, sink, cancelled, childUsage, browserHandoffs, browserEvidence)));
+                BrowserSubagentTool browserTool =
+                    new BrowserSubagentTool(new BrowserSubagentTool.Dependencies(browserRuntime, sessionId, runId,
+                        new PathValidator(toolFactory.resolve(workspace), extraRoots), measuredChild, sessionGate,
+                        approvals, config, sink, cancelled, childUsage, browserHandoffs, browserEvidence));
+                if (routedChild != null) {
+                    browserTool.withChildRoute(() -> modelSettings.snapshot().childModel(), routedChild);
+                }
+                tools.register(browserTool);
             }
             if (multiProperties.enabled() && !planMode) {
-                tools.register(new DispatchAgentsTool(multiAgent, sessionId, runId, workspace, sink, cancelled,
-                    measuredChild, profiles, childUsage).withExtraRoots(extraRoots).withParentPermission(
-                        unattended && executionTask.automation().fullAccess() ? PermissionMode.AUTO : null));
+                DispatchAgentsTool dispatchTool = new DispatchAgentsTool(multiAgent, sessionId, runId, workspace, sink,
+                    cancelled, measuredChild, profiles, childUsage).withExtraRoots(extraRoots).withParentPermission(
+                        unattended && executionTask.automation().fullAccess() ? PermissionMode.AUTO : null);
+                if (routedChild != null) {
+                    dispatchTool.withChildRoute(() -> modelSettings.snapshot().childModel(), routedChild);
+                }
+                tools.register(dispatchTool);
             }
         }
         tools.enable(inheritedDeferred);

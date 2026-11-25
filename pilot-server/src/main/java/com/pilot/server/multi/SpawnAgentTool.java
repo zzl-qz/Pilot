@@ -36,11 +36,13 @@ import com.pilot.core.model.ModelUsage;
 import com.pilot.core.multi.profile.AgentProfile;
 import com.pilot.core.multi.profile.AgentProfileCatalog;
 import com.pilot.core.permission.PermissionGate;
+import com.pilot.core.permission.PermissionResult;
 import com.pilot.core.prompt.PromptLibrary;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolRegistry;
 import com.pilot.core.tool.ToolResult;
 import com.pilot.core.tool.ToolSchemas;
+import com.pilot.core.workspace.AgentScope;
 
 /**
  * {@code spawn_agent}：把一段「读得多、结论短」的探索派给子代理。
@@ -61,7 +63,7 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
     static final int MAX_PARALLEL_SUBAGENTS = 4;
     private static final Set<String> FORBIDDEN_TOOLS =
         Set.of(ToolNames.SPAWN_AGENT, ToolNames.DISPATCH_AGENTS, ToolNames.PROMOTE_GOAL, "create_goal", "update_goal",
-            ToolNames.UPDATE_PLAN, ToolNames.STOP_COMMAND, ToolNames.WAIT_UNTIL, ToolNames.RECORD_RESEARCH);
+            ToolNames.UPDATE_PLAN, ToolNames.STOP_COMMAND, ToolNames.WAIT_UNTIL, ToolNames.RECORD_RESEARCH, "ask_user");
     private static final PromptLibrary PROMPTS = PromptLibrary.standard();
 
     /** 子代理单轮预算：支持大型多模块仓库按需调优，同时测试可压小步数快速验证边界。 */
@@ -93,6 +95,7 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
     private final AtomicInteger runRequests = new AtomicInteger();
     private Path checkoutWorkspace;
     private SubagentCheckouts checkouts;
+    private Function<AgentScope, ToolRegistry> scopedTools;
     private Function<Path, ToolRegistry> rootedTools = path -> null;
     private Function<Path, String> handoff = path -> "";
     /** 已配置的替代模型。空表示只能用父模型或子路由。 */
@@ -111,6 +114,12 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
     public SpawnAgentTool withChildRoute(Supplier<String> route, Function<String, ModelClient> models) {
         this.childRoute = route == null ? () -> "" : route;
         this.routedModels = models == null ? name -> null : models;
+        return this;
+    }
+
+    /** 为每次只读子代理按 AgentScope 现场构造独立工具表（含独立 ReadTracker 与路径/命令作用域硬隔离）。 */
+    public SpawnAgentTool withScopedTools(Function<AgentScope, ToolRegistry> factory) {
+        this.scopedTools = factory;
         return this;
     }
 
@@ -226,6 +235,11 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
     }
 
     @Override
+    public boolean readOnly(Map<String, Object> args) {
+        return !"write".equals(text(args == null ? null : args.get("mode")));
+    }
+
+    @Override
     public String execute(Map<String, Object> args) {
         return executeResult(args).text();
     }
@@ -283,6 +297,9 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
                 return ToolResult
                     .text("ERROR: 引用的代理 " + agentName + " 不存在（可用：" + (available.isEmpty() ? "无" : available) + "）");
             }
+            if (!profile.writable() && "write".equals(text(args.get("mode")))) {
+                return ToolResult.text("ERROR: 代理 " + agentName + " 配置为只读（writable=false），禁止以 write 模式运行");
+            }
         }
         String displayName = args == null || text(args.get("name")).isEmpty() ? agentName : text(args.get("name"));
         String checkoutNote = "";
@@ -301,78 +318,89 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
                 + (opened.diff() == null || opened.diff().isBlank() ? "" : "\n" + opened.diff());
         }
 
-        if (resumeId.isEmpty()) {
-            int spawn = runSpawns.incrementAndGet();
-            if (spawn > budget.maxSpawnsPerRun()) {
-                return ToolResult
-                    .text("ERROR: 本轮子代理派生次数已达到 " + budget.maxSpawnsPerRun() + " 次；请先合并已有结果，由父代理继续执行或阶段交付。");
-            }
-        }
-
-        String agentId = resumeId.isEmpty() ? "agent_" + UUID.randomUUID().toString().substring(0, 8) : resumeId;
-        events.accept(new SubagentStarted(agentId, profile == null ? task : profile.prefixGoal(task), displayName));
-        ArtifactCollector artifacts = new ArtifactCollector();
-        AtomicReference<RunCompleted> completion = new AtomicReference<>();
-        boolean slotHeld = false;
         try {
-            parallelSlots.acquire();
-            slotHeld = true;
-            // profile 的工具名单在已隔离的只读表上再裁剪：名单外工具对子代理不存在
-            ToolRegistry rooted = checkoutPath == null ? null : rootedTools.apply(checkoutPath);
-            ToolRegistry baseTools = rooted == null ? this.tools : withoutRecursion(rooted);
-            ToolRegistry effectiveTools = profile == null ? baseTools : filterTools(baseTools, profile);
-            AgentLoop.Config effectiveConfig = profile == null ? this.config : roleConfig(this.config, profile);
-            AgentLoop loop = new AgentLoop(boundedClient(chosen), effectiveTools, permissionGate, approvals,
-                effectiveConfig, cancelled::getAsBoolean).withExecutionPolicy(artifacts);
-            List<Message> context = resumeId.isEmpty() ? (inherit ? history.get() : List.of()) : prior;
-            String goal = profile == null ? task : profile.prefixGoal(task);
-            String prompt = resumeId.isEmpty() ? PROMPTS.render("subagent/task", Map.of("task", goal)).strip()
-                : "继续同一个只读子任务。历史里已有结论，不要从头重读。新问题：" + goal;
-            if (checkoutPath != null) {
-                prompt = prompt + "\n工作目录是独立检出 " + checkoutPath + "，不要改父目录。";
+            if (resumeId.isEmpty()) {
+                int spawn = runSpawns.incrementAndGet();
+                if (spawn > budget.maxSpawnsPerRun()) {
+                    return ToolResult
+                        .text("ERROR: 本轮子代理派生次数已达到 " + budget.maxSpawnsPerRun() + " 次；请先合并已有结果，由父代理继续执行或阶段交付。");
+                }
             }
-            // 子代理有独立累计器；子 run 的终止事件绝不能流入父 sink，否则会提前完成/中断父任务。
-            AgentLoop.Result result = loop.run(prompt, context, event -> forwardChildEvent(event, completion, agentId));
-            remember(agentId, result);
-            String manifest = resultManifest(artifacts, completion.get());
-            String closing = truncateSummary(result.finalText());
-            if (result.failed()) {
-                String code = result.failureCode() == null ? "UNKNOWN" : result.failureCode();
-                if (hasAuthoredConclusion(closing, code)) {
-                    // 对齐 DSH 结算通知：输出提取与停止原因解耦，触顶阶段总结必须完整交回父代理，避免父代理重抓一遍。
-                    String header = "[子代理阶段结算：" + settlementNote(code) + "]";
-                    String report = header + "\n\n" + closing + manifest + agentLine(agentId);
-                    events.accept(new SubagentFinished(agentId, report, false, code, true));
+
+            String agentId = resumeId.isEmpty() ? "agent_" + UUID.randomUUID().toString().substring(0, 8) : resumeId;
+            events.accept(new SubagentStarted(agentId, profile == null ? task : profile.prefixGoal(task), displayName));
+            ArtifactCollector artifacts = new ArtifactCollector();
+            AtomicReference<RunCompleted> completion = new AtomicReference<>();
+            boolean slotHeld = false;
+            boolean finishedSent = false;
+            try {
+                parallelSlots.acquire();
+                slotHeld = true;
+                // 只读子代理优先按 AgentScope 现场构造独立工具表（独立 ReadTracker + 路径/命令作用域硬隔离）；
+                // 写隔离 worktree 使用独立非缓存工具表，并叠加 profile 作用域门禁。
+                ToolRegistry effectiveTools = buildChildTools(checkoutPath, profile);
+                PermissionGate effectiveGate =
+                    profile == null ? permissionGate : scopedPermissionGate(permissionGate, profile);
+                AgentLoop.Config effectiveConfig = profile == null ? this.config : roleConfig(this.config, profile);
+                AgentLoop loop = new AgentLoop(boundedClient(chosen), effectiveTools, effectiveGate, approvals,
+                    effectiveConfig, cancelled::getAsBoolean).withExecutionPolicy(artifacts);
+                List<Message> context = resumeId.isEmpty() ? (inherit ? history.get() : List.of()) : prior;
+                String goal = profile == null ? task : profile.prefixGoal(task);
+                String prompt = resumeId.isEmpty() ? PROMPTS.render("subagent/task", Map.of("task", goal)).strip()
+                    : "继续同一个只读子任务。历史里已有结论，不要从头重读。新问题：" + goal;
+                if (checkoutPath != null) {
+                    prompt = prompt + "\n工作目录是独立检出 " + checkoutPath + "，不要改父目录。";
+                }
+                // 子代理有独立累计器；子 run 的终止事件绝不能流入父 sink，否则会提前完成/中断父任务。
+                AgentLoop.Result result =
+                    loop.run(prompt, context, event -> forwardChildEvent(event, completion, agentId));
+                remember(agentId, result);
+                String manifest = resultManifest(artifacts, completion.get());
+                String closing = truncateSummary(result.finalText());
+                if (result.failed()) {
+                    String code = result.failureCode() == null ? "UNKNOWN" : result.failureCode();
+                    if (hasAuthoredConclusion(closing, code)) {
+                        // 对齐 DSH 结算通知：输出提取与停止原因解耦，触顶阶段总结必须完整交回父代理，避免父代理重抓一遍。
+                        String header = "[子代理阶段结算：" + settlementNote(code) + "]";
+                        String report = header + "\n\n" + closing + manifest + agentLine(agentId);
+                        events.accept(new SubagentFinished(agentId, report, false, code, true));
+                        finishedSent = true;
+                        return new ToolResult(report, artifacts.changedPaths(), artifacts.checks());
+                    }
+                    String reason = "子代理未完成：" + code;
+                    String report = "ERROR: " + reason + manifest;
+                    events.accept(new SubagentFinished(agentId, report, false, code, false));
+                    finishedSent = true;
                     return new ToolResult(report, artifacts.changedPaths(), artifacts.checks());
                 }
-                String reason = "子代理未完成：" + code;
-                String report = "ERROR: " + reason + manifest;
-                events.accept(new SubagentFinished(agentId, report, false, code, false));
+                String summary = closing + manifest;
+                String report = closing.isBlank() ? "子代理完成，但没有返回文本结论。" + manifest : summary;
+                if (checkoutPath != null) {
+                    String handed = handoff.apply(checkoutPath);
+                    if (handed != null && !handed.isBlank()) {
+                        checkoutNote = checkoutNote + "\n" + handed;
+                    }
+                }
+                events.accept(new SubagentFinished(agentId, summary, true, "COMPLETED", false));
+                finishedSent = true;
+                return new ToolResult(report + agentLine(agentId) + checkoutNote, artifacts.changedPaths(),
+                    artifacts.checks());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return ToolResult.text("ERROR: 等待子代理空位时被中断");
+            } catch (RuntimeException e) {
+                String reason = "子代理异常：" + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+                String report = "ERROR: " + reason + resultManifest(artifacts, completion.get());
+                if (!finishedSent) {
+                    events.accept(new SubagentFinished(agentId, report, false, "RUNTIME_ERROR", false));
+                }
                 return new ToolResult(report, artifacts.changedPaths(), artifacts.checks());
-            }
-            String summary = closing + manifest;
-            events.accept(new SubagentFinished(agentId, summary, true, "COMPLETED", false));
-            String report = closing.isBlank() ? "子代理完成，但没有返回文本结论。" + manifest : summary;
-            if (checkoutPath != null) {
-                String handed = handoff.apply(checkoutPath);
-                if (handed != null && !handed.isBlank()) {
-                    checkoutNote = checkoutNote + "\n" + handed;
+            } finally {
+                if (slotHeld) {
+                    parallelSlots.release();
                 }
             }
-            return new ToolResult(report + agentLine(agentId) + checkoutNote, artifacts.changedPaths(),
-                artifacts.checks());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return ToolResult.text("ERROR: 等待子代理空位时被中断");
-        } catch (RuntimeException e) {
-            String reason = "子代理异常：" + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
-            String report = "ERROR: " + reason + resultManifest(artifacts, completion.get());
-            events.accept(new SubagentFinished(agentId, report, false, "RUNTIME_ERROR", false));
-            return new ToolResult(report, artifacts.changedPaths(), artifacts.checks());
         } finally {
-            if (slotHeld) {
-                parallelSlots.release();
-            }
             if (checkoutPath != null) {
                 checkouts.release(checkoutPath);
             }
@@ -435,6 +463,52 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
             }
             usageSink.beforeRequest();
         }, usageSink::afterRequest);
+    }
+
+    private ToolRegistry buildChildTools(Path checkoutPath, AgentProfile profile) {
+        if (checkoutPath != null) {
+            ToolRegistry rooted = rootedTools.apply(checkoutPath);
+            ToolRegistry base = rooted == null ? this.tools : withoutRecursion(rooted);
+            return profile == null ? base : filterTools(base, profile);
+        }
+        if (scopedTools != null) {
+            AgentScope scope =
+                profile == null ? AgentScope.readOnly(List.of(), List.of()) : profile.scope().withWritable(false);
+            ToolRegistry built = scopedTools.apply(scope);
+            if (built != null) {
+                return withoutRecursion(built);
+            }
+        }
+        return profile == null ? this.tools : filterTools(this.tools, profile);
+    }
+
+    /** 在权限门层强制校验 AgentProfile 的 files/denyFiles/commands/denyCommands/writable，兜底保护所有工具路径。 */
+    private static PermissionGate scopedPermissionGate(PermissionGate base, AgentProfile profile) {
+        AgentScope scope = profile.scope();
+        return (call, tool) -> {
+            if (!scope.allowsTool(call.name())) {
+                return PermissionResult.deny("代理 " + profile.name() + " 不允许使用工具 " + call.name());
+            }
+            Map<String, Object> callArgs = call.args();
+            if (!scope.writable() && !tool.readOnly(callArgs) && !ToolNames.RUN_COMMAND.equals(call.name())) {
+                return PermissionResult.deny("代理 " + profile.name() + " 为只读角色，禁止写操作 " + call.name());
+            }
+            if (ToolNames.RUN_COMMAND.equals(call.name()) && callArgs != null) {
+                String cmd = text(callArgs.get("command"));
+                if (!cmd.isEmpty() && !scope.allowsCommand(cmd)) {
+                    return PermissionResult.deny(scope.commandHint(cmd));
+                }
+            }
+            if (callArgs != null && (!scope.allowFiles().isEmpty() || !scope.denyFiles().isEmpty())) {
+                for (String key : List.of("path", "from", "to")) {
+                    String raw = text(callArgs.get(key));
+                    if (!raw.isEmpty() && !scope.allowsPath(raw) && !scope.allowsDirectory(raw)) {
+                        return PermissionResult.deny("路径 " + raw + " 不在代理 " + profile.name() + " 允许范围内");
+                    }
+                }
+            }
+            return base.check(call, tool);
+        };
     }
 
     private static ToolRegistry withoutRecursion(ToolRegistry source) {

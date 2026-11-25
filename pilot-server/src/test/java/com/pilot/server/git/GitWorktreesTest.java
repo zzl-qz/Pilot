@@ -182,6 +182,29 @@ class GitWorktreesTest {
         assertEquals("outside", Files.readString(outside));
     }
 
+    @Test
+    void handoffSucceedsWhenParentRunOwnsBaseWorkspaceLockAndRejectsOtherOwner(@TempDir Path root) throws Exception {
+        Path repo = root.resolve("repo");
+        Files.createDirectories(repo);
+        git(repo, "init");
+        git(repo, "config", "user.email", "test@pilot.local");
+        git(repo, "config", "user.name", "Pilot Test");
+        Files.writeString(repo.resolve("A.txt"), "base\n");
+        git(repo, "add", ".");
+        git(repo, "commit", "-m", "init");
+
+        var registry = new RunRegistry();
+        registry.register("run_parent", "ses_parent", repo);
+        var service = new GitWorktrees(new PilotDataDir(root.resolve("data").toString()), registry, null);
+        Path copy = Path.of(service.create(repo, "HEAD").path());
+        Files.writeString(copy.resolve("A.txt"), "updated\n");
+
+        assertThrows(IllegalStateException.class, () -> service.handoff(copy, null, "run_other"), "非持锁 run 仍应被工作区锁拒绝");
+        var handoff = service.handoff(copy, null, "run_parent");
+        assertEquals(1, handoff.files());
+        assertEquals("updated\n", Files.readString(repo.resolve("A.txt")));
+    }
+
     private static void git(Path directory, String... args) throws Exception {
         List<String> command = new ArrayList<>();
         command.add("git");

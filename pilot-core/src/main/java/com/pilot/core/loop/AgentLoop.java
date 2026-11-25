@@ -8,9 +8,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
@@ -1010,30 +1015,45 @@ public final class AgentLoop {
             }
         }
         try (ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor()) {
-            List<CompletableFuture<ToolExecutor.Outcome>> futures = new ArrayList<>(calls.size());
+            List<Future<ToolExecutor.Outcome>> futures = new ArrayList<>(calls.size());
             for (int index = 0; index < calls.size(); index++) {
                 ToolCall call = calls.get(index);
                 if (!permitted.get(index)) {
                     futures.add(CompletableFuture.completedFuture(new ToolExecutor.Outcome(call.name(),
                         ToolResults.skipped(executionPolicy.denialReason(call)), null, null)));
                 } else {
-                    futures.add(CompletableFuture
-                        .supplyAsync(() -> toolExecutor.execute(call, serializedEvents, parallelStartGuard), workers));
+                    futures.add(workers.submit(() -> toolExecutor.execute(call, serializedEvents, parallelStartGuard)));
                 }
             }
             for (int index = 0; index < calls.size(); index++) {
-                ToolExecutor.Outcome outcome;
-                try {
-                    outcome = futures.get(index).join();
-                } catch (RuntimeException e) {
-                    outcome = new ToolExecutor.Outcome(calls.get(index).name(), ToolResults.skipped("工具执行被中断，没有写回结果。"),
-                        null, null);
-                }
+                ToolExecutor.Outcome outcome = awaitParallelOutcome(calls.get(index), futures.get(index), workers);
                 stepOutcomes.add(outcome);
                 recordToolOutcome(calls.get(index), outcome, changedFiles, checks, messages);
             }
         }
         return new ParallelBatch(stepOutcomes, correctionDuringBatch.get());
+    }
+
+    /** 感知取消/暂停并立即中断仍在运行的并行子代理/工具线程，避免 join/close 死等。 */
+    private ToolExecutor.Outcome awaitParallelOutcome(ToolCall call, Future<ToolExecutor.Outcome> future,
+        ExecutorService workers) {
+        while (true) {
+            if (cancellation.cancelled()) {
+                workers.shutdownNow();
+                return new ToolExecutor.Outcome(call.name(), ToolResults.skipped("运行已暂停或取消，工具执行已中止。"), null, null);
+            }
+            try {
+                return future.get(200, TimeUnit.MILLISECONDS);
+            } catch (TimeoutException ignored) {
+                // 继续轮询取消/暂停信号
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                workers.shutdownNow();
+                return new ToolExecutor.Outcome(call.name(), ToolResults.skipped("工具执行被中断，没有写回结果。"), null, null);
+            } catch (ExecutionException | CancellationException e) {
+                return new ToolExecutor.Outcome(call.name(), ToolResults.skipped("工具执行被中断，没有写回结果。"), null, null);
+            }
+        }
     }
 
     /** 非模型故障可请求一次禁用工具的收尾；端点失败或预算耗尽时直接保留本地说明。 */

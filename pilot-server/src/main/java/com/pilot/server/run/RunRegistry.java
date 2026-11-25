@@ -86,17 +86,31 @@ public class RunRegistry {
     }
 
     public synchronized boolean lockWorkspace(String operationId, Path workspace) {
+        return lockWorkspace(operationId, workspace, null);
+    }
+
+    /** 允许已持锁的父运行 {@code allowedRunId} 在同步交回 worktree 时申请操作锁，仍阻止其他并发运行与操作。 */
+    public synchronized boolean lockWorkspace(String operationId, Path workspace, String allowedRunId) {
         String key = workspaceKey(workspace);
         if (workspaceOperations.entrySet().stream()
             .anyMatch(entry -> overlaps(key, entry.getKey()) && !operationId.equals(entry.getValue()))) {
             return false;
         }
-        if (runWorkspaces.entrySet().stream()
-            .anyMatch(entry -> overlaps(key, entry.getValue()) && !operationId.equals(entry.getKey()))) {
+        if (runWorkspaces.entrySet().stream().anyMatch(entry -> overlaps(key, entry.getValue())
+            && !operationId.equals(entry.getKey()) && (allowedRunId == null || !allowedRunId.equals(entry.getKey())))) {
             return false;
         }
         workspaceOperations.put(key, operationId);
         return true;
+    }
+
+    public synchronized boolean isWorkspaceLockedBy(Path workspace, String runId) {
+        if (runId == null || runId.isBlank()) {
+            return false;
+        }
+        String key = workspaceKey(workspace);
+        return runWorkspaces.entrySet().stream()
+            .anyMatch(entry -> runId.equals(entry.getKey()) && overlaps(key, entry.getValue()));
     }
 
     /** 与给定工作区重叠的一次活跃运行；用于把 409 的占用方告诉用户。 */
