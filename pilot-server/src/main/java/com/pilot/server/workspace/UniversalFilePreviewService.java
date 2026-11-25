@@ -3,12 +3,15 @@ package com.pilot.server.workspace;
 import java.awt.Desktop;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -63,6 +66,11 @@ public final class UniversalFilePreviewService {
     private static final int MAX_SHEET_COLS = 40;
     private static final int MAX_SLIDES = 120;
     private static final int MAX_ARCHIVE_ENTRIES = 500;
+    private static final Set<String> INLINE_IMAGE_TYPES =
+        Set.of("image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp", "image/x-icon", "image/avif");
+    private static final Set<String> DANGEROUS_OPEN_EXTENSIONS = Set.of("exe", "bat", "cmd", "com", "msi", "scr", "pif",
+        "vbs", "vbe", "js", "jse", "wsf", "wsh", "ps1", "psm1", "sh", "bash", "zsh", "command", "app", "dmg", "pkg",
+        "deb", "rpm", "appimage", "run", "jar", "lnk", "reg", "hta", "cpl", "msc", "desktop", "url", "webloc");
 
     private UniversalFilePreviewService() {
     }
@@ -129,17 +137,18 @@ public final class UniversalFilePreviewService {
                 throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "文件超过 200 MB，请改用下载或系统默认应用打开");
             }
             PreviewMeta meta = classify(file);
-            String contentType = download ? MediaType.APPLICATION_OCTET_STREAM_VALUE
-                : ("binary".equals(meta.kind()) ? probeContentType(file) : meta.mimeType());
-            ResponseEntity.BodyBuilder builder = ResponseEntity.ok().contentType(MediaType.parseMediaType(contentType))
-                .header("X-Content-Type-Options", "nosniff");
-            if ("image/svg+xml".equals(contentType) || contentType.startsWith("text/html")) {
-                builder.header("Content-Security-Policy",
-                    "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox");
+            String contentType = download ? MediaType.APPLICATION_OCTET_STREAM_VALUE : meta.mimeType();
+            boolean inline = !download && isSafeInline(meta.mimeType());
+            if (!download && !inline) {
+                contentType = MediaType.APPLICATION_OCTET_STREAM_VALUE;
             }
-            if (download) {
-                builder.header(HttpHeaders.CONTENT_DISPOSITION,
-                    ContentDisposition.attachment().filename(file.getFileName().toString()).build().toString());
+            ResponseEntity.BodyBuilder builder = ResponseEntity.ok().contentType(MediaType.parseMediaType(contentType))
+                .header("X-Content-Type-Options", "nosniff").header("Cache-Control", "no-store")
+                .header("Content-Security-Policy", "application/pdf".equals(contentType)
+                    ? "default-src 'none'; object-src 'self'; sandbox" : "default-src 'none'; sandbox");
+            if (download || !inline) {
+                builder.header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+                    .filename(file.getFileName().toString(), StandardCharsets.UTF_8).build().toString());
             }
             return builder.body(new FileSystemResource(file));
         } catch (IOException e) {
@@ -151,6 +160,9 @@ public final class UniversalFilePreviewService {
         boolean reveal = "reveal".equalsIgnoreCase(mode);
         if (!Files.exists(file)) {
             return new OpenResult(false, "文件不存在：" + file.getFileName(), "请先刷新文件树。");
+        }
+        if (!reveal && isDangerousOpenFile(file)) {
+            return new OpenResult(false, "出于安全原因，禁止直接通过系统应用运行可执行或脚本文件：" + file.getFileName(), "请仅在确认文件安全后使用其他方式处理。");
         }
         if (!BrowserRuntime.desktopAvailable()) {
             return new OpenResult(false, "当前服务端运行在无图形桌面环境，无法直接拉起本机应用。", "请点击「下载」将文件保存到本地电脑后再打开。");
@@ -168,11 +180,19 @@ public final class UniversalFilePreviewService {
             return new OpenResult(false, "当前操作系统暂不支持该原生打开操作。", "请点击「下载」后手动打开。");
         }
         try {
-            new ProcessBuilder(command).redirectErrorStream(true).start();
+            Process process = new ProcessBuilder(command).redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                .redirectError(ProcessBuilder.Redirect.DISCARD).start();
+            if (process.waitFor(250, TimeUnit.MILLISECONDS) && process.exitValue() != 0) {
+                int code = process.exitValue();
+                return new OpenResult(false, "系统默认应用打开失败（退出码 " + code + "）", "请点击「下载」保存到本机后打开。");
+            }
             String action = reveal ? "已在系统文件夹中定位 " : "已在系统默认应用中打开 ";
             return new OpenResult(true, action + file.getFileName(), "");
         } catch (IOException e) {
             return new OpenResult(false, "调用系统应用失败：" + e.getMessage(), "请点击「下载」保存到本机后打开。");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new OpenResult(false, "等待系统应用启动时被中断", "请点击「下载」保存到本机后打开。");
         }
     }
 
@@ -180,13 +200,29 @@ public final class UniversalFilePreviewService {
         Path normalized = file.toAbsolutePath().normalize();
         Path parent = normalized.getParent() == null ? normalized : normalized.getParent();
         if (HostOs.isMac(osName)) {
-            return reveal ? List.of("open", "-R", normalized.toString()) : List.of("open", normalized.toString());
+            return reveal ? List.of("open", "-R", "--", normalized.toString())
+                : List.of("open", "--", normalized.toString());
         }
         if (HostOs.isWindows(osName)) {
-            return reveal ? List.of("explorer.exe", "/select," + normalized)
-                : List.of("cmd.exe", "/c", "start", "", normalized.toString());
+            if (!reveal) {
+                return List.of();
+            }
+            String text = normalized.toString();
+            return text.contains(",") ? List.of("explorer.exe", parent.toString())
+                : List.of("explorer.exe", "/select," + text);
         }
         return List.of("xdg-open", reveal ? parent.toString() : normalized.toString());
+    }
+
+    private static boolean isSafeInline(String mime) {
+        return INLINE_IMAGE_TYPES.contains(mime) || mime.startsWith("audio/") || mime.startsWith("video/")
+            || "application/pdf".equals(mime);
+    }
+
+    private static boolean isDangerousOpenFile(Path file) {
+        String name = file.getFileName().toString().replaceAll("[. ]+$", "");
+        int dot = name.lastIndexOf('.');
+        return dot >= 0 && DANGEROUS_OPEN_EXTENSIONS.contains(name.substring(dot + 1).toLowerCase(Locale.ROOT));
     }
 
     private static StructuredPreview parseDocx(Path file, long size) throws IOException {

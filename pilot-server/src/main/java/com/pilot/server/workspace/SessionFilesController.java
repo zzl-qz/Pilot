@@ -61,11 +61,14 @@ public class SessionFilesController {
     private static final int MAX_FLAT_DEPTH = 12;
 
     private final SessionService sessions;
+    private final WorkspaceService workspaceService;
 
     /** 目录树的一层：目录在前、文件在后，按名称排序。 */
     @GetMapping("/{id}/files")
     public TreeResponse tree(@PathVariable String id, @RequestParam(name = "path", required = false) String path) {
-        return treeWorkspace(paths(id).root(), path);
+        Path root = paths(id).root();
+        workspaceService.requireSafeWorkspaceFile(root, path == null || path.isBlank() ? "." : path);
+        return treeWorkspace(root, path);
     }
 
     static TreeResponse treeWorkspace(Path workspace, String path) {
@@ -108,7 +111,9 @@ public class SessionFilesController {
      */
     @GetMapping("/{id}/files/flat")
     public FlatResponse flat(@PathVariable String id, @RequestParam(name = "limit", required = false) Integer limit) {
-        return flatWorkspace(paths(id).root(), limit);
+        Path root = paths(id).root();
+        workspaceService.requireSafeWorkspaceFile(root, ".");
+        return flatWorkspace(root, limit);
     }
 
     /** 草稿态与已有会话共用索引规则，不跟随符号链接。 */
@@ -158,14 +163,18 @@ public class SessionFilesController {
     /** 只读预览；覆盖文本/代码、图片、PDF、音视频、Office(.docx/.xlsx/.pptx)与压缩包(.zip/.jar/.war/.epub)。 */
     @GetMapping("/{id}/file")
     public FileResponse file(@PathVariable String id, @RequestParam("path") String path) {
-        return fileWorkspace(paths(id).root(), path);
+        Path root = paths(id).root();
+        workspaceService.requireSafeWorkspaceFile(root, path);
+        return fileWorkspace(root, path);
     }
 
     /** 工作区原始文件流，供图片、PDF、音视频原生预览及附件下载（自动支持 HTTP Range）。 */
     @GetMapping("/{id}/file/raw")
     public ResponseEntity<Resource> raw(@PathVariable String id, @RequestParam("path") String path,
         @RequestParam(name = "download", defaultValue = "false") boolean download) {
-        return rawWorkspace(paths(id).root(), path, download);
+        Path root = paths(id).root();
+        workspaceService.requireSafeWorkspaceFile(root, path);
+        return rawWorkspace(root, path, download);
     }
 
     /** 使用本机默认应用打开工作区文件或在系统文件夹中定位（跨 Windows/macOS/Linux）。 */
@@ -174,7 +183,9 @@ public class SessionFilesController {
         if (request == null || request.path() == null || request.path().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少文件路径");
         }
-        return openWorkspace(paths(id).root(), request.path(), request.mode());
+        Path root = paths(id).root();
+        workspaceService.requireSafeWorkspaceFile(root, request.path());
+        return openWorkspace(root, request.path(), request.mode());
     }
 
     static ResponseEntity<Resource> rawWorkspace(Path workspace, String path, boolean download) {
@@ -190,6 +201,8 @@ public class SessionFilesController {
     /** 工作区内图片的只读预览，供会话工具结果内嵌展示。 */
     @GetMapping("/{id}/file/image")
     public ResponseEntity<byte[]> image(@PathVariable String id, @RequestParam("path") String path) throws IOException {
+        Path root = paths(id).root();
+        workspaceService.requireSafeWorkspaceFile(root, path);
         Path file = paths(id).resolve(path);
         if (!Files.isRegularFile(file)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "不是文件: " + path);

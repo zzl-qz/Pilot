@@ -16,7 +16,16 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+
+import com.pilot.core.project.Project;
+import com.pilot.core.project.ProjectRepository;
+import com.pilot.core.session.Session;
+import com.pilot.core.session.SessionRepository;
+import com.pilot.core.workspace.PathValidator;
+import com.pilot.server.config.AgentProperties;
+import com.pilot.server.store.PilotDataDir;
 
 /**
  * 本地目录浏览与工作区校验。
@@ -29,6 +38,23 @@ public class WorkspaceService {
     private static final int MAX_DIRECTORIES = 300;
     private static final Set<String> NOISY_DIRECTORIES =
         Set.of("node_modules", ".git", ".gradle", "target", "dist", "out");
+    private final AgentProperties agentProperties;
+    private final ProjectRepository projects;
+    private final SessionRepository sessions;
+    private final PilotDataDir dataDir;
+
+    public WorkspaceService() {
+        this(null, null, null, null);
+    }
+
+    @Autowired
+    public WorkspaceService(AgentProperties agentProperties, ProjectRepository projects, SessionRepository sessions,
+        PilotDataDir dataDir) {
+        this.agentProperties = agentProperties;
+        this.projects = projects;
+        this.sessions = sessions;
+        this.dataDir = dataDir;
+    }
 
     public record RootEntry(String path, String label) {
     }
@@ -118,6 +144,79 @@ public class WorkspaceService {
         } catch (IOException e) {
             return path;
         }
+    }
+
+    public Path requireRegisteredWorkspace(String rawPath) {
+        Path requested = requireDirectory(rawPath);
+        if (agentProperties == null || !isRegistered(requested)) {
+            throw new IllegalArgumentException("工作区未在项目或会话中登记，拒绝读取文件");
+        }
+        return requested;
+    }
+
+    public Path requireSafeWorkspaceFile(Path workspace, String relativePath) {
+        if (relativePath == null) {
+            throw new IllegalArgumentException("文件路径不能为空");
+        }
+        Path root = realPath(workspace);
+        String trimmed = relativePath.strip();
+        if (trimmed.isEmpty() || ".".equals(trimmed)) {
+            return root;
+        }
+        Path file = new PathValidator(root).resolve(trimmed);
+        Path real;
+        try {
+            real = file.toRealPath();
+        } catch (IOException e) {
+            throw new IllegalArgumentException("文件不存在或无法访问");
+        }
+        Path privateRoot = dataDir == null ? null : realPath(dataDir.root());
+        if ((privateRoot != null && real.startsWith(privateRoot) && !root.startsWith(privateRoot))
+            || hasPilotDirectory(root, real)) {
+            throw new IllegalArgumentException("禁止访问 .pilot 数据目录");
+        }
+        return real;
+    }
+
+    private boolean isRegistered(Path requested) {
+        String configuredWorkspace = agentProperties.workspace();
+        if (configuredWorkspace != null && !configuredWorkspace.isBlank()
+            && requested.startsWith(realPath(Path.of(configuredWorkspace)))) {
+            return true;
+        }
+        for (Project project : projects == null ? List.<Project>of() : projects.list()) {
+            for (String folder : project.folders()) {
+                if (requested.startsWith(realPath(Path.of(folder)))) {
+                    return true;
+                }
+            }
+        }
+        for (Session session : sessions == null ? List.<Session>of() : sessions.list()) {
+            if (session.workspace() != null && requested.startsWith(realPath(Path.of(session.workspace())))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static Path realPath(Path path) {
+        try {
+            return path.toRealPath();
+        } catch (IOException | InvalidPathException e) {
+            return path.toAbsolutePath().normalize();
+        }
+    }
+
+    private static boolean hasPilotDirectory(Path root, Path file) {
+        Path current = file;
+        while (current != null && !current.equals(root) && current.startsWith(root)) {
+            Path name = current.getFileName();
+            if (name != null && ".pilot".equalsIgnoreCase(name.toString())) {
+                return true;
+            }
+            current = current.getParent();
+        }
+        return false;
     }
 
     private static Path home() {

@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -38,6 +39,7 @@ class SessionFilesApiTest {
 
     @Test
     void draftWorkspaceIndexSupportsUnicodeAndSkipsBuildArtifacts() throws Exception {
+        registerProject();
         Files.createDirectories(workspace.resolve("源码"));
         Files.createDirectories(workspace.resolve("node_modules"));
         Files.writeString(workspace.resolve("源码/测试 file.txt"), "内容");
@@ -48,6 +50,7 @@ class SessionFilesApiTest {
 
     @Test
     void draftWorkspaceIndexValidatesPathAndHonorsLimits() throws Exception {
+        registerProject();
         Files.writeString(workspace.resolve("a.txt"), "a");
         Files.writeString(workspace.resolve("b.txt"), "b");
         mvc.perform(get("/api/workspaces/files/flat").param("path", workspace.toString()).param("limit", "1"))
@@ -61,6 +64,7 @@ class SessionFilesApiTest {
 
     @Test
     void draftWorkspaceIndexDoesNotFollowSymlinks() throws Exception {
+        registerProject();
         Path outside = Files.createTempDirectory("pilot-outside-");
         try {
             Files.writeString(outside.resolve("private.txt"), "outside");
@@ -85,6 +89,7 @@ class SessionFilesApiTest {
 
     @Test
     void draftTreeAndPreviewShareSessionPathValidation() throws Exception {
+        registerProject();
         Files.createDirectories(workspace.resolve("源码"));
         Files.writeString(workspace.resolve("源码/测试 文件.md"), "内容");
         mvc.perform(get("/api/workspaces/files").param("root", workspace.toString())).andExpect(status().isOk())
@@ -103,6 +108,24 @@ class SessionFilesApiTest {
         Files.write(workspace.resolve("binary.bin"), new byte[] {0, 1, 2});
         mvc.perform(get("/api/workspaces/file").param("root", workspace.toString()).param("path", "binary.bin"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.binary").value(true));
+    }
+
+    @Test
+    void rejectsUnregisteredWorkspaceAndDotPilotFiles() throws Exception {
+        Files.writeString(workspace.resolve("secret.txt"), "nope");
+        mvc.perform(get("/api/workspaces/file").param("root", workspace.toString()).param("path", "secret.txt"))
+            .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/workspaces/file/raw").param("root", workspace.toString()).param("path", "secret.txt"))
+            .andExpect(status().isBadRequest());
+
+        registerProject();
+        Files.createDirectories(workspace.resolve(".pilot"));
+        Files.writeString(workspace.resolve(".pilot/pilot.db"), "db");
+        mvc.perform(get("/api/workspaces/file").param("root", workspace.toString()).param("path", ".pilot/pilot.db"))
+            .andExpect(status().isBadRequest());
+        mvc.perform(
+            get("/api/workspaces/file/raw").param("root", workspace.toString()).param("path", ".pilot/pilot.db"))
+            .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -185,6 +208,12 @@ class SessionFilesApiTest {
 
         mvc.perform(get("/api/sessions/{id}/file", sessionId).param("path", "../outside.txt"))
             .andExpect(status().isBadRequest());
+    }
+
+    private void registerProject() throws Exception {
+        String body = json.writeValueAsString(Map.of("name", "test-proj", "folders", List.of(workspace.toString())));
+        mvc.perform(post("/api/projects").contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isOk());
     }
 
     private String createSession() throws Exception {

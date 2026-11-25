@@ -122,9 +122,24 @@ class UniversalFilePreviewServiceTest {
         ResponseEntity<Resource> rawPng = SessionFilesController.rawWorkspace(workspace, "shot.png", false);
         assertEquals("image/png", rawPng.getHeaders().getContentType().toString());
         assertEquals("nosniff", rawPng.getHeaders().getFirst("X-Content-Type-Options"));
+        assertEquals("no-store", rawPng.getHeaders().getFirst("Cache-Control"));
+        assertTrue(rawPng.getHeaders().getFirst("Content-Security-Policy").contains("sandbox"));
 
         ResponseEntity<Resource> rawSvg = SessionFilesController.rawWorkspace(workspace, "icon.svg", false);
+        assertEquals("application/octet-stream", rawSvg.getHeaders().getContentType().toString());
+        assertTrue(rawSvg.getHeaders().getFirst("Content-Disposition").contains("attachment"));
         assertTrue(rawSvg.getHeaders().getFirst("Content-Security-Policy").contains("sandbox"));
+
+        for (String name : List.of("evil.xhtml", "doc.xml", "page.html", "报告.html")) {
+            Path target = workspace.resolve(name);
+            Files.writeString(target, "<html xmlns=\"http://www.w3.org/1999/xhtml\"><script>alert(1)</script></html>");
+            ResponseEntity<Resource> raw = SessionFilesController.rawWorkspace(workspace, name, false);
+            assertEquals("application/octet-stream", raw.getHeaders().getContentType().toString(), name);
+            assertEquals("nosniff", raw.getHeaders().getFirst("X-Content-Type-Options"), name);
+            assertEquals("no-store", raw.getHeaders().getFirst("Cache-Control"), name);
+            assertTrue(raw.getHeaders().getFirst("Content-Security-Policy").contains("sandbox"), name);
+            assertTrue(raw.getHeaders().getFirst("Content-Disposition").contains("attachment"), name);
+        }
 
         ResponseEntity<Resource> download = SessionFilesController.rawWorkspace(workspace, "shot.png", true);
         assertTrue(download.getHeaders().getFirst("Content-Disposition").contains("attachment"));
@@ -134,16 +149,29 @@ class UniversalFilePreviewServiceTest {
     }
 
     @Test
+    void blocksExecutableAndScriptNativeOpenIncludingTrailingDots() throws Exception {
+        for (String name : List.of("setup.exe", "payload.exe.", "run.sh", "script.ps1", "app.desktop")) {
+            Path file = workspace.resolve(name);
+            Files.writeString(file, "payload");
+            UniversalFilePreviewService.OpenResult result = UniversalFilePreviewService.openNative(file, "open");
+            assertFalse(result.ok(), name);
+            assertTrue(result.message().contains("安全原因"), name + " -> " + result.message());
+        }
+    }
+
+    @Test
     void buildsCrossPlatformNativeOpenAndRevealCommands() {
         Path sample = workspace.resolve("demo.pdf");
-        assertEquals(List.of("open", sample.toAbsolutePath().normalize().toString()),
+        Path comma = workspace.resolve("a,b.pdf");
+        assertEquals(List.of("open", "--", sample.toAbsolutePath().normalize().toString()),
             UniversalFilePreviewService.nativeCommand(sample, false, "Mac OS X"));
-        assertEquals(List.of("open", "-R", sample.toAbsolutePath().normalize().toString()),
+        assertEquals(List.of("open", "-R", "--", sample.toAbsolutePath().normalize().toString()),
             UniversalFilePreviewService.nativeCommand(sample, true, "Mac OS X"));
         assertEquals(List.of("explorer.exe", "/select," + sample.toAbsolutePath().normalize()),
             UniversalFilePreviewService.nativeCommand(sample, true, "Windows 11"));
-        assertEquals(List.of("cmd.exe", "/c", "start", "", sample.toAbsolutePath().normalize().toString()),
-            UniversalFilePreviewService.nativeCommand(sample, false, "Windows 11"));
+        assertEquals(List.of("explorer.exe", comma.toAbsolutePath().normalize().getParent().toString()),
+            UniversalFilePreviewService.nativeCommand(comma, true, "Windows 11"));
+        assertEquals(List.of(), UniversalFilePreviewService.nativeCommand(sample, false, "Windows 11"));
         assertEquals(List.of("xdg-open", sample.toAbsolutePath().normalize().getParent().toString()),
             UniversalFilePreviewService.nativeCommand(sample, true, "Linux"));
         assertEquals(List.of("xdg-open", sample.toAbsolutePath().normalize().toString()),

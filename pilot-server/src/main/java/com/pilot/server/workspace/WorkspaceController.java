@@ -1,6 +1,7 @@
 package com.pilot.server.workspace;
 
 import java.io.UncheckedIOException;
+import java.nio.file.Path;
 import java.util.List;
 
 import org.springframework.core.io.Resource;
@@ -35,7 +36,9 @@ public class WorkspaceController {
     public SessionFilesController.FlatResponse files(@RequestParam("path") String path,
         @RequestParam(name = "limit", required = false) Integer limit) {
         try {
-            return SessionFilesController.flatWorkspace(workspaces.requireDirectory(path), limit);
+            Path root = workspaces.requireRegisteredWorkspace(path);
+            workspaces.requireSafeWorkspaceFile(root, ".");
+            return SessionFilesController.flatWorkspace(root, limit);
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         }
@@ -45,9 +48,11 @@ public class WorkspaceController {
     public SessionFilesController.TreeResponse tree(@RequestParam("root") String root,
         @RequestParam(name = "path", defaultValue = "") String path) {
         try {
-            return SessionFilesController.treeWorkspace(workspaces.requireDirectory(root), path);
+            Path workspace = workspaces.requireRegisteredWorkspace(root);
+            workspaces.requireSafeWorkspaceFile(workspace, path == null || path.isBlank() ? "." : path);
+            return SessionFilesController.treeWorkspace(workspace, path);
         } catch (IllegalArgumentException | WorkspaceViolationException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+            throw invalidPath(e);
         }
     }
 
@@ -55,9 +60,11 @@ public class WorkspaceController {
     public SessionFilesController.FileResponse file(@RequestParam("root") String root,
         @RequestParam("path") String path) {
         try {
-            return SessionFilesController.fileWorkspace(workspaces.requireDirectory(root), path);
+            Path workspace = workspaces.requireRegisteredWorkspace(root);
+            workspaces.requireSafeWorkspaceFile(workspace, path);
+            return SessionFilesController.fileWorkspace(workspace, path);
         } catch (IllegalArgumentException | WorkspaceViolationException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+            throw invalidPath(e);
         }
     }
 
@@ -65,9 +72,11 @@ public class WorkspaceController {
     public ResponseEntity<Resource> raw(@RequestParam("root") String root, @RequestParam("path") String path,
         @RequestParam(name = "download", defaultValue = "false") boolean download) {
         try {
-            return SessionFilesController.rawWorkspace(workspaces.requireDirectory(root), path, download);
+            Path workspace = workspaces.requireRegisteredWorkspace(root);
+            workspaces.requireSafeWorkspaceFile(workspace, path);
+            return SessionFilesController.rawWorkspace(workspace, path, download);
         } catch (IllegalArgumentException | WorkspaceViolationException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+            throw invalidPath(e);
         }
     }
 
@@ -78,11 +87,16 @@ public class WorkspaceController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少工作区或文件路径");
         }
         try {
-            return SessionFilesController.openWorkspace(workspaces.requireDirectory(request.root()), request.path(),
-                request.mode());
+            Path workspace = workspaces.requireRegisteredWorkspace(request.root());
+            workspaces.requireSafeWorkspaceFile(workspace, request.path());
+            return SessionFilesController.openWorkspace(workspace, request.path(), request.mode());
         } catch (IllegalArgumentException | WorkspaceViolationException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+            throw invalidPath(e);
         }
+    }
+
+    private static ResponseStatusException invalidPath(RuntimeException error) {
+        return new ResponseStatusException(HttpStatus.BAD_REQUEST, error.getMessage());
     }
 
     public record WorkspaceOpenRequest(String root, String path, String mode) {
