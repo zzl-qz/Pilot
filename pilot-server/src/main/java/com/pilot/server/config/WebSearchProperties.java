@@ -37,6 +37,9 @@ public record WebSearchProperties(boolean local, String endpoint, String python,
         }
         endpoint = normalizeHttpEndpoint(endpoint, "pilot.web-search.endpoint");
         URI uri = URI.create(endpoint);
+        if (EndpointSecurity.isCloudMetadataHost(uri.getHost())) {
+            throw new IllegalArgumentException("联网搜索端点不能指向云元数据地址");
+        }
         if (local && managedHost(uri) != null && uri.getPort() < 0) {
             endpoint = uri.getScheme() + "://" + uri.getHost() + ":" + WebSearchTool.DEFAULT_ENDPOINT.getPort();
         }
@@ -49,6 +52,9 @@ public record WebSearchProperties(boolean local, String endpoint, String python,
         apiKey = clean(apiKey);
         apiEndpoint = apiEndpoint == null || apiEndpoint.isBlank() ? ""
             : normalizeHttpEndpoint(apiEndpoint, "pilot.web-search.api-endpoint");
+        if (!apiEndpoint.isBlank() && EndpointSecurity.isCloudMetadataHost(URI.create(apiEndpoint).getHost())) {
+            throw new IllegalArgumentException("联网搜索 API 端点不能指向云元数据地址");
+        }
         proxy = proxy == null || proxy.isBlank() ? "" : normalizeProxy(proxy);
         bochaApiKey = clean(bochaApiKey);
         tavilyApiKey = clean(tavilyApiKey);
@@ -109,6 +115,9 @@ public record WebSearchProperties(boolean local, String endpoint, String python,
             || uri.getRawFragment() != null || uri.getPort() == 0 || uri.getPort() > 65_535) {
             throw new IllegalArgumentException(fieldName + " 必须为不含凭据、查询参数或片段的 HTTP/HTTPS 地址");
         }
+        if (EndpointSecurity.isCloudMetadataHost(uri.getHost())) {
+            throw new IllegalArgumentException(fieldName + " 不能指向云元数据地址");
+        }
         return value;
     }
 
@@ -123,6 +132,9 @@ public record WebSearchProperties(boolean local, String endpoint, String python,
         String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
         if (uri.getUserInfo() != null) {
             throw new IllegalArgumentException("代理地址不支持内嵌账号密码，请使用无凭据的代理地址（如 http://127.0.0.1:7890）");
+        }
+        if (EndpointSecurity.isCloudMetadataHost(uri.getHost())) {
+            throw new IllegalArgumentException("代理地址不能指向云元数据地址");
         }
         if (!("http".equals(scheme) || "https".equals(scheme) || "socks5".equals(scheme) || "socks5h".equals(scheme))
             || uri.getHost() == null || uri.getRawQuery() != null || uri.getRawFragment() != null || uri.getPort() == 0

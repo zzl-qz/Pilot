@@ -28,6 +28,7 @@ import com.pilot.core.mcp.McpTrustStore;
 import com.pilot.core.permission.PermissionMode;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.config.AgentProperties;
+import com.pilot.server.config.EndpointSecurity;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -82,6 +83,14 @@ class McpConfigControllerTest {
         assertTrue(user.usable());
         assertEquals("UNTRUSTED", user.trustState());
         assertEquals("workspace", ws.source());
+    }
+
+    @Test
+    void endpointSecurityComparesOriginsAndBlocksMetadataHosts() {
+        assertTrue(EndpointSecurity.sameOrigin("https://api.example/v1", "https://API.EXAMPLE/other"));
+        assertFalse(EndpointSecurity.sameOrigin("https://api.example", "http://api.example"));
+        assertTrue(EndpointSecurity.isCloudMetadataHost("metadata.google.internal"));
+        assertTrue(EndpointSecurity.isCloudMetadataHost("169.254.170.2"));
     }
 
     @Test

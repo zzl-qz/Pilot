@@ -9,6 +9,7 @@ import java.util.UUID;
 
 import org.springframework.stereotype.Component;
 
+import com.pilot.server.config.EndpointSecurity;
 import com.pilot.server.store.SettingsStore;
 
 import tools.jackson.core.type.TypeReference;
@@ -101,7 +102,7 @@ public class ModelProfileStore {
         } else if (!blank(request.apiKey())) {
             apiKey = request.apiKey().strip();
         } else {
-            apiKey = existing.apiKey();
+            apiKey = EndpointSecurity.sameOrigin(existing.endpoint(), endpoint) ? existing.apiKey() : "";
         }
         Long context =
             request.contextTokens() == null ? existing.contextTokens() : positiveLong(request.contextTokens());
@@ -189,7 +190,8 @@ public class ModelProfileStore {
         }
         if (Boolean.TRUE.equals(request.inheritCurrentKey())) {
             String currentKey = models.snapshot().apiKey();
-            return currentKey == null ? "" : currentKey;
+            return currentKey == null || !EndpointSecurity.sameOrigin(models.snapshot().endpoint(), request.endpoint())
+                ? "" : currentKey;
         }
         return "";
     }

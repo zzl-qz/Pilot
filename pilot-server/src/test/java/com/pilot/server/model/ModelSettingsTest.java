@@ -52,6 +52,15 @@ class ModelSettingsTest {
     }
 
     @Test
+    void changingEndpointWithoutKeyDoesNotReuseSavedSecretAndMetadataIsRejected() {
+        ModelSettings settings = new ModelSettings(defaults, store);
+        settings.update("https://api.other.example/v1", "gpt-new", null);
+        assertFalse(settings.snapshot().hasApiKey());
+        assertThrows(IllegalArgumentException.class,
+            () -> settings.update("http://169.254.169.254/latest", "model", ""));
+    }
+
+    @Test
     void blankFieldsKeepPreviousValues() {
         ModelSettings settings = new ModelSettings(defaults, store);
 

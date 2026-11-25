@@ -241,6 +241,23 @@ public class WebSearchSettings implements com.pilot.server.model.SearchPreferenc
             writes.put(KEY_PROXY, nextProxy);
         }
 
+        String beforeEffectiveEndpoint = effectiveEndpointFor(before, nextProvider);
+        String nextEffectiveEndpoint = effectiveEndpointFor(nextProvider, nextGenericEndpoint, nextProviderEndpoints);
+        boolean searxngChanged = !nextProvider.requiresApiKey() && !com.pilot.server.config.EndpointSecurity
+            .sameOriginOrBothBlank(before.searxngEndpoint(), nextSearxngEndpoint);
+        boolean proxyRedirected = !nextProxy.isBlank() && !before.proxy().equals(nextProxy);
+        boolean outboundTargetChanged = !com.pilot.server.config.EndpointSecurity
+            .sameOriginOrBothBlank(beforeEffectiveEndpoint, nextEffectiveEndpoint) || searxngChanged || proxyRedirected;
+        if (outboundTargetChanged && (command.apiKey() == null || command.apiKey().isBlank())
+            && !Boolean.TRUE.equals(command.clearApiKey())) {
+            nextGenericKey = "";
+            nextProviderKeys.remove(nextProvider);
+            writes.put(KEY_API_KEY, "");
+            if (nextProvider.requiresApiKey()) {
+                writes.put(providerKeySlot(nextProvider), "");
+            }
+        }
+
         if (!writes.isEmpty()) {
             store.saveAll(writes);
         }
@@ -329,6 +346,23 @@ public class WebSearchSettings implements com.pilot.server.model.SearchPreferenc
         String searxngEndpoint =
             overrides.searxngEndpoint() == null || overrides.searxngEndpoint().isBlank() ? base.searxngEndpoint()
                 : WebSearchProperties.normalizeHttpEndpoint(overrides.searxngEndpoint(), "searxngEndpoint");
+        String beforeEffectiveEndpoint = effectiveEndpointFor(base, provider);
+        String probeEffectiveEndpoint = provider.requiresApiKey()
+            ? (endpoints.containsKey(provider) ? endpoints.get(provider).toString() : provider.defaultEndpoint())
+            : genericEndpoint;
+        String probeProxy = overrides.proxy() == null ? base.proxy()
+            : overrides.proxy().isBlank() ? "" : WebSearchProperties.normalizeProxy(overrides.proxy());
+        boolean searxngChanged = !provider.requiresApiKey()
+            && !com.pilot.server.config.EndpointSecurity.sameOriginOrBothBlank(base.searxngEndpoint(), searxngEndpoint);
+        boolean proxyRedirected = !probeProxy.isBlank() && !base.proxy().equals(probeProxy);
+        boolean outboundTargetChanged =
+            !com.pilot.server.config.EndpointSecurity.sameOriginOrBothBlank(beforeEffectiveEndpoint,
+                probeEffectiveEndpoint) || searxngChanged || proxyRedirected;
+        if (outboundTargetChanged && (overrides.apiKey() == null || overrides.apiKey().isBlank())
+            && !Boolean.TRUE.equals(overrides.clearApiKey())) {
+            genericKey = "";
+            keys.remove(provider);
+        }
         boolean fallback = overrides.fallbackEnabled() == null ? base.fallbackEnabled() : overrides.fallbackEnabled();
         URI apiUri = genericEndpoint.isBlank() ? null : URI.create(genericEndpoint);
         return new WebSearchConfig(provider, genericKey, apiUri, URI.create(searxngEndpoint), base.timeout(), fallback,
@@ -362,9 +396,45 @@ public class WebSearchSettings implements com.pilot.server.model.SearchPreferenc
         String nativeSummary = nativeSearch == null ? "" : nativeSearch.summary();
         return new View(snap.provider().id(), snap.effectiveProviderId(), snap.activeApiEndpoint(),
             !activeKey.isBlank(), WebSearchConfig.maskSecret(activeKey), snap.searxngEndpoint(), snap.fallbackEnabled(),
-            snap.preferPilotSearch(), snap.proxy(), proxyNoticeFor(snap.proxy()), (int)snap.timeout().toSeconds(),
-            localEnabled, localManaged, localRunning, localPortOpen, localSettingsUpToDate, settingsPath, logPath,
-            localMessage, nativeActive, nativeSummary, List.copyOf(providers));
+            snap.preferPilotSearch(), sanitizeProxy(snap.proxy()), proxyNoticeFor(snap.proxy()),
+            (int)snap.timeout().toSeconds(), localEnabled, localManaged, localRunning, localPortOpen,
+            localSettingsUpToDate, settingsPath, logPath, localMessage, nativeActive, nativeSummary,
+            List.copyOf(providers));
+    }
+
+    private static String effectiveEndpointFor(Snapshot snapshot, WebSearchProvider provider) {
+        return effectiveEndpointFor(provider, snapshot.apiEndpoint(), snapshot.providerEndpoints());
+    }
+
+    private static String effectiveEndpointFor(WebSearchProvider provider, String genericEndpoint,
+        Map<WebSearchProvider, String> providerEndpoints) {
+        if (!provider.requiresApiKey()) {
+            return genericEndpoint == null ? "" : genericEndpoint;
+        }
+        String custom = providerEndpoints.getOrDefault(provider, "");
+        if (custom != null && !custom.isBlank()) {
+            return custom;
+        }
+        if (genericEndpoint != null && !genericEndpoint.isBlank()) {
+            return genericEndpoint;
+        }
+        return provider.defaultEndpoint();
+    }
+
+    private static String sanitizeProxy(String proxy) {
+        if (proxy == null || proxy.isBlank()) {
+            return "";
+        }
+        try {
+            URI uri = URI.create(proxy);
+            if (uri.getRawUserInfo() == null) {
+                return proxy;
+            }
+            return new URI(uri.getScheme(), null, uri.getHost(), uri.getPort(), uri.getPath(), uri.getQuery(),
+                uri.getFragment()).toString();
+        } catch (java.net.URISyntaxException | IllegalArgumentException exception) {
+            return "";
+        }
     }
 
     private static String proxyNoticeFor(String proxy) {

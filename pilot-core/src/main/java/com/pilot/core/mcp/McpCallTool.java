@@ -119,11 +119,15 @@ public final class McpCallTool extends PromptedTool {
         approvedServer = server;
         approvedConfigHash = McpTrustStore.hash(config);
         StringBuilder text = new StringBuilder("调用 MCP 服务器 ").append(server).append(" 的工具 ").append(tool).append('\n');
-        text.append("服务器命令：").append(config.command());
-        for (String arg : config.args()) {
-            text.append(' ').append(arg);
+        if (config.isRemote()) {
+            text.append("传输：").append(config.transport()).append('\n');
+            text.append("URL：").append(config.url()).append('\n');
+            text.append("自定义 headers 键：").append(String.join(", ", config.headers().keySet())).append('\n');
+        } else {
+            text.append("传输：stdio\n命令：").append(config.command()).append('\n');
+            text.append("参数：").append(String.join(" ", config.args())).append('\n');
+            text.append("显式 env 键：").append(String.join(", ", config.env().keySet())).append('\n');
         }
-        text.append('\n');
         McpToolInfo observed = null;
         for (McpToolInfo info : manager.knownTools(workspace, server)) {
             if (info.name().equals(tool)) {

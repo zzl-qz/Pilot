@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 
 import com.pilot.core.browser.BrowserCommand;
 import com.pilot.core.model.ModelCapacity;
+import com.pilot.server.config.EndpointSecurity;
 import com.pilot.server.store.SettingsStore;
 
 import lombok.extern.slf4j.Slf4j;
@@ -117,7 +118,8 @@ public class ModelSettings {
     public synchronized Snapshot probeTarget(String endpoint, String apiKey) {
         Snapshot before = current;
         String targetEndpoint = blank(endpoint) ? before.endpoint() : endpoint.strip();
-        String targetKey = blank(apiKey) ? before.apiKey() : apiKey.strip();
+        String targetKey = blank(apiKey)
+            ? EndpointSecurity.sameOrigin(before.endpoint(), targetEndpoint) ? before.apiKey() : "" : apiKey.strip();
         requireHttpEndpoint(targetEndpoint);
         return new Snapshot(targetEndpoint, before.model(), targetKey, before.contextTokens(), before.maxOutputTokens(),
             before.childModel());
@@ -147,7 +149,8 @@ public class ModelSettings {
         Snapshot before = current;
         String nextEndpoint = blank(endpoint) ? before.endpoint() : endpoint.strip();
         String nextModel = blank(model) ? before.model() : model.strip();
-        String nextKey = clearApiKey ? "" : blank(apiKey) ? before.apiKey() : apiKey.strip();
+        String nextKey = clearApiKey ? "" : blank(apiKey)
+            ? EndpointSecurity.sameOrigin(before.endpoint(), nextEndpoint) ? before.apiKey() : "" : apiKey.strip();
         requireHttpEndpoint(nextEndpoint);
 
         Snapshot next = new Snapshot(nextEndpoint, nextModel, nextKey, before.contextTokens(), before.maxOutputTokens(),
@@ -264,6 +267,9 @@ public class ModelSettings {
             throw new IllegalArgumentException("模型端点不是合法 URL：" + endpoint);
         }
         String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase();
+        if (EndpointSecurity.isCloudMetadataHost(uri.getHost())) {
+            throw new IllegalArgumentException("模型端点不能指向云元数据地址");
+        }
         if (!"http".equals(scheme) && !"https".equals(scheme)) {
             throw new IllegalArgumentException("模型端点必须是 http/https 地址：" + endpoint);
         }

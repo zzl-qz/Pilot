@@ -26,6 +26,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
+import com.pilot.core.exec.EnvironmentSanitizer;
 import com.pilot.core.util.HostOs;
 
 import tools.jackson.databind.JsonNode;
@@ -138,6 +139,8 @@ final class McpClient implements AutoCloseable {
         command.addAll(config.args());
         ProcessBuilder builder = new ProcessBuilder(command);
         builder.directory(workdir.toFile());
+        builder.environment().clear();
+        builder.environment().putAll(EnvironmentSanitizer.defaults().inherit(System.getenv()));
         if (!extraPath.isBlank()) {
             String path = builder.environment().getOrDefault("PATH", "");
             builder.environment().put("PATH", extraPath + File.pathSeparator + path);

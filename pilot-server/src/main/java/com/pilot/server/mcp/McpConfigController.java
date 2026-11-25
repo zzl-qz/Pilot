@@ -34,6 +34,7 @@ import com.pilot.core.session.SessionService;
 import com.pilot.core.util.Texts;
 import com.pilot.server.api.ApiErrors;
 import com.pilot.server.config.AgentProperties;
+import com.pilot.server.config.EndpointSecurity;
 import com.pilot.server.session.lookup.SessionLookup;
 
 import tools.jackson.databind.JsonNode;
@@ -118,6 +119,9 @@ public class McpConfigController {
             if (urlError != null) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, urlError);
             }
+            if (EndpointSecurity.isCloudMetadataUrl(url)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "远程 MCP 地址不能指向云元数据地址");
+            }
             if (request.headers() != null && request.headers().values().stream().anyMatch(value -> value == null)) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "headers 的值不能为 null");
             }
@@ -138,7 +142,9 @@ public class McpConfigController {
                     JsonNode existing = servers.path(name);
                     ObjectNode entry =
                         existing.isObject() ? ((ObjectNode)existing).deepCopy() : mapper.createObjectNode();
-                    JsonNode oldHeaders = existing.path("headers");
+                    boolean mayPreserve = preserve && existing.path("type").asString("").equals(normalizedType)
+                        && EndpointSecurity.sameOrigin(existing.path("url").asString(""), url);
+                    JsonNode oldHeaders = mayPreserve ? existing.path("headers") : mapper.nullNode();
                     Map<String, String> mergedHeaders = new LinkedHashMap<>();
                     headers.forEach((key, value) -> {
                         if (value.isEmpty() && preserve && oldHeaders.isObject() && oldHeaders.path(key).isTextual()) {
@@ -196,7 +202,10 @@ public class McpConfigController {
                     // 旧的 url/headers/非 stdio type 不能和新命令混在一起
                     ObjectNode entry =
                         existing.isObject() ? ((ObjectNode)existing).deepCopy() : mapper.createObjectNode();
-                    JsonNode oldEnv = existing.path("env");
+                    boolean mayPreserveEnv =
+                        preserve && existing.isObject() && existing.path("command").asString("").equals(command)
+                            && sameStringList(existing.path("args"), args);
+                    JsonNode oldEnv = mayPreserveEnv ? existing.path("env") : mapper.nullNode();
                     Map<String, String> mergedEnv = new LinkedHashMap<>();
                     env.forEach((key, value) -> {
                         if (value.isEmpty() && preserve && oldEnv.isObject() && oldEnv.path(key).isTextual()) {
@@ -394,6 +403,9 @@ public class McpConfigController {
             if (urlError != null) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "服务器 " + name + "：" + urlError);
             }
+            if (EndpointSecurity.isCloudMetadataUrl(url)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "服务器 " + name + "：远程 MCP 地址不能指向云元数据地址");
+            }
             ObjectNode clean = mapper.createObjectNode();
             clean.put("type", "sse".equals(type) ? McpServerConfig.TRANSPORT_SSE : McpServerConfig.TRANSPORT_HTTP);
             clean.put("url", url);
@@ -445,6 +457,21 @@ public class McpConfigController {
             clean.put("type", "stdio");
         }
         return clean;
+    }
+
+    private static boolean sameStringList(JsonNode node, List<String> expected) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return expected.isEmpty();
+        }
+        if (!node.isArray() || node.size() != expected.size()) {
+            return false;
+        }
+        for (int i = 0; i < expected.size(); i++) {
+            if (!node.get(i).isTextual() || !expected.get(i).equals(node.get(i).asString())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private ObjectNode serversNode(ObjectNode root) {
