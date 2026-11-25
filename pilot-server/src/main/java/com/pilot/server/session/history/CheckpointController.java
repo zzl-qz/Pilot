@@ -223,8 +223,8 @@ public class CheckpointController {
         EventEnvelope selected =
             events.stream().filter(event -> event.sequence() == sequence && event.payload() instanceof RunStarted)
                 .findFirst().orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "该消息已变化，请刷新后重新选择用户消息"));
-        List<String> runIds =
-            events.stream().filter(event -> event.sequence() >= sequence).map(EventEnvelope::runId).distinct().toList();
+        List<String> runIds = events.stream().filter(event -> event.sequence() >= sequence).map(EventEnvelope::runId)
+            .filter(runId -> runId != null && !runId.isBlank() && !runId.startsWith("compact_")).distinct().toList();
         return new Selection(session, selected, events, runIds, ((RunStarted)selected.payload()).input());
     }
 

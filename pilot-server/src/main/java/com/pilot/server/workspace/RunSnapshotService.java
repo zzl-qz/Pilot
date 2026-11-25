@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
@@ -79,6 +80,7 @@ public class RunSnapshotService
     private final ObjectMapper mapper;
     private final Path root;
     private final ThreadLocal<Context> current = new ThreadLocal<>();
+    private final Map<String, Context> activeContexts = new ConcurrentHashMap<>();
 
     @org.springframework.beans.factory.annotation.Autowired
     public RunSnapshotService(ObjectMapper mapper, PilotDataDir dataDir) {
@@ -147,8 +149,74 @@ public class RunSnapshotService
     }
 
     public void bind(String runId, Path workspace) {
+        bind(runId, workspace, List.of());
+    }
+
+    public void bind(String runId, Path workspace, List<Path> extraRoots) {
         Path directory = root.resolve(sanitize(runId));
-        current.set(new Context(runId, workspace.toAbsolutePath().normalize(), directory));
+        List<Path> normalizedExtra = extraRoots == null ? List.of()
+            : extraRoots.stream().filter(Objects::nonNull).map(RunSnapshotService::canonicalizeRoot).toList();
+        Context context = new Context(runId, workspace.toAbsolutePath().normalize(), canonicalizeRoot(workspace),
+            directory, normalizedExtra);
+        current.set(context);
+        activeContexts.put(runId, context);
+    }
+
+    private Context resolveContext(String runId) {
+        if (runId != null && !runId.isBlank()) {
+            Context active = activeContexts.get(runId);
+            if (active != null) {
+                return active;
+            }
+        }
+        return current.get();
+    }
+
+    private static Path canonicalizeRoot(Path path) {
+        Path normalized = path.toAbsolutePath().normalize();
+        try {
+            return normalized.toRealPath();
+        } catch (IOException e) {
+            return normalized;
+        }
+    }
+
+    private static Path canonicalizeFile(Path path) {
+        Path normalized = path.toAbsolutePath().normalize();
+        try {
+            return normalized.toRealPath(LinkOption.NOFOLLOW_LINKS);
+        } catch (IOException e) {
+            Path parent = normalized.getParent();
+            Path name = normalized.getFileName();
+            if (parent != null && name != null) {
+                return canonicalizeRoot(parent).resolve(name).normalize();
+            }
+            return normalized;
+        }
+    }
+
+    private static Path relativeWithinWorkspace(Context context, Path absolute) {
+        if (absolute.startsWith(context.workspace)) {
+            return context.workspace.relativize(absolute);
+        }
+        Path canonical = canonicalizeFile(absolute);
+        if (canonical.startsWith(context.canonicalWorkspace)) {
+            return context.canonicalWorkspace.relativize(canonical);
+        }
+        return null;
+    }
+
+    private static boolean inExtraRoots(Context context, Path absolute) {
+        if (context.extraRoots.isEmpty()) {
+            return false;
+        }
+        Path canonical = canonicalizeFile(absolute);
+        for (Path extra : context.extraRoots) {
+            if (canonical.startsWith(extra)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public void finish() {
@@ -175,6 +243,7 @@ public class RunSnapshotService
         context.completed = unavailable.isEmpty();
         SnapshotMeta meta = persist(context);
         context.finished = true;
+        activeContexts.remove(context.runId, context);
         try {
             RunChangeReport changes = RunSnapshotDiff.capture(meta, context.directory().resolve("files"),
                 context.directory().resolve(COMPLETED_DIR), unavailable);
@@ -343,7 +412,7 @@ public class RunSnapshotService
                     }
                     content = Files.readAllBytes(backup);
                 }
-                externalChange(workspace.resolve(name),
+                externalChangeForRun(handle.runId(), workspace.resolve(name),
                     new SnapshotSink.FileSnapshot(before != null, content, before == null ? "" : before.hash()));
             }
             String warning = skippedWarning(untracked);
@@ -613,10 +682,13 @@ public class RunSnapshotService
             return;
         }
         Path absolute = file.toAbsolutePath().normalize();
-        if (!absolute.startsWith(context.workspace)) {
+        Path relative = relativeWithinWorkspace(context, absolute);
+        if (relative == null) {
+            if (inExtraRoots(context, absolute)) {
+                return;
+            }
             throw new IllegalStateException("拒绝快照工作区之外的路径: " + absolute);
         }
-        Path relative = context.workspace.relativize(absolute);
         String key = relative.toString().replace('\\', '/');
         if (!context.recorded.add(key)) {
             try {
@@ -659,7 +731,12 @@ public class RunSnapshotService
         if (context == null) {
             return;
         }
-        String key = context.workspace.relativize(file.toAbsolutePath().normalize()).toString().replace('\\', '/');
+        Path absolute = file.toAbsolutePath().normalize();
+        Path relative = relativeWithinWorkspace(context, absolute);
+        if (relative == null) {
+            return;
+        }
+        String key = relative.toString().replace('\\', '/');
         if (!context.recorded.contains(key)) {
             return;
         }
@@ -675,15 +752,22 @@ public class RunSnapshotService
     /** Import a command-discovered change using the pre-command bytes, never the already changed file. */
     @Override
     public synchronized void externalChange(Path file, SnapshotSink.FileSnapshot original) {
-        Context context = current.get();
+        externalChangeForRun(null, file, original);
+    }
+
+    private synchronized void externalChangeForRun(String runId, Path file, SnapshotSink.FileSnapshot original) {
+        Context context = resolveContext(runId);
         if (context == null) {
             return;
         }
         Path absolute = file.toAbsolutePath().normalize();
-        if (!absolute.startsWith(context.workspace) || absolute.equals(context.workspace)) {
+        Path relative = relativeWithinWorkspace(context, absolute);
+        if (relative == null || relative.toString().isEmpty()) {
+            if (inExtraRoots(context, absolute)) {
+                return;
+            }
             throw new IllegalStateException("拒绝记录工作区之外的命令变更: " + absolute);
         }
-        Path relative = context.workspace.relativize(absolute);
         String key = relative.toString().replace('\\', '/');
         try {
             String currentHash = hashIfRegularFile(absolute);
@@ -962,6 +1046,7 @@ public class RunSnapshotService
         }
         Files.createDirectories(target.getParent());
         Path temporary = Files.createTempFile(target.getParent(), ".pilot-restore-", ".tmp");
+        boolean interrupted = Thread.interrupted();
         try {
             Files.write(temporary, content);
             try (var channel = java.nio.channels.FileChannel.open(temporary, java.nio.file.StandardOpenOption.WRITE)) {
@@ -979,7 +1064,13 @@ public class RunSnapshotService
                 Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
             }
         } finally {
-            Files.deleteIfExists(temporary);
+            try {
+                Files.deleteIfExists(temporary);
+            } finally {
+                if (interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            }
         }
     }
 
@@ -1053,7 +1144,9 @@ public class RunSnapshotService
     private static final class Context {
         private final String runId;
         private final Path workspace;
+        private final Path canonicalWorkspace;
         private final Path directory;
+        private final List<Path> extraRoots;
         private final Set<String> recorded = new LinkedHashSet<>();
         private final List<SnapshotEntry> entries = new ArrayList<>();
         private boolean completed;
@@ -1061,10 +1154,12 @@ public class RunSnapshotService
         private final Map<String, String> writtenHashes = new LinkedHashMap<>();
         private final Set<String> conflicts = new LinkedHashSet<>();
 
-        private Context(String runId, Path workspace, Path directory) {
+        private Context(String runId, Path workspace, Path canonicalWorkspace, Path directory, List<Path> extraRoots) {
             this.runId = runId;
             this.workspace = workspace;
+            this.canonicalWorkspace = canonicalWorkspace;
             this.directory = directory;
+            this.extraRoots = List.copyOf(extraRoots);
         }
 
         private Path directory() {

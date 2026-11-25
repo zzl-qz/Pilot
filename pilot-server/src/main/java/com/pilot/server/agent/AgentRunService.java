@@ -1409,7 +1409,10 @@ public class AgentRunService implements RunStarter {
         if (goalPolicy != null) {
             loop.withExecutionPolicy(goalPolicy);
         }
-        snapshots.bind(runId, toolFactory.resolve(workspace));
+        List<Path> extraRoots =
+            prepared.workspaceValidator() == null || prepared.workspaceValidator().roots().size() <= 1 ? List.of()
+                : prepared.workspaceValidator().roots().subList(1, prepared.workspaceValidator().roots().size());
+        snapshots.bind(runId, toolFactory.resolve(workspace), extraRoots);
         try {
             // 工作区变了就在本步输入前补一份仓库快照（见 withRepositoryBrief），没变不重复注入；
             // 用户点名了技能时，指引作为独立 user 消息在用户输入之前注入（见 withSkillActivation）

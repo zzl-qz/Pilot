@@ -58,9 +58,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @RequiredArgsConstructor
 public class BackupService {
-    private static final List<String> DIRECTORIES =
-        List.of("multi", "validation", "commands", "traces", "snapshots", "work-products", "file-versions", "studio",
-            "apply-journal", "history-edits", "agents", "skills", "tasks", "mobile", "artifacts");
+    private static final List<String> DIRECTORIES = List.of("multi", "validation", "commands", "traces", "snapshots",
+        "work-products", "file-versions", "studio", "apply-journal", "history-edits", "agents", "skills", "tasks",
+        "mobile", "artifacts", "memory", "coordination", "browser-evidence", "audit");
     static final String EXTERNAL_ATTACHMENTS = "_external/attachments";
     private static final Duration QUIESCE_TIMEOUT = Duration.ofSeconds(2);
 

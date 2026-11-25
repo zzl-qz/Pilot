@@ -17,6 +17,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
@@ -526,6 +527,33 @@ class RunSnapshotServiceTest {
         assertTrue(result.complete(), result.warning());
         assertEquals(List.of("generated/static/tracked.txt", "src/App.java"), result.changedPaths(),
             "Git 忽略的未跟踪构建产物应被过滤，已跟踪文件与普通新源码必须保留");
+    }
+
+    @Test
+    void asyncCommandFinishCapturesChangesAcrossThreadsAndSurvivesInterrupt() throws Exception {
+        Path target = Files.writeString(workspace.resolve("async.txt"), "before");
+        snapshots.bind("run_async_cross_thread", workspace);
+        CommandChangeTracker.Handle handle = snapshots.begin(workspace);
+        Files.writeString(target, "after-bg");
+
+        // 模拟 CommandStatusTool 在 ForkJoinPool 异步线程中完成命令快照（无 ThreadLocal）
+        CommandChangeTracker.Result asyncResult = CompletableFuture.supplyAsync(() -> snapshots.finish(handle)).join();
+        assertTrue(asyncResult.complete(), asyncResult.warning());
+        assertEquals(List.of("async.txt"), asyncResult.changedPaths());
+
+        // 模拟取消触发中断位时 persist meta.json 不抛 ClosedByInterruptException 且保留中断标记
+        Thread.currentThread().interrupt();
+        try {
+            snapshots.finish();
+            assertTrue(Thread.interrupted(), "持久化完成后应恢复原有中断标记");
+        } finally {
+            snapshots.clear();
+        }
+
+        RunSnapshotService.RollbackReport rollback = snapshots.rollback("run_async_cross_thread");
+        assertEquals(List.of("async.txt"), rollback.restored());
+        assertTrue(rollback.failed().isEmpty() && rollback.conflicts().isEmpty());
+        assertEquals("before", Files.readString(target));
     }
 
     private static void git(Path dir, String... args) throws Exception {
