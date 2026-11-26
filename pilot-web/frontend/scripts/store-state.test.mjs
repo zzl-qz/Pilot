@@ -164,6 +164,33 @@ test('命令日志按服务端 Unicode 码点游标续读而不重复从零拉�
     assert.deepEqual(offsets, [0, 2]); assert.equal(useStore.getState().commandLog.text, '中文中文');
   } finally { fetchHandler = saved; }
 });
+test('命令日志使用后端上限，失败写入可见错误并可重试', async () => {
+  reset(); const urls = []; const saved = fetchHandler; let fail = true;
+  fetchHandler = async url => {
+    urls.push(String(url));
+    if (fail) throw new Error('网络暂不可用');
+    return Response.json({ offset: 0, nextOffset: 2, text: 'ok', eof: false });
+  };
+  try {
+    await useStore.getState().loadCommandLog({ taskId: 'c' });
+    assert.match(urls[0], /limit=65536/);
+    assert.match(useStore.getState().commandLogError, /网络暂不可用/);
+    fail = false;
+    await useStore.getState().loadCommandLog(useStore.getState().commandDetail);
+    assert.equal(useStore.getState().commandLogError, '');
+    assert.equal(useStore.getState().commandLog.text, 'ok');
+  } finally { fetchHandler = saved; }
+});
+test('命令列表加载失败保存可见错误并在重试成功后清除', async () => {
+  reset(); const saved = fetchHandler; let fail = true;
+  fetchHandler = async () => { if (fail) throw new Error('列表不可用'); return Response.json({ tasks: [] }); };
+  try {
+    await useStore.getState().loadCommandTasks();
+    assert.match(useStore.getState().commandTasksError, /列表不可用/);
+    fail = false; await useStore.getState().loadCommandTasks();
+    assert.equal(useStore.getState().commandTasksError, '');
+  } finally { fetchHandler = saved; }
+});
 test('同名命令在离开会话后返回旧日志时不会覆盖当前内容', async () => {
   reset(); const pending = deferred(); const saved = fetchHandler;
   fetchHandler = () => pending.promise;
@@ -632,6 +659,45 @@ test('init 解析 /api/health Response 检测过期构建，并在非 2xx 时标
     fetchHandler = previousFetch;
     globalThis.document = previousDocument;
     delete globalThis.EventSource;
+    useStore.setState(saved);
+  }
+});
+
+test('activate 切换会话后不再晚到调用 composerApi.setText 抹除已恢复的附件与 mention 草稿', async () => {
+  reset();
+  const saved = useStore.getState();
+  const fixture = fakeStreams();
+  const { api } = await import('../src/api.js');
+  const original = { ...api };
+  let setTextCalls = 0;
+  localStorage.setItem('pilot.draft.s-draft', '保留草稿');
+  api.session = async id => ({ id, title: '带草稿会话', workspace: '/tmp/ws', projectId: null, permissionMode: 'AUTO' });
+  api.history = async () => ({ historyRevision: 1, hasMore: false, events: [] });
+  api.plan = async () => ({ items: [] });
+  api.queue = async () => ({ entries: [] });
+  api.task = async () => null;
+  api.notes = async () => ({ notes: [] });
+  api.contextStatus = async () => ({ tokens: 0, limit: 1000 });
+  api.skills = async () => ({ available: [], invalid: [] });
+  api.memoryDraftCount = async () => ({ count: 0 });
+  api.validation = async () => null;
+  api.activeRun = async () => ({ running: false });
+  useStore.setState({
+    composerApi: {
+      setText() { setTextCalls += 1; },
+      getText() { return ''; },
+      insertAttachments() {},
+      prepareReload() { return { ok: true }; }
+    }
+  });
+  try {
+    assert.equal(await useStore.getState().activate('s-draft'), true);
+    assert.equal(setTextCalls, 0);
+  } finally {
+    closeStreams();
+    fixture.restore();
+    localStorage.removeItem('pilot.draft.s-draft');
+    Object.assign(api, original);
     useStore.setState(saved);
   }
 });

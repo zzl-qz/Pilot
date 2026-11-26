@@ -11,8 +11,9 @@ import { sameUserInput } from '../thread-utils.js';
 import { isRunEnd } from './events.js';
 import { samePath } from './project/sessions.js';
 
-const STORAGE_KEY = 'pilot.side-chats';
+import { safeLocalStorage } from './safe-storage.js';
 const QUERY_KEY = 'sideChat';
+const STORAGE_KEY = 'pilot.side-chats';
 export const SIDE_CHAT_TITLE = '侧边对话';
 
 /**
@@ -20,11 +21,7 @@ export const SIDE_CHAT_TITLE = '侧边对话';
  * 让上层安静地按「没有侧边对话」处理，而不是在模块加载阶段就炸掉。
  */
 function defaultStorage() {
-  try {
-    return typeof window !== 'undefined' ? window.localStorage : null;
-  } catch {
-    return null;
-  }
+  return safeLocalStorage();
 }
 
 /** 读持久化的标签页；坏数据直接当没有，不能让侧栏被一段脏 JSON 拖死。 */

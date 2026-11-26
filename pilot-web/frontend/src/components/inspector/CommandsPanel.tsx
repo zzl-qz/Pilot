@@ -13,6 +13,8 @@ export function CommandsPanel() {
   const tasks = useStore((state) => state.commandTasks || NO_TASKS);
   const detail = useStore((state) => state.commandDetail);
   const log = useStore((state) => state.commandLog);
+  const tasksError = useStore((state) => state.commandTasksError);
+  const logError = useStore((state) => state.commandLogError);
   const logRef = useRef<HTMLPreElement>(null);
   const [follow, setFollow] = useState(true);
   const active = tasks.filter((task) => isCommandActive(task));
@@ -87,6 +89,7 @@ export function CommandsPanel() {
         <button type="button" className="btn" onClick={() => useStore.getState().loadCommandTasks()}>刷新</button>
       </div>
       <div id="commands-list" className="commands-list">
+        {tasksError && <p role="alert">{tasksError} <button type="button" className="btn" onClick={() => useStore.getState().loadCommandTasks()}>重试</button></p>}
         {tasks.map((task) => {
           const taskId = task.taskId || task.id;
           const running = isCommandActive(task);
@@ -139,6 +142,7 @@ export function CommandsPanel() {
             {detail.pid != null && <div><dt>PID</dt><dd>{detail.pid}</dd></div>}
           </dl>
           {detail.reason && <p className="command-reason">{detail.reason}</p>}
+          {logError && <p role="alert">{logError} <button type="button" className="btn" onClick={() => useStore.getState().loadCommandLog(detail)}>重试</button></p>}
           {log?.truncated && <p className="command-log-note">输出超过上限，已截断。</p>}
           <div className="command-log-head">
             <span className="command-log-note">{follow ? '自动跟随最新输出' : '已暂停跟随'}</span>

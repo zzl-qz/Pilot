@@ -9,6 +9,7 @@ import { api } from '../api.js';
 import { errorInfo } from '../lib/errors.js';
 import { formatDateTime, safeIsoDate } from '../lib/date-format.js';
 import { useStore } from '../store.js';
+import { safeLocalStorage, safeSetItem } from '../lib/safe-storage.js';
 import type { DeliveryServiceDelivery, DeliveryServiceSettings } from '../types/server.js';
 import { AutomationDialog } from './automation/AutomationDialog.jsx';
 import { useAutomationList } from './automation/useAutomationList.js';
@@ -28,8 +29,7 @@ export async function enableDesktopNotifications() {
 
 export function setLocalNotifications(enabled: boolean) {
   useStore.setState({ notifyEnabled: enabled });
-  try { localStorage.setItem('pilot.notify', enabled ? '1' : '0'); }
-  catch { useStore.getState().showNotice('通知偏好无法保存在此设备，下次打开可能需要重新启用。'); }
+  if (!safeSetItem(safeLocalStorage(), 'pilot.notify', enabled ? '1' : '0')) useStore.getState().showNotice('通知偏好无法保存在此设备，下次打开可能需要重新启用。');
 }
 
 export default function Notifications() {

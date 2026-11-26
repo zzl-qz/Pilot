@@ -9,6 +9,7 @@ import { rememberInput } from '../lib/input-history.js';
 import { dropDraft, readDraft } from '../lib/drafts.js';
 import { DEFAULT_SKILL_CONTENT, resolveSkillCommand, toSkillCommands } from '../lib/skills.js';
 import { sameUserInput } from '../thread-utils.js';
+import { DRAFT_STORAGE } from '../lib/drafts.js';
 
 export function createInputActions({ set, get }: StoreContext): StoreSlice<'registerComposer' | 'modelReady' | 'submitInput' | 'composerApi'> {
   return {
@@ -79,7 +80,7 @@ export function createInputActions({ set, get }: StoreContext): StoreSlice<'regi
       const result = await submissions.submit(sessionId, body, () => {
         if (get().sessionEpoch !== ownerEpoch || get().sessionId !== sessionId || !get().modelReady()) return false;
         queueInstead = get().running;
-        const remembered = rememberInput(localStorage, sessionId, text);
+      const remembered = rememberInput(DRAFT_STORAGE, sessionId, text);
         if (!queueInstead) {
           set((draft) => {
             draft.pendingInputs.push(payloadContent);
@@ -106,8 +107,8 @@ export function createInputActions({ set, get }: StoreContext): StoreSlice<'regi
         if (queueInstead && get().sessionId === sessionId && get().sessionEpoch === ownerEpoch) {
           void get().loadQueue().catch(() => get().showNotice('消息已接收，队列刷新失败，请稍后刷新。'));
         }
-        if (get().sessionId === sessionId && get().sessionEpoch === ownerEpoch && readDraft(localStorage, sessionId) === text) {
-          dropDraft(localStorage, sessionId);
+      if (get().sessionId === sessionId && get().sessionEpoch === ownerEpoch && readDraft(DRAFT_STORAGE, sessionId) === text) {
+        dropDraft(DRAFT_STORAGE, sessionId);
         }
         return true;
       }

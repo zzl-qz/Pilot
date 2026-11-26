@@ -28,6 +28,10 @@ import { mergeCommands, toSkillCommands } from './lib/skills.js';
 import { QUICK_COMMANDS } from './lib/commands.js';
 import { readSideChats, readEmbeddedSession } from './lib/side-chat.js';
 import { createWorkbenchRefresher, saveWorkbenchView, takeWorkbenchView } from './lib/workbench-sync.js';
+import { safeLocalStorage, safeSessionStorage } from './lib/safe-storage.js';
+
+const localStore = safeLocalStorage();
+const sessionStore = safeSessionStorage();
 
 /**
  * 全局状态：zustand + immer。
@@ -53,8 +57,8 @@ export const initialUi = (): UiState => ({
   syncError: '',
   lastSyncedAt: 0,
   filesRevision: 0,
-  themeMode: localStorage.getItem('pilot.theme') || 'light',
-  accent: localStorage.getItem('pilot.accent') || 'sky',
+  themeMode: localStore.getItem('pilot.theme') || 'light',
+  accent: localStore.getItem('pilot.accent') || 'sky',
   sidebarOpen: typeof window.matchMedia === 'function' ? !window.matchMedia('(max-width: 960px)').matches : true,
   inspectorOpen: false,
   inspectorTab: 'changes',
@@ -123,7 +127,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       return false;
     }
     let saved = false;
-    try { saved = saveWorkbenchView(sessionStorage, state); } catch { /* 浏览器禁止访问存储 */ }
+    try { saved = saveWorkbenchView(sessionStore, state); } catch (error) { console.warn('无法访问会话存储，不能保存工作区状态', error); }
     if (!saved) {
       state.showNotice('无法保存当前工作区状态，已保留页面。请先使用“刷新工作台数据”。');
       return false;
@@ -217,9 +221,11 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   usageData: null,
   fileIndex: { items: [], sessionId: null, loading: false },
   commandTasks: [],
+  commandTasksError: '',
   commandDetail: null,
   /** 命令日志是 {text, offset, nextOffset, ...} 的增量片段，不是数组。 */
   commandLog: null,
+  commandLogError: '',
   commandLogTaskId: null,
   /** 能力清单（工具 / MCP / 模型 / 权限档位），「能力」页签直接读它。 */
   capabilities: null,
@@ -265,12 +271,12 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     }
   },
   setTheme(mode) {
-    localStorage.setItem('pilot.theme', mode);
+    localStore.setItem('pilot.theme', mode);
     set((draft) => { draft.ui.themeMode = mode; });
     applyTheme(mode, get().ui.accent);
   },
   setAccent(accent) {
-    localStorage.setItem('pilot.accent', accent);
+    localStore.setItem('pilot.accent', accent);
     set((draft) => { draft.ui.accent = accent; });
     applyTheme(get().ui.themeMode, accent);
   },
@@ -286,7 +292,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       const current = requireData(await api.deliverySettings());
       await api.saveDeliverySettings({ ...current, desktop: next });
       set(draft => { draft.notifyEnabled = next; });
-      try { localStorage.setItem(NOTIFY_KEY, next ? '1' : '0'); } catch { /* 当前设备仍生效 */ }
+      try { localStore.setItem(NOTIFY_KEY, next ? '1' : '0'); } catch (error) { console.warn('无法保存通知偏好', error); }
       get().showNotice(next ? '已开启可靠桌面通知，可在收件箱查看投递状态。' : '已关闭桌面通知');
     } catch (e) { get().showNotice(errorInfo(e).message || '操作失败'); }
   },
@@ -416,7 +422,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   /* ---------- 启动 ---------- */
   async init(embeddedSessionId = null) {
     let restore = null;
-    try { if (!embeddedSessionId) restore = takeWorkbenchView(sessionStorage); } catch { /* 隐私模式下继续正常启动 */ }
+    try { if (!embeddedSessionId) restore = takeWorkbenchView(sessionStore); } catch (error) { console.warn('无法读取工作区恢复状态', error); }
     applyTheme(get().ui.themeMode, get().ui.accent);
     get().loadSkills();
     void get().refreshMemoryDraftCount();
@@ -1018,7 +1024,7 @@ function applyTheme(mode: string, accent: string) {
 /** 桌面通知开关的本地持久化（旧版 NOTIFY_KEY 同名），默认关闭，只在你主动开后打扰你。 */
 function readNotifyEnabled() {
   try {
-    return localStorage.getItem(NOTIFY_KEY) === '1';
+    return localStore.getItem(NOTIFY_KEY) === '1';
   } catch {
     return false;
   }

@@ -1,6 +1,7 @@
 import type { WorkbenchRefresherOptions, RefreshOptions, WorkbenchView } from '../types/sync.js';
 import type { ReducerState } from '../types/thread.js';
 import { errorInfo } from './errors.js';
+import { safeSetItem } from './safe-storage.js';
 import { settleStoppedWork } from '../thread-reducer.js';
 /** 不重建编辑器和历史窗口的数据同步；Web 与桌面共用，后台窗口暂停轮询。 */
 export function watchWorkbench({ refresh, window: win = window, document: doc = document, interval = 15000 }: { refresh: (options: RefreshOptions) => unknown; window?: Pick<Window, 'addEventListener' | 'removeEventListener' | 'setInterval' | 'clearInterval'>; document?: Pick<Document, 'hidden' | 'addEventListener' | 'removeEventListener'>; interval?: number }) {
@@ -121,11 +122,10 @@ export function createWorkbenchRefresher({ get, set, api }: WorkbenchRefresherOp
 
 const RESTORE_KEY = 'pilot.workbench.restore.v1';
 export function saveWorkbenchView(storage: Pick<Storage, 'setItem'>, state: Partial<WorkbenchView>) {
-  try {
-    storage.setItem(RESTORE_KEY, JSON.stringify({ sessionId: state.sessionId, draftSession: state.draftSession,
-      workspace: state.workspace, currentProjectId: state.currentProjectId }));
-    return true;
-  } catch { return false; }
+  return safeSetItem(storage, RESTORE_KEY, JSON.stringify({
+    sessionId: state.sessionId, draftSession: state.draftSession,
+    workspace: state.workspace, currentProjectId: state.currentProjectId
+  }));
 }
 export function takeWorkbenchView(storage: Pick<Storage, 'getItem' | 'removeItem'>): Partial<WorkbenchView> | null {
   try {

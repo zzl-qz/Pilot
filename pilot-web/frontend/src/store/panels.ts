@@ -7,6 +7,8 @@ import { api, apiJson } from '../api.js';
 import { samePath } from '../lib/project/sessions.js';
 import { mergeCommandLog } from '../lib/command-tasks.js';
 
+export const COMMAND_LOG_LIMIT = 65536;
+
 export function createPanelActions({ set, get }: StoreContext): StoreSlice<'loadChanges' | 'restoreChanges' | 'rollbackRun' | 'createBranch' | 'openPreview' | 'loadCommandTasks' | 'loadCommandLog' | 'stopCommand'> {
   return {
     /* ---------- 变更 / 预览 ---------- */
@@ -140,6 +142,7 @@ export function createPanelActions({ set, get }: StoreContext): StoreSlice<'load
     async loadCommandTasks() {
       const { sessionId, sessionEpoch } = get();
       if (!sessionId) return;
+      set((draft) => { draft.commandTasksError = ''; });
       try {
         const data = await apiJson<{ tasks: CommandTask[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/commands`);
         if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
@@ -155,7 +158,10 @@ export function createPanelActions({ set, get }: StoreContext): StoreSlice<'load
             draft.commandLogTaskId = null;
           }
         });
-      } catch { /* 命令面板不可用不阻塞 */ }
+      } catch (error) {
+        if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
+        set((draft) => { draft.commandTasksError = '加载命令列表失败：' + errorInfo(error).message; });
+      }
     },
 
     /** 选中某个命令任务并把它的日志拉到最新（offset 用上次的 nextOffset 续读）。 */
@@ -166,6 +172,7 @@ export function createPanelActions({ set, get }: StoreContext): StoreSlice<'load
       const sameTask = get().commandLogTaskId === taskId;
       const offset = sameTask ? (get().commandLog?.offset || 0) : 0;
       set((draft) => {
+        draft.commandLogError = '';
         draft.commandDetail = { ...(task || {}) };
         if (!sameTask) {
           draft.commandLogTaskId = taskId;
@@ -173,7 +180,7 @@ export function createPanelActions({ set, get }: StoreContext): StoreSlice<'load
         }
       });
       try {
-        const chunk = await apiJson<S.CommandTaskManagerLogChunk>(`/api/sessions/${encodeURIComponent(sessionId)}/commands/${encodeURIComponent(taskId)}/logs?offset=${offset}&limit=200000`);
+        const chunk = await apiJson<S.CommandTaskManagerLogChunk>(`/api/sessions/${encodeURIComponent(sessionId)}/commands/${encodeURIComponent(taskId)}/logs?offset=${offset}&limit=${COMMAND_LOG_LIMIT}`);
         if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
         set((draft) => {
           if (draft.commandLogTaskId !== taskId) {
@@ -181,7 +188,10 @@ export function createPanelActions({ set, get }: StoreContext): StoreSlice<'load
           }
           draft.commandLog = mergeCommandLog(draft.commandLog, chunk);
         });
-      } catch { /* 日志拉取失败不阻塞面板 */ }
+      } catch (error) {
+        if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch || get().commandLogTaskId !== taskId) return;
+        set((draft) => { draft.commandLogError = '加载命令日志失败：' + errorInfo(error).message; });
+      }
     },
 
     /** 停止一个还在跑的命令任务：后端收到后返回最新任务状态，界面随即刷新。 */

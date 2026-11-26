@@ -104,7 +104,7 @@ export interface StoreData extends Omit<ReducerState, 'ui'> {
   globalPendingApprovals: GlobalPendingApproval[]; globalPendingQuestions: GlobalPendingQuestion[];
   permissionMode: string; usageData: S.UsageServiceUsageReport | null;
   fileIndex: { key?: string; items: string[]; sessionId: string | null; loading: boolean };
-  commandTasks: CommandTask[]; commandDetail: CommandTask | null; commandLog: CommandLog | null; commandLogTaskId: string | null;
+  commandTasks: CommandTask[]; commandTasksError: string; commandDetail: CommandTask | null; commandLog: CommandLog | null; commandLogError: string; commandLogTaskId: string | null;
   capabilities: S.CapabilitiesControllerCapabilitiesResponse | null; capabilitiesState: string;
   /** 当前会话的验证结论；输入框上方的结论条读它。null 表示还没加载。 */
   validation: S.DiagnosticsControllerValidationView | null;

@@ -1,6 +1,7 @@
 import { api, ApiError } from '../api.js';
 import type { InputMessage, SubmissionResult } from '../types/api.js';
 import { errorInfo } from './errors.js';
+import { safeLocalStorage, type SafeStorage } from './safe-storage.js';
 
 export interface PendingSubmission { requestId: string; sessionId: string; createdAt: number; preview: string; resolved?: 'accepted' | 'rejected' }
 /** 无法解析的旧凭据：保留原文供核对与导出，不参与任何会话的阻止判断。 */
@@ -15,7 +16,7 @@ const listeners = new Set<() => void>();
 const changed = () => { for (const listener of listeners) listener(); };
 
 /** 仅存凭据与短摘要，不把附件再次写入浏览器存储。每个请求独立键，窗口之间不会覆盖凭据。 */
-export function createSubmissions(client = api, storage: () => Storage = () => localStorage) {
+export function createSubmissions(client = api, storage: () => SafeStorage = safeLocalStorage) {
   const acknowledging = new Set<string>();
   function acknowledge(record: PendingSubmission) {
     if (acknowledging.has(record.requestId)) return;

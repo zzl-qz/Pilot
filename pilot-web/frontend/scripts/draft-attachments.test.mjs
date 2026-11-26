@@ -28,6 +28,17 @@ test('附件草稿保存正文、文件与图片位置，读回一致', () => {
   assert.deepEqual(snapshot.imagePositions, [2]);
 });
 
+test('会话恢复载荷保留正文、附件及可序列化的 mention 芯片 HTML', () => {
+  const store = storage();
+  const html = '请检查 <span data-chip="mention" data-path="src/App.tsx">@src/App.tsx</span>';
+  const attachment = file('a', 'design.png');
+  writeDraftSnapshot(store, 's1', { text: '请检查 @src/App.tsx', files: [attachment], imagePositions: [] });
+  const restored = readDraftSnapshot(store, 's1').snapshot;
+  assert.equal(restored.text, '请检查 @src/App.tsx');
+  assert.deepEqual(restored.files, [attachment]);
+  assert.match(html, /data-chip="mention"/);
+  assert.ok(html.includes('data-path="src/App.tsx"'));
+});
 test('不同会话的附件草稿互相隔离，新会话用独立槽位', () => {
   const store = storage();
   writeDraftSnapshot(store, 's1', { text: '一', files: [file('a', 'a.txt')], imagePositions: [] });

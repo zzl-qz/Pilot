@@ -1,6 +1,5 @@
 import type { Draft } from 'immer';
 import type { StoreContext, StoreSlice } from './context.js';
-import type { CommandTask } from '../types/store.js';
 import type { PendingInteractionsSnapshot, RunAttentionPayload } from '../types/api.js';
 import type { EventEnvelope } from '../types/events.js';
 import type { PendingQuestion, ResultRow } from '../types/thread.js';
@@ -222,25 +221,12 @@ export function createSessionStreams(
       if (get().sessionId !== sessionId) {
         return;
       }
-      try {
-        const data = await apiJson<{ tasks: CommandTask[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/commands`);
-        if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
-        const tasks = Array.isArray(data?.tasks) ? data.tasks : [];
-        set((draft) => {
-          draft.commandTasks = tasks;
-          const detailId = draft.commandDetail?.taskId || draft.commandDetail?.id;
-          const found = detailId ? tasks.find((task) => (task.taskId || task.id) === detailId) : null;
-          if (found) {
-            draft.commandDetail = { ...draft.commandDetail, ...found };
-          }
-        });
-        // 有选中的任务就顺手续读一截日志（游标前进多少由 mergeCommandLog 负责）
-        const detailId = get().commandDetail?.taskId || get().commandDetail?.id;
-        const current = detailId ? tasks.find((task) => (task.taskId || task.id) === detailId) : null;
-        if (current) {
-          get().loadCommandLog(current);
-        }
-      } catch { /* 命令面板不可用不阻塞 */ }
+      await get().loadCommandTasks();
+      if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
+      const tasks = get().commandTasks;
+      const detailId = get().commandDetail?.taskId || get().commandDetail?.id;
+      const current = detailId ? tasks.find((task) => (task.taskId || task.id) === detailId) : null;
+      if (current) get().loadCommandLog(current);
     };
     poll();
     commandTimer = setInterval(poll, 5000);

@@ -1,4 +1,7 @@
 import type { DraftAttachment } from '../types/input.js';
+import { safeLocalStorage, safeSetItem } from './safe-storage.js';
+
+export const DRAFT_STORAGE = safeLocalStorage();
 
 /**
  * 输入框草稿：按会话存在 localStorage，刷新、切换会话、误关页面都不丢。
@@ -144,15 +147,13 @@ export function writeDraftSnapshot(
       reason: `${files.length} 个未发送附件超过浏览器草稿上限，刷新后无法恢复；请先发送或移除后再离开页面。`
     };
   }
-  try {
-    storage.setItem(draftFilesKey(sessionId), value);
+  if (safeSetItem(storage, draftFilesKey(sessionId), value)) {
     return { ok: true };
-  } catch {
-    // 配额满或隐私模式：清掉旧副本，避免恢复出与当前草稿不一致的附件
-    dropDraftSnapshot(storage, sessionId);
-    return {
-      ok: false,
-      reason: `${files.length} 个未发送附件无法写入浏览器存储（空间不足或被禁用），刷新后无法恢复；请先发送或移除。`
-    };
   }
+  // 配额满或隐私模式：清掉旧副本，避免恢复出与当前草稿不一致的附件
+  dropDraftSnapshot(storage, sessionId);
+  return {
+    ok: false,
+    reason: `${files.length} 个未发送附件无法写入浏览器存储（空间不足或被禁用），刷新后无法恢复；请先发送或移除。`
+  };
 }

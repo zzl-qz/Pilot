@@ -1,6 +1,8 @@
 import type { AlertPreferences, ComposerSendKey, SoundVolumeLevel } from '../types/store.js';
-
 export type AlertSoundKind = 'done' | 'approval' | 'question' | 'error';
+
+import { safeLocalStorage, safeSetItem } from './safe-storage.js';
+
 
 export const ALERT_PREFS_KEY = 'pilot.alerts.v1';
 
@@ -68,25 +70,22 @@ export function isDndActive(prefs: Pick<AlertPreferences, 'dndUntil'> | null | u
   return until === -1 || (typeof until === 'number' && until > now);
 }
 
-export function readAlertPreferences(storage: Pick<Storage, 'getItem'> | undefined = globalThis.localStorage): AlertPreferences {
+export function readAlertPreferences(storage: Pick<Storage, 'getItem'> = safeLocalStorage()): AlertPreferences {
   try {
-    const raw = storage?.getItem(ALERT_PREFS_KEY);
+    const raw = storage.getItem(ALERT_PREFS_KEY);
     return raw ? normalizeAlertPreferences(JSON.parse(raw)) : { ...DEFAULT_ALERT_PREFS };
-  } catch {
+  } catch (error) {
+    console.warn('读取提醒偏好失败，使用默认值', error);
     return { ...DEFAULT_ALERT_PREFS };
   }
 }
 
 export function writeAlertPreferences(
   prefs: AlertPreferences,
-  storage: Pick<Storage, 'setItem'> | undefined = globalThis.localStorage
+  storage: Pick<Storage, 'setItem'> = safeLocalStorage()
 ): boolean {
-  try {
-    storage?.setItem(ALERT_PREFS_KEY, JSON.stringify(normalizeAlertPreferences(prefs)));
-    return true;
-  } catch {
-    return false;
-  }
+  if (!storage) return false;
+  return safeSetItem(storage, ALERT_PREFS_KEY, JSON.stringify(normalizeAlertPreferences(prefs)));
 }
 
 export function shouldPlaySound(kind: AlertSoundKind, prefs: AlertPreferences, backgrounded: boolean, now = Date.now()): boolean {

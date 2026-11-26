@@ -5,6 +5,7 @@ import { writeDraft } from '../lib/drafts.js';
 import { errorInfo } from '../lib/errors.js';
 import { buildTakeBackDraftText, fetchQueuedDraft, locateQueueTarget, normalizeQueue, queueEntryKey } from '../lib/queue.js';
 import { formatSkillPrefix } from '../lib/skills.js';
+import { DRAFT_STORAGE } from '../lib/drafts.js';
 
 const dismissDesktopAlert = (id: string) => {
   void globalThis.window?.pilotDesktop?.dismissFloatingAlert?.(id)?.catch?.(() => {});
@@ -387,7 +388,7 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
         }
         if (restored.files.length) bridge.insertAttachments?.(restored.files);
         if (entry.mode === 'plan' || entry.mode === 'act') get().setUi({ executionMode: entry.mode });
-        writeDraft(localStorage, sessionId, bridge.getText());
+      writeDraft(DRAFT_STORAGE, sessionId, bridge.getText());
         const details: string[] = [];
         if (entry.mode === 'plan') details.push('分析模式');
         if (skillCommand) details.push(skillCommand);

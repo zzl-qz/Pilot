@@ -1,4 +1,5 @@
 interface LayoutStorage { getItem(key: string): string | null; setItem(key: string, value: string): void }
+import { safeLocalStorage } from './safe-storage.js';
 export interface PanelLayout { sidebarW: number | null; activityW: number | null }
 /**
  * 三栏布局的可调宽度：左侧会话栏与右侧审阅栏都能拖，宽度记在本地。
@@ -22,7 +23,7 @@ function storageOf(storage?: LayoutStorage | null) {
     return storage;
   }
   try {
-    return typeof window !== 'undefined' ? window.localStorage : null;
+    return typeof window !== 'undefined' ? safeLocalStorage() : null;
   } catch {
     return null;
   }

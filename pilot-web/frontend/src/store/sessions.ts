@@ -4,12 +4,13 @@ import { api } from '../api.js';
 import { initialThread } from '../thread-reducer.js';
 import { errorInfo } from '../lib/errors.js';
 import { loadInputHistory } from '../lib/input-history.js';
-import { readDraft, writeDraft, dropDraft, dropDraftSnapshot } from '../lib/drafts.js';
+import { DRAFT_STORAGE as localStore, readDraft, writeDraft, dropDraft, dropDraftSnapshot } from '../lib/drafts.js';
 import { normalizePermission } from '../lib/permission.js';
 import { sortSessions } from '../lib/project/sessions.js';
 import { NOTE_COUNT_LIMIT, createDraftNote, noteContentError, readDraftNotes, uploadDraftNotes, writeDraftNotes } from '../lib/notes.js';
 import { sideChatsFor, writeSideChats } from '../lib/side-chat.js';
 
+function saveDraftNotes(notes: Parameters<typeof writeDraftNotes>[1]) { writeDraftNotes(localStore, notes); }
 interface SessionConnections {
   closeStreams: () => void;
   connectMirror: () => void;
@@ -192,7 +193,7 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
       const request = ++notesLoadSequence;
       if (!sessionId) {
         set((draft) => {
-          draft.notes = readDraftNotes(localStorage);
+        draft.notes = readDraftNotes(localStore);
           draft.notesState = 'ready';
           draft.notesError = '';
         });
@@ -248,7 +249,7 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
           return false;
         }
         const next = [note, ...get().notes];
-        writeDraftNotes(localStorage, next);
+        saveDraftNotes(next);
         set((draft) => {
           draft.notes = next;
           draft.notesState = 'ready';
@@ -293,7 +294,7 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
         const next = get().notes.map((note) => note.id === id
           ? { ...note, content, updatedAt: new Date().toISOString() }
           : note);
-        writeDraftNotes(localStorage, next);
+        saveDraftNotes(next);
         set((draft) => { draft.notes = next; draft.notesError = ''; });
         return true;
       }
@@ -322,7 +323,7 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
       const sessionId = get().sessionId;
       if (!sessionId) {
         const next = get().notes.filter((note) => note.id !== id);
-        writeDraftNotes(localStorage, next);
+        saveDraftNotes(next);
         set((draft) => { draft.notes = next; draft.notesError = ''; });
         return true;
       }
@@ -352,7 +353,7 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
       const sessionId = get().sessionId;
       if (!sessionId) {
         const next = get().notes.map((note) => note.id === id ? { ...note, status } : note);
-        writeDraftNotes(localStorage, next);
+        saveDraftNotes(next);
         set((draft) => { draft.notes = next; draft.notesError = ''; });
         return true;
       }
@@ -469,13 +470,13 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
           draft.workspace = created.workspace || draft.workspace;
           draft.sessionTitle = created.title || draft.sessionTitle;
         });
-        writeDraft(localStorage, id, readDraft(localStorage, null));
-        dropDraft(localStorage, null);
+        writeDraft(localStore, id, readDraft(localStore, null));
+        dropDraft(localStore, null);
         // 先把草稿里的想法并入这条新会话，再让列表读取服务端结果；失败时保留本地副本并提示
-        const draftNotes = readDraftNotes(localStorage);
+        const draftNotes = readDraftNotes(localStore);
         if (draftNotes.length) {
           const { remaining } = await uploadDraftNotes(draftNotes, (content) => api.createNote(id, content));
-          writeDraftNotes(localStorage, remaining);
+        writeDraftNotes(localStore, remaining);
           if (remaining.length) {
             get().showNotice(`有 ${remaining.length} 条想法没能并入会话，仍保存在本地草稿`);
           }
@@ -541,12 +542,8 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
         get().loadValidation()
       ]);
       if (!current()) return false;
-      const draftText = readDraft(localStorage, sessionId);
-      if (draftText) {
-        get().composerApi?.setText(draftText);
-      }
       set((draft) => {
-        draft.inputHistory = loadInputHistory(localStorage, sessionId);
+        draft.inputHistory = loadInputHistory(localStore, sessionId);
         draft.inputHistoryIndex = -1;
         draft.inputHistoryDraft = '';
       });
@@ -619,8 +616,8 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
       try {
         await api.deleteSession(id);
         // 会话没了，它的草稿正文与附件副本也不再需要
-        dropDraft(localStorage, id);
-        dropDraftSnapshot(localStorage, id);
+        dropDraft(localStore, id);
+        dropDraftSnapshot(localStore, id);
         // 先本地摘掉这一行：后端的清理是异步的，紧接着的列表可能还带着它
         set((draft) => { draft.sessions = (draft.sessions || []).filter((session) => session.id !== id); });
         // 主任务没了，挂在它下面的侧边对话也一起清掉（它们不会出现在列表里，留着就成了孤儿）
@@ -633,7 +630,7 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
             }).activeId;
           });
           writeSideChats(get().sideChats);
-          orphans.forEach((item) => { dropDraft(localStorage, item.id); dropDraftSnapshot(localStorage, item.id); api.deleteSession(item.id).catch(() => {}); });
+      orphans.forEach((item) => { dropDraft(localStore, item.id); dropDraftSnapshot(localStore, item.id); api.deleteSession(item.id).catch(() => {}); });
         }
         get().showNotice('已删除对话');
         const list = await get().loadSessions();

@@ -3,9 +3,11 @@ interface LocalBookmark { sequence: number; title: string; preview?: string; key
 export interface BookmarkView extends MessageLibraryBookmark { id: string }
 interface BookmarkSyncResult { values: BookmarkView[]; skipped: number[] }
 import { api } from '../api.js';
+import { safeLocalStorage, safeSetItem } from './safe-storage.js';
+const storage = safeLocalStorage();
 const key = (session: string | null) => `pilot.message-bookmarks:${session}`;
 export function localBookmarks(session: string | null): LocalBookmark[] {
-  try { const values = JSON.parse(localStorage.getItem(key(session)) || '[]'); return Array.isArray(values) ? values.filter((e: LocalBookmark) => Number.isSafeInteger(e?.sequence) && typeof e.title === 'string').slice(0, 500) : []; }
+  try { const values = JSON.parse(storage.getItem(key(session)) || '[]'); return Array.isArray(values) ? values.filter((e: LocalBookmark) => Number.isSafeInteger(e?.sequence) && typeof e.title === 'string').slice(0, 500) : []; }
   catch { return []; }
 }
 export function normalizeBookmarks(values: unknown): BookmarkView[] {
@@ -21,7 +23,7 @@ export function syncBookmarks(session: string): Promise<BookmarkSyncResult> {
       const data = await api.importBookmarks(session, local.map(e => e.sequence));
       const values = normalizeBookmarks(data?.bookmarks);
       // 迁移成功才移走旧数据；无法定位的旧条目保存在备份，服务端迁移指纹避免恢复已删除的书签。
-      try { localStorage.setItem(key(session) + ':migration-backup', JSON.stringify(local)); localStorage.removeItem(key(session)); } catch { /* 服务端已有迁移标记，下次不会重复导入 */ }
+      try { storage.setItem(key(session) + ':migration-backup', JSON.stringify(local)); storage.removeItem(key(session)); } catch (error) { console.warn('书签迁移备份无法写入本机存储，保留服务端迁移结果', error); }
       return { values, skipped: data!.skipped || [] };
     }
     return { values: normalizeBookmarks(await api.bookmarks(session)), skipped: [] };
@@ -30,9 +32,10 @@ export function syncBookmarks(session: string): Promise<BookmarkSyncResult> {
 }
 export async function migrateLocalBookmarks() {
   const sessions = [];
+  if (!storage.available()) throw new Error('无法读取旧书签存储，请检查浏览器存储权限。');
   try {
-    for (let index = 0; index < localStorage.length; index++) {
-      const name = localStorage.key(index);
+    for (let index = 0; index < storage.length; index++) {
+      const name = storage.key(index);
       if (name?.startsWith('pilot.message-bookmarks:') && !name.endsWith(':migration-backup')) sessions.push(name.slice('pilot.message-bookmarks:'.length));
     }
   } catch { throw new Error('无法读取旧书签存储，请检查浏览器存储权限。'); }
@@ -46,9 +49,6 @@ export async function migrateLocalBookmarks() {
 export const BOOKMARK_SIGNAL = 'pilot.bookmarks-changed';
 export function bookmarksChanged(session: string) {
   window.dispatchEvent(new CustomEvent('pilot:bookmarks-changed', { detail: session }));
-  try {
-    // storage 事件送达同源的其它窗口；每次值不同，连续编辑也不会丢通知。
-    localStorage.setItem(BOOKMARK_SIGNAL, JSON.stringify({ session, nonce: `${Date.now()}:${Math.random()}` }));
-    return true;
-  } catch { return false; /* 聚焦、恢复联网和定时刷新继续兜底。 */ }
+  // storage 事件送达同源的其它窗口；每次值不同，连续编辑也不会丢通知。
+  return safeSetItem(storage, BOOKMARK_SIGNAL, JSON.stringify({ session, nonce: `${Date.now()}:${Math.random()}` }));
 }
