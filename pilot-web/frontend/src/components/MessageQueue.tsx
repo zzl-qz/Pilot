@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { splitAttachmentMarkers, joinAttachmentMarkers } from '../lib/attachments/attachments.js';
 import { locateQueueTarget, queueBlockReason, queueEntryBadges, queueEntryKey, queueHeader, queueLane, textWithoutParkedMark } from '../lib/queue.js';
+import { shouldReorderQueueOnArrow } from '../lib/interaction.js';
 import type { QueueEditTarget } from '../types/store.js';
 import { Icon } from './Icon.jsx';
 
@@ -104,6 +105,8 @@ function QueueGroup({ entries, lane, held, title, hint, editAt, dragFrom, dragOv
               onKeyDown={event => {
                 if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
                 if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+                const target = event.target;
+                if (!shouldReorderQueueOnArrow({ key: event.key, targetTagName: target instanceof HTMLElement ? target.tagName : '', altKey: event.altKey })) return;
                 event.preventDefault();
                 const next = event.key === 'ArrowUp' ? index - 1 : index + 1;
                 if (next < 0 || next >= entries.length || useStore.getState().queueBusy) return;

@@ -92,7 +92,7 @@ export function ReviewActions({ files, isGit, canUndo, loading, restoring, onRef
       {canUndo && <button type="button" role="menuitem" id="changes-undo-all" className="is-danger" disabled={running || loading} onClick={() => show('undo')}><Icon name="trash" />撤销全部改动…</button>}
       {running && <p className="review-menu-hint">任务结束后可操作 Git 改动</p>}
     </div>}
-    {dialog && createPortal(<Modal id="review-action-dialog" title={dialog.type === 'branch' ? '创建并切换分支' : '撤销全部改动？'} onClose={close} dismissible={!busy}>
+    {dialog && createPortal(<Modal id="review-action-dialog" title={dialog.type === 'branch' ? '创建并切换分支' : '撤销全部改动？'} onClose={close} dismissible={!busy} purpose="form">
       <form onSubmit={submit} aria-busy={busy}>
         {dialog.type === 'branch' ? <>
           <p className="review-dialog-note">从当前分支创建新分支并切换，未提交的改动会保留。</p>

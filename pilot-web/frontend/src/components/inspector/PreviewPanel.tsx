@@ -147,7 +147,7 @@ export function PreviewPanel() {
           placeholder="文件路径"
           aria-label="预览文件路径"
           onChange={(event) => useStore.getState().setUi({ previewPath: event.target.value })}
-          onKeyDown={(event) => { if (event.key === 'Enter') useStore.getState().openPreview(path); }}
+ onKeyDown={(event) => { if (event.nativeEvent?.isComposing || event.keyCode === 229) return; if (event.key === 'Enter') { event.preventDefault(); useStore.getState().openPreview(path); } }}
         />
         <button type="button" className="btn" id="preview-refresh" disabled={!path.trim()} onClick={() => useStore.getState().openPreview(path)}>打开</button>
         {kind === 'text' && (

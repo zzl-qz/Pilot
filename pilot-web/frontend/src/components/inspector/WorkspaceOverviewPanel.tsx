@@ -248,7 +248,7 @@ export function WorkspaceOverviewPanel() {
         })}
       </ul>
       {target && (
-        <section className="overview-form" onKeyDown={(e) => { if (e.key === 'Escape') setTarget(''); }}>
+        <section className="overview-form" onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setTarget(''); } }}>
           <h4 title={target}>请求协作 · {sessionNameOf(target)}</h4>
           <input className="overview-input" value={reason} onChange={(event) => setReason(event.target.value)}
             placeholder="说明为什么需要对方配合" autoFocus />
@@ -264,7 +264,7 @@ export function WorkspaceOverviewPanel() {
         </section>
       )}
       {handoffTarget && (
-        <section className="overview-form" onKeyDown={(e) => { if (e.key === 'Escape') setHandoffTarget(''); }}>
+        <section className="overview-form" onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setHandoffTarget(''); } }}>
           <h4 title={handoffTarget}>请求交接 · {sessionNameOf(handoffTarget)}</h4>
           <input className="overview-input" value={handoffTask} onChange={(event) => setHandoffTask(event.target.value)}
             placeholder="任务标识（可留空）" autoFocus />

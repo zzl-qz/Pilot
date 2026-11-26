@@ -94,7 +94,7 @@ export function Inspector() {
             role="tab"
             id={`inspector-tab-${item.id}`}
             aria-controls={`inspector-panel-${item.id}`}
-            tabIndex={tab === item.id ? 0 : -1}
+            tabIndex={tab === item.id || (MORE_TABS.some(more => more.id === tab) && item.id === TABS[0].id) ? 0 : -1}
             title={item.title}
             aria-label={item.label}
             aria-selected={tab === item.id}

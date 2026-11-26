@@ -213,7 +213,7 @@ export function SessionNotes({ onClose, embedded = false, onAsk }: { onClose?: (
           ? <div className="note-edit">
             <textarea ref={editRef} aria-label="编辑想法" rows={3} maxLength={NOTE_LIMIT} value={editText}
               onChange={event => setEditText(event.target.value)} onKeyDown={event => {
-                if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+                if (event.nativeEvent?.isComposing || event.keyCode === 229) return;
                 if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void saveEdit(); }
                 if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setEditing(null); }
               }} />
@@ -264,7 +264,7 @@ export function SessionNotes({ onClose, embedded = false, onAsk }: { onClose?: (
         placeholder="记下这一刻的想法，稍后可带回输入框…" value={draft}
         onChange={event => setDraft(event.target.value)}
         onKeyDown={event => {
-          if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+          if (event.nativeEvent?.isComposing || event.keyCode === 229) return;
           if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.stopPropagation(); void save(); }
         }} />
       <div className="notes-form-foot">

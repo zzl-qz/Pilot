@@ -8,6 +8,7 @@ import type {
 import { errorInfo } from '../../lib/errors.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../../store.js';
+import { isModalBlockingShortcuts, isShortcutModifier } from '../../lib/interaction.js';
 import { api } from '../../api.js';
 import { formatScreenshotFeedback, userPageUrl } from '../../lib/browser-mirror.js';
 
@@ -1220,7 +1221,7 @@ function DesktopBrowserPanel({ desktopBridge, toolsMenuOpen }: { desktopBridge: 
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'l') return;
+      if (isModalBlockingShortcuts() || !isShortcutModifier(event) || event.key.toLowerCase() !== 'l') return;
       event.preventDefault();
       addressRef.current?.focus();
       addressRef.current?.select();
@@ -1356,8 +1357,9 @@ function DesktopBrowserPanel({ desktopBridge, toolsMenuOpen }: { desktopBridge: 
               </div>
               {findOpen && (
                 <form className="browser-find" onSubmit={(event) => { event.preventDefault(); desktopBridge.find(findText); }} onKeyDown={event => {
-                  if (event.key !== 'Escape' || event.nativeEvent.isComposing) return;
+                  if (event.key !== 'Escape' || event.nativeEvent?.isComposing || event.keyCode === 229) return;
                   event.preventDefault();
+                  event.stopPropagation();
                   setFindOpen(false);
                   setFindText('');
                   desktopBridge.find('');

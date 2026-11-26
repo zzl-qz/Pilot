@@ -174,10 +174,11 @@ export function ChangesPanel() {
         return;
       }
       if (event.key === 'Escape') {
+        if (!confirm && !view) return;
         event.preventDefault(); event.stopImmediatePropagation();
         if (confirm) {
           setConfirm(null);
-        } else {
+        } else if (view) {
           useStore.getState().setUi({ changeView: '' });
         }
         return;
@@ -800,7 +801,7 @@ function DiffView({ report, scoped, path, change, prevPath, nextPath, index, tot
         <button type="button" className="icon-btn change-view-close" title="关闭差异" aria-label="关闭差异" onClick={close}>×</button>
       </div>
       <p className="review-line-hint">点击行号选择，Shift + 点击选择多行，再添加审阅意见。</p>
-      {selection && <div className="review-feedback" onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setSelection(null); } }}>
+      {selection && <div className="review-feedback" onKeyDown={event => { if (!event.nativeEvent?.isComposing && event.keyCode !== 229 && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setSelection(null); } }}>
         <label>对选中代码的意见<textarea aria-label="审阅意见" value={feedback} onChange={event => setFeedback(event.target.value)} placeholder="描述需要调整的地方" rows={2} /></label>
         <button type="button" className="btn" onClick={addFeedback}>引用到输入框</button>
         <button type="button" className="btn" onClick={() => { setSelection(null); setFeedback(''); }}>取消选择</button>
