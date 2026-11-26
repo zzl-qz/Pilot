@@ -1,5 +1,6 @@
 package com.pilot.core.tool.command;
 
+import java.net.URI;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -23,6 +24,7 @@ import com.pilot.core.workspace.PathValidator;
 final class CommandRiskGuard {
     private static final Set<String> DELETE_COMMANDS =
         Set.of("rm", "rmdir", "del", "erase", "unlink", "rd", "remove-item", "ri");
+    private static final Set<String> POSIX_SHELL_WRAPPERS = Set.of("sh", "bash", "zsh", "dash", "fish");
     private static final Set<String> SHELL_WRAPPERS =
         Set.of("sh", "bash", "zsh", "dash", "fish", "cmd", "powershell", "pwsh");
     private static final Set<String> PROTECTED_BRANCHES =
@@ -194,12 +196,13 @@ final class CommandRiskGuard {
         List<String> args = tokens.subList(subIndex + 1, tokens.size());
         boolean force = hasForcePushFlag(args);
         boolean delete = hasDeletePushFlag(args);
-        boolean allOrMirror = args.stream().anyMatch(arg -> arg.equals("--all") || arg.equals("--mirror"));
+        boolean mirror = args.stream().anyMatch("--mirror"::equals);
+        boolean all = args.stream().anyMatch("--all"::equals);
         List<String> positionals = gitPushPositionals(args);
         boolean explicitRepo = args.stream().anyMatch(arg -> arg.equals("--repo") || arg.startsWith("--repo="));
         List<String> refspecs = explicitRepo ? positionals
             : positionals.size() <= 1 ? List.of() : positionals.subList(1, positionals.size());
-        if (force && (allOrMirror || refspecs.isEmpty())) {
+        if (mirror || force && (all || refspecs.isEmpty())) {
             return "高危命令需二次确认：未指定非受保护目标分支的 git 强制推送可能覆盖受保护分支";
         }
         for (String refspec : refspecs) {
@@ -318,7 +321,8 @@ final class CommandRiskGuard {
             return tokens.stream().skip(1).anyMatch(t -> REMOTE_RSYNC_OR_SCP.matcher(t).find());
         }
         if (Set.of("nc", "ncat", "socat").contains(executable)) {
-            return tokens.stream().skip(1).anyMatch(t -> !t.startsWith("-") && !isLoopbackToken(t));
+            return tokens.stream().skip(1)
+                .anyMatch(t -> !t.startsWith("-") && !t.matches("\\d{1,5}") && !isLoopbackToken(t));
         }
         if (Set.of("wget", "invoke-webrequest", "invoke-restmethod", "iwr", "irm").contains(executable)) {
             boolean hasUploadFlag = tokens.stream().skip(1).anyMatch(CommandRiskGuard::isUploadFlag);
@@ -336,8 +340,24 @@ final class CommandRiskGuard {
     }
 
     private static boolean isLoopbackToken(String token) {
-        String lower = token.toLowerCase(Locale.ROOT);
-        return lower.contains("localhost") || lower.contains("127.0.0.1") || lower.contains("[::1]");
+        if (token == null || token.isBlank()) {
+            return false;
+        }
+        String cleaned = stripQuotes(token).toLowerCase(Locale.ROOT);
+        if (isLoopbackHost(cleaned)) {
+            return true;
+        }
+        try {
+            URI uri = cleaned.contains("://") ? URI.create(cleaned) : URI.create("http://" + cleaned);
+            String host = uri.getHost();
+            return host != null && isLoopbackHost(host.toLowerCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    private static boolean isLoopbackHost(String host) {
+        return host.equals("localhost") || host.equals("127.0.0.1") || host.equals("::1") || host.equals("[::1]");
     }
 
     private static boolean readsOrExposesSecret(List<String> tokens) {
@@ -407,13 +427,28 @@ final class CommandRiskGuard {
         if (!SHELL_WRAPPERS.contains(executable)) {
             return null;
         }
+        boolean posixShell = POSIX_SHELL_WRAPPERS.contains(executable);
         for (int i = 1; i < tokens.size() - 1; i++) {
             String flag = tokens.get(i).toLowerCase(Locale.ROOT);
-            if (Set.of("-c", "-lc", "/c", "/k", "-command", "-encodedcommand", "-enc").contains(flag)) {
+            if (Set.of("-c", "-lc", "/c", "/k", "-command", "-encodedcommand", "-enc").contains(flag)
+                || (posixShell && isPosixMergedCommandFlag(flag))) {
                 return tokens.get(i + 1);
             }
         }
         return null;
+    }
+
+    private static boolean isPosixMergedCommandFlag(String flag) {
+        if (flag.length() < 3 || flag.charAt(0) != '-' || flag.charAt(1) == '-' || flag.indexOf('c', 1) < 0) {
+            return false;
+        }
+        for (int i = 1; i < flag.length(); i++) {
+            char ch = flag.charAt(i);
+            if (ch < 'a' || ch > 'z') {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static Path userHomePath() {

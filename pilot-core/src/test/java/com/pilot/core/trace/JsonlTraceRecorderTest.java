@@ -48,4 +48,16 @@ class JsonlTraceRecorderTest {
         assertTrue(line.length() < 1_500, "单行 trace 应截断，实际长度 " + line.length());
         assertTrue(line.contains("…"), "被截断的内容应带省略标记");
     }
+
+    @Test
+    void scrubsSecretsFromArgumentsAndResultBeforeWriting() throws IOException {
+        Path file = tempDir.resolve("trace-secrets.jsonl");
+        JsonlTraceRecorder recorder = new JsonlTraceRecorder(file, JsonMapper.builder().build());
+        recorder.record(new ToolCall("c1", "http", Map.of("authorization", "Bearer abcdefghijklmnop")),
+            "failed with api_key=super-secret-value", 1L);
+        String line = Files.readString(file, StandardCharsets.UTF_8);
+        assertTrue(line.contains("***"));
+        assertTrue(!line.contains("abcdefghijklmnop"));
+        assertTrue(!line.contains("super-secret-value"));
+    }
 }

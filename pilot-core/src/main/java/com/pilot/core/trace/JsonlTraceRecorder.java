@@ -9,6 +9,7 @@ import java.util.Map;
 
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.tool.ToolResults;
+import com.pilot.core.util.SecretScrubber;
 import com.pilot.core.util.Texts;
 
 import tools.jackson.databind.ObjectMapper;
@@ -27,10 +28,10 @@ public final class JsonlTraceRecorder implements TraceRecorder {
     public synchronized void record(ToolCall call, String result, long latencyMs) {
         try {
             Files.createDirectories(file.getParent());
-            String args = mapper.writeValueAsString(call.args() == null ? Map.of() : call.args());
+            String args = SecretScrubber.scrub(mapper.writeValueAsString(call.args() == null ? Map.of() : call.args()));
             String line = mapper.writeValueAsString(Map.of("callId", call.callId(), "name", call.name(), "argsSummary",
-                Texts.oneLine(args, 300), "resultSummary", Texts.oneLine(result, 300), "latencyMs", latencyMs,
-                "decision", decision(result).name()));
+                Texts.oneLine(args, 300), "resultSummary", Texts.oneLine(SecretScrubber.scrub(result), 300),
+                "latencyMs", latencyMs, "decision", decision(result).name()));
             Files.writeString(file, line + "\n", StandardCharsets.UTF_8, StandardOpenOption.CREATE,
                 StandardOpenOption.WRITE, StandardOpenOption.APPEND);
         } catch (IOException e) {

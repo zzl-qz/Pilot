@@ -35,6 +35,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 import com.pilot.core.util.HostOs;
+import com.pilot.core.util.SecretScrubber;
 import com.pilot.core.util.WireEnum;
 
 import tools.jackson.databind.ObjectMapper;
@@ -440,16 +441,17 @@ public final class CommandTaskManager implements AutoCloseable {
                 String decoded = decoder.decode(buffer, count, false);
                 int accepted = (int)Math.min(decoded.length(), outputLimit - inputChars);
                 inputChars += accepted;
-                append(entry, redactor.accept(decoded.substring(0, Math.max(0, accepted)), false));
+                append(entry,
+                    SecretScrubber.scrub(redactor.accept(decoded.substring(0, Math.max(0, accepted)), false)));
                 if (accepted < decoded.length()) {
                     requestStop(entry, CommandTaskStatus.OUTPUT_LIMIT, "命令输出达到上限 " + outputLimit + " 字节，已终止进程树");
                     break;
                 }
             }
             if (entry.stopStatus != CommandTaskStatus.OUTPUT_LIMIT) {
-                append(entry, redactor.accept(decoder.decode(new byte[0], 0, true), false));
+                append(entry, SecretScrubber.scrub(redactor.accept(decoder.decode(new byte[0], 0, true), false)));
                 // A cap may cut a secret halfway; discard that withheld suffix instead of exposing a partial credential.
-                append(entry, redactor.accept("", true));
+                append(entry, SecretScrubber.scrub(redactor.accept("", true)));
             }
         } catch (IOException e) {
             if (entry.stopStatus == null) {
@@ -756,7 +758,7 @@ public final class CommandTaskManager implements AutoCloseable {
     }
 
     private static String redact(String text, List<String> secrets) {
-        return new StreamingRedactor(secrets).accept(text, true);
+        return SecretScrubber.scrub(new StreamingRedactor(secrets).accept(text, true));
     }
 
     private final class Entry {
