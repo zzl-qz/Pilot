@@ -1161,14 +1161,25 @@ function DesktopBrowserPanel({ desktopBridge, toolsMenuOpen }: { desktopBridge: 
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) return undefined;
+    let draggingGutter = false;
+    let rafId = 0;
+    let lastPayload = '';
+    const sendBounds = (next: { x: number; y: number; width: number; height: number; visible: boolean }) => {
+      const key = `${next.x},${next.y},${next.width},${next.height},${next.visible ? 1 : 0}`;
+      if (key === lastPayload) return;
+      lastPayload = key;
+      desktopBridge.setBounds(next);
+    };
     const push = () => {
-      if (viewMode !== 'stage') {
-        desktopBridge.setBounds({ visible: false, x: 0, y: 0, width: 0, height: 0 });
+      if (viewMode !== 'stage' || draggingGutter) {
+        sendBounds({ visible: false, x: 0, y: 0, width: 0, height: 0 });
         return;
       }
       const rect = visibleStageRect(stage);
-      const covered = toolsMenuOpen || document.querySelector('dialog[open], [aria-modal="true"]');
-      desktopBridge.setBounds({
+      const covered = toolsMenuOpen || document.querySelector(
+        '#model-menu, #perm-menu, #context-menu, #notes-menu, [role="menu"], [role="dialog"], dialog[open], [aria-modal="true"], .gutter.is-dragging'
+      );
+      sendBounds({
         x: rect.x,
         y: rect.y,
         width: rect.width,
@@ -1177,16 +1188,44 @@ function DesktopBrowserPanel({ desktopBridge, toolsMenuOpen }: { desktopBridge: 
           && !covered && document.visibilityState === 'visible'
       });
     };
-    const observer = new ResizeObserver(push);
+    const schedulePush = () => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        push();
+      });
+    };
+    const observer = new ResizeObserver(schedulePush);
     observer.observe(stage);
-    window.addEventListener('resize', push);
-    document.addEventListener('scroll', push, true);
+    window.addEventListener('resize', schedulePush);
+    document.addEventListener('scroll', schedulePush, true);
+    const onPointerDown = (event: PointerEvent) => {
+      if ((event.target as Element | null)?.closest('.gutter')) {
+        draggingGutter = true;
+        sendBounds({ visible: false, x: 0, y: 0, width: 0, height: 0 });
+      }
+    };
+    const onPointerEnd = () => {
+      if (!draggingGutter) return;
+      draggingGutter = false;
+      schedulePush();
+    };
+    const mutationObserver = new MutationObserver(schedulePush);
+    mutationObserver.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['open', 'class', 'aria-expanded', 'aria-hidden'] });
+    document.addEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('pointerup', onPointerEnd, true);
+    window.addEventListener('pointercancel', onPointerEnd, true);
     const timer = setInterval(push, 400);
     push();
     return () => {
+      if (rafId) cancelAnimationFrame(rafId);
       observer.disconnect();
-      window.removeEventListener('resize', push);
-      document.removeEventListener('scroll', push, true);
+      mutationObserver.disconnect();
+      window.removeEventListener('resize', schedulePush);
+      document.removeEventListener('scroll', schedulePush, true);
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('pointerup', onPointerEnd, true);
+      window.removeEventListener('pointercancel', onPointerEnd, true);
       clearInterval(timer);
       desktopBridge.setBounds({ visible: false, x: 0, y: 0, width: 0, height: 0 });
     };
