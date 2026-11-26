@@ -507,9 +507,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             if (shell == null) {
                 return Preparation.error("ERROR: Windows 上执行命令需要 PowerShell（powershell.exe 或 pwsh.exe），当前都没找到");
             }
-            boolean shortCircuit = operators.contains("&&") || operators.contains("||");
-            String scriptText = shortCircuit ? chainScript(resolved, checks, operators, segments)
-                : script(resolved, checks, operators, segments);
+            String scriptText = chainScript(resolved, checks, operators, segments);
             List<String> commandLine =
                 List.of(shell.toString(), "-NoProfile", "-NonInteractive", "-Command", scriptText);
             return new Preparation(new Prepared(commandLine, List.of(display), workdir, background, timeoutMs,

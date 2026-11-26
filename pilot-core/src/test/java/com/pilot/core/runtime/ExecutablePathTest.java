@@ -7,6 +7,7 @@ import java.io.File;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -31,6 +32,26 @@ class ExecutablePathTest {
     void treatsUnsetAndBlankPathsAsEmpty() {
         assertTrue(ExecutablePath.directories(null).findAny().isEmpty());
         assertTrue(ExecutablePath.directories("  ").findAny().isEmpty());
+    }
+
+    @Test
+    void stripsQuotedPathEntriesAndKeepsExecutableExtensionsAsProvided() {
+        Path quoted = directory.resolve("Program Files");
+        String path = "\"" + quoted + "\"" + File.pathSeparator + directory;
+        assertEquals(List.of(quoted, directory), ExecutablePath.directories(path).toList());
+        assertEquals(List.of(directory.resolve("node.exe")),
+            ExecutablePath.candidates(Stream.of(directory), "node.exe").toList());
+    }
+
+    @Test
+    void resolvesWindowsExecutableExtensionsInPriorityOrderWithoutUnixShims() {
+        assertEquals(
+            List.of(directory.resolve("tool.exe"), directory.resolve("tool.cmd"), directory.resolve("tool.bat")),
+            ExecutablePath.executableCandidates(Stream.of(directory), "tool", true).toList());
+        assertEquals(List.of(directory.resolve("tool.cmd")),
+            ExecutablePath.executableCandidates(Stream.of(directory), "tool.cmd", true).toList());
+        assertEquals(List.of(directory.resolve("tool")),
+            ExecutablePath.executableCandidates(Stream.of(directory), "tool", false).toList());
     }
 
     @Test

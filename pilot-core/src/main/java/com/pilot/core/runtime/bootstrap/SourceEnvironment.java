@@ -266,7 +266,8 @@ public final class SourceEnvironment {
 
     private List<Path> pathExecutables(String executable) {
         var directories = ExecutablePath.directories(ExecutablePath.inherited(environment));
-        return ExecutablePath.candidates(directories, executable).filter(Files::isRegularFile).toList();
+        return ExecutablePath.executableCandidates(directories, executable, platform.windows())
+            .filter(Files::isRegularFile).toList();
     }
 
     private String java(Path home) {

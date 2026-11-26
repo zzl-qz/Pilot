@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -27,6 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 import com.pilot.core.exec.EnvironmentSanitizer;
+import com.pilot.core.runtime.ExecutablePath;
 import com.pilot.core.util.HostOs;
 
 import tools.jackson.databind.JsonNode;
@@ -459,7 +461,11 @@ final class McpClient implements AutoCloseable {
 
     /** Windows 上 npx、npm 等是 .cmd 脚本，ProcessBuilder 不会自动补扩展名。 */
     private static String resolveCommand(String command) {
-        if (!HostOs.isWindows()) {
+        return resolveCommand(command, HostOs.isWindows(), ExecutablePath.inherited(System.getenv()));
+    }
+
+    static String resolveCommand(String command, boolean windows, String path) {
+        if (!windows) {
             return command;
         }
         String lower = command.toLowerCase(Locale.ROOT);
@@ -467,6 +473,13 @@ final class McpClient implements AutoCloseable {
             || command.contains("\\")) {
             return command;
         }
-        return List.of("npx", "npm", "pnpm", "yarn", "uvx").contains(lower) ? command + ".cmd" : command;
+        if ("uvx".equals(lower)) {
+            if (path != null && !path.isBlank()) {
+                return ExecutablePath.executableCandidates(ExecutablePath.directories(path), command, true)
+                    .filter(Files::isRegularFile).map(Path::toString).findFirst().orElse(command);
+            }
+            return command;
+        }
+        return List.of("npx", "npm", "pnpm", "yarn").contains(lower) ? command + ".cmd" : command;
     }
 }

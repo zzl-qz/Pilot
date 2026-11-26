@@ -83,6 +83,11 @@ class ProcessSupportTest {
         assertEquals("", ProcessSupport.decode(new byte[0]));
     }
 
+    @Test
+    void malformedUtf8NeverFailsDecoding() {
+        Assertions.assertDoesNotThrow(() -> ProcessSupport.decode(new byte[] {(byte)0xC3, 0x28}));
+    }
+
     private ProcessBuilder child(String mode) {
         Path java = Path.of(System.getProperty("java.home"), "bin", BootstrapPlatform.current().executable("java"));
         return new ProcessBuilder(java.toString(), "-cp", System.getProperty("java.class.path"), Child.class.getName(),

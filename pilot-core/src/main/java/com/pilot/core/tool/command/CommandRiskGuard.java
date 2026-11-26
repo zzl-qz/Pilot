@@ -8,6 +8,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import com.pilot.core.util.HostOs;
 import com.pilot.core.util.SecretScrubber;
 import com.pilot.core.workspace.PathValidator;
 
@@ -145,6 +146,11 @@ final class CommandRiskGuard {
     private static String deleteTargetValue(List<String> tokens, int index) {
         String token = tokens.get(index);
         String lower = token.toLowerCase(Locale.ROOT);
+        String executable = CommandPolicy.leaf(tokens.getFirst());
+        if (Set.of("del", "erase", "rd", "rmdir").contains(executable)
+            && lower.matches("/(?:[fsqp]|a(?::[^/\\\\]+)?)")) {
+            return null;
+        }
         if (lower.startsWith("-path=") || lower.startsWith("-literalpath=")) {
             return token.substring(token.indexOf('=') + 1);
         }
@@ -171,6 +177,9 @@ final class CommandRiskGuard {
 
     private static String resolvedDeleteProblem(String token, Path workdir, PathValidator paths, Path home) {
         String cleaned = stripQuotes(token);
+        if (!HostOs.isWindows() && cleaned.matches("(?i)^[a-z]:[/\\\\].*")) {
+            return "禁止删除工作区外的文件：" + token;
+        }
         try {
             Path resolved = paths.resolve(workdir.resolve(cleaned).toString());
             if (resolved.getParent() == null || (home != null && resolved.equals(home))) {

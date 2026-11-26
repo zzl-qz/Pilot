@@ -35,6 +35,7 @@ final class SelfProtection {
     private static String bare(String executable) {
         String value = executable == null ? "" : executable.replace('\\', '/').toLowerCase(Locale.ROOT);
         int slash = value.lastIndexOf('/');
-        return slash >= 0 ? value.substring(slash + 1) : value;
+        value = slash >= 0 ? value.substring(slash + 1) : value;
+        return value.replaceFirst("\\.(exe|cmd|bat)$", "");
     }
 }

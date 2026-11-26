@@ -5,6 +5,7 @@ import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
@@ -33,8 +34,8 @@ public final class ExecutablePath {
         if (pathList == null || pathList.isBlank()) {
             return Stream.empty();
         }
-        return SEPARATOR.splitAsStream(pathList).map(normalizeEntry).filter(entry -> !entry.isBlank())
-            .flatMap(entry -> {
+        return SEPARATOR.splitAsStream(pathList).map(String::trim).map(ExecutablePath::stripQuotes).map(normalizeEntry)
+            .filter(entry -> !entry.isBlank()).flatMap(entry -> {
                 try {
                     return Stream.of(Path.of(entry));
                 } catch (InvalidPathException ignored) {
@@ -46,5 +47,17 @@ public final class ExecutablePath {
     public static Stream<Path> candidates(Stream<Path> directories, String... names) {
         List<String> orderedNames = Arrays.asList(names);
         return directories.flatMap(directory -> orderedNames.stream().map(directory::resolve));
+    }
+
+    public static Stream<Path> executableCandidates(Stream<Path> directories, String command, boolean windows) {
+        String lower = command.toLowerCase(Locale.ROOT);
+        List<String> names = windows && !lower.endsWith(".exe") && !lower.endsWith(".cmd") && !lower.endsWith(".bat")
+            ? List.of(command + ".exe", command + ".cmd", command + ".bat") : List.of(command);
+        return candidates(directories, names.toArray(String[]::new));
+    }
+
+    private static String stripQuotes(String entry) {
+        return entry.length() >= 2 && entry.startsWith("\"") && entry.endsWith("\"")
+            ? entry.substring(1, entry.length() - 1) : entry;
     }
 }

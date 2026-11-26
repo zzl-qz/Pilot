@@ -1,10 +1,8 @@
 package com.pilot.core.tool.code;
 
 import java.io.ByteArrayOutputStream;
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -19,9 +17,13 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
+import com.pilot.core.exec.ProcessSupport;
+import com.pilot.core.runtime.ExecutablePath;
+import com.pilot.core.util.HostOs;
+
 /** 本机已安装的跨语言代码检查器（Maven/Gradle/TypeScript/Go/Python/Rust）。 */
 public final class LocalCodeChecker {
-    private static final boolean WINDOWS = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+    private static final boolean WINDOWS = HostOs.isWindows();
     private static final Pattern STANDARD_LINE = Pattern.compile("^(.+?):(\\d+)(?::(\\d+))?:\\s*(.+)$");
     private static final Pattern TSC_PAREN_LINE = Pattern.compile("^(.+?)\\((\\d+),(\\d+)\\):\\s*(.+)$");
     private static final Pattern MAVEN_ERROR_LINE = Pattern.compile("^\\[ERROR]\\s+(.+?):\\[(\\d+),(\\d+)]\\s*(.+)$");
@@ -400,10 +402,13 @@ public final class LocalCodeChecker {
             return null;
         }
         if (WINDOWS) {
-            Path cmd = binDir.resolve(binary + ".cmd");
-            if (Files.isRegularFile(cmd)) {
-                return cmd;
+            for (String suffix : List.of(".cmd", ".exe", ".bat")) {
+                Path candidate = binDir.resolve(binary + suffix);
+                if (Files.isRegularFile(candidate)) {
+                    return candidate;
+                }
             }
+            return null;
         }
         Path direct = binDir.resolve(binary);
         return Files.isRegularFile(direct) ? direct : null;
@@ -605,31 +610,12 @@ public final class LocalCodeChecker {
     }
 
     private static Path resolveOnPath(String name) {
-        String path = System.getenv("PATH");
+        String path = ExecutablePath.inherited(System.getenv());
         if (path == null || path.isBlank()) {
             return null;
         }
-        List<String> candidates = WINDOWS ? List.of(name + ".exe", name + ".cmd", name + ".bat", name) : List.of(name);
-        for (String rawDir : path.split(File.pathSeparator)) {
-            String dir = rawDir.strip();
-            if (dir.length() >= 2 && dir.startsWith("\"") && dir.endsWith("\"")) {
-                dir = dir.substring(1, dir.length() - 1);
-            }
-            if (dir.isEmpty()) {
-                continue;
-            }
-            for (String candidate : candidates) {
-                try {
-                    Path file = Path.of(dir, candidate);
-                    if (Files.isRegularFile(file)) {
-                        return file;
-                    }
-                } catch (RuntimeException ignored) {
-                    // 忽略非法 PATH 项
-                }
-            }
-        }
-        return null;
+        return ExecutablePath.executableCandidates(ExecutablePath.directories(path), name, WINDOWS)
+            .filter(Files::isRegularFile).findFirst().orElse(null);
     }
 
     private static String runProcess(Path directory, List<String> command, long timeoutSeconds) {
@@ -661,13 +647,18 @@ public final class LocalCodeChecker {
                 drainer.join(1000);
                 return new ProcessOutcome(-1, "", true);
             }
-            drainer.join(2000);
-            return new ProcessOutcome(process.exitValue(), buffer.toString(StandardCharsets.UTF_8), false);
+            drainer.join(5000);
+            return new ProcessOutcome(process.exitValue(), ProcessSupport.decode(buffer.toByteArray()), false);
         } catch (IOException e) {
             return new ProcessOutcome(-1, "ERROR: 无法启动检查器进程: " + e.getMessage(), false);
         } catch (InterruptedException e) {
             if (process != null) {
                 destroyTree(process);
+                try {
+                    process.waitFor(2, TimeUnit.SECONDS);
+                } catch (InterruptedException cleanupInterrupted) {
+                    Thread.currentThread().interrupt();
+                }
             }
             Thread.currentThread().interrupt();
             return new ProcessOutcome(-1, "", false);

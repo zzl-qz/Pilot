@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -42,6 +43,23 @@ class CommandRiskGuardTest {
             assertTrue(result.startsWith("ERROR: "), "应当直接拒绝: " + command + " -> " + result);
             assertTrue(result.contains("禁止"), command + " -> " + result);
             assertFalse(tool.confirm(Map.of("command", command)), "绝对禁止的命令不应退化为询问审批: " + command);
+        }
+    }
+
+    @Test
+    void windowsDeleteSwitchesAreNotTreatedAsAbsolutePaths() {
+        PathValidator paths = new PathValidator(workspace);
+        for (String command : new String[] {"del /f /q tmp.txt", "erase /p /a:readonly tmp.txt", "rd /s /q build",
+            "rmdir /q /s build", "del " + workspace.resolve("tmp.txt")}) {
+            List<String> tokens = CommandChain.parse(command).segments().getFirst().tokens();
+            assertEquals(null, CommandPolicy.arguments(tokens, workspace, paths), command);
+            assertEquals(null, CommandPolicy.blocked(tokens, workspace, paths), command);
+            assertFalse(tool.readOnly(Map.of("command", command)), command);
+        }
+        for (String command : new String[] {"del C:\\Windows\\temp", "del /etc/passwd", "del ../outside.txt"}) {
+            List<String> tokens = CommandChain.parse(command).segments().getFirst().tokens();
+            assertNotNull(CommandPolicy.blocked(tokens, workspace, paths), command);
+            assertTrue(tool.readOnly(Map.of("command", command)), command);
         }
     }
 

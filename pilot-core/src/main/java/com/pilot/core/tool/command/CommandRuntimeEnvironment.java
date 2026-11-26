@@ -53,8 +53,8 @@ final class CommandRuntimeEnvironment {
         prepareEnvironment(environment);
 
         var directories = ExecutablePath.directories(ExecutablePath.inherited(environment), String::trim);
-        String[] names = windows ? new String[] {name + ".exe", name + ".cmd", name + ".bat"} : new String[] {name};
-        return ExecutablePath.candidates(directories, names).filter(Files::isRegularFile).findFirst().orElse(null);
+        return ExecutablePath.executableCandidates(directories, name, windows).filter(Files::isRegularFile).findFirst()
+            .orElse(null);
     }
 
     static Path findWrapper(Path workspace, String baseName, boolean windows) {
