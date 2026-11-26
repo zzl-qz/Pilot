@@ -8,7 +8,7 @@ import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, 
 import { homedir, tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const JAVA_DIRS = ['pilot-core/src/main/java', 'pilot-core/src/test/java', 'pilot-server/src/main/java', 'pilot-server/src/test/java'];
@@ -494,7 +494,9 @@ function main() {
 }
 
 // 只有直接执行时才跑；被质量同步脚本 import 时只导出规则声明，不产生副作用。
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+const invokedPath = process.argv[1] ? resolve(process.argv[1]) : '';
+const modulePath = resolve(fileURLToPath(import.meta.url));
+if (invokedPath && (process.platform === 'win32' ? invokedPath.toLowerCase() === modulePath.toLowerCase() : invokedPath === modulePath)) {
   try {
     main();
   } catch (error) {

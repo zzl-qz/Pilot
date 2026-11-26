@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
+pilot_shell_os="$(uname -s)"
+case "$pilot_shell_os" in
+  MINGW*|MSYS*|CYGWIN*) printf 'Pilot: Windows Git Bash is not supported by start.sh; run scripts/start.ps1 from PowerShell.\n' >&2; exit 1 ;;
+esac
 pilot_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$pilot_root"
 source "$pilot_root/scripts/bootstrap-java.sh"

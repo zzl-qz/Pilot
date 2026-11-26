@@ -93,9 +93,9 @@ $env:PATH = (Join-Path $selected 'bin') + ';' + $env:PATH
 # 用独立进程编译：子脚本里的 exit 会终止调用者脚本，ExecutionPolicy 也可能拦下 -File 被子脚本继承。
 # 编译失败不阻止启动：OsSandbox 会报「未启用」并在本机执行，写入不受限。
 $buildScript = Join-Path $root 'scripts/build-windows-sandbox.ps1'
-$buildArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $buildScript)
-$build = Start-Process -FilePath 'powershell.exe' -NoNewWindow -Wait -PassThru -ArgumentList $buildArgs
-if ($build.ExitCode -ne 0) { Write-Host "Pilot: sandbox runner build exited with $($build.ExitCode); commands run locally without write isolation." }
+$build = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$buildScript"
+$buildExitCode = $LASTEXITCODE
+if ($buildExitCode -ne 0) { Write-Host "Pilot: sandbox runner build exited with $buildExitCode; commands run locally without write isolation." }
 $runner = Join-Path $root '.pilot/bin/pilot-sandbox.exe'
 if (Test-Path -LiteralPath $runner -PathType Leaf) { $env:PILOT_WINDOWS_SANDBOX_RUNNER = $runner }
 $java = Join-Path $selected 'bin/java.exe'

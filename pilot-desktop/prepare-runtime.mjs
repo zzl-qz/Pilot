@@ -64,5 +64,9 @@ export async function prepareDesktopRuntime({root=desktopRoot,env=process.env,pl
  return {ready:true,binary:brand(root)};
 }
 let direct=false;
-try{direct=Boolean(process.argv[1])&&realpathSync(process.argv[1])===fileURLToPath(import.meta.url);}catch{}
+try{
+ const invoked=process.argv[1]?resolve(realpathSync(process.argv[1])):'';
+ const modulePath=resolve(fileURLToPath(import.meta.url));
+ direct=Boolean(invoked)&&(process.platform==='win32'?invoked.toLowerCase()===modulePath.toLowerCase():invoked===modulePath);
+}catch{}
 if(direct)prepareDesktopRuntime().then(result=>{if(!result.ready)console.log(result.message);}).catch(error=>{console.error('准备桌面运行时失败：'+error.message);process.exitCode=1;});
