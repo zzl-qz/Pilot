@@ -211,8 +211,9 @@ final class CompletionGate {
             planPrompts++;
             return new Nudge("原始用户目标：" + (goal == null ? "见持久任务上下文" : goal) + "\n计划进度："
                 + plan.stream().filter(PlanItem::done).count() + "/" + plan.size() + "\n仍未完成的计划：\n" + bullets(openSteps)
-                + "\n继续完成可执行工作。仅在取得验证证据后更新步骤；不要删除或缩小要求来通过完成检查。" + "确实无法执行的步骤标 blocked 并写明原因，用户同意跳过的标 skipped；不要假装完成。",
-                "计划仍有未完成项，继续执行并核对原始目标", planPrompts, 2);
+                + "\n若上述步骤已实际完成且具备验证证据，请直接调用 update_plan 将对应项标记为 completed（切勿仅在正文中口头总结，否则系统仍判定为 TASK_INCOMPLETE）；"
+                + "若尚有可执行工作，请继续完成后再调用 update_plan 更新。不要删除或缩小要求来通过完成检查；"
+                + "确实无法执行的步骤标 blocked 并写明原因，用户同意跳过的标 skipped；不要假装完成。", "计划仍有未完成项，继续执行并核对原始目标", planPrompts, 2);
         }
         boolean changed = !changedFiles.isEmpty();
         // 只读任务没有改动，但「目标像调研、工具却只用了两三次」同样要核对覆盖范围

@@ -26,6 +26,19 @@ import com.pilot.core.quality.TextChange;
 
 class CompletionGateTest {
     @Test
+    void openPlanNudgeExplicitlyInstructsCallingUpdatePlanForVerifiedSteps() {
+        CompletionGate gate = new CompletionGate(true, "修复登录接口并跑通单测");
+        List<PlanItem> plan = List.of(new PlanItem("补齐单测", PlanItem.IN_PROGRESS));
+
+        CompletionGate.Nudge nudge =
+            gate.evaluate(Set.of("src/A.java"), List.of("mvn test -> exit 0"), plan, List.of("补齐单测"));
+
+        assertNotNull(nudge);
+        assertTrue(nudge.prompt().contains("update_plan"), nudge.prompt());
+        assertTrue(nudge.prompt().contains("completed"), nudge.prompt());
+    }
+
+    @Test
     void allowsFinishingWhenNothingChanged() {
         CompletionGate gate = new CompletionGate(true, "解释一下调用链");
 
