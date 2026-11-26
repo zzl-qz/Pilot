@@ -156,6 +156,7 @@ function SimpleSideChat({ sessionId }: { sessionId: string }) {
       if (cancelled) return;
       const events = data?.events || [];
       let sequence = lastEventSequence(events);
+      let eventEpoch = 0;
       runRef.current = active?.runId || '';
       setBusy(!!runRef.current);
       setLoading(false);
@@ -174,11 +175,13 @@ function SimpleSideChat({ sessionId }: { sessionId: string }) {
         if (!ephemeral) sequence = Math.max(sequence, Number(event.sequence) || 0);
         setThread((current) => reduceSideChat(current, event));
         if (event.type === 'run.started') {
+          eventEpoch += 1;
           setBusy(true);
           runRef.current = event.runId || '';
           if (stopRequested.current) stop();
         }
         if (isRunEnd(event.type)) {
+          eventEpoch += 1;
           setBusy(false); runRef.current = '';
           if (event.type === 'run.failed') setError(event.payload?.message || event.payload?.reason || '侧边任务失败，请重试。');
         }
@@ -188,20 +191,21 @@ function SimpleSideChat({ sessionId }: { sessionId: string }) {
       }
       let disconnected = false;
       const reconcileRun = async (preserveDisconnectNotice: boolean) => {
+        const epochAtStart = eventEpoch;
         try {
           const activeRun = await api.activeRun(sessionId);
-          if (cancelled) return;
+          if (cancelled || eventEpoch !== epochAtStart) return;
           if (activeRun?.runId) { runRef.current = activeRun.runId; setBusy(true); return; }
           runRef.current = '';
           setBusy(false);
           setThread(current => ({ ...current, live: '' }));
           const latest = await api.history(sessionId, { limit: 80 });
-          if (cancelled || runRef.current) return;
+          if (cancelled || eventEpoch !== epochAtStart || runRef.current) return;
           const latestEvents = latest?.events || [];
           sequence = Math.max(sequence, lastEventSequence(latestEvents));
           setThread({ messages: simplifyTranscript(latestEvents), live: '' });
         } catch (failure) {
-          if (!cancelled && !preserveDisconnectNotice) {
+          if (!cancelled && eventEpoch === epochAtStart && !preserveDisconnectNotice) {
             setError(errorInfo(failure).message || '核对侧边任务状态失败，连接恢复后会重试。');
           }
         }
