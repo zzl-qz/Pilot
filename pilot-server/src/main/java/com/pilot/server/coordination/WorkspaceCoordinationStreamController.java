@@ -87,8 +87,7 @@ public class WorkspaceCoordinationStreamController {
                     current.close();
                 }
                 presence.markOffline(watcher);
-            }, () -> {
-            });
+            }, () -> presence.markOnline(watcher));
         long earliest = events.earliestRetainedSequence();
         long latest = events.latestSequence();
         if (cursor > 0 && cursor + 1 < earliest) {

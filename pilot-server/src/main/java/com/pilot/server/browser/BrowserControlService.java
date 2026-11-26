@@ -58,6 +58,7 @@ public class BrowserControlService implements BrowserEventListener {
     private final int quality;
     private final boolean enabled;
     private final ConcurrentMap<String, State> states = new ConcurrentHashMap<>();
+    private final ConcurrentMap<SseEmitter, Object> emitterLocks = new ConcurrentHashMap<>();
     private volatile BrowserHandoffBroker handoffs;
     private volatile BrowserEvidenceService evidence;
     /** 控制动作（开/关镜像、置前）串行执行，避免并发拉起重复请求。 */
@@ -133,6 +134,10 @@ public class BrowserControlService implements BrowserEventListener {
     }
 
     /** 订阅某个会话的镜像帧；连接建立即补发当前状态与最新一帧。 */
+    public Object sendLock(SseEmitter emitter) {
+        return emitterLocks.computeIfAbsent(emitter, ignored -> new Object());
+    }
+
     public SseEmitter subscribe(String sessionId) {
         return subscribe(sessionId, new SseEmitter(0L));
     }
@@ -191,6 +196,7 @@ public class BrowserControlService implements BrowserEventListener {
 
     /** 订阅者断开（页面关闭/折叠/出错）；最后一个断开时停止该会话的 screencast。幂等。 */
     public void unsubscribe(String sessionId, SseEmitter emitter) {
+        emitterLocks.remove(emitter);
         State state = states.get(sessionId);
         if (state == null) {
             return;
@@ -485,11 +491,13 @@ public class BrowserControlService implements BrowserEventListener {
 
     /** 必须持有 state 锁；写失败（对端断开）时移除订阅，最后一个断开时联动停帧。 */
     private void push(State state, SseEmitter emitter, String name, String data) {
-        try {
-            emitter.send(SseEmitter.event().name(name).data(data));
-        } catch (IOException | IllegalStateException error) {
-            // ClientAbortException 等：对端已断，静默收尾并摘掉订阅
-            drop(state, emitter);
+        synchronized (sendLock(emitter)) {
+            try {
+                emitter.send(SseEmitter.event().name(name).data(data));
+            } catch (IOException | IllegalStateException error) {
+                // ClientAbortException 等：对端已断，静默收尾并摘掉订阅
+                drop(state, emitter);
+            }
         }
     }
 

@@ -123,29 +123,85 @@ public class ScheduleService {
     }
 
     /** 取消和超时先写终态，再请求异步停止；旧运行退出前不能启动下一轮。 */
-    synchronized boolean occurrenceFinished(String id) {
+    boolean occurrenceFinished(String id) {
         var job = get(id);
         return ScheduleState.terminal(job.state()) && runs.activeRun(job.sessionId()).isEmpty();
     }
 
-    public synchronized ScheduledTask create(Create request) {
+    void cleanupOccurrenceWorkspace(String id) {
+        var job = get(id);
+        if (!ScheduleState.terminal(job.state()) || runs.activeRun(job.sessionId()).isPresent() || worktrees == null
+            || job.workspace() == null || !WorkspaceMode.ISOLATED.is(job.workspace().mode())
+            || job.workspace().handedOffAt() != null) {
+            return;
+        }
+        var session = sessions.find(job.sessionId()).orElse(null);
+        if (session == null || Objects.equals(session.workspace(), job.workspace().path())) {
+            try {
+                worktrees.remove(Path.of(job.workspace().path()));
+            } catch (RuntimeException e) {
+                log.warn("清理周期任务 {} 隔离 worktree 失败：{}", id, e.getMessage());
+            }
+        }
+    }
+
+    public ScheduledTask create(Create request) {
         return createOccurrence(request, ID_PREFIX + UUID.randomUUID());
     }
 
     /** 周期触发使用稳定的实例 ID；重启后重复投递只返回原任务。 */
-    synchronized ScheduledTask createOccurrence(Create request, String occurrenceId) {
+    ScheduledTask createOccurrence(Create request, String occurrenceId) {
         return createOccurrence(request, occurrenceId, false);
+    }
+
+    private record PreparedOccurrence(String id, String name, Session source, String content,
+        TaskControlService.Requirements requirements, String skill, Instant runAt, String zone, boolean isolated) {
     }
 
     /**
      * @param dispatchIfPast 周期轮次专用：扫描到派发之间跨过了一秒窗口时，按实际派发时点入队，
      *                       而不是把「执行时间必须在未来」当成周期配置错误。人工创建仍要求未来时间。
      */
-    synchronized ScheduledTask createOccurrence(Create request, String occurrenceId, boolean dispatchIfPast) {
+    ScheduledTask createOccurrence(Create request, String occurrenceId, boolean dispatchIfPast) {
         var existing = repository.find(occurrenceId);
         if (existing.isPresent()) {
             return existing.get();
         }
+        PreparedOccurrence prepared = validateOccurrence(request, occurrenceId, dispatchIfPast);
+        // 隔离 worktree 的外部 git 调用放在同步锁外执行，避免阻塞其他定时任务与心跳。
+        Created isolated = null;
+        try {
+            String path = prepared.source().workspace();
+            ScheduledTask.Workspace executionWorkspace;
+            if (prepared.isolated()) {
+                isolated = createIsolatedWorktree(path, prepared.skill());
+                path = isolated.path();
+                executionWorkspace = new ScheduledTask.Workspace(WorkspaceMode.ISOLATED.name(), path, isolated.base(),
+                    isolated.branch(), isolated.commit(), null);
+            } else {
+                executionWorkspace = new ScheduledTask.Workspace(WorkspaceMode.SHARED.name(), path, path, "", "", null);
+            }
+            ScheduledTask raced = insertOccurrence(prepared, path, executionWorkspace);
+            if (raced != null) {
+                if (isolated != null) {
+                    worktrees.remove(Path.of(isolated.path()));
+                }
+                return raced;
+            }
+            return get(prepared.id());
+        } catch (RuntimeException e) {
+            if (isolated != null) {
+                try {
+                    worktrees.remove(Path.of(isolated.path()));
+                } catch (RuntimeException cleanup) {
+                    e.addSuppressed(cleanup);
+                }
+            }
+            throw e;
+        }
+    }
+
+    private PreparedOccurrence validateOccurrence(Create request, String occurrenceId, boolean dispatchIfPast) {
         if (request == null || request.content() == null || request.content().isBlank()) {
             throw new IllegalArgumentException("请填写任务目标");
         }
@@ -168,9 +224,9 @@ public class ScheduleService {
         if (source.isSide()) {
             throw new IllegalArgumentException("请从主对话创建定时任务");
         }
+        String content = request.content().strip();
         String name = request.name() == null || request.name().isBlank()
-            ? request.content().strip().substring(0,
-                Math.min(ScheduleLimits.DEFAULT_NAME_CHARS, request.content().strip().length()))
+            ? content.substring(0, Math.min(ScheduleLimits.DEFAULT_NAME_CHARS, content.length()))
             : request.name().strip();
         if (name.length() > ScheduleLimits.MAX_NAME_CHARS) {
             throw new IllegalArgumentException("任务名称最多 " + ScheduleLimits.MAX_NAME_CHARS + " 个字符");
@@ -179,51 +235,52 @@ public class ScheduleService {
         if (skill != null && skills.catalogFor(source.workspace()).find(skill).isEmpty()) {
             throw new IllegalArgumentException("指定技能不存在");
         }
-        String id = occurrenceId;
+        return new PreparedOccurrence(occurrenceId, name, source, content, buildRequirements(request, occurrenceId),
+            skill, runAt, zone, !Boolean.FALSE.equals(request.isolated()));
+    }
+
+    private static TaskControlService.Requirements buildRequirements(Create request, String occurrenceId) {
         var req = request.requirements() == null ? new TaskControlService.Requirements(List.of(), List.of())
             : request.requirements();
-        var requirements = new TaskControlService.Requirements(req.constraints(),
+        boolean requireResearch = request.requireResearch() != null ? request.requireResearch()
+            : req.automation() != null && req.automation().requireResearch();
+        return new TaskControlService.Requirements(req.constraints(),
             req.acceptance().stream().map(a -> new TaskControlService.Acceptance(a.text(), false, "")).toList(),
-            new TaskControlService.Automation(id, !Boolean.FALSE.equals(request.fullAccess()),
-                request.requireResearch() != null ? request.requireResearch()
-                    : req.automation() != null && req.automation().requireResearch()));
-        // 独立会话已经有计划内容，不占普通「空白对话」名额。
-        Created isolated = null;
-        Session target = null;
+            new TaskControlService.Automation(occurrenceId, !Boolean.FALSE.equals(request.fullAccess()),
+                requireResearch));
+    }
+
+    private Created createIsolatedWorktree(String sourceWorkspace, String skill) {
+        if (worktrees == null || toolFactory == null) {
+            throw new IllegalStateException("独立工作区服务不可用");
+        }
+        Created isolated = worktrees.create(toolFactory.resolve(sourceWorkspace), "HEAD");
+        if (skill != null && skills.catalogFor(isolated.path()).find(skill).isEmpty()) {
+            try {
+                worktrees.remove(Path.of(isolated.path()));
+            } catch (RuntimeException ignored) {
+                // 主异常是技能缺失，清理失败不掩盖主因
+            }
+            throw new IllegalArgumentException("独立工作区缺少所选技能；请先将项目技能提交到 Git，或改用原目录执行");
+        }
+        return isolated;
+    }
+
+    private synchronized ScheduledTask insertOccurrence(PreparedOccurrence prepared, String path,
+        ScheduledTask.Workspace executionWorkspace) {
+        var concurrent = repository.find(prepared.id());
+        if (concurrent.isPresent()) {
+            return concurrent.get();
+        }
+        Session target = sessions.createSession(prepared.name(), path, prepared.source().projectId(), false);
         try {
-            String path = source.workspace();
-            ScheduledTask.Workspace executionWorkspace;
-            if (!Boolean.FALSE.equals(request.isolated())) {
-                if (worktrees == null || toolFactory == null) {
-                    throw new IllegalStateException("独立工作区服务不可用");
-                }
-                isolated = worktrees.create(toolFactory.resolve(path), "HEAD");
-                path = isolated.path();
-                if (skill != null && skills.catalogFor(path).find(skill).isEmpty()) {
-                    throw new IllegalArgumentException("独立工作区缺少所选技能；请先将项目技能提交到 Git，或改用原目录执行");
-                }
-                executionWorkspace = new ScheduledTask.Workspace(WorkspaceMode.ISOLATED.name(), path, isolated.base(),
-                    isolated.branch(), isolated.commit(), null);
-            } else {
-                executionWorkspace = new ScheduledTask.Workspace(WorkspaceMode.SHARED.name(), path, path, "", "", null);
-            }
-            target = sessions.createSession(name, path, source.projectId(), false);
-            var task =
-                new ScheduledTask(id, name, target.id(), null, request.content().strip(), requirements, skill, runAt,
-                    zone, ScheduleState.SCHEDULED.name(), null, 0, 0, null, "等待执行", List.of(), 0, executionWorkspace);
-            repository.insert(task);
-            return task;
+            var createdTask = new ScheduledTask(prepared.id(), prepared.name(), target.id(), null, prepared.content(),
+                prepared.requirements(), prepared.skill(), prepared.runAt(), prepared.zone(),
+                ScheduleState.SCHEDULED.name(), null, 0, 0, null, "等待执行", List.of(), 0, executionWorkspace);
+            repository.insert(createdTask);
+            return null;
         } catch (RuntimeException e) {
-            if (target != null) {
-                sessions.delete(target.id());
-            }
-            if (isolated != null) {
-                try {
-                    worktrees.remove(Path.of(isolated.path()));
-                } catch (RuntimeException cleanup) {
-                    e.addSuppressed(cleanup);
-                }
-            }
+            sessions.delete(target.id());
             throw e;
         }
     }
@@ -281,7 +338,7 @@ public class ScheduleService {
         }
     }
 
-    public synchronized void tick() {
+    public void tick() {
         for (var job : repository.list()) {
             try {
                 advance(job);
@@ -461,7 +518,7 @@ public class ScheduleService {
         return worktrees.preview(Path.of(job.workspace().path()));
     }
 
-    public synchronized ScheduledTask handoff(String id, String revision) {
+    public ScheduledTask handoff(String id, String revision) {
         if (revision == null || revision.isBlank()) {
             throw new IllegalArgumentException("请先预览改动");
         }

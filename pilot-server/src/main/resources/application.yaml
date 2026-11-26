@@ -6,6 +6,10 @@ server:
   port: 9999
 
 spring:
+  task:
+    scheduling:
+      pool:
+        size: 4
   servlet:
     multipart:
       # 语音上传和前端预检从实际 multipart 限额派生，修改文件上限时也要给请求封装留空间。

@@ -11,6 +11,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Service;
@@ -54,6 +56,7 @@ public class RecurringScheduleService {
     private final ScheduleService schedules;
     private final SessionService sessions;
     private final Clock clock;
+    private volatile boolean ready;
     private DataMaintenance maintenance = new DataMaintenance();
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -219,12 +222,19 @@ public class RecurringScheduleService {
         return row;
     }
 
-    @Scheduled(fixedDelayString = ScheduleLimits.POLL_DELAY)
-    public void poll() {
-        maintenance.whenAvailable(this::tick);
+    @EventListener(ApplicationReadyEvent.class)
+    public void ready() {
+        ready = true;
     }
 
-    public synchronized void tick() {
+    @Scheduled(fixedDelayString = ScheduleLimits.POLL_DELAY)
+    public void poll() {
+        if (ready) {
+            maintenance.whenAvailable(this::tick);
+        }
+    }
+
+    public void tick() {
         for (var row : list()) {
             try {
                 advance(row);
@@ -255,6 +265,9 @@ public class RecurringScheduleService {
         }
         if (row.activeId() != null && !schedules.occurrenceFinished(row.activeId())) {
             return;
+        }
+        if (row.activeId() != null) {
+            schedules.cleanupOccurrenceWorkspace(row.activeId());
         }
         ZoneId zone = ZoneId.of(row.timezone());
         var next = nextTime(CronExpression.parse(row.cron()), now.atZone(zone));

@@ -15,6 +15,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
+import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.server.ResponseStatusException;
@@ -63,9 +64,9 @@ public class GlobalApiExceptionHandler {
         return response(HttpStatus.BAD_REQUEST, message == null || message.isBlank() ? "请求参数不合法" : message);
     }
 
-    @ExceptionHandler(AsyncRequestNotUsableException.class)
-    public void disconnected(AsyncRequestNotUsableException exception) {
-        // SSE/长连接对端主动断开，不写响应体也不刷异常堆栈。
+    @ExceptionHandler({AsyncRequestNotUsableException.class, AsyncRequestTimeoutException.class})
+    public void disconnected(Exception exception) {
+        // SSE/长连接对端主动断开或异步超时，不向 text/event-stream 写 JSON 响应体也不刷异常堆栈。
     }
 
     @ExceptionHandler(Exception.class)

@@ -78,6 +78,7 @@ public class BrowserControlController {
         SseEmitter emitter = capture ? browser.subscribe(id) : browser.subscribeState(id);
         AtomicBoolean closed = new AtomicBoolean(false);
         AtomicReference<ScheduledFuture<?>> heartbeat = new AtomicReference<>();
+        Object sendLock = browser.sendLock(emitter);
 
         // 页面刷新、折叠侧栏或关页都会让连接失效；属于正常生命周期，静默收尾。
         Runnable close = () -> {
@@ -98,16 +99,28 @@ public class BrowserControlController {
         emitter.onCompletion(close);
         emitter.onTimeout(close);
         emitter.onError(error -> close.run());
-        heartbeat.set(HEARTBEAT.scheduleAtFixedRate(() -> {
+        ScheduledFuture<?> scheduled = HEARTBEAT.scheduleAtFixedRate(() -> {
             if (closed.get()) {
+                ScheduledFuture<?> current = heartbeat.get();
+                if (current != null) {
+                    current.cancel(false);
+                }
                 return;
             }
             try {
-                emitter.send(SseEmitter.event().comment("ping"));
+                synchronized (sendLock) {
+                    if (!closed.get()) {
+                        emitter.send(SseEmitter.event().comment("ping"));
+                    }
+                }
             } catch (Exception error) {
                 close.run();
             }
-        }, HEARTBEAT_SECONDS, HEARTBEAT_SECONDS, TimeUnit.SECONDS));
+        }, HEARTBEAT_SECONDS, HEARTBEAT_SECONDS, TimeUnit.SECONDS);
+        heartbeat.set(scheduled);
+        if (closed.get()) {
+            scheduled.cancel(false);
+        }
         return ResponseEntity.ok().header("Cache-Control", "no-cache").header("X-Accel-Buffering", "no").body(emitter);
     }
 
