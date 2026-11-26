@@ -169,8 +169,9 @@ function SimpleSideChat({ sessionId }: { sessionId: string }) {
           return;
         }
         if (cancelled || event.sessionId !== sessionId) return;
-        if (event.sequence && event.sequence <= sequence) return;
-        sequence = Math.max(sequence, Number(event.sequence) || 0);
+        const ephemeral = event.type === 'assistant.preview';
+        if (!ephemeral && event.sequence && event.sequence <= sequence) return;
+        if (!ephemeral) sequence = Math.max(sequence, Number(event.sequence) || 0);
         setThread((current) => reduceSideChat(current, event));
         if (event.type === 'run.started') {
           setBusy(true);
@@ -185,8 +186,42 @@ function SimpleSideChat({ sessionId }: { sessionId: string }) {
       for (const type of ['user.message', 'run.started', 'assistant.delta', 'assistant.preview', ...RUN_END_EVENTS]) {
         source.addEventListener(type, onEvent);
       }
-      source.onerror = () => { if (!cancelled) setError('侧边对话连接中断，正在重连…'); };
-      source.onopen = () => { if (!cancelled) setError(current => current === '侧边对话连接中断，正在重连…' ? '' : current); };
+      let disconnected = false;
+      const reconcileRun = async (preserveDisconnectNotice: boolean) => {
+        try {
+          const activeRun = await api.activeRun(sessionId);
+          if (cancelled) return;
+          if (activeRun?.runId) { runRef.current = activeRun.runId; setBusy(true); return; }
+          runRef.current = '';
+          setBusy(false);
+          setThread(current => ({ ...current, live: '' }));
+          const latest = await api.history(sessionId, { limit: 80 });
+          if (cancelled || runRef.current) return;
+          const latestEvents = latest?.events || [];
+          sequence = Math.max(sequence, lastEventSequence(latestEvents));
+          setThread({ messages: simplifyTranscript(latestEvents), live: '' });
+        } catch (failure) {
+          if (!cancelled && !preserveDisconnectNotice) {
+            setError(errorInfo(failure).message || '核对侧边任务状态失败，连接恢复后会重试。');
+          }
+        }
+      };
+      source.onerror = () => {
+        if (!cancelled) {
+          disconnected = true;
+          setError('侧边对话连接中断，正在重连…');
+          void reconcileRun(true);
+        }
+      };
+      source.onopen = () => {
+        if (!cancelled) {
+          setError(current => current === '侧边对话连接中断，正在重连…' ? '' : current);
+          if (disconnected) {
+            disconnected = false;
+            void reconcileRun(false);
+          }
+        }
+      };
     }).catch((failure) => {
       if (!cancelled) {
         setLoading(false);

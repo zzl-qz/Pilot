@@ -14,8 +14,13 @@ function fixture() {
   }
   state.showNotice = message => notices.push(message);
   const api = { session: async id => ({ id, title: '手机修改的标题', workspace: 'C:\\项目', projectId: 'p' }), activeRun: async () => null };
-  const refresh = createWorkbenchRefresher({ get: () => state, set: change => change(state), api });
-  return { state, api, calls, notices, refresh };
+  let circuitOpen = false;
+  const refresh = createWorkbenchRefresher({
+    get: () => state, set: change => change(state), api,
+    isCircuitOpen: () => circuitOpen,
+    resetCircuit: () => { circuitOpen = false; }
+  });
+  return { state, api, calls, notices, refresh, isCircuitOpen: () => circuitOpen, setCircuitOpen(value) { circuitOpen = value; } };
 }
 
 test('手动同步更新元数据与运行状态，保留任务、编辑器、附件与历史窗口', async () => {
@@ -82,10 +87,15 @@ test('列表读取失败不重建界面；自动失败静默但保留可查询�
   assert.match(f.state.ui.syncError, /服务离线/);
 });
 
-test('编辑中的任务契约不被同步覆盖；断线自动同步会续接游标', async () => {
-  const f = fixture(); f.state.taskDirty = true; f.state.ui.connection.status = 'error';
+test('编辑中的任务契约不被同步覆盖；断线自动同步尊重熔断，显式重连解除熔断并续接游标', async () => {
+  const f = fixture(); f.state.taskDirty = true; f.state.ui.connection.status = 'error'; f.setCircuitOpen(true);
   await f.refresh({ silent: true, full: true });
   assert.equal(f.calls.some(call => call.name === 'loadTask'), false);
+  assert.equal(f.calls.some(call => call.name === 'connectSse'), false);
+  assert.equal(f.isCircuitOpen(), true);
+  // 显式 reconnect（如手动刷新或回到前台）应自动复位熔断并续接游标
+  await f.refresh({ silent: true, full: true, reconnect: true });
+  assert.equal(f.isCircuitOpen(), false);
   assert.equal(f.calls.some(call => call.name === 'connectSse'), true);
 });
 

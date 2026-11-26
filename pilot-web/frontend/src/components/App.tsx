@@ -116,7 +116,13 @@ function Workbench() {
     const onBlur = () => useStore.getState().setDesktopFocused(false);
     const onVisibility = () => {
       if (document.hidden) useStore.getState().setDesktopFocused(false);
-      else syncFocus();
+      else {
+        syncFocus();
+        const state = useStore.getState();
+        if (state.sessionId && state.ui.connection.status !== 'ok') {
+          void state.refreshWorkbench({ silent: true, full: true, reconnect: true });
+        }
+      }
     };
     window.addEventListener('focus', syncFocus);
     window.addEventListener('blur', onBlur);

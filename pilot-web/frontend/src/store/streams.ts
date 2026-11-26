@@ -34,6 +34,7 @@ export function createSessionStreams(
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   let stableConnectionTimer: ReturnType<typeof setTimeout> | undefined;
   let streamPaused = false;
+  let circuitOpen = false;
   let streamFailures = 0;
   let streamGeneration = 0;
   let mirrorSource: EventSource | null = null;
@@ -108,10 +109,11 @@ export function createSessionStreams(
     clearTimeout(reconnectTimer);
     reconnectTimer = undefined;
     const retry = ++streamFailures <= 3;
+      circuitOpen = !retry;
     set(draft => {
       draft.ui.connection = { status: 'error', text: retry ? '正在恢复事件' : '事件恢复失败，请刷新' };
     });
-    if (retry) get().scheduleReconnect(sessionId);
+      if (retry) get().scheduleReconnect(sessionId);
     else get().showNotice(reason + '，已停止自动重试。请刷新页面；若仍失败，请检查服务端事件数据。');
   }
 
@@ -140,6 +142,7 @@ export function createSessionStreams(
     resetHistory();
     disconnectSse();
     streamPaused = false;
+    circuitOpen = false;
     streamFailures = 0;
     discardQueuedEvents();
     if (mirrorSource) {
@@ -238,6 +241,7 @@ export function createSessionStreams(
     /* ---------- SSE ---------- */
     connectSse(sessionId, cursor) {
       if (get().sessionId !== sessionId) return;
+      if (circuitOpen && get().ui.connection.status === 'error') return;
       const generation = ++streamGeneration;
       disconnectSse();
       clearTimeout(reconnectTimer);
@@ -334,6 +338,8 @@ export function createSessionStreams(
         stableConnectionTimer = setTimeout(() => {
           stableConnectionTimer = undefined;
           if (current()) {
+            circuitOpen = false;
+            streamFailures = 0;
             set(draft => { draft._reconnectAttempt = 0; });
           }
         }, CONNECTION_STABLE_MS);
@@ -359,6 +365,7 @@ export function createSessionStreams(
         if (get().sessionId !== sessionId) {
           return;
         }
+        if (circuitOpen) return;
         // 续订：带着已渲染的游标，避免从 0 重新回放
         get().connectSse(sessionId, get().thread.cursor);
         await get().refreshActiveRun();
@@ -575,5 +582,10 @@ export function createSessionStreams(
     },
 
   };
-  return { actions, close: closeStreams, closeAll: closeAllStreams, connectMirror, connectCommandTasks, rebuildHistory: rebuildStreamHistory };
+  return {
+    actions, close: closeStreams, closeAll: closeAllStreams, connectMirror, connectCommandTasks,
+    rebuildHistory: rebuildStreamHistory,
+    isCircuitOpen: () => circuitOpen,
+    resetCircuit() { circuitOpen = false; streamFailures = 0; }
+  };
 }

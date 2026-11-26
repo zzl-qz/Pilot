@@ -25,7 +25,9 @@ export function watchWorkbench({ refresh, window: win = window, document: doc = 
 }
 
 /** 同步只读数据，不重发指令、不切换任务；同一窗口、同一会话与代次的并发刷新才合并。 */
-export function createWorkbenchRefresher({ get, set, api }: WorkbenchRefresherOptions) {
+export function createWorkbenchRefresher({
+  get, set, api, isCircuitOpen = () => false, resetCircuit
+}: WorkbenchRefresherOptions) {
   type Wanted = { reconnect: boolean; notify: boolean; full: boolean };
   const wanted = new Map<string, Wanted>();
   let flight: { key: string; wanted: Wanted; promise: Promise<boolean> } | null = null;
@@ -89,8 +91,9 @@ export function createWorkbenchRefresher({ get, set, api }: WorkbenchRefresherOp
             if (failure) throw failure.reason;
           }
           if (!current()) { superseded = true; return false; }
-          // 合并刷新期间追加的手动刷新也应续接持久游标，不清空滚动位置和输入。
-          if (flags.reconnect || get().ui.connection.status === 'error') {
+          // 显式重连（手动刷新/回到前台）允许解除熔断；后台定时同步须遵守熔断上限，避免无限重连坏流。
+          if (flags.reconnect || (get().ui.connection.status === 'error' && !isCircuitOpen())) {
+            if (flags.reconnect) resetCircuit?.();
             get().flushEvents();
             get().connectSse(sessionId, get().thread.cursor);
           }

@@ -29,4 +29,6 @@ export interface WorkbenchRefresherOptions {
   get: () => WorkbenchSyncState;
   set: (change: (state: WorkbenchSyncState) => void) => void;
   api: Pick<ApiClient, 'session' | 'activeRun'>;
+  isCircuitOpen?: () => boolean;
+  resetCircuit?: () => void;
 }
