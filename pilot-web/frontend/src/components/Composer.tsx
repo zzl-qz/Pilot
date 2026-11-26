@@ -529,6 +529,7 @@ export function Composer() {
         sessionDraftsRef.current.delete(state.sessionId);
         dropDraft(localStore, useStore.getState().sessionId);
         dropDraftSnapshot(localStore, useStore.getState().sessionId);
+        if (!state.sessionId) dropDraftSnapshot(localStore, null);
       } else {
         sessionDraftsRef.current.delete(state.sessionId);
       }
@@ -546,13 +547,17 @@ export function Composer() {
     if (!text.trim()) return;
     const baseline = steeredCount;
     const state = useStore.getState();
+    const sessionId = state.sessionId;
+    const sessionEpoch = state.sessionEpoch;
     const sent = await state.steer(text, []);
+    const current = useStore.getState();
+    if (current.sessionId !== sessionId || current.sessionEpoch !== sessionEpoch) return;
     if (!sent) {
       // store 已提示失败原因；文本保留在输入框
       return;
     }
     if (!inputRef.current) return;
-    const submitter = useStore.getState();
+    const submitter = current;
     inputRef.current.setText('');
     draftFilesRef.current.clear();
     writeDraft(localStore, submitter.sessionId, '');

@@ -24,6 +24,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
   let earlierPage: { sessionId: string; before: number; events: EventEnvelope[]; hasMore: boolean } | null = null;
   let earlierInflight: { sessionId: string; before: number; promise: Promise<boolean> } | null = null;
   let earlierRequest: Promise<boolean> | null = null;   // 同一次边界触发的并发去重
+  let laterInflight: { sessionId: string; after: number; promise: Promise<boolean> } | null = null;
   // 已经问过差异的结果卡。空快照也记在这里，避免上翻时反复打同一轮。
   let attachedDiffs = new Set<string>();
 
@@ -84,6 +85,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
       earlierPage = null;
       earlierInflight = null;
       earlierRequest = null;
+      laterInflight = null;
       try {
         const data = requireData(await api.history(sessionId, { limit: thread.history.pageSize, compactTools: true }));
         if (get().sessionId !== sessionId || historyGeneration !== generation) {
@@ -109,7 +111,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
           }
           if (!draft.running) settleStoppedWork(draft);
           draft.thread.replaying = false;
-          draft.thread.history.hasMore = data.hasMore === true;
+          draft.thread.history.hasMore = Boolean(data.hasMore === true && (data.events?.length || 0) > 0);
           draft.thread.history.hasNewer = false;
           draft.thread.history.error = false;
           draft.thread.history.forwardError = false;
@@ -225,11 +227,11 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
           const known = new Set(draft.thread.windowEvents.map((event) => event.sequence));
           const fresh = older.filter((event) => !known.has(event.sequence));
           if (!fresh.length) {
-            draft.thread.history.hasMore = data.hasMore === true;
+            draft.thread.history.hasMore = Boolean(data.hasMore === true && (data.events?.length || 0) > 0);
             return;
           }
           prependHistoryPage(draft, fresh);
-          draft.thread.history.hasMore = data.hasMore === true;
+          draft.thread.history.hasMore = Boolean(data.hasMore === true && (data.events?.length || 0) > 0);
         });
         attachRunDiffs();
         return true;
@@ -295,7 +297,9 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
       if (!Number.isFinite(after)) {
         return false;
       }
-      try {
+      if (laterInflight?.sessionId === sessionId && laterInflight.after === after) return laterInflight.promise;
+      const promise = (async () => {
+        try {
         const data = requireData(await api.history(sessionId, { limit: thread.history.pageSize, after, compactTools: true }));
         if (!currentHistoryPage(sessionId, generation, data.historyRevision)) {
           return false;
@@ -307,7 +311,10 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
             draft.thread.history.hasNewer = false;
             return;
           }
-          appendHistoryPage(draft, newer);
+          const known = new Set(draft.thread.windowEvents.map(event => event.sequence));
+          const fresh = newer.filter(event => !known.has(event.sequence));
+          if (!fresh.length) { draft.thread.history.hasNewer = data.hasMore === true; return; }
+          appendHistoryPage(draft, fresh);
           draft.thread.history.hasNewer = data.hasMore === true;
         });
         attachRunDiffs();
@@ -318,6 +325,10 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
         get().showNotice('加载更新的消息失败：' + errorInfo(error).message);
         return false;
       }
+      })();
+      laterInflight = { sessionId, after, promise };
+      try { return await promise; }
+      finally { if (laterInflight?.promise === promise) laterInflight = null; }
     },
 
     async requestLaterHistory({ force = false } = {}) {
@@ -344,6 +355,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
       earlierPage = null;
       earlierInflight = null;
       earlierRequest = null;
+      laterInflight = null;
     }
   };
 }

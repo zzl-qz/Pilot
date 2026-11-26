@@ -169,13 +169,21 @@ export function settleStoppedWork(draft: ReducerState, finishedAt = Date.now()) 
     return;
   }
   for (const row of rows) {
-    if (row.type === 'turn') settleTurn(row, finishedAt);
+    if (row.type === 'turn') {
+      settleTurn(row, finishedAt);
+      row.reply.live = false;
+      row.reply.preview = '';
+    }
   }
   if (draft.runUsage && !draft.runUsage.finishedAt) {
     draft.runUsage.finishedAt = finishedAt;
   }
   draft.pendingApprovals = {};
   draft.pendingQuestions = {};
+  draft.pendingArbitrations = {};
+  for (const [id, agent] of Object.entries(draft.agents || {})) {
+    if (agent.status === 'running') draft.agents[id] = { ...agent, status: 'stopped', finishedAt: agent.finishedAt || finishedAt };
+  }
 }
 
 /** Immer 会分离数组与索引里的对象引用，更新工具后显式同步两个视图。 */
@@ -1057,10 +1065,10 @@ interface ReplayScope {
 
 function openReplayScope(root: ReducerState): ReplayScope {
   return {
-    running: root.running,
-    cancelling: root.cancelling,
-    runId: root.runId,
-    runStartedAt: root.runStartedAt,
+    running: false,
+    cancelling: false,
+    runId: null,
+    runStartedAt: undefined,
     // 用量要隔一份副本：直接改根用量会把本页的中间值写回去。
     runUsage: root.runUsage ? { ...root.runUsage } : null
   };

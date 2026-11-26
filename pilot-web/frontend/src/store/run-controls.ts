@@ -5,6 +5,7 @@ import { submissions, type SubmissionOperation } from '../lib/submissions.js';
 
 /** 运行入口统一沿用提交回执；控制请求只更新发起时的会话与运行。 */
 export function createRunControlActions({ set, get }: StoreContext): StoreSlice<'steer' | 'pauseRun' | 'cancelRun' | 'continueRun' | 'resendMessage' | 'regenerate'> {
+  let regenerating = false;
   const action = async (sessionId: string, content: string, operation: SubmissionOperation) => {
     const epoch = get().sessionEpoch;
     const result = await submissions.submit(sessionId, { content }, () => get().sessionId === sessionId && get().sessionEpoch === epoch && get().modelReady(), operation);
@@ -84,10 +85,24 @@ export function createRunControlActions({ set, get }: StoreContext): StoreSlice<
 
     async regenerate() {
       const { sessionId, running, sessionEpoch } = get();
-      if (!sessionId || running || !get().modelReady()) return;
-      if (await action(sessionId, '重新生成上一轮回复', requestId => api.regenerate(sessionId, requestId)) && get().sessionId === sessionId && get().sessionEpoch === sessionEpoch) {
-        set(draft => { draft.running = true; draft.runStartedAt = Date.now(); draft.lastOutcome = ''; });
-      }
+      if (!sessionId || running || regenerating || !get().modelReady()) return;
+      regenerating = true;
+      try {
+        const result = await submissions.submit(sessionId, { content: '重新生成上一轮回复' },
+          () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch && get().modelReady(),
+          async requestId => {
+            const response = await api.regenerate(sessionId, requestId);
+            return response?.runId ? { sessionId, runId: response.runId } : null;
+          });
+        if (result.state !== 'accepted') {
+          if (result.message) get().showNotice(result.message);
+          return;
+        }
+        if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
+        const acceptedRunId = result.response?.runId;
+        if (!acceptedRunId) return;
+        set(draft => { draft.runId = acceptedRunId; draft.running = true; draft.runStartedAt = Date.now(); draft.lastOutcome = ''; });
+      } finally { regenerating = false; }
     },
 
   };

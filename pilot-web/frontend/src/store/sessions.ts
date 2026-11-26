@@ -190,6 +190,7 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
      */
     async loadNotes() {
       const sessionId = get().sessionId;
+      const sessionEpoch = get().sessionEpoch;
       const request = ++notesLoadSequence;
       if (!sessionId) {
         set((draft) => {
@@ -202,14 +203,14 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
       set((draft) => { draft.notesState = 'loading'; });
       try {
         const notes = await api.notes(sessionId);
-        if (request !== notesLoadSequence || get().sessionId !== sessionId) return;
+        if (request !== notesLoadSequence || get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
         set((draft) => {
           draft.notes = Array.isArray(notes) ? notes : [];
           draft.notesState = 'ready';
           draft.notesError = '';
         });
       } catch (error) {
-        if (request !== notesLoadSequence || get().sessionId !== sessionId) return;
+        if (request !== notesLoadSequence || get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
         set((draft) => {
           draft.notesState = 'error';
           draft.notesError = errorInfo(error).message || '读取想法失败，请重试。';

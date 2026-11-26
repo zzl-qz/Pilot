@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { produce } from 'immer';
-import { initialThread, applyEvent, settleStoppedWork, prependHistoryPage } from '../src/thread-reducer.js';
+import { initialThread, applyEvent, settleStoppedWork, prependHistoryPage, appendHistoryPage } from '../src/thread-reducer.js';
 import { buildThreadDisplay } from '../src/lib/thread-display.js';
 
 const start = Date.parse('2026-11-20T13:00:00Z');
@@ -62,4 +62,32 @@ test('翻页拼接后展示出的耗时等于真实时长，不再塌成 0:00', 
 test('翻页重放不把隔离区的中间用量写回根状态', () => {
   const base = newerRoot();
   assert.deepEqual(replay(base).runUsage, base.runUsage, '根用量只由真实事件推进，不被翻页重放改写');
+});
+
+test('停止收尾清空实时预览、运行中子代理与仲裁状态', () => {
+  const state = produce(emptyState(), draft => {
+    draft.thread.rows = [{ type: 'turn', reply: { live: true, preview: '残留预览' }, thinking: { live: true }, tools: [], runIds: [] }];
+    draft.agents = { a: { status: 'running' }, b: { status: 'completed' } };
+    draft.pendingArbitrations = { a: { id: 'pending' } };
+  });
+  const stopped = produce(state, draft => settleStoppedWork(draft, start));
+  assert.equal(stopped.thread.rows[0].reply.live, false);
+  assert.equal(stopped.thread.rows[0].reply.preview, '');
+  assert.equal(stopped.agents.a.status, 'stopped');
+  assert.equal(stopped.agents.b.status, 'completed');
+  assert.deepEqual(stopped.pendingArbitrations, {});
+});
+
+test('运行中翻页回放没有历史 runId 时不借用根会话的当前 runId', () => {
+  const root = produce(emptyState(), draft => {
+    draft.running = true;
+    draft.runId = 'current-run';
+  });
+  const replayed = produce(root, draft => appendHistoryPage(draft, [{
+    type: 'assistant.delta', sequence: 9, timestamp: iso(9), payload: { text: '旧回复' }
+  }]));
+  const turn = replayed.thread.rows.find(row => row.type === 'turn');
+  assert.ok(turn);
+  assert.deepEqual(turn.runIds, []);
+  assert.equal(replayed.runId, 'current-run');
 });

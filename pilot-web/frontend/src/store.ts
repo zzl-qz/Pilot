@@ -41,10 +41,16 @@ const sessionStore = safeSessionStorage();
  */
 
 let stopStreams: () => void = () => {};
+let streamCircuitOpen: () => boolean = () => false;
+let resetStreamCircuit: () => void = () => {};
 let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 let noticeCallback: (() => unknown) | null = null;
 let skillLoadSequence = 0;
 let memoryDraftCountSequence = 0;
+let usageLoadSequence = 0;
+let capabilitiesLoadSequence = 0;
+let validationLoadSequence = 0;
+let browserStatusLoadSequence = 0;
 let interactionsInitialized = false;
 let cachedUrgentCount = 0;
 /** 桌面通知开关（与旧版同名键）。 */
@@ -102,6 +108,8 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     (kind, title, applied, beforeQuestions) => applyAttention(kind, title, applied, beforeQuestions),
     (payload) => handleRunAttention(payload)
   );
+  streamCircuitOpen = streams.isCircuitOpen;
+  resetStreamCircuit = streams.resetCircuit;
   stopStreams = () => {
     interactionsInitialized = false;
     cachedUrgentCount = 0;
@@ -114,7 +122,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   sessionEpoch: 0,
   historyRevision: null,
   ready: false,
-  refreshWorkbench: createWorkbenchRefresher({ get, set, api }),
+  refreshWorkbench: createWorkbenchRefresher({ get, set, api, isCircuitOpen: () => streamCircuitOpen(), resetCircuit: () => resetStreamCircuit() }),
   async reloadWorkbench() {
     const state = get();
     const prepared = state.composerApi?.prepareReload?.() || { ok: true };
@@ -805,21 +813,26 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   },
   /** 能力清单：工具、MCP 服务器、模型与权限档位，全部来自后端注册表而不是写死的文案。 */
   async loadCapabilities() {
-    const { sessionId } = get();
+    const { sessionId, sessionEpoch } = get();
+    const request = ++capabilitiesLoadSequence;
+    const current = () => request === capabilitiesLoadSequence && get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
     if (!sessionId) {
       return null;
     }
     set((draft) => { draft.capabilitiesState = 'loading'; });
     try {
       const data = await api.capabilities(sessionId);
+      if (!current()) return null;
       set((draft) => {
         draft.capabilities = data;
         draft.capabilitiesState = '';
       });
       return data;
-    } catch (error) {
-      set((draft) => { draft.capabilitiesState = 'error'; });
-      get().showNotice('读取能力清单失败：' + errorInfo(error).message);
+    } catch (failure) {
+      if (get().sessionId === sessionId && get().sessionEpoch === sessionEpoch) {
+        set((draft) => { draft.capabilitiesState = 'error'; });
+        get().showNotice('读取能力清单失败：' + errorInfo(failure).message);
+      }
       return null;
     }
   },
@@ -852,15 +865,17 @@ export const useStore = create<StoreState>()(immer((set, get) => {
    * <p>不抛错、不弹通知：这条带子只是常驻提示，网络抖动时保持上一次结论比刷一条错误更有用。
    */
   async loadValidation() {
-    const { sessionId } = get();
+    const { sessionId, sessionEpoch } = get();
+    const request = ++validationLoadSequence;
     if (!sessionId) {
       set((draft) => { draft.validation = null; draft.hasRun = false; });
       return;
     }
     try {
+      const current = () => request === validationLoadSequence && get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
       const data = await api.validation(sessionId);
       // 请求期间可能已经切了会话：晚到的结果不能写到别的会话上。
-      if (get().sessionId !== sessionId) return;
+      if (!current()) return;
       set((draft) => {
         draft.validation = data ?? null;
         draft.hasRun = draft.hasRun || Boolean(draft.runId || draft.lastRunId || draft.lastOutcome);
@@ -871,12 +886,14 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   },
   /** 浏览器运行时状态：只有 capable 时镜像和置前按钮才有意义。 */
   async loadBrowserStatus() {
-    const { sessionId } = get();
+    const { sessionId, sessionEpoch } = get();
+    const request = ++browserStatusLoadSequence;
     if (!sessionId) {
       return null;
     }
     try {
       const status = await api.browserStatus(sessionId);
+      if (request !== browserStatusLoadSequence || get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return null;
       if (!status) {
         return null;
       }
@@ -975,8 +992,11 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     }
   },
   async loadUsage(days) {
+    const { sessionId, sessionEpoch } = get();
+    const request = ++usageLoadSequence;
     try {
       const data = await api.usage(days);
+      if (request !== usageLoadSequence || get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
       set((draft) => { draft.usageData = data; draft.ui.usageDays = days; });
     } catch { /* 用量读取失败不阻塞 */ }
   },

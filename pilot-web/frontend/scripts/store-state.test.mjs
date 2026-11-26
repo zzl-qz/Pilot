@@ -101,6 +101,74 @@ test('各运行入口通过真实 API 封装发送独立凭据并正确处理成
     assert.equal(useStore.getState().running,true);
   } finally {fetchHandler=originalFetch;globalThis.localStorage=originalStorage;useStore.setState(saved);}
 });
+
+test('切会话后能力、浏览器、验证、用量与想法的迟到响应不覆盖当前状态', async () => {
+  reset();
+  const saved = useStore.getState();
+  const { api } = await import('../src/api.js');
+  const original = { ...api };
+  const gates = Object.fromEntries(['capabilities', 'browserStatus', 'validation', 'usage', 'notes'].map(name => [name, deferred()]));
+  for (const name of Object.keys(gates)) api[name] = () => gates[name].promise;
+  try {
+    const actions = ['loadCapabilities', 'loadBrowserStatus', 'loadValidation', 'loadUsage', 'loadNotes'];
+    const pending = actions.map(name => useStore.getState()[name](7));
+    useStore.setState({ sessionId: 'other', sessionEpoch: 2 });
+    for (const [name, gate] of Object.entries(gates)) {
+      gate.resolve(name === 'usage' ? { total: 99 } : name === 'notes' ? [{ id: 'old' }] : { marker: 'old' });
+    }
+    await Promise.all(pending);
+    const state = useStore.getState();
+    assert.equal(state.capabilities, null);
+    assert.equal(state.ui.browserStatus, null);
+    assert.equal(state.validation, null);
+    assert.notDeepEqual(state.usageData, { total: 99 });
+    assert.deepEqual(state.notes, []);
+  } finally { Object.assign(api, original); useStore.setState(saved); }
+});
+test('重新生成互斥且失败或切会话的响应不制造无 runId 运行态', async () => {
+  reset();
+  const saved = useStore.getState();
+  const { api } = await import('../src/api.js');
+  const original = { ...api };
+  const originalStorage = globalThis.localStorage;
+  const storageData = new Map();
+  globalThis.localStorage = { get length() { return storageData.size; }, key: index => [...storageData.keys()][index], getItem: key => storageData.get(key) ?? null,
+    setItem: (key, value) => storageData.set(key, value), removeItem: key => storageData.delete(key) };
+  const gate = deferred();
+  let calls = 0;
+  api.submissionToken = async () => ({ requestId: 'regenerate-race' });
+  api.acknowledgeSubmission = async () => ({});
+  api.regenerate = () => { calls += 1; return gate.promise; };
+  useStore.setState({ running: false, runId: null, modelReady: () => true, showNotice: () => {} });
+  try {
+    const first = useStore.getState().regenerate();
+    const second = useStore.getState().regenerate();
+    for (let attempt = 0; attempt < 8 && calls === 0; attempt += 1) await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls, 1);
+    gate.resolve({ sessionId: 's', runId: 'generated-run' });
+    await Promise.all([first, second]);
+    assert.equal(useStore.getState().running, true);
+    assert.equal(useStore.getState().runId, 'generated-run');
+
+    useStore.setState({ running: false, runId: null });
+    const stale = deferred();
+    api.regenerate = () => { calls += 1; return stale.promise; };
+    const pending = useStore.getState().regenerate();
+    useStore.setState({ sessionId: 'other', sessionEpoch: 2, running: false, runId: null });
+    stale.resolve({ sessionId: 's', runId: 'stale-run' });
+    await pending;
+    assert.equal(useStore.getState().running, false);
+    assert.equal(useStore.getState().runId, null);
+
+    useStore.setState({ sessionId: 's', sessionEpoch: 1 });
+    api.regenerate = async () => { throw new Error('server failure'); };
+    await useStore.getState().regenerate();
+    assert.equal(useStore.getState().running, false);
+    assert.equal(useStore.getState().runId, null);
+    assert.equal(calls, 1);
+  } finally { Object.assign(api, original); globalThis.localStorage = originalStorage; useStore.setState(saved); }
+});
+
 test('SSE 同帧批处理保留顺序，临时预览不占正式游标', () => {
   reset(); const state = useStore.getState();
   state.handleEvent({ type: 'run.started', sessionId: 's', sequence: 1, runId: 'r', payload: { input: '任务' } });
@@ -500,6 +568,29 @@ test('断线快照在正式历史后替换预览，边界后的增量去重且�
     source.emit(snapshot); // 已关闭连接的迟到快照不能覆盖新状态
     assert.equal(useStore.getState().thread.rows.at(-1).reply.preview, '');
   } finally { fixture.restore(); }
+});
+
+test('更晚历史并发请求合并，返回事件按 sequence 去重', async () => {
+  const saved = fetchHandler; const pending = deferred(); let requests = 0;
+  try {
+    reset();
+    useStore.setState(draft => {
+      draft.thread.windowEvents = [{ type: 'user.message', sessionId: 's', sequence: 1, payload: { text: '已有' } }];
+      draft.thread.history.hasNewer = true;
+    });
+    fetchHandler = () => { requests++; return pending.promise; };
+    const first = useStore.getState().loadLater();
+    const second = useStore.getState().loadLater();
+    assert.equal(requests, 1);
+    pending.resolve(new Response(JSON.stringify({ events: [
+      { type: 'assistant.delta', sessionId: 's', sequence: 1, payload: { text: '重复' } },
+      { type: 'run.started', sessionId: 's', sequence: 2, payload: { input: '新事件' } }
+    ], hasMore: false })));
+    assert.equal(await first, true);
+    assert.equal(requests, 1);
+    assert.equal(useStore.getState().thread.windowEvents.filter(event => event.sequence === 1).length, 1);
+    assert.equal(useStore.getState().thread.windowEvents.at(-1).sequence, 2);
+  } finally { fetchHandler = saved; }
 });
 
 test('重试和恢复只替换当前推理，不清除先前已完成的说明', () => {
