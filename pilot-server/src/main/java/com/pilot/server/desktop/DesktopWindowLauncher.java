@@ -8,11 +8,15 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.function.LongFunction;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import jakarta.annotation.PreDestroy;
 
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -49,6 +53,7 @@ public class DesktopWindowLauncher {
     private final Environment environment;
     private final DesktopShellInstaller installer;
     private final BrowserHome browserHome;
+    private final Set<Process> launchedProcesses = ConcurrentHashMap.newKeySet();
 
     @EventListener(ApplicationReadyEvent.class)
     public void open() {
@@ -116,12 +121,35 @@ public class DesktopWindowLauncher {
             builder.redirectErrorStream(true);
             builder.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile.toFile()));
             Process process = builder.start();
+            launchedProcesses.add(process);
+            process.onExit().thenRun(() -> launchedProcesses.remove(process));
             watchWindow(process, logFile, url);
             return LaunchResult.started("正在打开桌面窗口；Web 工作台同样可用：" + url + "。");
         } catch (IOException e) {
             return LaunchResult
                 .failed("桌面窗口没有打开：" + e.getMessage() + "；请访问 " + webUrl() + " 使用 Web 工作台，或查看 " + logFile + "。");
         }
+    }
+
+    @PreDestroy
+    public void destroy() {
+        for (Process process : launchedProcesses) {
+            process.descendants().forEach(ProcessHandle::destroy);
+            process.destroy();
+            try {
+                if (!process.waitFor(2, TimeUnit.SECONDS)) {
+                    process.descendants().forEach(ProcessHandle::destroyForcibly);
+                    process.destroyForcibly();
+                    process.waitFor(2, TimeUnit.SECONDS);
+                }
+            } catch (InterruptedException e) {
+                process.descendants().forEach(ProcessHandle::destroyForcibly);
+                process.destroyForcibly();
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+        launchedProcesses.clear();
     }
 
     private String webUrl() {

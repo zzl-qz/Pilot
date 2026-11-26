@@ -69,7 +69,7 @@ public class MobileConnectionService {
     private int failures;
     private MobileEnvironment environment;
     private String connectionMode = "auto";
-    private String lastStatusDiagnostic = "";
+    private volatile String lastStatusDiagnostic = "";
 
     @Autowired
     public void configureConnectionMode(@Value("${pilot.mobile.mode:auto}") String value) {
@@ -128,35 +128,28 @@ public class MobileConnectionService {
         }
     }
 
-    public synchronized JsonNode request(String operation, JsonNode body) {
+    public JsonNode request(String operation, JsonNode body) {
         if ("repair".equals(operation)) {
-            if (environment == null) {
-                throw new IllegalStateException("当前运行方式未启用自动环境补全");
-            }
-            environment.repair();
-            return environmentStatus();
+            return repairEnvironment();
         }
-        if (environment != null) {
-            environment.ensureChecked();
+        JsonNode unavailable = unavailableEnvironment(operation);
+        if (unavailable != null) {
+            return unavailable;
         }
-        if (environment != null && !environment.status().ready()) {
-            if ("status".equals(operation)) {
-                MobileEnvironment.Status state = environment.status();
-                logStatusDiagnostic("environment=" + state.state(), "手机连接诊断：环境状态={}，二维码尚未生成", state.state());
-                return environmentStatus();
-            }
-            throw new IllegalStateException(environment.status().message());
-        }
-        String path = switch (operation) {
-            case "status" -> "/api/status";
-            case "pair" -> "/api/pair";
-            case "revoke" -> "/api/revoke";
-            default -> throw new IllegalArgumentException("不支持的设备操作");
-        };
+        String path = operationPath(operation);
         try {
-            start();
-            HttpRequest.Builder request = HttpRequest.newBuilder(admin.resolve(path)).timeout(ADMIN_REQUEST_TIMEOUT)
-                .header("X-Pilot-Pairing", token);
+            URI targetAdmin;
+            String currentToken;
+            synchronized (this) {
+                start();
+                targetAdmin = this.admin;
+                currentToken = this.token;
+            }
+            if (targetAdmin == null || currentToken == null) {
+                throw new IllegalStateException("手机连接服务已关闭");
+            }
+            HttpRequest.Builder request = HttpRequest.newBuilder(targetAdmin.resolve(path))
+                .timeout(ADMIN_REQUEST_TIMEOUT).header("X-Pilot-Pairing", currentToken);
             if ("status".equals(operation)) {
                 request.GET();
             } else {
@@ -174,18 +167,7 @@ public class MobileConnectionService {
             if ("status".equals(operation) && result.path("version").asInt() != 2) {
                 throw new IllegalStateException("手机连接组件版本不兼容，请更新完整安装包");
             }
-            if ("status".equals(operation)) {
-                boolean invite = !result.path("invite").isMissingNode() && !result.path("invite").isNull();
-                int devices = result.path("devices").isArray() ? result.path("devices").size() : 0;
-                String pairing = result.path("pairingState").asText("unknown");
-                String mode = result.path("connectionMode").asText("unknown");
-                String key = "pairing=" + pairing + ",invite=" + invite + ",devices=" + devices + ",mode=" + mode;
-                logStatusDiagnostic(key, "手机连接诊断：配对状态={}，有效配对码={}，已配对设备数={}，连接模式={}{}", pairing, invite, devices, mode,
-                    !invite && devices > 0 ? "；前端将显示设备列表，选择‘添加设备’生成新码" : "");
-            } else if ("pair".equals(operation)) {
-                log.info("手机连接诊断：配对码申请成功，有效配对码={}，二维码图像={}", !result.path("code").asText("").isBlank(),
-                    !result.path("image").asText("").isBlank());
-            }
+            logResponse(operation, result);
             return result;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -200,6 +182,54 @@ public class MobileConnectionService {
             throw new IllegalStateException("手机连接服务暂不可用，请重试", e);
         } catch (Exception e) {
             throw new IllegalStateException("手机连接服务暂不可用，请重试", e);
+        }
+    }
+
+    private JsonNode repairEnvironment() {
+        if (environment == null) {
+            throw new IllegalStateException("当前运行方式未启用自动环境补全");
+        }
+        environment.repair();
+        return environmentStatus();
+    }
+
+    private JsonNode unavailableEnvironment(String operation) {
+        if (environment == null) {
+            return null;
+        }
+        environment.ensureChecked();
+        MobileEnvironment.Status state = environment.status();
+        if (state.ready()) {
+            return null;
+        }
+        if ("status".equals(operation)) {
+            logStatusDiagnostic("environment=" + state.state(), "手机连接诊断：环境状态={}，二维码尚未生成", state.state());
+            return environmentStatus();
+        }
+        throw new IllegalStateException(state.message());
+    }
+
+    private static String operationPath(String operation) {
+        return switch (operation) {
+            case "status" -> "/api/status";
+            case "pair" -> "/api/pair";
+            case "revoke" -> "/api/revoke";
+            default -> throw new IllegalArgumentException("不支持的设备操作");
+        };
+    }
+
+    private void logResponse(String operation, JsonNode result) {
+        if ("status".equals(operation)) {
+            boolean invite = !result.path("invite").isMissingNode() && !result.path("invite").isNull();
+            int devices = result.path("devices").isArray() ? result.path("devices").size() : 0;
+            String pairing = result.path("pairingState").asText("unknown");
+            String mode = result.path("connectionMode").asText("unknown");
+            String key = "pairing=" + pairing + ",invite=" + invite + ",devices=" + devices + ",mode=" + mode;
+            logStatusDiagnostic(key, "手机连接诊断：配对状态={}，有效配对码={}，已配对设备数={}，连接模式={}{}", pairing, invite, devices, mode,
+                !invite && devices > 0 ? "；前端将显示设备列表，选择‘添加设备’生成新码" : "");
+        } else if ("pair".equals(operation)) {
+            log.info("手机连接诊断：配对码申请成功，有效配对码={}，二维码图像={}", !result.path("code").asText("").isBlank(),
+                !result.path("image").asText("").isBlank());
         }
     }
 
@@ -366,12 +396,28 @@ public class MobileConnectionService {
     }
 
     @PreDestroy
-    public synchronized void close() {
-        closed = true;
-        supervisor.shutdownNow();
-        if (process != null) {
-            process.destroy();
+    public void close() {
+        Process child;
+        synchronized (this) {
+            closed = true;
+            child = process;
+            admin = null;
         }
-        admin = null;
+        supervisor.shutdownNow();
+        if (child != null && child.isAlive()) {
+            child.descendants().forEach(ProcessHandle::destroy);
+            child.destroy();
+            try {
+                if (!child.waitFor(2, TimeUnit.SECONDS)) {
+                    child.descendants().forEach(ProcessHandle::destroyForcibly);
+                    child.destroyForcibly();
+                    child.waitFor(2, TimeUnit.SECONDS);
+                }
+            } catch (InterruptedException e) {
+                child.descendants().forEach(ProcessHandle::destroyForcibly);
+                child.destroyForcibly();
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 }
