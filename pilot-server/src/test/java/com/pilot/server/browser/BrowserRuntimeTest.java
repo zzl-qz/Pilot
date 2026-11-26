@@ -170,18 +170,19 @@ class BrowserRuntimeTest {
     @Test
     void desktopDetectionUsesOsSignalsInsteadOfJvmHeadlessFlag() {
         // Windows：本地控制台 / RDP 会话有桌面，变量缺失按有桌面处理（本地 Web 应用是主流形态）
-        assertTrue(BrowserRuntime.desktopAvailable("Windows 11", "Console", null, null));
-        assertTrue(BrowserRuntime.desktopAvailable("Windows 11", "RDP-Tcp#0", null, null));
-        assertTrue(BrowserRuntime.desktopAvailable("Windows 11", null, null, null));
+        assertTrue(BrowserRuntime.desktopAvailable("Windows 11", Map.of("SESSIONNAME", "Console")));
+        assertTrue(BrowserRuntime.desktopAvailable("Windows 11", Map.of("SESSIONNAME", "RDP-Tcp#0")));
+        assertTrue(BrowserRuntime.desktopAvailable("Windows 11", Map.of()));
         // Windows 服务会话（Session 0）没有交互桌面
-        assertFalse(BrowserRuntime.desktopAvailable("Windows 11", "Service", null, null));
+        assertFalse(BrowserRuntime.desktopAvailable("Windows 11", Map.of("SESSIONNAME", "Services")));
         // Linux：有 X11 / Wayland 会话才有桌面，CI 与纯 SSH 环境正确降级
-        assertTrue(BrowserRuntime.desktopAvailable("Linux", "", ":0", null));
-        assertTrue(BrowserRuntime.desktopAvailable("Linux", "", null, "wayland-0"));
-        assertFalse(BrowserRuntime.desktopAvailable("Linux", "", null, null));
+        assertTrue(BrowserRuntime.desktopAvailable("Linux", Map.of("DISPLAY", ":0")));
+        assertTrue(BrowserRuntime.desktopAvailable("Linux", Map.of("WAYLAND_DISPLAY", "wayland-0")));
+        assertFalse(BrowserRuntime.desktopAvailable("Linux", Map.of("DISPLAY", " ", "WAYLAND_DISPLAY", "")));
         // macOS 本地运行常在桌面
-        assertTrue(BrowserRuntime.desktopAvailable("Mac OS X", null, null, null));
-        assertTrue(BrowserRuntime.desktopAvailable("Darwin", null, null, null));
+        assertTrue(BrowserRuntime.desktopAvailable("Mac OS X", Map.of()));
+        assertFalse(BrowserRuntime.desktopAvailable("Darwin", Map.of("SSH_TTY", "/dev/ttys001")));
+        assertFalse(BrowserRuntime.desktopAvailable("Darwin", Map.of("SSH_CONNECTION", "x", "DISPLAY", ":0")));
     }
 
     @Test

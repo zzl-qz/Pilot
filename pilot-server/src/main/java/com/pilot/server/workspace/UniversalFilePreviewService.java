@@ -1,8 +1,10 @@
 package com.pilot.server.workspace;
 
 import java.awt.Desktop;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -11,6 +13,7 @@ import java.util.Enumeration;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
@@ -39,13 +42,13 @@ import org.apache.poi.xwpf.usermodel.XWPFTableCell;
 import org.apache.poi.xwpf.usermodel.XWPFTableRow;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
-import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.pilot.core.exec.ProcessSupport;
 import com.pilot.core.tool.office.OfficeSupport;
 import com.pilot.core.util.HostOs;
 import com.pilot.server.browser.BrowserRuntime;
@@ -148,13 +151,23 @@ public final class UniversalFilePreviewService {
                 .header("Content-Security-Policy", "application/pdf".equals(contentType)
                     ? "default-src 'none'; object-src 'self'; sandbox" : "default-src 'none'; sandbox");
             if (download || !inline) {
-                builder.header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
-                    .filename(file.getFileName().toString(), StandardCharsets.UTF_8).build().toString());
+                builder.header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition(file.getFileName().toString()));
             }
             return builder.body(new FileSystemResource(file));
         } catch (IOException e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "无法读取文件", e);
         }
+    }
+
+    static String contentDisposition(String filename) {
+        String safe = (filename == null ? "download" : filename).replaceAll("[\\x00-\\x1F\\x7F\"\\\\]", "_");
+        String ascii = safe.replaceAll("[^\\x20-\\x7E]", "_").strip();
+        if (ascii.isEmpty() || ascii.replace("_", "").isEmpty()) {
+            ascii = "download";
+        }
+        String encoded =
+            URLEncoder.encode(safe, StandardCharsets.UTF_8).replace("+", "%20").replace("%21", "!").replace("%7E", "~");
+        return "attachment; filename=\"" + ascii + "\"; filename*=UTF-8''" + encoded;
     }
 
     public static OpenResult openNative(Path file, String mode) {
@@ -180,20 +193,48 @@ public final class UniversalFilePreviewService {
         if (command.isEmpty()) {
             return new OpenResult(false, "当前操作系统暂不支持该原生打开操作。", "请点击「下载」后手动打开。");
         }
+        return runNativeLauncher(command, file.getFileName().toString(), reveal);
+    }
+
+    static OpenResult runNativeLauncher(List<String> command, String displayName, boolean reveal) {
         try {
             Process process = new ProcessBuilder(command).redirectOutput(ProcessBuilder.Redirect.DISCARD)
-                .redirectError(ProcessBuilder.Redirect.DISCARD).start();
-            if (process.waitFor(250, TimeUnit.MILLISECONDS) && process.exitValue() != 0) {
+                .redirectError(ProcessBuilder.Redirect.PIPE).start();
+            var stderrTask = new FutureTask<>(() -> readBounded(process.getErrorStream(), 2048));
+            Thread.startVirtualThread(stderrTask);
+            if (process.waitFor(750, TimeUnit.MILLISECONDS) && process.exitValue() != 0) {
                 int code = process.exitValue();
-                return new OpenResult(false, "系统默认应用打开失败（退出码 " + code + "）", "请点击「下载」保存到本机后打开。");
+                String detail = "";
+                try {
+                    detail = ProcessSupport.decode(stderrTask.get(250, TimeUnit.MILLISECONDS)).replaceAll("\\s+", " ")
+                        .strip();
+                } catch (Exception ignored) {
+                    stderrTask.cancel(true);
+                }
+                String suffix = detail.isEmpty() ? "" : "：" + detail;
+                return new OpenResult(false, "系统默认应用打开失败（退出码 " + code + suffix + "）", "请点击「下载」保存到本机后打开。");
             }
             String action = reveal ? "已在系统文件夹中定位 " : "已在系统默认应用中打开 ";
-            return new OpenResult(true, action + file.getFileName(), "");
+            return new OpenResult(true, action + displayName, "");
         } catch (IOException e) {
             return new OpenResult(false, "调用系统应用失败：" + e.getMessage(), "请点击「下载」保存到本机后打开。");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return new OpenResult(false, "等待系统应用启动时被中断", "请点击「下载」保存到本机后打开。");
+        }
+    }
+
+    private static byte[] readBounded(InputStream stream, int maxBytes) throws IOException {
+        try (stream) {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buf = new byte[512];
+            int n;
+            while ((n = stream.read(buf)) != -1) {
+                if (out.size() < maxBytes) {
+                    out.write(buf, 0, Math.min(n, maxBytes - out.size()));
+                }
+            }
+            return out.toByteArray();
         }
     }
 

@@ -542,8 +542,7 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
 
     /** 桌面开窗与浏览器运行时共用同一套会话判定，避免各平台各写一份。 */
     public static boolean desktopAvailable() {
-        return desktopAvailable(HostOs.name(), System.getenv("SESSIONNAME"), System.getenv("DISPLAY"),
-            System.getenv("WAYLAND_DISPLAY"));
+        return desktopAvailable(HostOs.name(), System.getenv());
     }
 
     /**
@@ -554,19 +553,25 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
      * 该标志只约束 JVM 内的 AWT，与子进程 Chromium 能否开窗口无关——用它判断会在
      * 所有 Spring Boot 部署里误降级，本地有桌面的 Windows 也一样中招（实测踩过）。
      *
-     * <p>真实信号：Windows 服务会话（Session 0，{@code SESSIONNAME=Service}）没有交互桌面，
+     * <p>真实信号：Windows 服务会话（Session 0，{@code SESSIONNAME=Services}）没有交互桌面，
      * 控制台与 RDP 会话都有，变量缺失时按有桌面处理（本地 Web 应用是主流形态）；
-     * Linux 看 {@code DISPLAY} / {@code WAYLAND_DISPLAY}（CI、纯 SSH 环境正确降级）；
-     * macOS 本地运行常在桌面，不额外探测。
+     * Linux 看非空 {@code DISPLAY} / {@code WAYLAND_DISPLAY}（CI、纯 SSH 环境正确降级）；
+     * macOS 在纯 SSH 会话（{@code SSH_CONNECTION} 或 {@code SSH_TTY} 非空）时视为无本地桌面。
      */
-    static boolean desktopAvailable(String osName, String sessionName, String display, String waylandDisplay) {
+    static boolean desktopAvailable(String osName, Map<String, String> environment) {
+        Map<String, String> env = environment == null ? Map.of() : environment;
         if (HostOs.isWindows(osName)) {
-            return !"Service".equalsIgnoreCase(sessionName);
+            String session = env.get("SESSIONNAME");
+            return !"Services".equalsIgnoreCase(session) && !"Service".equalsIgnoreCase(session);
         }
         if (HostOs.isMac(osName)) {
-            return true;
+            return !nonBlank(env.get("SSH_CONNECTION")) && !nonBlank(env.get("SSH_TTY"));
         }
-        return display != null || waylandDisplay != null;
+        return nonBlank(env.get("DISPLAY")) || nonBlank(env.get("WAYLAND_DISPLAY"));
+    }
+
+    private static boolean nonBlank(String value) {
+        return value != null && !value.isBlank();
     }
 
     /** 空闲回收策略：显式秒数优先；自动模式下无头 10 分钟，有头不回收（用户可能正看着窗口）。 */

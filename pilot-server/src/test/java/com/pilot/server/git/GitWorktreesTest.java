@@ -37,6 +37,24 @@ class GitWorktreesTest {
     }
 
     @Test
+    void rejectsOptionLikeAndMalformedBranchNames() throws Exception {
+        Path repo = root.resolve("branch-validation");
+        Files.createDirectories(repo);
+        git(repo, "init");
+        GitWorktrees service = new GitWorktrees(new PilotDataDir(root.resolve("data").toString()));
+        assertThrows(IllegalArgumentException.class, () -> service.create(repo, "--upload-pack"));
+        assertThrows(IllegalArgumentException.class, () -> service.create(repo, "bad..ref"));
+    }
+
+    @Test
+    void boundedDeleteRetryRemovesTree() throws Exception {
+        Path tree = Files.createDirectories(root.resolve("transient-tree"));
+        Files.writeString(tree.resolve("file"), "data");
+        GitWorktrees.deleteWithRetry(tree);
+        assertFalse(Files.exists(tree));
+    }
+
+    @Test
     void opensADetachedCheckoutAndHandsChangesBack() throws Exception {
         Path repo = root.resolve("repo");
         Files.createDirectories(repo);

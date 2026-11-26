@@ -20,6 +20,7 @@ import java.util.stream.Stream;
 
 import org.springframework.stereotype.Component;
 
+import com.pilot.core.exec.ProcessSupport;
 import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.core.util.FileTrees;
 import com.pilot.core.util.Sha256;
@@ -69,8 +70,9 @@ public class GitWorktrees {
     public Created create(Path workspace, String branch) {
         Path root = toplevel(workspace);
         String selected = branch == null ? "" : branch.strip();
-        if (selected.startsWith("-")) {
-            throw new IllegalArgumentException("分支名不能以 - 开头：" + selected);
+        if (selected.startsWith("-") || (!selected.isEmpty() && !selected.equals("HEAD")
+            && git(root, "check-ref-format", "--branch", selected).exit != 0)) {
+            throw new IllegalArgumentException("分支名无效：" + selected);
         }
         if (selected.isEmpty()) {
             Exec current = git(root, "rev-parse", "--abbrev-ref", "HEAD");
@@ -300,7 +302,19 @@ public class GitWorktrees {
         Path base = Path.of(meta.base);
         Path target = Path.of(meta.path);
         if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
-            checked(git(base, "worktree", "remove", "--force", meta.path));
+            Exec removed = git(base, "worktree", "remove", "--force", meta.path);
+            if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+                try {
+                    deleteWithRetry(target);
+                } catch (IOException e) {
+                    throw new IllegalArgumentException("worktree 文件仍被占用，清理失败：" + e.getMessage(), e);
+                }
+                if (removed.exit != 0) {
+                    checked(git(base, "worktree", "prune"));
+                }
+            } else if (removed.exit != 0) {
+                checked(removed);
+            }
         } else {
             git(base, "worktree", "prune");
         }
@@ -309,6 +323,32 @@ public class GitWorktrees {
         } catch (IOException e) {
             throw new IllegalArgumentException("worktree 已移除，但登记没删掉：" + e.getMessage());
         }
+    }
+
+    static void deleteWithRetry(Path path) throws IOException {
+        IOException failure = null;
+        for (int attempt = 0; attempt < 4; attempt++) {
+            if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+                return;
+            }
+            try {
+                FileTrees.delete(path);
+                return;
+            } catch (IOException e) {
+                failure = e;
+                if (attempt == 3) {
+                    break;
+                }
+                try {
+                    Thread.sleep(50L << attempt);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    e.addSuppressed(interrupted);
+                    throw e;
+                }
+            }
+        }
+        throw failure;
     }
 
     private Path location(Path root, String id) {
@@ -377,6 +417,8 @@ public class GitWorktrees {
     private static Exec command(Path directory, Map<String, String> env, String input, String... args) {
         List<String> command = new ArrayList<>();
         command.add("git");
+        command.add("-c");
+        command.add("core.longpaths=true");
         command.addAll(List.of(args));
         Path output = null;
         Process process = null;
@@ -396,6 +438,7 @@ public class GitWorktrees {
                 }
             });
             if (!process.waitFor(60, TimeUnit.SECONDS)) {
+                process.descendants().forEach(ProcessHandle::destroyForcibly);
                 process.destroyForcibly();
                 return new Exec(-1, "git 超时");
             }
@@ -403,7 +446,7 @@ public class GitWorktrees {
             if (Files.size(output) > 20_000_000) {
                 return new Exec(-1, "改动超过 20 MB，请拆分或手动交回");
             }
-            return new Exec(process.exitValue(), Files.readString(output));
+            return new Exec(process.exitValue(), ProcessSupport.decode(Files.readAllBytes(output)));
         } catch (IOException e) {
             return new Exec(-1, e.getMessage());
         } catch (InterruptedException e) {
@@ -411,6 +454,7 @@ public class GitWorktrees {
             return new Exec(-1, "git 被中断");
         } finally {
             if (process != null && process.isAlive()) {
+                process.descendants().forEach(ProcessHandle::destroyForcibly);
                 process.destroyForcibly();
             }
             if (output != null) {

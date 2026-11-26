@@ -28,11 +28,29 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.core.io.Resource;
 import org.springframework.http.ResponseEntity;
 
+import com.pilot.core.util.HostOs;
 import com.pilot.core.workspace.WorkspaceViolationException;
 
 class UniversalFilePreviewServiceTest {
     @TempDir
     Path workspace;
+
+    @Test
+    void contentDispositionHasAsciiFallbackUtf8NameAndRejectsHeaderInjection() {
+        String header = UniversalFilePreviewService.contentDisposition("报告\"\r\n.txt");
+        assertTrue(header.startsWith("attachment; filename=\""));
+        assertTrue(header.contains("filename*=UTF-8''"));
+        assertFalse(header.contains("\r"));
+        assertFalse(header.contains("\n"));
+        assertTrue(header.contains("%E6%8A%A5%E5%91%8A"));
+
+        var failed = UniversalFilePreviewService
+            .runNativeLauncher(HostOs.isWindows() ? List.of("cmd.exe", "/c", "echo no-handler 1>&2 & exit 3")
+                : List.of("/bin/sh", "-c", "echo no-handler >&2; exit 3"), "demo.pdf", false);
+        assertFalse(failed.ok());
+        assertTrue(failed.message().contains("退出码 3"), failed.message());
+        assertTrue(failed.message().contains("no-handler"), failed.message());
+    }
 
     @Test
     void parsesDocxXlsxPptxAndArchiveNativelyWithoutExternalTools() throws Exception {
