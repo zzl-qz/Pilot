@@ -35,7 +35,7 @@ export function SkillsSettings() {
     </div>}
     <ul className="skills-list" id="settings-skills-list">
       {skills.map(skill => <li key={skill.name || skill.id}>
-        <b>/{skill.command || skill.name}</b>
+        <b>/{(skill.command || skill.name).replace(/^\/+/, '')}</b>
         <span className="skill-source">{skill.source === 'project' ? '项目级' : skill.source === 'builtin' ? '内置' : '用户级'}</span>
         <span className="skill-desc">{skill.description || ''}</span>
       </li>)}

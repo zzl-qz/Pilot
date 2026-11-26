@@ -2,6 +2,7 @@ import type { TimelineItem } from '../../types/thread.js';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../../store.js';
 import { formatTime } from '../../thread-utils.js';
+import { MarkdownBody } from '../MarkdownBody.jsx';
 
 export function Filters() {
   const current = useStore((state) => state.ui.filters);
@@ -138,6 +139,15 @@ export function ActivityPanel() {
   );
 }
 
+function activitySummary(value: string) {
+  return value.replace(/^\s{0,3}#{1,6}\s+/gm, '').replace(/\*\*([^*\n]+)\*\*/g, '$1')
+    .replace(/(^|[\s(（【"'“])__([^_\n]+)__(?=$|[\s.,;:!?）)】"'”])/g, '$1$2')
+    .replace(/\*([^*\n]+)\*/g, '$1')
+    .replace(/(^|[\s(（【"'“])_([^_\n]+)_(?=$|[\s.,;:!?）)】"'”])/g, '$1$2')
+    .replace(/~~([^~\n]+)~~/g, '$1').replace(/`+/g, '').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/\s+/g, ' ').trim();
+}
+
 function matchesActivity(item: TimelineItem, keyword: string) {
   return [item.type, item.title, item.detail, item.foot, item.status]
     .some((value) => String(value || '').toLowerCase().includes(keyword));
@@ -160,9 +170,9 @@ const ActivityItem = memo(function ActivityItem({ item, open, onToggle }: { item
         <span className="event-status">{item.status}</span>
         <span className="event-time">{formatTime(item.timestamp)}</span>
       </div>
-      {item.title && <p className="event-title">{item.title}</p>}
-      {item.detail && <p className="event-detail">{item.detail}</p>}
-      {item.foot && <p className="event-foot">{item.foot}</p>}
+      {item.title && <p className="event-title">{activitySummary(item.title)}</p>}
+      {item.detail && (open ? <div className="event-detail"><MarkdownBody text={item.detail} /></div> : <p className="event-detail">{activitySummary(item.detail)}</p>)}
+      {item.foot && (open ? <div className="event-foot"><MarkdownBody text={item.foot} /></div> : <p className="event-foot">{activitySummary(item.foot)}</p>)}
       {item.actions && item.callId && <ApprovalInline callId={item.callId} />}
     </li>
   );

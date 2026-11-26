@@ -88,6 +88,12 @@
   color: var(--color-text-primary, var(--ink));
   font: inherit;
 }
+.automation-native-control:is(select) {
+  padding-inline-end: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%236a7280' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
 
 .automation-input { min-height: 38px; }
 .automation-native-control:disabled { color: var(--color-text-secondary, var(--ink-2)); }

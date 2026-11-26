@@ -47,11 +47,12 @@ function useDirectory(sessionId: string | null, workspace: string, path: string,
 export function WorkspaceTree({ defaultOpen = false }: { defaultOpen?: boolean } = {}) {
   const sessionId = useStore(state => state.sessionId);
   const workspace = useStore(state => state.workspace);
-  return <WorkspaceFiles key={`${sessionId || ''}:${workspace}`} sessionId={sessionId} workspace={workspace} defaultOpen={defaultOpen} />;
+  const [open, setOpen] = useState(defaultOpen);
+  const setOpenPreference = useCallback((next: boolean) => setOpen(next), []);
+  return <WorkspaceFiles key={`${sessionId || ''}:${workspace}`} sessionId={sessionId} workspace={workspace} open={open} setOpen={setOpenPreference} />;
 }
 
-function WorkspaceFiles({ sessionId, workspace, defaultOpen }: { sessionId: string | null; workspace: string; defaultOpen: boolean }) {
-  const [open, setOpen] = useState(defaultOpen);
+function WorkspaceFiles({ sessionId, workspace, open, setOpen }: { sessionId: string | null; workspace: string; open: boolean; setOpen: (open: boolean) => void }) {
   const [localRevision, setRevision] = useState(0);
   const [query, setQuery] = useState('');
   const [flatFiles, setFlatFiles] = useState<string[] | null>(null);

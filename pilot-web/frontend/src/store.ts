@@ -1005,6 +1005,19 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   };
 }));
 
+if (typeof document !== 'undefined') {
+  let previousTitle: string | undefined;
+  useStore.subscribe((state) => {
+    if (state.sessionTitle !== previousTitle) {
+      previousTitle = state.sessionTitle;
+      syncTabSignal(state, state.ui.attentionKind, state.sessionTitle);
+    }
+  });
+  const initial = useStore.getState();
+  previousTitle = initial.sessionTitle;
+  syncTabSignal(initial, initial.ui.attentionKind, initial.sessionTitle);
+}
+
 /* ---------- 模块级辅助 ---------- */
 
 /**

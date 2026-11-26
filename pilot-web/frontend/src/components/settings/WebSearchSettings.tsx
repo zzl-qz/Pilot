@@ -91,6 +91,14 @@ export function WebSearchSettings() {
   const liveProxyNotice = /^socks5h?:\/\//i.test(proxy.trim())
     ? 'SOCKS5 代理当前仅作用于本机 SearXNG，云端搜索 API 与公开只读源将直连；建议改用 http://host:port 以同时覆盖全部搜索源。'
     : (view?.proxyNotice || '');
+  const safeSearchUrl = (value: string) => {
+    try {
+      const url = new URL(value);
+      return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+    } catch {
+      return null;
+    }
+  };
 
   function selectProvider(id: string) {
     const target = providers.find(item => item.id === id);
@@ -376,7 +384,9 @@ export function WebSearchSettings() {
             <ul className="web-search-hits">
               {testResult.hits.map((hit, idx) => (
                 <li key={`${hit.url}-${idx}`}>
-                  <a href={hit.url} target="_blank" rel="noreferrer">{hit.title || hit.url}</a>
+                  {safeSearchUrl(hit.url)
+                    ? <a href={safeSearchUrl(hit.url)!} target="_blank" rel="noopener noreferrer">{hit.title || hit.url}</a>
+                    : <span>{hit.title || hit.url}</span>}
                   {(hit.publishedDate || hit.engines.length > 0) && (
                     <span className="web-search-hit-meta">
                       {[hit.publishedDate, hit.engines.join(', ')].filter(Boolean).join(' · ')}

@@ -5,8 +5,10 @@
   --panel-2: #121822;
   --panel-3: #161d27;
   --line: #1f262f;
+  --border: var(--line);
   --line-soft: #171d25;
   --ink: #e8ecf2;
+  --text: var(--ink);
   --ink-2: #bcc5d3;
   --muted: #8b95a5;
   --dim: #5d6775;
@@ -1467,8 +1469,10 @@ kbd {
   --panel-2: #131824;
   --panel-3: #1a2130;
   --line: #202838;
+  --border: var(--line);
   --line-soft: #171e2b;
   --ink: #eef2fa;
+  --text: var(--ink);
   --ink-2: #c4cbd9;
   --muted: #8892a6;
   --dim: #59637a;
@@ -2102,8 +2106,10 @@ html[data-theme="light"] {
   --panel-2: #f7f8fb;
   --panel-3: #eef1f6;
   --line: #e2e6ee;
+  --border: var(--line);
   --line-soft: #edf0f5;
   --ink: #171a21;
+  --text: var(--ink);
   --ink-2: #39404e;
   --muted: #6a7280;
   --dim: #9aa2b1;
@@ -3445,13 +3451,15 @@ html[data-theme="light"] .input-flow[data-empty="true"]::before { color: #aeb5c2
   padding: 0;
   border: 1px solid var(--line);
   border-radius: 50%;
-  background: rgba(20, 26, 36, 0.9);
-  color: var(--ink-2);
+  background: #ffffff;
+  color: #111827;
   font-size: 16px;
   line-height: 1;
   cursor: pointer;
 }
-.composer-preview-close:hover { background: rgba(38, 46, 60, 0.95); color: #fff; }
+.composer-preview-close:hover { background: #e5e7eb; color: #111827; }
+html[data-theme="light"] .composer-preview-close { background: #ffffff; color: #111827; border-color: #4b5563; }
+html[data-theme="light"] .composer-preview-close:hover { background: #e5e7eb; color: #111827; }
 
 /* 输入框左下角的「添加文件」按钮 */
 .attach-button {

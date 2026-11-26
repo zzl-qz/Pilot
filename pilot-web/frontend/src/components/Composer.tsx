@@ -1,11 +1,10 @@
 import type { DraftAttachment, BuiltinCommand, SkillCommand } from '../types/input.js';
-import type { ContextStatus } from '../types/runtime.js';
 import { Button } from '@astryxdesign/core/Button';
 import { IconButton } from '@astryxdesign/core/IconButton';
 type QuickCommand = BuiltinCommand | SkillCommand;
 interface ReferenceMenu { items: string[]; message?: string; loading?: boolean }
 import { errorInfo } from '../lib/errors.js';
-import { formatCache } from '../lib/request-usage.js';
+import { formatCache, requestContext } from '../lib/request-usage.js';
 import React, { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { ErrorBoundary } from './ErrorBoundary.jsx';
@@ -24,7 +23,7 @@ import { readAttachmentFile, readDesktopClipboardFiles } from '../lib/attachment
 import { checkIncomingFile, requireAttachmentLimits } from '../lib/attachments/attachments.js';
 import { DRAFT_STORAGE as localStore, writeDraft, readDraft, dropDraft, readDraftSnapshot, writeDraftSnapshot, dropDraftSnapshot } from '../lib/drafts.js';
 import { PERMISSION_MODES, normalizePermission, permissionLabel } from '../lib/permission.js';
-import { usageBudgetTitle, usageLevel, usagePercent } from '../lib/context-usage.js';
+import { usageBudgetTitle, usageLevel } from '../lib/context-usage.js';
 import './conversation.css';
 
 const ContextUsagePanel = lazy(() => import('./RequestUsage.jsx').then(m => ({ default: m.ContextUsagePanel })));
@@ -112,6 +111,8 @@ export function Composer() {
   const compacting = useStore((state) => state.compactingContext);
   const requestReports = useStore((state) => state.requestReports);
   const latestContextReport = useStore((state) => state.latestContextReport);
+  const context = requestContext(contextStatus, latestContextReport);
+  const contextUsagePercent = context.percent == null ? null : Math.round(context.percent);
   const runUsage = useStore((state) => state.runUsage);
   const editTarget = useStore((state) => state._editTarget);
 
@@ -685,7 +686,9 @@ export function Composer() {
       setToolbarPanel(null);
       document.getElementById(toolbarPanel + '-chip')?.focus({ preventScroll: true });
     };
-    const owned = '#' + toolbarPanel + '-chip, #' + toolbarPanel + '-menu';
+    const owned = toolbarPanel === 'context'
+      ? '#context-chip, #context-menu'
+      : '#' + toolbarPanel + '-chip, #' + toolbarPanel + '-menu';
     const closeOutside = (event: Event) => {
       if (event.target instanceof Element && !event.target.closest(owned)) {
         setToolbarPanel(null);
@@ -942,11 +945,11 @@ export function Composer() {
           </div>
           <div className="composer-actions">
             <div className="perm-picker composer-context-picker">
-              <span title={usageBudgetTitle(contextStatus?.usedTokens, contextStatus?.limitTokens)}><Button id="context-chip" ref={contextTriggerRef} className={'composer-choice composer-context level-' + usageLevel(usagePercent(contextStatus))}
-                size="sm" variant="ghost" label={'上下文用量 ' + contextPercent(contextStatus) + (runUsage?.details ? ' · 缓存命中 ' + formatCache(runUsage.details) : '')}
+              <span title={usageBudgetTitle(context.used, context.limit)}><Button id="context-chip" ref={contextTriggerRef} className={'composer-choice composer-context level-' + usageLevel(contextUsagePercent)}
+                size="sm" variant="ghost" label={'上下文用量 ' + contextPercent(contextUsagePercent) + (runUsage?.details ? ' · 缓存命中 ' + formatCache(runUsage.details) : '')}
                 aria-haspopup="dialog" aria-expanded={contextOpen} aria-controls={contextOpen ? 'context-menu' : undefined}
-                icon={<svg className="context-ring" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" opacity=".25" strokeWidth="2" /><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeWidth="2" pathLength="100" strokeDasharray={usagePercent(contextStatus) + ' 100'} transform="rotate(-90 10 10)" /></svg>}
-                onClick={() => toggleToolbarPanel('context')}>{contextPercent(contextStatus)}</Button></span>
+                icon={<svg className="context-ring" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" opacity=".25" strokeWidth="2" /><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeWidth="2" pathLength="100" strokeDasharray={`${contextUsagePercent ?? 0} 100`} transform="rotate(-90 10 10)" /></svg>}
+                onClick={() => toggleToolbarPanel('context')}>{contextPercent(contextUsagePercent)}</Button></span>
               {contextOpen && <ErrorBoundary name="上下文用量" onReset={() => setToolbarPanel(null)}><Suspense fallback={null}><ContextUsagePanel status={contextStatus} compacting={compacting}
                 report={latestContextReport} reports={requestReports} usage={runUsage}
                 onClose={() => { setToolbarPanel(null); contextTriggerRef.current?.focus({ preventScroll: true }); }}
@@ -994,9 +997,6 @@ export function Composer() {
   );
 }
 
-function contextPercent(status: ContextStatus | null) {
-  if (!status?.limitTokens) {
-    return '—';
-  }
-  return `${usagePercent(status)}%`;
+function contextPercent(value: number | null) {
+  return value == null ? '—' : `${value}%`;
 }

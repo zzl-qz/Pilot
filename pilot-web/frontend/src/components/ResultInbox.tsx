@@ -17,6 +17,7 @@ import { verificationLabel, verificationHint, verificationTone, verificationNeed
 import { reverifyPrompt } from '../lib/verification/products.js';
 import { updateResultUnread } from '../lib/result-unread.js';
 import { Icon } from './Icon.jsx';
+import { MarkdownBody } from './MarkdownBody.jsx';
 import './results.css';
 
 const labels: Record<string, string> = {
@@ -147,7 +148,7 @@ function InboxDialog({ target }: { target?: string | null }) {
           const timeText = formatResultTime(row.at);
           return <button key={row.id} ref={node => { if (node) rowRefs.current.set(row.id, node); else rowRefs.current.delete(row.id); }} className={`result-card${row.id === selected ? ' is-selected' : ''}`} disabled={busy} aria-pressed={row.id === selected} onClick={() => { lastRow.current = row.id; listScroll.current = listScroller()?.scrollTop || 0; setSelected(row.id); }}>
           <span className="result-card-head"><strong className="result-card-title">{!row.read && <span className="result-unread" aria-label="未读" />}{row.title || '未命名任务'}</strong><Badge label={stateLabel} variant={row.state === 'NEEDS_ATTENTION' && !row.handled ? 'warning' : 'neutral'} /></span>
-          <small className="result-card-summary">{row.summary || '暂无摘要'}</small>
+          <small className="result-card-summary">{resultSummary(row.summary) || '暂无摘要'}</small>
           <small className="result-card-meta">{row.source === 'SCHEDULE' ? '定时任务' : '对话任务'}{timeText ? ` · ${timeText}` : ''}</small>
         </button>;
         })}
@@ -155,7 +156,7 @@ function InboxDialog({ target }: { target?: string | null }) {
       {selected && <section ref={detailRef} className="result-detail" tabIndex={-1} aria-label="结果详情" aria-busy={detailLoading}>
         <Button className="results-back" label="返回结果列表" variant="ghost" isDisabled={busy} onClick={() => { lastRow.current = selected; setSelected(null); }} />
         {detailLoading && <p role="status">正在读取详情…</p>}
-        {item && detail && <><h2>{item.title || '未命名任务'}</h2><p>{labels[item.state] || item.state} · {item.handled ? '已处理' : '待处理'}</p><p className="result-summary">{item.summary || '暂无摘要，请打开执行对话查看。'}</p>
+        {item && detail && <><h2>{item.title || '未命名任务'}</h2><p>{labels[item.state] || item.state} · {item.handled ? '已处理' : '待处理'}</p><div className="result-summary"><MarkdownBody text={item.summary || '暂无摘要，请打开执行对话查看。'} /></div>
           <nav className="result-sections" aria-label="结果内容导航">{[['verification', '验收'], ['changes', '改动'], ...(item.workspace ? [['workspace', '工作区']] : []), ['research', '开源参考']].map(([key, text]) => <Button key={key} label={text} variant="ghost" onClick={() => gotoSection(key)} />)}</nav>
           <h3 id="result-verification">验收与验证</h3><p data-verification-phase={detail.verification} data-verification-tone={verificationTone(detail.verification)}><span className="result-verification-badge">{verificationLabel(detail.verification)}</span>{verificationHint(detail.verification) && <span className="results-note">{verificationHint(detail.verification)}</span>}</p>
           {verificationNeedsRerun(detail.verification) && <Button label="重新验证" isDisabled={busy} onClick={() => act(async () => { await useStore.getState().activate(item.sessionId); await useStore.getState().submitInput(reverifyPrompt(verificationHint(detail.verification))); close(); })} />}
@@ -183,5 +184,14 @@ function InboxDialog({ target }: { target?: string | null }) {
   </Dialog>;
 }
 function ResultList({ title, rows = [], empty }: { title?: string; rows?: string[]; empty?: string }) { return <>{title && <h4>{title}</h4>}{rows.length ? <ul>{rows.map((row, i) => <li key={i}>{row}</li>)}</ul> : empty ? <p>{empty}</p> : null}</>; }
+
+function resultSummary(value?: string | null) {
+  return (value || '').replace(/^\s{0,3}#{1,6}\s+/gm, '').replace(/\*\*([^*\n]+)\*\*/g, '$1')
+    .replace(/(^|[\s(（【"'“])__([^_\n]+)__(?=$|[\s.,;:!?）)】"'”])/g, '$1$2')
+    .replace(/\*([^*\n]+)\*/g, '$1')
+    .replace(/(^|[\s(（【"'“])_([^_\n]+)_(?=$|[\s.,;:!?）)】"'”])/g, '$1$2')
+    .replace(/~~([^~\n]+)~~/g, '$1').replace(/`+/g, '').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/\s+/g, ' ').trim();
+}
 
 function required<T>(value: T | null): T { if (value === null) throw new Error('服务端返回空结果，请重新加载'); return value; }
