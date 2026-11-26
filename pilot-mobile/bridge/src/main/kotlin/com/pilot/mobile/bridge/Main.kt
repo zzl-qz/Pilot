@@ -77,7 +77,8 @@ fun main(args: Array<String>) = runBlocking {
         diagnose = { diagnoseNetwork(URI(relays.firstOrNull() ?: "https://aps1-1.relay.n0.iroh.link").host) },
         observe = { observeEnvironment(URI(relays.firstOrNull() ?: "https://aps1-1.relay.n0.iroh.link"),
             inspectSystemProxy = mode != "direct-only" && System.getProperty("java.net.useSystemProxies") == "true") },
-        relayAvailable = { endpoint.addr().use { it.relayUrl() != null } })
+        relayAvailable = { endpoint.addr().use { it.relayUrl() != null } },
+        currentRelayUrl = { endpoint.addr().use { it.relayUrl()?.toString() } })
     val admin = PairingAdmin(store, bridge, relayConfigured = relays.isNotEmpty(), network = network::snapshot) {
         network.issue(option("--name") ?: "我的电脑", relays, publicServices)
     }

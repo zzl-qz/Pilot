@@ -46,7 +46,8 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
                 mutable.update { it.copy(busy = true, status = "网络已切换 · 正在恢复连接") }
                 try {
                     monitor?.cancelAndJoin()
-                    previous?.disconnect()
+                    val computer = state.value.computerId?.let { id -> store.computers().firstOrNull { it.id == id } }
+                    if (computer != null) replaceEndpoint(computer)
                     restartMonitor()
                 } finally { mutable.update { it.copy(busy = false) } }
                 true
@@ -71,6 +72,17 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
     private fun remote(endpoint: Endpoint, computer: PairedComputer) =
         RemoteClient(endpoint, computer.ticket, diagnostic = { Log.d("PilotConnection", it) },
             relays = computer.relays, allowPublicRelays = computer.development)
+
+    private suspend fun replaceEndpoint(computer: PairedComputer) {
+        val oldClient = client
+        val oldEndpoint = endpoint
+        client = null
+        endpoint = null
+        releaseTransport(oldClient, oldEndpoint)
+        val fresh = createEndpoint(store.identity(), computer.relays, computer.development)
+        endpoint = fresh
+        client = remote(fresh, computer)
+    }
 
     private suspend fun connect(computer: PairedComputer, readyEndpoint: Endpoint? = null, readyClient: RemoteClient? = null) {
         saveDraft(); monitor?.cancelAndJoin()
@@ -157,7 +169,7 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
                                     throw StreamConsumptionFailed(e)
                                 }
                             }
-                            if (response.status == 401) error("设备授权已失效，请重新配对")
+                            if (response.status == 401) throw RemoteClient.AuthenticationExpiredException()
                             require(response.status in 200..299) { "无法读取任务进度（${response.status}）" }
                         } catch (reference: EventReferenceRequired) {
                             try {
@@ -168,11 +180,16 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
                             mutable.update { it.copy(rows = conversation.snapshot(), phase = conversation.phase) }
                             referenceApplied = true
                             } catch (e: CancellationException) { throw e }
+                            catch (e: RemoteClient.AuthenticationExpiredException) { throw e }
                             catch (e: Exception) { throw StreamConsumptionFailed(e) }
                         } finally { metadata.cancelAndJoin() }
                     }
                     if (!referenceApplied) delay(recovery.disconnected((System.nanoTime() - connectedAt) / 1_000_000))
                 } catch (e: CancellationException) { throw e }
+                catch (e: RemoteClient.AuthenticationExpiredException) {
+                    mutable.update { it.copy(status = "设备授权已失效", networkError = e.message ?: "设备授权已失效，请重新配对") }
+                    break
+                }
                 catch (e: StreamStopped) {
                     mutable.update { it.copy(status = "事件恢复已停止", networkError = e.message ?: "请重新打开会话") }
                     break
@@ -502,6 +519,7 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
             if (client === owner && state.value.computerId == host) mutable.update { it.copy(pending = null) }
             flushAcknowledgments()
         }
+        if (result.first.status == 401) throw RemoteClient.AuthenticationExpiredException()
         if (result.first.status !in 200..299) {
             val message = (parsed as? JsonObject)?.let { it.text("error").ifBlank { it.text("message") } }.orEmpty()
             error(message.ifBlank { "请求失败（${result.first.status}）" })

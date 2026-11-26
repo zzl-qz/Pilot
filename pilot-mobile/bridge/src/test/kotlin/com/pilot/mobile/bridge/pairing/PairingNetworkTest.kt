@@ -33,10 +33,11 @@ class PairingNetworkTest {
         val recovered = CompletableDeferred<Unit>()
         val attempts = AtomicInteger()
         var ticket = endpoint.addr().use { EndpointTicket.fromAddr(it).use { value -> value.toString() } }
+        var currentRelay = "https://relay-first.example.com"
         val network = PairingNetwork(store, "automatic", { ticket }, online = {
             if (attempts.incrementAndGet() == 1) { failed.await(); error("simulated DNS failure") }
             recovered.await()
-        }, retryMillis = 10, diagnose = { " TUN 测试诊断" })
+        }, retryMillis = 10, diagnose = { " TUN 测试诊断" }, currentRelayUrl = { currentRelay })
         val admin = PairingAdmin(store, Bridge(endpoint, store, 9999), network = network::snapshot) {
             network.issue("电脑", emptyList(), true)
         }
@@ -55,6 +56,8 @@ class PairingNetworkTest {
             assertEquals("preparing", initial.text("networkState"), "出码不能等待尚未完成的公网探测")
             val invite = PairingInvite.decode(initial.text("code"))
             assertTrue(invite.developmentRelays)
+            assertEquals("https://relay-first.example.com", invite.relays.single())
+            currentRelay = "https://relay-mobile.example.com"
             failed.complete(Unit)
             withTimeout(2_000) { while (network.snapshot().text("networkState") != "unavailable") delay(5) }
             val unavailable = request("/api/status")
@@ -71,6 +74,7 @@ class PairingNetworkTest {
             val routed = PairingInvite.decode(updated.text("code"))
             assertNotEquals(initial.text("code"), updated.text("code"))
             assertEquals(invite.secret, routed.secret)
+            assertEquals("https://relay-mobile.example.com", routed.relays.single())
             assertEquals(invite.expiresAt, routed.expiresAt)
             val bytes = Base64.getDecoder().decode(updated.text("image").substringAfter(','))
             val bitmap = BinaryBitmap(HybridBinarizer(BufferedImageLuminanceSource(ImageIO.read(bytes.inputStream()))))

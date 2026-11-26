@@ -45,15 +45,18 @@ internal data class InterfaceObservation(val id: String, val addresses: List<Byt
 internal data class ProxyObservation(val types: Set<String>, val detection: String, val invalid: Boolean, val signature: List<String>)
 
 internal fun environmentSnapshot(interfaces: List<InterfaceObservation>, proxy: ProxyObservation): NetworkEnvironment {
-    val addresses = interfaces.flatMap { it.addresses }
+    val usable = interfaces.filterNot { virtualInterface(it.id) }
+        .map { it.copy(addresses = it.addresses.filterNot(::linkLocalIp)) }
+        .filter { it.addresses.isNotEmpty() }
+    val addresses = usable.flatMap { it.addresses }
     return NetworkEnvironment(
-        availability = if (interfaces.isEmpty()) "none" else "available",
-        interfaceCount = interfaces.size,
+        availability = if (usable.isEmpty()) "none" else "available",
+        interfaceCount = usable.size,
         ipv4 = addresses.any { it.size == 4 }, ipv6 = addresses.any { it.size == 16 },
-        tunnelHint = interfaces.any { it.tunnel } || addresses.any(::fakeIp),
+        tunnelHint = usable.any { it.tunnel } || addresses.any(::fakeIp),
         proxyTypes = proxy.types, proxyDetection = proxy.detection, invalidProxy = proxy.invalid,
         // 仅内部比较；不向 HTTP、日志或二维码增加网卡地址与代理凭证。
-        fingerprint = (interfaces.map { it.id + ":" + it.addresses.map { a -> a.joinToString(".") }.sorted() }.sorted() +
+        fingerprint = (usable.map { it.id + ":" + it.addresses.map { a -> a.joinToString(".") }.sorted() }.sorted() +
             proxy.signature.sorted()).joinToString("|"),
     )
 }
@@ -61,9 +64,9 @@ internal fun environmentSnapshot(interfaces: List<InterfaceObservation>, proxy: 
 internal suspend fun observeEnvironment(target: URI, inspectSystemProxy: Boolean): NetworkEnvironment = runInterruptible(Dispatchers.IO) {
     val interfaces = (NetworkInterface.getNetworkInterfaces()?.let { Collections.list(it) }.orEmpty()).mapNotNull { network ->
         runCatching {
-            if (!network.isUp || network.isLoopback) return@runCatching null
+            if (!network.isUp || network.isLoopback || virtualInterface(network.name)) return@runCatching null
             val addresses = Collections.list(network.inetAddresses).filterNot {
-                it.isAnyLocalAddress || it.isLoopbackAddress || it.isMulticastAddress
+                it.isAnyLocalAddress || it.isLoopbackAddress || it.isMulticastAddress || it.isLinkLocalAddress
             }.map { it.address }
             if (addresses.isEmpty()) null else InterfaceObservation(network.name, addresses, network.isPointToPoint)
         }.getOrNull()
@@ -109,3 +112,15 @@ internal fun observeProxies(env: Map<String, String>, properties: Map<String, St
 
 internal fun fakeIp(address: ByteArray): Boolean =
     address.size == 4 && (address[0].toInt() and 255) == 198 && (address[1].toInt() and 254) == 18
+
+internal fun virtualInterface(name: String): Boolean {
+    val normalized = name.lowercase()
+    return listOf("docker", "veth", "br-", "virbr", "wsl", "hyper-v", "vethernet", "vmnet", "vboxnet")
+        .any(normalized::startsWith)
+}
+
+internal fun linkLocalIp(address: ByteArray): Boolean = when (address.size) {
+    4 -> (address[0].toInt() and 255) == 169 && (address[1].toInt() and 255) == 254
+    16 -> (address[0].toInt() and 255) == 0xfe && (address[1].toInt() and 0xc0) == 0x80
+    else -> false
+}

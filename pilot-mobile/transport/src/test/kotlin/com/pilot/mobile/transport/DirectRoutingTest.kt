@@ -25,6 +25,14 @@ class DirectRoutingTest {
                         }
                     }
                 }
+                EndpointAddr(id, null, listOf("127.0.0.1:12345")).use { noRelay ->
+                    EndpointTicket.fromAddr(noRelay).use { asyncTicket ->
+                        dialAddress(asyncTicket.toString(), listOf("https://custom-relay.example.com/")).use { fallback ->
+                            assertEquals("https://custom-relay.example.com/", fallback.relayUrl()?.toString())
+                            assertEquals(noRelay.id(), fallback.id())
+                        }
+                    }
+                }
             }
         }
     }

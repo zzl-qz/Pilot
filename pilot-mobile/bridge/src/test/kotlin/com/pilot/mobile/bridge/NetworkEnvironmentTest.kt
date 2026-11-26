@@ -33,8 +33,11 @@ class NetworkEnvironmentTest {
         assertEquals("none", environmentSnapshot(emptyList(), proxy).availability)
         assertEquals("unknown", NetworkEnvironment.unknown().availability)
         assertFalse(environmentSnapshot(listOf(InterfaceObservation("Docker", listOf(address("172.16.1.2")))), proxy).tunnelHint)
-        assertEquals("available", environmentSnapshot(listOf(InterfaceObservation("Ethernet", listOf(address("169.254.1.2")))), proxy).availability,
-            "Windows 无 DHCP 时的链路本地地址不能被误报为没有网卡")
+        assertEquals("none", environmentSnapshot(listOf(InterfaceObservation("Ethernet", listOf(address("169.254.1.2")))), proxy).availability)
+        assertEquals("none", environmentSnapshot(listOf(InterfaceObservation("eth0", listOf(address("fe80::1")))), proxy).availability)
+        for (name in listOf("docker0", "veth123", "br-abc", "virbr0", "wsl0", "Hyper-V Virtual Ethernet")) {
+            assertEquals("none", environmentSnapshot(listOf(InterfaceObservation(name, listOf(address("192.0.2.1")))), proxy).availability, name)
+        }
     }
 
     @Test fun `代理识别支持大小写SOCKS系统设置排除规则及非法值且不改变全局配置`() {

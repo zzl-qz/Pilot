@@ -18,6 +18,7 @@ class RemoteClient(
 ) {
     private val mutex = Mutex()
     private var connection: Connection? = null
+    class AuthenticationExpiredException : IOException("设备授权已失效，请重新配对")
 
     private fun trace(message: String) { runCatching { diagnostic(message) } }
 
@@ -136,12 +137,16 @@ class RemoteClient(
     }
 }
 
-/** 显式直连配置剥离旧票据的中继；自动模式保留票据中的跨网路由。 */
+/** 显式直连配置剥离旧票据的中继；自动模式保留票据中的跨网路由，自定义中继在异步出码未带 relayUrl 时回退到已配置中继。 */
 internal fun dialAddress(ticket: String, relays: List<String>, allowPublicRelays: Boolean = false): EndpointAddr =
     EndpointTicket.fromString(ticket).use { parsed ->
         parsed.endpointAddr().use { address ->
             address.id().use { id ->
-                EndpointAddr(id, if (relays.isEmpty() && !allowPublicRelays) null else address.relayUrl(), address.directAddresses())
+                val relay = when {
+                    relays.isEmpty() && !allowPublicRelays -> null
+                    else -> address.relayUrl() ?: relays.firstOrNull()
+                }
+                EndpointAddr(id, relay, address.directAddresses())
             }
         }
     }

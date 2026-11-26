@@ -15,6 +15,7 @@ internal class PairingNetwork(
     private val diagnose: suspend () -> String = { "" },
     private val observe: (suspend () -> NetworkEnvironment)? = null,
     private val relayAvailable: (() -> Boolean)? = null,
+    private val currentRelayUrl: (() -> String?)? = null,
     private val pollMillis: Long = 2_000,
 ) : AutoCloseable {
     private val worker = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -72,12 +73,26 @@ internal class PairingNetwork(
         }
     }
 
-    fun issue(name: String, relays: List<String>, publicServices: Boolean) =
-        store.issue(ticket(), name, relays, publicServices)
+    @Volatile private var configuredRelays: List<String> = emptyList()
+
+    fun issue(name: String, relays: List<String>, publicServices: Boolean) = run {
+        configuredRelays = relays
+        store.issue(ticket(), name, effectiveRelays(relays), publicServices)
+    }
+
+    private fun effectiveRelays(configured: List<String>): List<String> =
+        if (configured.isNotEmpty()) configured else listOfNotNull(relayUrl())
+
+    private fun relayUrl(): String? = currentRelayUrl?.invoke()
 
     fun snapshot(): JsonObject {
-        store.refreshRouting(ticket())
         val current = state
+        val refreshedRelays = when {
+            configuredRelays.isNotEmpty() -> configuredRelays
+            current == "ready" -> currentRelayUrl?.let { listOfNotNull(it()) }
+            else -> null
+        }
+        store.refreshRouting(ticket(), refreshedRelays)
         return buildJsonObject {
             put("connectionMode", mode)
             put("networkState", current)
