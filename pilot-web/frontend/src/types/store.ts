@@ -147,6 +147,7 @@ export interface StoreActions {
   setDesktopFocused(focused: boolean): void;
   syncPendingInteractions(snapshot?: PendingInteractionsSnapshot | null): void;
   connectGlobalInteractions(): void;
+  refreshCommandPolling(): void;
   loadPlan(options?: StrictOptions): Promise<void>; loadQueue(options?: StrictOptions): Promise<void>;
   mutateQueue(operation: (id: string, revision: string | null) => Promise<unknown>, failure: string): Promise<boolean>;
   steerQueueItem(index: number): Promise<boolean>; saveQueueItem(target: QueueEditTarget, text: string, requirements?: { constraints: string[]; acceptance: string[] }): Promise<boolean>;

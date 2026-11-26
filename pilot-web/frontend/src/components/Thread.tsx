@@ -91,22 +91,20 @@ export function Thread() {
     const el = scrollRef.current;
     const prev = prependAnchorRef.current;
     const currentFirstKey = rows[0]?.key ?? null;
-    if (el && prev.count > 0 && rows.length > prev.count && currentFirstKey !== prev.firstKey && !isAtBottom) {
-      const deltaHeight = el.scrollHeight - prev.scrollHeight;
-      const browserDeltaTop = el.scrollTop - prev.scrollTop;
-      if (deltaHeight > 0 && Math.abs(browserDeltaTop - deltaHeight) > 16) {
-        el.scrollTop = prev.scrollTop + deltaHeight;
-        lastScrollTop.current = el.scrollTop;
+    const prepended = prev.count > 0 && rows.length > prev.count && currentFirstKey !== prev.firstKey;
+    if (el && prepended) {
+      if (!isAtBottom && prev.scrollHeight > 0) {
+        const deltaHeight = el.scrollHeight - prev.scrollHeight;
+        const browserDeltaTop = el.scrollTop - prev.scrollTop;
+        if (deltaHeight > 0 && Math.abs(browserDeltaTop - deltaHeight) > 16) {
+          el.scrollTop = prev.scrollTop + deltaHeight;
+          lastScrollTop.current = el.scrollTop;
+        }
       }
       earlierPending.current = false;
-    }
-    if (el) {
-      prependAnchorRef.current = {
-        scrollHeight: el.scrollHeight,
-        scrollTop: el.scrollTop,
-        firstKey: currentFirstKey,
-        count: rows.length
-      };
+      prependAnchorRef.current = { scrollHeight: el.scrollHeight, scrollTop: el.scrollTop, firstKey: currentFirstKey, count: rows.length };
+    } else if (!prev.count || currentFirstKey !== prev.firstKey) {
+      prependAnchorRef.current = { scrollHeight: 0, scrollTop: 0, firstKey: currentFirstKey, count: rows.length };
     }
   }, [rows, isAtBottom, scrollRef]);
 
@@ -223,7 +221,8 @@ export function Thread() {
   const hasPendingApprovals = useStore((state) => Object.keys(state.pendingApprovals || {}).length > 0);
   const hasPendingQuestions = useStore((state) => Object.keys(state.pendingQuestions || {}).length > 0);
   const bottomHint = hasPendingApprovals ? '等待批准' : hasPendingQuestions ? '等待选择' : running ? '有新输出' : '';
-  const lastResultRow = [...display.rows].reverse().find((row) => row.type === 'result');
+  const lastResultRow = display.rows.findLast((row) => row.type === 'result');
+  const lastInteractionIndex = display.rows.findLastIndex((row) => row.type === 'turn' || row.type === 'user');
 
   if (!rows.length && !eventCount && !history.hasMore) {
     return <EmptyState />;
@@ -247,7 +246,7 @@ export function Thread() {
               row={row}
               duplicate={row.type === 'result' && duplicateResult(display.rows as ThreadRow[], index)}
               hasPrecedingReply={index > 0 && display.rows[index - 1]?.type === 'turn' && Boolean((display.rows[index - 1] as TurnRow).reply?.text)}
-              isLast={!display.rows.slice(index + 1).some(item => item.type === 'turn' || item.type === 'user')}
+              isLast={index >= lastInteractionIndex}
               isLastResult={Boolean(lastResultRow && row.key === lastResultRow.key)}
             />
           ))}

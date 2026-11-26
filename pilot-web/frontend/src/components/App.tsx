@@ -3,7 +3,8 @@ type ResizeKind = 'sidebar' | 'activity';
 import React, { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Button } from '@astryxdesign/core/Button';
 import { Dialog } from '@astryxdesign/core/Dialog';
-import { useStore } from '../store.js';
+import { closeStreams, useStore } from '../store.js';
+import { isCommandActive } from '../lib/command-tasks.js';
 import { formatClock } from '../thread-utils.js';
 import { RuntimeFooter } from './RuntimeFooter.jsx';
 import { NavigationRail } from './NavigationRail.jsx';
@@ -89,7 +90,7 @@ function Workbench() {
   const agentsDockOpen = useStore((state) => state.ui.agentsDockOpen);
   const sessionTitle = useStore((state) => state.sessionTitle);
   const workspace = useStore((state) => state.workspace);
-  const agents = useStore((state) => state.agents);
+  const agentCount = useStore((state) => Object.keys(state.agents || {}).length);
   const reviewExpanded = useStore(state => state.ui.reviewExpanded && state.ui.inspectorOpen && state.ui.inspectorTab === 'changes');
   const inspectorOpen = useStore((state) => state.ui.inspectorOpen);
   const inspectorTab = useStore((state) => state.ui.inspectorTab);
@@ -107,6 +108,26 @@ function Workbench() {
   }, [embedded]);
 
   useEffect(() => installSoundUnlock(), []);
+
+  useEffect(() => {
+    window.addEventListener('pagehide', closeStreams);
+    window.addEventListener('beforeunload', closeStreams);
+    const refreshCommandPolling = () => useStore.getState().refreshCommandPolling();
+    const unsubscribe = useStore.subscribe((state, previous) => {
+      const activeChanged = state.commandTasks.some(isCommandActive) !== previous.commandTasks.some(isCommandActive);
+      if (activeChanged || state.running !== previous.running || state.ui.inspectorOpen !== previous.ui.inspectorOpen
+        || state.ui.inspectorTab !== previous.ui.inspectorTab) {
+        refreshCommandPolling();
+      }
+    });
+    document.addEventListener('visibilitychange', refreshCommandPolling);
+    return () => {
+      window.removeEventListener('pagehide', closeStreams);
+      window.removeEventListener('beforeunload', closeStreams);
+      document.removeEventListener('visibilitychange', refreshCommandPolling);
+      unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     const syncFocus = () => {
@@ -473,11 +494,11 @@ function Workbench() {
             <h1 id="crumb-title" className="crumb-title" title={sessionTitle}>{sessionTitle || '新任务'}</h1>
           </div>
           <div className="topbar-right">
-            {Object.keys(agents || {}).length > 0 && (
+            {agentCount > 0 && (
               <Button
                 id="agents-chip"
                 className="workbench-agents"
-                label={`子智能体 · ${Object.keys(agents).length}`}
+                label={`子智能体 · ${agentCount}`}
                 variant="ghost"
                 tooltip="查看本对话的子智能体"
                 aria-expanded={agentsDockOpen}

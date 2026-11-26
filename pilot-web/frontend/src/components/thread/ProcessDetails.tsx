@@ -134,6 +134,7 @@ function ProcessScrollViewport({
   const innerRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const thumbRef = useRef<HTMLDivElement>(null);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
   const following = useRef(true);
   const [fade, setFade] = useState<ScrollFade>('none');
   const [scrollable, setScrollable] = useState(false);
@@ -229,11 +230,15 @@ function ProcessScrollViewport({
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onEnd);
       window.removeEventListener('pointercancel', onEnd);
+      dragCleanupRef.current = null;
     };
+    dragCleanupRef.current = onEnd;
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onEnd);
     window.addEventListener('pointercancel', onEnd);
   }, []);
+
+  useEffect(() => () => dragCleanupRef.current?.(), []);
 
   const handleTrackPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const el = scrollRef.current;

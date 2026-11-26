@@ -496,6 +496,8 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     set(state => { state.ready = true; });
   },
 
+  refreshCommandPolling() { streams.refreshCommandPolling(); },
+
   ...createSessionActions({ set, get }, { closeStreams: streams.close,
     connectMirror: streams.connectMirror, connectCommandTasks: streams.connectCommandTasks }),
 

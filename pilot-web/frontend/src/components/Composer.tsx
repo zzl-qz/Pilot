@@ -27,6 +27,11 @@ import { usageBudgetTitle, usageLevel } from '../lib/context-usage.js';
 import './conversation.css';
 
 const ContextUsagePanel = lazy(() => import('./RequestUsage.jsx').then(m => ({ default: m.ContextUsagePanel })));
+const MAX_SESSION_DRAFTS = 20;
+
+function releaseDraftPreview(file: DraftAttachment) {
+  if (file.dataBase64?.startsWith('blob:')) URL.revokeObjectURL(file.dataBase64);
+}
 const ImagePreview = lazy(() => import('./ImagePreview.jsx').then(m => ({ default: m.ImagePreview })));
 const MessageQueue = lazy(() => import('./MessageQueue.jsx').then(m => ({ default: m.MessageQueue })));
 const ModelPicker = lazy(() => import('./model/ModelPicker.jsx').then(m => ({ default: m.ModelPicker })));
@@ -283,9 +288,17 @@ export function Composer() {
         persistSnapshot(previous);
       }
       // 附件在 rail 里、不在 root 的 innerHTML 内，必须连同文件副本一起存
+      sessionDraftsRef.current.delete(previous);
       sessionDraftsRef.current.set(previous, {
         html: input.root.innerHTML, files: new Map(draftFilesRef.current), attachmentIds: input.attachmentIds()
       });
+      while (sessionDraftsRef.current.size > MAX_SESSION_DRAFTS) {
+        const oldest = sessionDraftsRef.current.keys().next().value;
+        if (oldest === undefined) break;
+        const draft = sessionDraftsRef.current.get(oldest);
+        draft?.files.forEach(releaseDraftPreview);
+        sessionDraftsRef.current.delete(oldest);
+      }
     }
     const saved = sessionDraftsRef.current.get(sessionId);
       const stored = readDraftSnapshot(localStore, sessionId);

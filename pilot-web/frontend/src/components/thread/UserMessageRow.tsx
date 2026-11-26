@@ -166,8 +166,9 @@ function AttachmentPreview({ file, onClose }: { file: MessageAttachment; onClose
           const response = await apiFetch(url, { signal: controller.signal });
           if (!response.ok) throw new Error(`读取附件失败（HTTP ${response.status}）`);
           const blob = await response.blob();
-          if (ext === 'pdf') { if (alive) setPdfData(await blob.arrayBuffer()); }
-          else if (image) { currentUrl = URL.createObjectURL(blob); if (alive) setBlobUrl(currentUrl); }
+          if (!alive) return;
+          if (ext === 'pdf') setPdfData(await blob.arrayBuffer());
+          else if (image) { currentUrl = URL.createObjectURL(blob); setBlobUrl(currentUrl); }
           else setText((await blob.text()).slice(0, 250000));
         } else {
           setError('此格式暂不支持应用内预览，请下载后使用本机应用打开。');

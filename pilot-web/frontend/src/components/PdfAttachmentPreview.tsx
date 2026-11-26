@@ -25,6 +25,7 @@ export default function PdfAttachmentPreview({ data, name }: { data: ArrayBuffer
     let task: import('pdfjs-dist').PDFDocumentLoadingTask | undefined;
     setPdfDoc(null);
     setPage(1);
+    setZoom(1);
     setPainted(false);
     setLoadError('');
     setRenderError('');
@@ -83,10 +84,12 @@ export default function PdfAttachmentPreview({ data, name }: { data: ArrayBuffer
     if (!pdfDoc || !canvasRef.current || !width) return;
     let cancelled = false;
     let renderTask: RenderTask | undefined;
+    let pageProxy: import('pdfjs-dist').PDFPageProxy | undefined;
     setRenderError('');
     setRendering(true);
 
     void pdfDoc.getPage(page).then(pdfPage => {
+      pageProxy = pdfPage;
       if (cancelled || !canvasRef.current) return;
       const base = pdfPage.getViewport({ scale: 1 });
       const fit = Math.min(1.6, Math.max(0.25, (width - 36) / base.width));
@@ -125,8 +128,11 @@ export default function PdfAttachmentPreview({ data, name }: { data: ArrayBuffer
         setRenderError('PDF 页面渲染失败，请重试或下载。');
         setRendering(false);
       }
+    }).finally(() => {
+      pageProxy?.cleanup();
+      pageProxy = undefined;
     });
-    return () => { cancelled = true; renderTask?.cancel(); };
+    return () => { cancelled = true; renderTask?.cancel(); pageProxy?.cleanup(); pageProxy = undefined; };
   }, [pdfDoc, page, width, zoom]);
 
   const error = loadError || renderError;

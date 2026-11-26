@@ -11,6 +11,7 @@ import { isEphemeral, isRunEnd } from '../lib/events.js';
 import { browserStateUpdate } from '../lib/browser-mirror.js';
 import { sortChangeFiles } from '../lib/changes.js';
 import { classifyModelError } from '../lib/model-settings.js';
+import { isCommandActive } from '../lib/command-tasks.js';
 import { unrefTimer } from './context.js';
 import { requireData } from './shared.js';
 
@@ -39,6 +40,8 @@ export function createSessionStreams(
   let streamGeneration = 0;
   let mirrorSource: EventSource | null = null;
   let commandTimer: ReturnType<typeof setTimeout> | undefined;
+  let commandPollInFlight = false;
+  let commandPollSession: string | null = null;
   let globalSource: EventSource | null = null;
   let globalReconnectTimer: ReturnType<typeof setTimeout> | undefined;
   let globalAttempt = 0;
@@ -137,6 +140,11 @@ export function createSessionStreams(
     }
   }
 
+  function clearCommandTimer() {
+    clearTimeout(commandTimer);
+    commandTimer = undefined;
+  }
+
   function closeStreams() {
     streamGeneration++;
     resetHistory();
@@ -149,8 +157,8 @@ export function createSessionStreams(
       mirrorSource.close();
       mirrorSource = null;
     }
-    clearInterval(commandTimer);
-    commandTimer = undefined;
+    clearCommandTimer();
+    commandPollSession = null;
     clearTimeout(reconnectTimer);
     reconnectTimer = undefined;
   }
@@ -212,29 +220,70 @@ export function createSessionStreams(
     };
   }
 
+  function shouldPollCommands() {
+    const state = get();
+    const hidden = typeof document !== 'undefined' && document.hidden;
+    return !hidden && (state.running || state.commandTasks.some(isCommandActive)
+      || (state.ui.inspectorOpen && state.ui.inspectorTab === 'commands'));
+  }
+
+  function scheduleCommandPoll(sessionId: string, sessionEpoch: number, immediate: boolean) {
+    if (!sessionId || commandPollSession !== sessionId) return;
+    const schedule = () => {
+      clearCommandTimer();
+      if (!shouldPollCommands() || commandPollSession !== sessionId || get().sessionId !== sessionId) return;
+      commandTimer = setTimeout(() => { void poll(); }, 5000);
+      unrefTimer(commandTimer);
+    };
+    const poll = async () => {
+      commandTimer = undefined;
+      if (commandPollSession !== sessionId || get().sessionId !== sessionId || commandPollInFlight) return;
+      commandPollInFlight = true;
+      try {
+        await get().loadCommandTasks();
+        if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
+        const tasks = get().commandTasks;
+        const detailId = get().commandDetail?.taskId || get().commandDetail?.id;
+        const current = detailId ? tasks.find((task) => (task.taskId || task.id) === detailId) : null;
+        if (current) get().loadCommandLog(current);
+      } finally {
+        commandPollInFlight = false;
+        schedule();
+      }
+    };
+    if (immediate) {
+      clearCommandTimer();
+      void poll();
+    } else if (!commandTimer && !commandPollInFlight) {
+      schedule();
+    }
+  }
+
   function connectCommandTasks() {
     const { sessionId, sessionEpoch } = get();
-    clearInterval(commandTimer);
-    commandTimer = undefined;
+    clearCommandTimer();
     if (!sessionId) {
+      commandPollSession = null;
       return;
     }
-    // 后端只提供 REST 命令任务接口（无 SSE 流），这里用轻量轮询保持面板实时。
-    const poll = async () => {
-      if (get().sessionId !== sessionId) {
-        return;
-      }
-      await get().loadCommandTasks();
-      if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
-      const tasks = get().commandTasks;
-      const detailId = get().commandDetail?.taskId || get().commandDetail?.id;
-      const current = detailId ? tasks.find((task) => (task.taskId || task.id) === detailId) : null;
-      if (current) get().loadCommandLog(current);
-    };
-    poll();
-    commandTimer = setInterval(poll, 5000);
-    // Node（单元测试）里定时器会吊住事件循环，让测试文件永远不退出；浏览器里没有 unref
-    unrefTimer(commandTimer);
+    commandPollSession = sessionId;
+    // 切换会话先拉一次快照（更新后台命令徽标），后续仅在命令运行/Agent 执行中或命令面板打开时轮询。
+    scheduleCommandPoll(sessionId, sessionEpoch, true);
+  }
+
+  function refreshCommandPolling() {
+    const { sessionId, sessionEpoch, ui } = get();
+    if (!sessionId || commandPollSession !== sessionId) {
+      clearCommandTimer();
+      return;
+    }
+    if (!shouldPollCommands()) {
+      clearCommandTimer();
+      return;
+    }
+    if (commandTimer || commandPollInFlight) return;
+    const panelVisible = ui.inspectorOpen && ui.inspectorTab === 'commands';
+    scheduleCommandPoll(sessionId, sessionEpoch, panelVisible);
   }
 
   const actions: StoreSlice<'connectSse' | 'scheduleReconnect' | 'handleEvent' | 'flushEvents' | 'settleEvent' | 'ensureMirror' | 'connectGlobalInteractions'> = {
@@ -583,7 +632,7 @@ export function createSessionStreams(
 
   };
   return {
-    actions, close: closeStreams, closeAll: closeAllStreams, connectMirror, connectCommandTasks,
+    actions, close: closeStreams, closeAll: closeAllStreams, connectMirror, connectCommandTasks, refreshCommandPolling,
     rebuildHistory: rebuildStreamHistory,
     isCircuitOpen: () => circuitOpen,
     resetCircuit() { circuitOpen = false; streamFailures = 0; }
