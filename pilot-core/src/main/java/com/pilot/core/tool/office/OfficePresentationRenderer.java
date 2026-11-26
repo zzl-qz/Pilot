@@ -34,6 +34,7 @@ public final class OfficePresentationRenderer {
         OfficeSupport.bounded(source, OfficeSupport.MAX_OFFICE_BYTES);
         JsonNode slides = spec.path("append_slides");
         OfficeSupport.requireArray(slides, 1, 40, "append_slides");
+        OfficeSupport.hardenZip();
         try (InputStream in = Files.newInputStream(source); var deck = new XMLSlideShow(in);
             OutputStream out = Files.newOutputStream(target)) {
             if (deck.getSlides().size() + slides.size() > 40) {

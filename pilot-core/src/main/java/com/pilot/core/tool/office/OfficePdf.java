@@ -137,7 +137,7 @@ final class OfficePdf {
             List<Attachment> images = new ArrayList<>();
             int rendered = 0;
             for (int page = range[0]; page <= range[1]; page++) {
-                BufferedImage image = renderer.renderImageWithDPI(page - 1, DPI);
+                BufferedImage image = OfficeSupport.renderPdfPage(renderer, document.getPage(page - 1), page - 1, DPI);
                 Path png = dir.resolve("page-" + page + ".png");
                 if (!ImageIO.write(image, "png", png.toFile()) || Files.size(png) > MAX_PNG_BYTES) {
                     Files.deleteIfExists(png);

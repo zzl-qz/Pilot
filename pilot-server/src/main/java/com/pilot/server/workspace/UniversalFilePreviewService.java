@@ -46,6 +46,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.pilot.core.tool.office.OfficeSupport;
 import com.pilot.core.util.HostOs;
 import com.pilot.server.browser.BrowserRuntime;
 
@@ -231,6 +232,7 @@ public final class UniversalFilePreviewService {
         }
         List<DocBlock> blocks = new ArrayList<>();
         boolean truncated = false;
+        OfficeSupport.hardenZip();
         try (InputStream in = Files.newInputStream(file); XWPFDocument doc = new XWPFDocument(in)) {
             for (IBodyElement element : doc.getBodyElements()) {
                 if (blocks.size() >= MAX_DOCX_BLOCKS) {
@@ -284,6 +286,7 @@ public final class UniversalFilePreviewService {
         List<SheetData> sheets = new ArrayList<>();
         boolean truncated = false;
         DataFormatter formatter = new DataFormatter(Locale.ROOT);
+        OfficeSupport.hardenZip();
         try (InputStream in = Files.newInputStream(file); Workbook workbook = WorkbookFactory.create(in)) {
             FormulaEvaluator evaluator = workbook.getCreationHelper().createFormulaEvaluator();
             int count = workbook.getNumberOfSheets();
@@ -320,7 +323,7 @@ public final class UniversalFilePreviewService {
             List<String> values = new ArrayList<>(lastCell);
             for (int c = 0; c < lastCell; c++) {
                 Cell cell = row.getCell(c);
-                values.add(cell == null ? "" : formatter.formatCellValue(cell, evaluator).strip());
+                values.add(cell == null ? "" : OfficeSupport.safeCellText(cell, formatter, evaluator));
             }
             maxCol = Math.max(maxCol, values.size());
             rows.add(values);
@@ -339,6 +342,7 @@ public final class UniversalFilePreviewService {
         }
         List<SlideData> slides = new ArrayList<>();
         boolean truncated = false;
+        OfficeSupport.hardenZip();
         try (InputStream in = Files.newInputStream(file); XMLSlideShow ppt = new XMLSlideShow(in)) {
             int index = 0;
             for (XSLFSlide slide : ppt.getSlides()) {

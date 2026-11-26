@@ -196,6 +196,7 @@ public final class OfficeTool implements Tool {
 
     private static String spreadsheetInspect(Path file) throws Exception {
         List<Object> items = new ArrayList<>();
+        OfficeSupport.hardenZip();
         try (InputStream in = Files.newInputStream(file); var book = new XSSFWorkbook(in)) {
             if (!book.getExternalLinksTable().isEmpty()) {
                 throw new IllegalArgumentException("工作簿含外部引用，不自动计算");
@@ -210,13 +211,20 @@ public final class OfficeTool implements Tool {
                         if (++count > 50000) {
                             throw new IllegalArgumentException("超过 50000 单元格检查上限");
                         }
-                        var computed = evaluator.evaluate(cell);
+                        org.apache.poi.ss.usermodel.CellValue computed = null;
+                        boolean evaluationFailed = false;
+                        try {
+                            computed = evaluator.evaluate(cell);
+                        } catch (RuntimeException | StackOverflowError failure) {
+                            evaluationFailed = true;
+                        }
                         if (computed != null && computed.getCellType() == CellType.ERROR) {
                             throw new IllegalArgumentException("单元格计算错误：" + cell.getAddress());
                         }
                         if (values.size() < 200) {
-                            values.add(Map.of("cell", cell.getAddress().formatAsString(), "value",
-                                formatter.formatCellValue(cell, evaluator), "formula",
+                            String rendered = evaluationFailed && cell.getCellType() == CellType.FORMULA
+                                ? "=" + cell.getCellFormula() : OfficeSupport.safeCellText(cell, formatter, evaluator);
+                            values.add(Map.of("cell", cell.getAddress().formatAsString(), "value", rendered, "formula",
                                 cell.getCellType() == CellType.FORMULA ? cell.getCellFormula() : ""));
                         }
                     }
@@ -230,6 +238,7 @@ public final class OfficeTool implements Tool {
 
     private static String presentationInspect(Path file) throws Exception {
         List<Object> items = new ArrayList<>();
+        OfficeSupport.hardenZip();
         try (InputStream in = Files.newInputStream(file); var deck = new XMLSlideShow(in)) {
             if (deck.getSlides().size() > 40) {
                 throw new IllegalArgumentException("超过 40 页检查上限");
@@ -253,6 +262,7 @@ public final class OfficeTool implements Tool {
         Path directory = paths.resolve(paths.display(file) + ".preview-" + java.util.UUID.randomUUID());
         List<Attachment> images = new ArrayList<>();
         List<String> changed = new ArrayList<>();
+        OfficeSupport.hardenZip();
         try (InputStream in = Files.newInputStream(file); var deck = new XMLSlideShow(in)) {
             if (deck.getSlides().isEmpty() || deck.getSlides().size() > 40) {
                 throw new IllegalArgumentException("页数必须为 1–40");

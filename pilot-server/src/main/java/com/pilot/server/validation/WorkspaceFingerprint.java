@@ -1,10 +1,13 @@
 package com.pilot.server.validation;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 
 import com.pilot.core.multi.DiffSandbox;
@@ -45,12 +48,26 @@ public final class WorkspaceFingerprint {
                 continue;
             }
             try {
-                entries.add(relative + "\0" + DiffSandbox.fingerprint(Files.readString(file, StandardCharsets.UTF_8)));
+                entries.add(relative + "\0" + fingerprint(file));
             } catch (IOException | RuntimeException e) {
                 entries.add(relative + "\0UNREADABLE");
             }
         }
         entries.sort(String::compareTo);
         return entries.isEmpty() ? "" : DiffSandbox.fingerprint(String.join("\n", entries));
+    }
+
+    private static String fingerprint(Path file) throws IOException {
+        try (InputStream input = Files.newInputStream(file)) {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                digest.update(buffer, 0, read);
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is unavailable", e);
+        }
     }
 }

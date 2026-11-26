@@ -75,6 +75,7 @@ public final class OfficeWorkbookRenderer {
     }
 
     public static void edit(Path source, Path target, JsonNode spec) throws Exception {
+        OfficeSupport.hardenZip();
         try (InputStream in = Files.newInputStream(source); var book = new XSSFWorkbook(in);
             OutputStream out = Files.newOutputStream(target)) {
             JsonNode cells = spec.path("cells");
@@ -174,12 +175,23 @@ public final class OfficeWorkbookRenderer {
 
     private static void verifyFormulas(XSSFWorkbook book) {
         var evaluator = book.getCreationHelper().createFormulaEvaluator();
-        evaluator.evaluateAll();
         for (var sheet : book) {
             for (var row : sheet) {
                 for (var cell : row) {
-                    if (cell.getCellType() == CellType.FORMULA && cell.getCachedFormulaResultType() == CellType.ERROR) {
-                        throw new IllegalArgumentException("公式错误：" + sheet.getSheetName() + "!" + cell.getAddress());
+                    if (cell.getCellType() == CellType.FORMULA) {
+                        try {
+                            CellType evaluated = evaluator.evaluateFormulaCell(cell);
+                            if (evaluated == CellType.ERROR) {
+                                throw new IllegalArgumentException(
+                                    "公式错误：" + sheet.getSheetName() + "!" + cell.getAddress());
+                            }
+                        } catch (IllegalArgumentException failure) {
+                            if (failure.getMessage() != null && failure.getMessage().startsWith("公式错误：")) {
+                                throw failure;
+                            }
+                        } catch (RuntimeException | StackOverflowError failure) {
+                            // 单个循环引用或异常公式降级保留公式原文与既有缓存，不中断整本工作簿处理。
+                        }
                     }
                 }
             }

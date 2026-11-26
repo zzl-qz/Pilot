@@ -30,6 +30,7 @@ import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellType;
 import org.apache.poi.ss.usermodel.DataFormatter;
+import org.apache.poi.ss.usermodel.FormulaEvaluator;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.xslf.usermodel.XMLSlideShow;
@@ -142,7 +143,8 @@ public final class FilePreviews {
             PDFRenderer renderer = new PDFRenderer(document);
             renderer.setSubsamplingAllowed(true);
             for (int page = 1; page <= total; page++) {
-                BufferedImage img = renderer.renderImageWithDPI(page - 1, PDF_DPI, ImageType.RGB);
+                BufferedImage img =
+                    OfficeSupport.renderPdfPage(renderer, document.getPage(page - 1), page - 1, PDF_DPI, ImageType.RGB);
                 writeAtomic(img, directory.resolve("page-" + page + ".png"));
             }
             String notice = "按 PDF 原始版式高清渲染" + (rawPages > MAX_PAGES ? "，仅前 " + MAX_PAGES + " 页" : "");
@@ -152,6 +154,7 @@ public final class FilePreviews {
 
     private static Result pptx(Path source, Path directory) throws IOException {
         OfficeSupport.ensureCjkFontRegistered();
+        OfficeSupport.hardenZip();
         try (InputStream in = Files.newInputStream(source); XMLSlideShow deck = new XMLSlideShow(in)) {
             List<XSLFSlide> slides = deck.getSlides();
             int total = Math.min(slides.size(), MAX_PAGES);
@@ -193,10 +196,10 @@ public final class FilePreviews {
 
     /** Word 结构化排版预览：按文档真实元素顺序绘制标题层级、段落、项目符号与边框表格。 */
     private static Result docx(Path source, Path directory) throws IOException {
-        OfficeSupport.hardenZip();
         OfficeSupport.ensureCjkFontRegistered();
         String family = uiFontFamily();
         List<DocItem> items = new ArrayList<>();
+        OfficeSupport.hardenZip();
         try (InputStream in = Files.newInputStream(source); XWPFDocument doc = new XWPFDocument(in)) {
             for (IBodyElement el : doc.getBodyElements()) {
                 if (el instanceof XWPFParagraph p) {
@@ -412,16 +415,18 @@ public final class FilePreviews {
 
     /** Excel 电子表格预览：按工作表绘制表头、自适应列宽、网格线与数值右对齐。 */
     private static Result xlsx(Path source, Path directory) throws IOException {
-        OfficeSupport.hardenZip();
         OfficeSupport.ensureCjkFontRegistered();
         String family = uiFontFamily();
         List<BufferedImage> pages = new ArrayList<>();
         DataFormatter formatter = new DataFormatter(Locale.ROOT);
+        FormulaEvaluator evaluator;
 
+        OfficeSupport.hardenZip();
         try (InputStream in = Files.newInputStream(source); XSSFWorkbook book = new XSSFWorkbook(in)) {
+            evaluator = book.getCreationHelper().createFormulaEvaluator();
             for (int s = 0; s < book.getNumberOfSheets() && pages.size() < MAX_PAGES; s++) {
                 Sheet sheet = book.getSheetAt(s);
-                renderSheetPages(sheet, formatter, family, pages);
+                renderSheetPages(sheet, formatter, evaluator, family, pages);
             }
         }
         if (pages.isEmpty()) {
@@ -437,10 +442,18 @@ public final class FilePreviews {
         return new Result(total, "表格网格预览（数值自动右对齐）；筛选、公式编辑与宽表滚动请点「用本机应用打开」");
     }
 
-    private static void renderSheetPages(Sheet sheet, DataFormatter formatter, String family,
-        List<BufferedImage> pages) {
+    private static void renderSheetPages(Sheet sheet, DataFormatter formatter, FormulaEvaluator evaluator,
+        String family, List<BufferedImage> pages) {
+        List<List<CellVal>> grid = collectSheetGrid(sheet, formatter, evaluator);
+        if (grid.isEmpty()) {
+            return;
+        }
+        renderSheetGrid(sheet, grid, family, pages);
+    }
+
+    private static List<List<CellVal>> collectSheetGrid(Sheet sheet, DataFormatter formatter,
+        FormulaEvaluator evaluator) {
         List<List<CellVal>> grid = new ArrayList<>();
-        int maxCols = 0;
         int lastRow = Math.min(sheet.getLastRowNum(), 300);
         for (int r = sheet.getFirstRowNum(); r <= lastRow; r++) {
             Row row = sheet.getRow(r);
@@ -455,20 +468,23 @@ public final class FilePreviews {
             boolean anyText = false;
             for (int c = 0; c < cols; c++) {
                 Cell cell = row.getCell(c);
-                String text = cell == null ? "" : formatter.formatCellValue(cell).strip();
+                String text = cell == null ? "" : OfficeSupport.safeCellText(cell, formatter, evaluator);
                 boolean numeric = (cell != null && (cell.getCellType() == CellType.NUMERIC
                     || cell.getCellType() == CellType.FORMULA && looksNumeric(text))) || looksNumeric(text);
-                if (!text.isEmpty()) {
-                    anyText = true;
-                }
+                anyText |= !text.isEmpty();
                 values.add(new CellVal(text, numeric));
             }
             if (anyText) {
                 grid.add(values);
-                maxCols = Math.max(maxCols, cols);
             }
         }
-        if (grid.isEmpty() || maxCols == 0) {
+        return grid;
+    }
+
+    private static void renderSheetGrid(Sheet sheet, List<List<CellVal>> grid, String family,
+        List<BufferedImage> pages) {
+        int maxCols = grid.stream().mapToInt(List::size).max().orElse(0);
+        if (maxCols == 0) {
             return;
         }
         int contentWidth = PAGE_WIDTH - MARGIN * 2;
@@ -495,8 +511,6 @@ public final class FilePreviews {
             g.setColor(INK);
             g.drawString(tag, MARGIN + 14, y + 23);
             y += 48;
-
-            // 每页重复冻结首行表头
             if (cursor > 0) {
                 drawSheetRow(g, grid.getFirst(), colWidths, MARGIN, y, rowH, true, headFont, cellFont);
                 y += rowH;

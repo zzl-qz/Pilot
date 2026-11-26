@@ -2,6 +2,7 @@ package com.pilot.core.tool.office;
 
 import java.awt.Font;
 import java.awt.GraphicsEnvironment;
+import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -12,10 +13,16 @@ import java.util.Locale;
 
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.rendering.ImageType;
+import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.poi.openxml4j.util.ZipSecureFile;
 import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.CellType;
 import org.apache.poi.ss.usermodel.DataFormatter;
+import org.apache.poi.ss.usermodel.FormulaEvaluator;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.xslf.usermodel.XMLSlideShow;
@@ -49,7 +56,7 @@ public final class OfficeSupport {
     }
 
     /** OOXML 是 zip：显式给出膨胀比、单条目、条目数和文本上限，避免只靠文件大小挡 zip bomb。 */
-    static void hardenZip() {
+    public static void hardenZip() {
         if (zipHardened) {
             return;
         }
@@ -63,6 +70,58 @@ public final class OfficeSupport {
             ZipSecureFile.setMaxTextSize(10L * 1024 * 1024);
             zipHardened = true;
         }
+    }
+
+    public static float boundedPdfDpi(PDPage page, float requestedDpi) {
+        PDRectangle mediaBox = page.getMediaBox();
+        if (mediaBox == null) {
+            return requestedDpi;
+        }
+        PDRectangle box = mediaBox;
+        PDRectangle cropBox = page.getCropBox();
+        if (cropBox != null && cropBox.getWidth() > 0 && cropBox.getHeight() > 0
+            && (cropBox.getWidth() < mediaBox.getWidth() || cropBox.getHeight() < mediaBox.getHeight())) {
+            box = cropBox;
+        }
+        double width = Math.max(1.0, box.getWidth());
+        double height = Math.max(1.0, box.getHeight());
+        int rotation = Math.floorMod(page.getRotation(), 360);
+        if (rotation == 90 || rotation == 270) {
+            double swap = width;
+            width = height;
+            height = swap;
+        }
+        double pixelsPerPoint = requestedDpi / 72.0;
+        double scale = Math.min(1.0, Math.min(8192.0 / (width * pixelsPerPoint), 8192.0 / (height * pixelsPerPoint)));
+        scale = Math.min(scale, Math.sqrt(32_000_000.0 / (width * height * pixelsPerPoint * pixelsPerPoint)));
+        return (float)(requestedDpi * scale);
+    }
+
+    public static String safeCellText(Cell cell, DataFormatter formatter, FormulaEvaluator evaluator) {
+        if (cell.getCellType() != CellType.FORMULA) {
+            return formatter.formatCellValue(cell).strip();
+        }
+        try {
+            String value = formatter.formatCellValue(cell, evaluator).strip();
+            return value.contains("~CIRCULAR~") ? "=" + cell.getCellFormula() : value;
+        } catch (IllegalArgumentException failure) {
+            if (failure.getMessage() != null && failure.getMessage().startsWith("单元格计算错误：")) {
+                throw failure;
+            }
+            return "=" + cell.getCellFormula();
+        } catch (RuntimeException | StackOverflowError failure) {
+            return "=" + cell.getCellFormula();
+        }
+    }
+
+    public static BufferedImage renderPdfPage(PDFRenderer renderer, PDPage page, int pageIndex, float requestedDpi)
+        throws IOException {
+        return renderer.renderImageWithDPI(pageIndex, boundedPdfDpi(page, requestedDpi));
+    }
+
+    public static BufferedImage renderPdfPage(PDFRenderer renderer, PDPage page, int pageIndex, float requestedDpi,
+        ImageType imageType) throws IOException {
+        return renderer.renderImageWithDPI(pageIndex, boundedPdfDpi(page, requestedDpi), imageType);
     }
 
     static void bounded(Path file, long limit) throws IOException {
@@ -127,14 +186,16 @@ public final class OfficeSupport {
 
     private static String spreadsheetText(Path file) throws IOException {
         StringBuilder out = new StringBuilder();
+        hardenZip();
         try (InputStream in = Files.newInputStream(file); XSSFWorkbook book = new XSSFWorkbook(in)) {
             DataFormatter formatter = new DataFormatter(Locale.ROOT);
+            var evaluator = book.getCreationHelper().createFormulaEvaluator();
             for (Sheet sheet : book) {
                 out.append("[sheet] ").append(sheet.getSheetName()).append('\n');
                 for (Row row : sheet) {
                     List<String> values = new ArrayList<>();
                     for (Cell cell : row) {
-                        values.add(formatter.formatCellValue(cell));
+                        values.add(safeCellText(cell, formatter, evaluator));
                     }
                     out.append(String.join(" | ", values)).append('\n');
                 }
@@ -145,6 +206,7 @@ public final class OfficeSupport {
 
     private static String presentationText(Path file) throws IOException {
         StringBuilder out = new StringBuilder();
+        hardenZip();
         try (InputStream in = Files.newInputStream(file); XMLSlideShow deck = new XMLSlideShow(in)) {
             for (var slide : deck.getSlides()) {
                 out.append("[slide ").append(slide.getSlideNumber()).append("]\n");
@@ -160,6 +222,7 @@ public final class OfficeSupport {
 
     private static String documentText(Path file) throws IOException {
         StringBuilder out = new StringBuilder();
+        hardenZip();
         try (InputStream in = Files.newInputStream(file); XWPFDocument document = new XWPFDocument(in)) {
             for (var element : document.getBodyElements()) {
                 if (element instanceof XWPFParagraph paragraph) {

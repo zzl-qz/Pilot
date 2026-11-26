@@ -136,7 +136,8 @@ final class MediaFileReader {
         Path dir = ToolArtifacts.directory("pdf/" + key);
         List<Attachment> images = new ArrayList<>();
         for (int page = range[0]; page <= range[1] && images.size() < MAX_RENDERED_PAGES; page++) {
-            BufferedImage image = renderer.renderImageWithDPI(page - 1, RENDER_DPI);
+            BufferedImage image =
+                OfficeSupport.renderPdfPage(renderer, document.getPage(page - 1), page - 1, RENDER_DPI);
             Path target = dir.resolve("page-" + page + ".png");
             if (!ImageIO.write(image, "png", target.toFile()) || Files.size(target) > MAX_IMAGE_BYTES) {
                 Files.deleteIfExists(target);
