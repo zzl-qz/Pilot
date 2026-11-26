@@ -16,6 +16,8 @@ import { MarkdownBody } from "./MarkdownBody.jsx";
 import { writeClipboard } from "../lib/clipboard.js";
 import { formatClock, formatCount, formatTime } from "../thread-utils.js";
 import { Icon } from "./Icon.jsx";
+import { ErrorBoundary } from "./ErrorBoundary.jsx";
+import { safeLocalStorage } from "../lib/safe-storage.js";
 import { UserMessage } from "./thread/UserMessageRow.js";
 import { ProcessChevron, isSummaryClick, useSecondTick, elapsedSeconds } from "./thread/process-helpers.js";
 import "./conversation.css";
@@ -261,9 +263,9 @@ export function Thread() {
         </div>
       )}
       {rows.length > 0 && (
-        <Suspense fallback={null}>
+        <ErrorBoundary name="对话导航"><Suspense fallback={null}>
           <ThreadNavigator rows={rows} scrollRef={scrollRef} contentRef={contentRef} stopFollowing={stopScroll} beforeJump={beforeNavigation} />
-        </Suspense>
+        </Suspense></ErrorBoundary>
       )}
     </div>
   );
@@ -302,9 +304,7 @@ function EmptyState() {
     && (settingsData.modelEndpoint === undefined || settingsData.modelEndpoint.trim())
   );
   const soundEnabled = useStore(state => state.alertPrefs.soundEnabled);
-  const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
-    try { return localStorage.getItem('pilot.onboarding.dismissed') === '1'; } catch { return false; }
-  });
+  const [onboardingDismissed, setOnboardingDismissed] = useState(() => safeLocalStorage().getItem('pilot.onboarding.dismissed') === '1');
   const [scope, setScope] = useState<ApiResults['worktreeInfo'] | null>(null);
   const [scopeUnavailable, setScopeUnavailable] = useState(false);
   useEffect(() => {
@@ -338,7 +338,7 @@ function EmptyState() {
                     className="onboarding-dismiss"
                     onClick={() => {
                       setOnboardingDismissed(true);
-                      try { localStorage.setItem('pilot.onboarding.dismissed', '1'); } catch { /* 忽略 */ }
+                      safeLocalStorage().setItem('pilot.onboarding.dismissed', '1');
                     }}
                   >
                     暂不显示
@@ -418,9 +418,9 @@ const RowView = memo(function RowView({ row, isLast, duplicate, hasPrecedingRepl
     case 'user': return <UserMessage row={row} />;
     case 'turn': return <Turn row={row} isLast={isLast} />;
     case 'compaction-group': return <CompactionGroupCard row={row} />;
-    case 'result': return <Suspense fallback={null}><ResultCard row={row} duplicate={duplicate} hasPrecedingReply={hasPrecedingReply} isLastResult={isLastResult} /></Suspense>;
-    case 'sandbox': return <Suspense fallback={null}><SandboxCard row={row} /></Suspense>;
-    case 'arb': return <Suspense fallback={null}><ArbitrationCard row={row} /></Suspense>;
+    case 'result': return <ErrorBoundary name="运行结果"><Suspense fallback={null}><ResultCard row={row} duplicate={duplicate} hasPrecedingReply={hasPrecedingReply} isLastResult={isLastResult} /></Suspense></ErrorBoundary>;
+    case 'sandbox': return <ErrorBoundary name="沙箱结果"><Suspense fallback={null}><SandboxCard row={row} /></Suspense></ErrorBoundary>;
+    case 'arb': return <ErrorBoundary name="审批结果"><Suspense fallback={null}><ArbitrationCard row={row} /></Suspense></ErrorBoundary>;
     default: return null;
   }
 });
@@ -442,9 +442,9 @@ const Turn = memo(function Turn({ row, isLast }: { row: TurnRow; isLast: boolean
   return (
     <div className="turn-shell" data-run={row.runIds?.join(',') || undefined}>
       {hasProcess && (
-        <Suspense fallback={null}>
+        <ErrorBoundary name="运行详情"><Suspense fallback={null}>
           <TurnProcess thinking={row.thinking} tools={row.tools} agents={row.agents} />
-        </Suspense>
+        </Suspense></ErrorBoundary>
       )}
       {(replyText || row.reply.live) && (
         <article className={`msg msg-assistant${row.reply.live ? ' is-streaming' : ''}`}>
@@ -550,7 +550,7 @@ const TurnStats = memo(function TurnStats({ stats, reports, agentCount }: { stat
       </span>
       <span className="turn-stat"><span>费用估算</span><b>{priced > 0 ? totalCost(stats.details) : '未返回'}</b></span>
       <span className="turn-stat-note">{priceNote}</span>
-    </div>{open && (reports?.length || 0) > 0 && <Suspense fallback={null}><RequestList reports={reports} /></Suspense>}</details>
+    </div>{open && (reports?.length || 0) > 0 && <ErrorBoundary name="请求用量"><Suspense fallback={null}><RequestList reports={reports} /></Suspense></ErrorBoundary>}</details>
   );
 });
 

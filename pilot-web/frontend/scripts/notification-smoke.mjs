@@ -12,7 +12,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const output = await mkdtemp(join(tmpdir(), 'pilot-notification-ui-'));
 const entry = `.notification-fixture-${process.pid}.html`;
 const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module">
-import React from 'react';import{createRoot}from'react-dom/client';import Notifications from'/src/components/Notifications.jsx';import{UiProvider}from'/src/components/UiProvider.jsx';import{ErrorBoundary}from'/src/components/ErrorBoundary.jsx';import{useStore}from'/src/store.js';import{api}from'/src/api.js';import'/src/styles.css';import'/src/workbench.css';
+import React,{Suspense}from'react';import{createRoot}from'react-dom/client';import Notifications from'/src/components/Notifications.jsx';import{UiProvider}from'/src/components/UiProvider.jsx';import{ErrorBoundary}from'/src/components/ErrorBoundary.jsx';import{useStore}from'/src/store.js';import{api}from'/src/api.js';import'/src/styles.css';import'/src/workbench.css';
 window.store=useStore;window.receipts=[];window.notices=[];window.failSave=false;window.failRead=false;window.failDeliveries=false;window.failRetry=false;window.crash=true;window.deliveries=[];
 window.TestNotification=class{static permission='denied';static async requestPermission(){return this.permission;}constructor(title,options){this.title=title;this.options=options;notices.push(this);if(options.tag!=='silent-notice')setTimeout(()=>this.options.tag==='error-notice'?this.onerror?.():this.onshow?.(),0);}close(){}};
 window.Notification=window.TestNotification;
@@ -25,7 +25,11 @@ api.claimDelivery=async()=>claims.shift()||null;api.deliveryReceipt=async(id,bod
 useStore.getState().setTheme('dark');
 useStore.getState().setUi({notificationsOpen:true});
 function Fragile(){if(window.crash)throw Error('隔离测试错误');return React.createElement('p',null,'面板恢复正常');}
-createRoot(document.getElementById('root')).render(React.createElement(UiProvider,null,React.createElement(Notifications),React.createElement(ErrorBoundary,{name:'验证面板',onReset:()=>{window.crash=false;}},React.createElement(Fragile))));
+const BrokenModal=React.lazy(()=>Promise.reject(Error('模拟弹窗 chunk 加载失败')));
+const clearDialogState=()=>useStore.getState().setUi({settingsOpen:false,schedulesOpen:false,searchOpen:false,resultsOpen:false,recurringOpen:false,ideasOpen:false,projectEditor:null,picker:null,exportCopy:null,paletteOpen:false,checkpointDialog:null,confirm:null,shortcutsOpen:false,mobileConnectionOpen:false});
+useStore.getState().setUi({settingsOpen:true,schedulesOpen:true,searchOpen:true,projectEditor:{name:'测试'}});
+function DeferredModalFixture(){return React.createElement(ErrorBoundary,{name:'弹窗',onReset:clearDialogState,fallback:React.createElement('section',{role:'dialog'},React.createElement('p',{role:'alert'},'弹窗加载失败'),React.createElement('button',{onClick:clearDialogState},'关闭'))},React.createElement(Suspense,{fallback:null},React.createElement(BrokenModal)));}
+createRoot(document.getElementById('root')).render(React.createElement(UiProvider,null,React.createElement(Notifications),React.createElement(ErrorBoundary,{name:'验证面板',onReset:()=>{window.crash=false;}},React.createElement(Fragile)),React.createElement(DeferredModalFixture)));
 </script></body></html>`;
 try { await writeFile(join(root, entry), fixture); await build({ root, build: { outDir: output, emptyOutDir: false, rollupOptions: { input: join(root, entry) } } }); }
 finally { await rm(join(root, entry), { force: true }); }
@@ -86,6 +90,9 @@ async function run(page, name) {
   await page.getByRole('button', { name: '关闭通知与投递', exact:true }).click();
   await page.getByRole('button', { name: '重试', exact: true }).click();
   await page.getByText('面板恢复正常', { exact: true }).waitFor();
+  const brokenModal=page.getByRole('dialog');await brokenModal.getByRole('alert').filter({hasText:'弹窗加载失败'}).waitFor();
+  await brokenModal.getByRole('button',{name:'关闭',exact:true}).click();
+  await page.waitForFunction(()=>{const ui=store.getState().ui;return !ui.settingsOpen&&!ui.schedulesOpen&&!ui.searchOpen&&ui.projectEditor===null;});
   await page.evaluate(() => notices[0].onclick());
   assert.equal(await page.evaluate(() => store.getState().ui.resultTarget), 'result');
   await page.evaluate(() => { window.failRead = true; store.getState().setUi({ notificationsOpen: true }); });
@@ -104,8 +111,10 @@ async function run(page, name) {
 }
 try {
 browser = await chromium.launch(browserOptions({ headless: true })); await run(await browser.newPage(), 'chromium'); await browser.close(); browser = null;
-  const main = join(output, 'main.cjs'); await writeFile(main, `const{app,BrowserWindow}=require('electron');app.setPath('userData',${JSON.stringify(join(output,'electron-profile'))});app.whenReady().then(()=>{const w=new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}});w.loadURL(${JSON.stringify(url)});});`);
-  const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
-  desktop = await _electron.launch({ executablePath: electronBinary(), args: [main], env }); await run(await desktop.firstWindow(), 'electron');
+  if (!process.argv.includes('--chromium-only')) {
+    const main = join(output, 'main.cjs'); await writeFile(main, `const{app,BrowserWindow}=require('electron');app.setPath('userData',${JSON.stringify(join(output,'electron-profile'))});app.whenReady().then(()=>{const w=new BrowserWindow({show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}});w.loadURL(${JSON.stringify(url)});});`);
+    const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
+    desktop = await _electron.launch({ executablePath: electronBinary(), args: [main], env }); await run(await desktop.firstWindow(), 'electron');
+  }
   console.log('Evidence:', output);
 } finally { await browser?.close(); await desktop?.close(); await new Promise(resolve => server.httpServer.close(resolve)); }

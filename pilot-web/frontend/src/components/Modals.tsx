@@ -15,6 +15,7 @@ import { writeClipboard } from '../lib/clipboard.js';
 import { downloadSessionExport, exportFailureMessage, saveSessionMarkdown } from '../lib/session-export.js';
 import { buildTranscript } from '../lib/transcript.js';
 import { SessionActionDialog } from './SessionActionDialog.jsx';
+import { ErrorBoundary } from './ErrorBoundary.jsx';
 import { filterPaletteActions } from '../lib/commands.js';
 import { shortcut } from '../lib/interaction.js';
 import { verificationLabel, verificationHint, verificationTone, verificationNeedsRerun } from '../lib/verification/run.js';
@@ -174,6 +175,18 @@ function parseAcceptanceLines(text: string, previous: S.TaskControlServiceAccept
     });
 }
 
+function ModalLoadError({ name, close }: { name: string; close: () => void }) {
+  return (
+    <Modal id="modal-load-error" title={`${name}加载失败`} width={420} onClose={close}>
+      <p role="alert">{name}加载或渲染失败，请关闭后重试或重新载入工作台。</p>
+      <div className="workbench-worktree-actions">
+        <button type="button" className="btn" onClick={close}>关闭</button>
+        <button type="button" className="btn btn-primary" onClick={() => { close(); void useStore.getState().reloadWorkbench(); }}>重新载入工作台</button>
+      </div>
+    </Modal>
+  );
+}
+
 /** 全部弹层：工作区选择 / 项目编辑 / 设置 / 命令面板 / 检查点。 */
 export function Modals() {
   const picker = useStore((state) => state.ui.picker);
@@ -185,11 +198,14 @@ export function Modals() {
   const confirm = useStore((state) => state.ui.confirm);
   const mobileConnectionOpen = useStore((state) => state.ui.mobileConnectionOpen);
   const shortcutsOpen = useStore((state) => state.ui.shortcutsOpen);
+  const closePicker = () => useStore.getState().setUi({ picker: null });
+  const closeProject = () => useStore.getState().setUi({ projectEditor: null });
+  const closeSettings = () => useStore.getState().setUi({ settingsOpen: false });
   return (
     <>
-      {picker && <WorkspacePicker />}
-      {projectEditor && <Suspense fallback={null}><ProjectEditor /></Suspense>}
-      {settingsOpen && <Suspense fallback={null}><SettingsModal /></Suspense>}
+      {picker && <ErrorBoundary name="工作区选择" onReset={closePicker} fallback={<ModalLoadError name="工作区选择" close={closePicker} />}><WorkspacePicker /></ErrorBoundary>}
+      {projectEditor && <ErrorBoundary name="项目设置" onReset={closeProject} fallback={<ModalLoadError name="项目设置" close={closeProject} />}><Suspense fallback={null}><ProjectEditor /></Suspense></ErrorBoundary>}
+      {settingsOpen && <ErrorBoundary name="设置" onReset={closeSettings} fallback={<ModalLoadError name="设置" close={closeSettings} />}><Suspense fallback={null}><SettingsModal /></Suspense></ErrorBoundary>}
       {exportCopy != null && <SessionActionDialog action={{ kind: 'copy', value: exportCopy, title: '', trigger: null }}
         onClose={() => useStore.getState().setUi({ exportCopy: null })} />}
       {paletteOpen && <Palette />}
@@ -197,9 +213,9 @@ export function Modals() {
       {confirm && <ConfirmDialog />}
       {shortcutsOpen && <ShortcutsModal />}
       {mobileConnectionOpen && <Modal id="mobile-connection" title="连接手机" width={760} onClose={() => useStore.getState().setUi({ mobileConnectionOpen: false })}>
-        <Suspense fallback={null}>
+        <ErrorBoundary name="手机连接" onReset={() => useStore.getState().setUi({ mobileConnectionOpen: false })}><Suspense fallback={null}>
           <MobileConnectionContent onDone={() => useStore.getState().setUi({ mobileConnectionOpen: false })} />
-        </Suspense>
+        </Suspense></ErrorBoundary>
       </Modal>}
     </>
   );

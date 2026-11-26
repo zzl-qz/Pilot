@@ -7,6 +7,7 @@ import { groupSessionsByProject } from '../lib/project/sessions.js';
 import { Icon } from './Icon.jsx';
 import { SessionMenu, type SessionAction } from './SessionMenu.jsx';
 import { sideChatsFor } from '../lib/side-chat.js';
+import { ErrorBoundary } from './ErrorBoundary.jsx';
 
 const WorkspaceTree = lazy(() => import('./files/WorkspaceTree.jsx').then(m => ({ default: m.WorkspaceTree })));
 const SessionActionDialog = lazy(() => import('./SessionActionDialog.jsx').then(m => ({ default: m.SessionActionDialog })));
@@ -25,7 +26,7 @@ function DeferredWorkspaceTree() {
     );
   }
   return (
-    <Suspense fallback={
+    <ErrorBoundary name="工作区文件"><Suspense fallback={
       <section className="workspace-files is-open" aria-label="工作区文件">
         <header className="workspace-files-head">
           <button type="button" className="workspace-files-toggle" aria-expanded={true} aria-controls="file-tree">
@@ -35,7 +36,7 @@ function DeferredWorkspaceTree() {
       </section>
     }>
       <WorkspaceTree defaultOpen />
-    </Suspense>
+    </Suspense></ErrorBoundary>
   );
 }
 
@@ -226,7 +227,7 @@ export function Sidebar() {
           {workspace ? workspace.split(/[\\/]/).filter(Boolean).pop() : ''}
         </button>
       </div>
-      {action && <Suspense fallback={null}><SessionActionDialog action={action} onClose={() => setAction(null)} /></Suspense>}
+        {action && <ErrorBoundary name="会话操作" onReset={() => setAction(null)}><Suspense fallback={null}><SessionActionDialog action={action} onClose={() => setAction(null)} /></Suspense></ErrorBoundary>}
     </aside>
   );
 }

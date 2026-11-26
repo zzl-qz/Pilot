@@ -33,6 +33,12 @@ const WorkspaceDialog = lazy(() => import('./WorkspaceDialog.jsx'));
 const Modals = lazy(() => import('./Modals.jsx').then(module => ({ default: module.Modals })));
 const TaskContract = lazy(() => import('./Modals.jsx').then(module => ({ default: module.TaskContract })));
 const Inspector = lazy(() => import('./Inspector.jsx').then(module => ({ default: module.Inspector })));
+const clearDialogState = () => useStore.getState().setUi({
+  settingsOpen: false, schedulesOpen: false, scheduleDraft: null, scheduleTarget: null, scheduleRepeat: false,
+  searchOpen: false, resultsOpen: false, resultTarget: null, recurringOpen: false,
+  ideasOpen: false, ideaSeed: null, notificationsOpen: false, projectEditor: null, picker: null,
+  exportCopy: null, paletteOpen: false, checkpointDialog: null, confirm: null, shortcutsOpen: false, mobileConnectionOpen: false
+});
 
 /** 应用外壳：左栏 + 主区（topbar / 通知 / 对话 / 输入） + 右侧工作区 + 弹层。 */
 export default function App() {
@@ -633,16 +639,16 @@ function WorkbenchDialogs({ embedded }: { embedded: boolean }) {
   useResultUnread(!embedded && !results);
   const setUi = useStore.getState().setUi;
   return <>
-    {schedules && <DeferredDialog name="定时任务" close={() => setUi({ schedulesOpen: false, scheduleDraft: null, scheduleTarget: null, scheduleRepeat: false })}><Schedules /></DeferredDialog>}
-    {results && <DeferredDialog name="任务收件箱" close={() => setUi({ resultsOpen: false, resultTarget: null })}><ResultInbox /></DeferredDialog>}
-    {recurring && <DeferredDialog name="周期计划" close={() => setUi({ recurringOpen: false })}><RecurringPlans /></DeferredDialog>}
-    {search && <DeferredDialog name="消息搜索" close={() => setUi({ searchOpen: false })}><MessageSearch /></DeferredDialog>}
-    {ideas && <DeferredDialog name="想法库" close={closeIdeas}><IdeaLibrary onClose={closeIdeas} /></DeferredDialog>}
+    {schedules && <DeferredDialog name="定时任务" close={() => setUi({ schedulesOpen: false, scheduleDraft: null, scheduleTarget: null, scheduleRepeat: false })} reset={() => setUi({ schedulesOpen: false, scheduleDraft: null, scheduleTarget: null, scheduleRepeat: false })}><Schedules /></DeferredDialog>}
+    {results && <DeferredDialog name="任务收件箱" close={() => setUi({ resultsOpen: false, resultTarget: null })} reset={() => setUi({ resultsOpen: false, resultTarget: null })}><ResultInbox /></DeferredDialog>}
+    {recurring && <DeferredDialog name="周期计划" close={() => setUi({ recurringOpen: false })} reset={() => setUi({ recurringOpen: false })}><RecurringPlans /></DeferredDialog>}
+    {search && <DeferredDialog name="消息搜索" close={() => setUi({ searchOpen: false })} reset={() => setUi({ searchOpen: false })}><MessageSearch /></DeferredDialog>}
+    {ideas && <DeferredDialog name="想法库" close={closeIdeas} reset={closeIdeas}><IdeaLibrary onClose={closeIdeas} /></DeferredDialog>}
   </>;
 }
 
-function DeferredDialog({ name, close, children }: { name: string; close: () => void; children: ReactNode }) {
-  return <ErrorBoundary name={name} fallback={<DialogPlaceholder name={name} close={close} failed />}>
+function DeferredDialog({ name, close, reset = close, children }: { name: string; close: () => void; reset?: () => void; children: ReactNode }) {
+  return <ErrorBoundary name={name} onReset={reset} fallback={<DialogPlaceholder name={name} close={close} failed />}>
     <Suspense fallback={<DialogPlaceholder name={name} close={close} />}>{children}</Suspense>
   </ErrorBoundary>;
 }
@@ -680,13 +686,18 @@ function InspectorPlaceholder({ failed = false }: { failed?: boolean }) {
 function DeferredTaskContract() {
   const hasTask = useStore((state) => Boolean(state.task));
   if (!hasTask) return null;
-  return <Suspense fallback={null}><TaskContract /></Suspense>;
+  return <ErrorBoundary name="任务契约" fallback={<p role="alert">任务契约加载失败</p>}><Suspense fallback={null}><TaskContract /></Suspense></ErrorBoundary>;
 }
 
 function DeferredNotifications() {
   const active = useStore((state) => Boolean(state.ui.notificationsOpen || state.notifyEnabled));
+  const open = useStore((state) => state.ui.notificationsOpen);
+  const close = () => useStore.getState().setUi({ notificationsOpen: false });
   if (!active) return null;
-  return <Suspense fallback={null}><Notifications /></Suspense>;
+  return <ErrorBoundary name="通知" onReset={close}
+    fallback={open ? <DialogPlaceholder name="通知" close={close} failed /> : <p role="alert">通知加载失败</p>}>
+    <Suspense fallback={null}><Notifications /></Suspense>
+  </ErrorBoundary>;
 }
 
 function DeferredModals() {
@@ -702,6 +713,6 @@ function DeferredModals() {
     || state.ui.mobileConnectionOpen
   ));
   if (!active) return null;
-  return <Suspense fallback={null}><Modals /></Suspense>;
+  return <ErrorBoundary name="弹窗" onReset={clearDialogState} fallback={<DialogPlaceholder name="弹窗" close={clearDialogState} failed />}><Suspense fallback={<DialogPlaceholder name="弹窗" close={clearDialogState} />}><Modals /></Suspense></ErrorBoundary>;
 }
 

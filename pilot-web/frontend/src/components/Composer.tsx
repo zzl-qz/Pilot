@@ -8,6 +8,7 @@ import { errorInfo } from '../lib/errors.js';
 import { formatCache } from '../lib/request-usage.js';
 import React, { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
+import { ErrorBoundary } from './ErrorBoundary.jsx';
 import { api } from '../api.js';
 import { Icon } from './Icon.jsx';
 import { VoiceInput } from './VoiceInput.jsx';
@@ -21,7 +22,7 @@ import { stepHistory } from '../lib/input-history.js';
 import { readTransferFiles, hasFileTransferHint, readTransferFilePaths, transferDirectoryNames } from '../lib/clipboard.js';
 import { readAttachmentFile, readDesktopClipboardFiles } from '../lib/attachments/input.js';
 import { checkIncomingFile, requireAttachmentLimits } from '../lib/attachments/attachments.js';
-import { writeDraft, readDraft, dropDraft, readDraftSnapshot, writeDraftSnapshot, dropDraftSnapshot } from '../lib/drafts.js';
+import { DRAFT_STORAGE as localStore, writeDraft, readDraft, dropDraft, readDraftSnapshot, writeDraftSnapshot, dropDraftSnapshot } from '../lib/drafts.js';
 import { PERMISSION_MODES, normalizePermission, permissionLabel } from '../lib/permission.js';
 import { usageBudgetTitle, usageLevel, usagePercent } from '../lib/context-usage.js';
 import './conversation.css';
@@ -44,7 +45,7 @@ function DeferredTopDocks() {
     || state.thread?.rows?.length
   ));
   if (!active) return null;
-  return <Suspense fallback={null}><ComposerTopDocks /></Suspense>;
+  return <ErrorBoundary name="输入区工具"><Suspense fallback={null}><ComposerTopDocks /></Suspense></ErrorBoundary>;
 }
 
 function DeferredMessageQueue() {
@@ -52,7 +53,7 @@ function DeferredMessageQueue() {
     state.queueEntries.length || state.ui.queueEdit || state.queueHeld || state.queueWaitingReason
   ));
   if (!active) return null;
-  return <Suspense fallback={null}><MessageQueue /></Suspense>;
+  return <ErrorBoundary name="消息队列"><Suspense fallback={null}><MessageQueue /></Suspense></ErrorBoundary>;
 }
 
 function DeferredAgentDock() {
@@ -62,13 +63,13 @@ function DeferredAgentDock() {
     return Boolean(state.ui.agentsDockOpen || list.some((agent) => agent?.status === 'running'));
   });
   if (!active) return null;
-  return <Suspense fallback={null}><AgentDock /></Suspense>;
+  return <ErrorBoundary name="智能体面板"><Suspense fallback={null}><AgentDock /></Suspense></ErrorBoundary>;
 }
 
 function DeferredChangesStrip() {
   const active = useStore((state) => Boolean(!state.embeddedSessionId && !state.ui.inspectorOpen && state.changeReport?.files?.length));
   if (!active) return null;
-  return <Suspense fallback={null}><ComposerChangesStrip /></Suspense>;
+  return <ErrorBoundary name="变更摘要"><Suspense fallback={null}><ComposerChangesStrip /></Suspense></ErrorBoundary>;
 }
 
 /** 是否有真正阻止交互的模态弹窗；普通 <dialog open>（非模态）不算。 */
@@ -159,10 +160,10 @@ export function Composer() {
     const files = input.attachmentIds()
       .map((id) => draftFilesRef.current.get(id)).filter((item): item is DraftAttachment => Boolean(item));
     if (!files.length) {
-      dropDraftSnapshot(localStorage, sessionKey);
+      dropDraftSnapshot(localStore, sessionKey);
       return;
     }
-    const result = writeDraftSnapshot(localStorage, sessionKey, {
+    const result = writeDraftSnapshot(localStore, sessionKey, {
       text: input.getText(), files, imagePositions: input.getDraft().imagePositions
     });
     if (!result.ok && !snapshotWarnedRef.current) {
@@ -195,13 +196,13 @@ export function Composer() {
       onPreview: setPreview,
       onChange: () => {
         const currentSession = useStore.getState().sessionId;
-        writeDraft(localStorage, currentSession, input.getText());
+        writeDraft(localStore, currentSession, input.getText());
         if (!input.attachmentIds().length) {
           if (snapshotTimer.current) {
             window.clearTimeout(snapshotTimer.current);
             snapshotTimer.current = null;
           }
-          dropDraftSnapshot(localStorage, currentSession);
+          dropDraftSnapshot(localStore, currentSession);
         } else {
           scheduleSnapshot();
         }
@@ -230,8 +231,8 @@ export function Composer() {
         if (submittingRef.current || pendingFilesRef.current) return { ok: false, reason: '正在发送或读取附件，请完成后重新载入。' };
         if (input.attachmentIds().length) return { ok: false, reason: '有未发送的附件，请先发送或移除，再重新载入。' };
         const text = input.getText();
-        writeDraft(localStorage, useStore.getState().sessionId, text);
-        if (text.trim() && readDraft(localStorage, useStore.getState().sessionId) !== text) return { ok: false, reason: '当前草稿未能完整保存，已保留页面，请先复制或发送草稿。' };
+        writeDraft(localStore, useStore.getState().sessionId, text);
+        if (text.trim() && readDraft(localStore, useStore.getState().sessionId) !== text) return { ok: false, reason: '当前草稿未能完整保存，已保留页面，请先复制或发送草稿。' };
         return { ok: true };
       },
       getText: () => input.getText(),
@@ -286,7 +287,7 @@ export function Composer() {
       });
     }
     const saved = sessionDraftsRef.current.get(sessionId);
-    const stored = readDraftSnapshot(localStorage, sessionId);
+      const stored = readDraftSnapshot(localStore, sessionId);
     if (stored.error === 'corrupt') {
       useStore.getState().showNotice('未发送的附件草稿已损坏并清除，请重新添加需要保留的附件。');
     }
@@ -297,11 +298,11 @@ export function Composer() {
     } else if (stored.snapshot && input) {
       // 刷新/重开工作台：正文、文件、图片和图片位置一起恢复
       draftFilesRef.current = new Map(stored.snapshot.files.map((item) => [item.id, item]));
-      input.restoreDraft(stored.snapshot.text || readDraft(localStorage, sessionId), stored.snapshot.files,
+      input.restoreDraft(stored.snapshot.text || readDraft(localStore, sessionId), stored.snapshot.files,
         stored.snapshot.imagePositions);
     } else {
       draftFilesRef.current.clear();
-      input?.setText(readDraft(localStorage, sessionId));
+      input?.setText(readDraft(localStore, sessionId));
     }
     previousSessionRef.current = sessionId;
   }, [sessionId]);
@@ -526,8 +527,8 @@ export function Composer() {
         input.setText('');
         draftFilesRef.current.clear();
         sessionDraftsRef.current.delete(state.sessionId);
-        dropDraft(localStorage, useStore.getState().sessionId);
-        dropDraftSnapshot(localStorage, useStore.getState().sessionId);
+        dropDraft(localStore, useStore.getState().sessionId);
+        dropDraftSnapshot(localStore, useStore.getState().sessionId);
       } else {
         sessionDraftsRef.current.delete(state.sessionId);
       }
@@ -554,8 +555,8 @@ export function Composer() {
     const submitter = useStore.getState();
     inputRef.current.setText('');
     draftFilesRef.current.clear();
-    writeDraft(localStorage, submitter.sessionId, '');
-    dropDraftSnapshot(localStorage, submitter.sessionId);
+    writeDraft(localStore, submitter.sessionId, '');
+    dropDraftSnapshot(localStore, submitter.sessionId);
     setSteerPending({ runId, text, baseline });
     submitter.showNotice('纠正已提交，等待本轮在安全点应用。');
   }
@@ -577,7 +578,7 @@ export function Composer() {
     const input = inputRef.current;
     if (input && !input.getText().trim()) {
       input.setText(pending.text);
-      writeDraft(localStorage, useStore.getState().sessionId, pending.text);
+      writeDraft(localStore, useStore.getState().sessionId, pending.text);
     }
     useStore.getState().showNotice('本轮已结束，纠正可能未被应用；内容已放回输入框，可重试或加入队列。');
   }, [runId, steerPending]);
@@ -927,10 +928,10 @@ export function Composer() {
                 <span className="model-chip-name" title={currentModel || undefined}>{currentModel || '选择模型'}</span>
               </Button>
               {modelOpen && (
-                <Suspense fallback={null}>
+                <ErrorBoundary name="模型选择" onReset={() => setToolbarPanel(null)}><Suspense fallback={null}>
                   <ModelPicker key={currentEndpoint} models={modelOptions} initialModel={currentModel} initialEndpoint={currentEndpoint}
                     onClose={() => { setToolbarPanel(null); document.getElementById('model-chip')?.focus(); }} />
-                </Suspense>
+                </Suspense></ErrorBoundary>
               )}
             </div>
           </div>
@@ -941,11 +942,11 @@ export function Composer() {
                 aria-haspopup="dialog" aria-expanded={contextOpen} aria-controls={contextOpen ? 'context-menu' : undefined}
                 icon={<svg className="context-ring" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" opacity=".25" strokeWidth="2" /><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeWidth="2" pathLength="100" strokeDasharray={usagePercent(contextStatus) + ' 100'} transform="rotate(-90 10 10)" /></svg>}
                 onClick={() => toggleToolbarPanel('context')}>{contextPercent(contextStatus)}</Button></span>
-              {contextOpen && <Suspense fallback={null}><ContextUsagePanel status={contextStatus} compacting={compacting}
+              {contextOpen && <ErrorBoundary name="上下文用量" onReset={() => setToolbarPanel(null)}><Suspense fallback={null}><ContextUsagePanel status={contextStatus} compacting={compacting}
                 report={latestContextReport} reports={requestReports} usage={runUsage}
                 onClose={() => { setToolbarPanel(null); contextTriggerRef.current?.focus({ preventScroll: true }); }}
                 onCompact={(focus) => useStore.getState().compactContext(focus)}
-                onSettings={() => { setToolbarPanel(null); useStore.getState().setUi({ settingsOpen: true, settingsSection: 'model' }); }} /></Suspense>}
+                onSettings={() => { setToolbarPanel(null); useStore.getState().setUi({ settingsOpen: true, settingsSection: 'model' }); }} /></Suspense></ErrorBoundary>}
             </div>
             <IconButton className="composer-icon schedule-compose" variant="ghost" label="定时执行" icon={<Icon name="clock" />}
               isDisabled={pendingFiles > 0 || submitting}
@@ -983,7 +984,7 @@ export function Composer() {
         </div>
         <div className="composer-voice-feedback" ref={voiceFeedbackRef} />
       </form>
-      {preview && <Suspense fallback={null}><ImagePreview name={preview.name} src={preview.src} onClose={() => setPreview(null)} /></Suspense>}
+ {preview && <ErrorBoundary name="图片预览" onReset={() => setPreview(null)}><Suspense fallback={null}><ImagePreview name={preview.name} src={preview.src} onClose={() => setPreview(null)} /></Suspense></ErrorBoundary>}
     </div>
   );
 }

@@ -5,6 +5,7 @@ type BoundaryProps = {
   children?: React.ReactNode;
   onReset?: () => void;
   fallback?: React.ReactNode;
+  retryLabel?: string;
 };
 type BoundaryState = { error: unknown };
 
@@ -44,7 +45,7 @@ export class ErrorBoundary extends React.Component<BoundaryProps, BoundaryState>
       <div className="panel-error" role="alert">
         <p className="panel-error-title">{this.props.name || '这一块'}渲染失败了</p>
         <pre className="panel-error-detail">{String(errorInfo(error).message || error)}</pre>
-        <button type="button" className="btn" onClick={this.reset}>重试</button>
+        <button type="button" className="btn" onClick={this.reset}>{this.props.retryLabel || '重试'}</button>
       </div>
     );
   }
