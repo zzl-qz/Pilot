@@ -192,10 +192,12 @@ function ChangedFilesCard({ files, runId, canRollback, onOpen, onRollback }: {
   useEffect(() => {
     if (preview == null) return undefined;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') dismissPreview();
+      if (event.key !== 'Escape' || event.isComposing || event.keyCode === 229) return;
+      event.preventDefault(); event.stopPropagation();
+      dismissPreview();
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [preview, dismissPreview]);
   useLayoutEffect(() => {
     if (preview == null) {

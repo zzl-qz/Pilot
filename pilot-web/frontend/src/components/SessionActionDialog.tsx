@@ -65,7 +65,7 @@ export function SessionActionDialog({ action, onClose }: { action: SessionAction
     </Modal>, document.body);
   }
   if (action.kind === 'rename') {
-    return createPortal(<Modal id="session-rename" title="重命名对话" onClose={close} dismissible={!busy}>
+    return createPortal(<Modal id="session-rename" title="重命名对话" onClose={close} dismissible={!busy} purpose="form">
       <form className="session-rename-form" onSubmit={event => {
         event.preventDefault();
         if (validTitle) void submit(() => useStore.getState().renameSession(title, action.session.id));

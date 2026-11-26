@@ -497,7 +497,7 @@ function runPaletteAction(action: string) {
       state.startNewSession();
       break;
     case 'open-context':
-      state.setUi({ inspectorOpen: true, inspectorTab: 'context' });
+      state.setUi({ inspectorOpen: true, inspectorTab: 'usage' });
       break;
     case 'toggle-activity':
       state.setUi((ui) => ({ inspectorOpen: !ui.inspectorOpen }));

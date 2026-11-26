@@ -14,11 +14,12 @@ interface ModalProps {
   footer?: React.ReactNode;
   dismissible?: boolean;
   initialFocus?: string;
+  purpose?: 'info' | 'form';
 }
 
 const fallbackStack: HTMLDivElement[] = [];
 
-export function Modal({ id, title, onClose, children, wide, width, footer, dismissible = true, initialFocus }: ModalProps) {
+export function Modal({ id, title, onClose, children, wide, width, footer, dismissible = true, initialFocus, purpose = 'info' }: ModalProps) {
   const dialog = useRef<HTMLDialogElement>(null);
   const fallback = useRef<HTMLDivElement>(null);
   const close = useRef<(() => void) | null>(null);
@@ -97,12 +98,12 @@ export function Modal({ id, title, onClose, children, wide, width, footer, dismi
     {footer && <footer className="pilot-dialog-footer">{footer}</footer>}
   </div>;
 
-  if (!native) return <div ref={fallback} id={id} className="modal pilot-dialog-fallback" role="dialog" aria-modal="true"
+  if (!native) return <div ref={fallback} id={id} className={`modal pilot-dialog-fallback${purpose === 'form' ? ' modal-form' : ''}`} role="dialog" aria-modal="true"
     aria-labelledby={titleId} tabIndex={-1} style={{ '--pilot-dialog-width': `${preferredWidth}px` } as React.CSSProperties}
-    onClick={event => { if (event.target === event.currentTarget) close.current?.(); }}>{content}</div>;
+    onClick={event => { if (purpose !== 'form' && event.target === event.currentTarget) close.current?.(); }}>{content}</div>;
 
-  return <Dialog ref={dialog} id={id} className="modal pilot-dialog" isOpen aria-labelledby={titleId}
-    width={preferredWidth} maxHeight="100dvh" padding={0} purpose={dismissible ? 'info' : 'required'}
+  return <Dialog ref={dialog} id={id} className={`modal pilot-dialog${purpose === 'form' ? ' modal-form' : ''}`} isOpen aria-labelledby={titleId}
+    width={preferredWidth} maxHeight="100dvh" padding={0} purpose={dismissible ? purpose : 'required'}
     onOpenChange={open => { if (!open) close.current?.(); }}
     onKeyDown={event => {
       if (event.key !== 'Escape') return;

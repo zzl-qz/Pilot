@@ -13,7 +13,7 @@ import { Thread } from './Thread.jsx';
 import { Composer } from './Composer.jsx';
 import { SelectionQuote } from './SelectionQuote.jsx';
 import { ErrorBoundary } from './ErrorBoundary.jsx';
-import { shortcut, runPhase, runTone, isShortcutModifier } from '../lib/interaction.js';
+import { shortcut, runPhase, runTone, isShortcutModifier, isModalBlockingShortcuts, isSideChatShortcut } from '../lib/interaction.js';
 import { classifyApprovalRisk } from '../lib/attention.js';
 import { installSoundUnlock, isDndActive } from '../lib/sound.js';
 import { watchWorkbench } from '../lib/workbench-sync.js';
@@ -263,8 +263,9 @@ function Workbench() {
       if (embedded || event.defaultPrevented) {
         return;
       }
+      if (isModalBlockingShortcuts()) return;
       const mod = isShortcutModifier(event);
-      const refreshKey = event.key === 'F5' || (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'r';
+      const refreshKey = event.key === 'F5' || (mod && event.key.toLowerCase() === 'r');
       if (!event.altKey && !event.getModifierState?.('AltGraph') && refreshKey) {
         event.preventDefault();
         if (event.isComposing || event.keyCode === 229) return;
@@ -274,7 +275,7 @@ function Workbench() {
         }
         return;
       }
-      if (mod && event.altKey && event.key.toLowerCase() === 's') {
+      if (isSideChatShortcut(event) && mod) {
         event.preventDefault();
         useStore.getState().toggleSideChatPane();
         return;
@@ -324,7 +325,7 @@ function Workbench() {
         || state.ui.searchOpen || state.ui.resultsOpen || state.ui.schedulesOpen || state.ui.recurringOpen || state.ui.ideasOpen
         || state.ui.paletteOpen || state.ui.checkpointDialog || state.ui.skillsInstall || state.ui.confirm
         || state.ui.mobileConnectionOpen || state.ui.notificationsOpen || state.ui.shortcutsOpen || document.querySelector('dialog[open], [aria-modal="true"], [data-workbench-menu-open]'));
-      if (overlayOpen) {
+      if (overlayOpen || isModalBlockingShortcuts()) {
         return;
       }
       if (state.ui.sidebarOpen && window.matchMedia('(max-width: 960px)').matches) {

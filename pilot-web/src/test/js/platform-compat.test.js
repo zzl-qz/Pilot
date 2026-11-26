@@ -10,9 +10,11 @@ test('快捷键标识覆盖三平台及优先使用的 Client Hints', () => {
   assert.equal(platformModifier({}), 'Ctrl');
 });
 
-test('Ctrl/Cmd 可以触发动作，AltGr 和中文输入候选键不能触发', () => {
-  assert.equal(isShortcutModifier({ ctrlKey: true }), true);
-  assert.equal(isShortcutModifier({ metaKey: true }), true);
+test('平台对应的 Ctrl/Cmd 可以触发动作，AltGr 和中文输入候选键不能触发', () => {
+  assert.equal(isShortcutModifier({ ctrlKey: true }, 'Linux x86_64'), true);
+  assert.equal(isShortcutModifier({ metaKey: true }, 'MacIntel'), true);
+  assert.equal(isShortcutModifier({ ctrlKey: true }, 'MacIntel'), false);
+  assert.equal(isShortcutModifier({ metaKey: true }, 'Win32'), false);
   assert.equal(isShortcutModifier({ ctrlKey: true, altKey: true, getModifierState: key => key === 'AltGraph' }), false);
   assert.equal(isShortcutModifier({ metaKey: true, isComposing: true }), false);
   assert.equal(isShortcutModifier({ ctrlKey: true, keyCode: 229 }), false);

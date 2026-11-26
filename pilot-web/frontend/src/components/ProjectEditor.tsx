@@ -131,7 +131,7 @@ export function ProjectEditor() {
         <Button id="project-save" onClick={() => update('save')} variant="primary" label={busy === 'save' ? '保存中…' : '保存'} isDisabled={Boolean(busy) || !name.trim() || !paths.length || (Boolean(editor?.id) && !agentsReady)} />
   </>;
 
-  return <Modal id="project-modal" title={editor?.id ? '编辑项目' : '新建项目'} onClose={close} dismissible={!busy} footer={footer}>
+  return <Modal id="project-modal" title={editor?.id ? '编辑项目' : '新建项目'} onClose={close} dismissible={!busy} purpose="form" footer={footer}>
     <form className="pilot-form" onSubmit={event => {
       event.preventDefault();
       if (name.trim()) void update('save');

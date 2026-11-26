@@ -94,12 +94,16 @@ function WorkspaceFiles({ sessionId, workspace, defaultOpen }: { sessionId: stri
   useEffect(() => {
     if (!menu) return;
     const close = () => setMenu(null);
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setMenu(null); };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.isComposing || event.keyCode === 229) return;
+      event.preventDefault(); event.stopPropagation();
+      setMenu(null);
+    };
     window.addEventListener('click', close);
-    window.addEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
     return () => {
       window.removeEventListener('click', close);
-      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keydown', onKey, true);
     };
   }, [menu]);
 

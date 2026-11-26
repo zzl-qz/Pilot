@@ -5,6 +5,7 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { errorInfo } from "../../lib/errors.js";
 import { api } from "../../api.js";
+import { useStore } from "../../store.js";
 import { Icon } from "../Icon.jsx";
 
 export function WebSearchSettings() {
@@ -29,9 +30,11 @@ export function WebSearchSettings() {
   const [testResult, setTestResult] = useState<WebSearchTestResponse | null>(null);
   const [testError, setTestError] = useState('');
   const sequence = useRef(0);
+  const dirtyRef = useRef(false);
 
   const applyView = useCallback((data: WebSearchSettingsView) => {
     setView(data);
+    if (dirtyRef.current) return;
     const nextProvider = data.provider || 'auto';
     const matched = (data.providers || []).find(item => item.id === nextProvider);
     setProvider(nextProvider);
@@ -92,6 +95,7 @@ export function WebSearchSettings() {
   function selectProvider(id: string) {
     const target = providers.find(item => item.id === id);
     setProvider(id);
+    dirtyRef.current = true;
     setApiKey('');
     setApiEndpoint(target?.requiresApiKey ? (target.apiEndpoint || '') : (view?.apiEndpoint || ''));
   }
@@ -112,6 +116,7 @@ export function WebSearchSettings() {
         preferPilotSearch,
         proxy
       });
+      dirtyRef.current = false;
       if (saved) applyView(saved);
       setFeedback({
         text: proxyChanged && localWasUp
@@ -131,6 +136,7 @@ export function WebSearchSettings() {
     setFeedback(null);
     try {
       const saved = await api.clearWebSearchApiKey(needsKey ? provider : undefined);
+      dirtyRef.current = false;
       if (saved) applyView(saved);
       setFeedback({ text: '已清除当前提供商的搜索 API Key。' });
     } catch (failure) {
@@ -242,22 +248,22 @@ export function WebSearchSettings() {
         {needsKey && (
           <div className="settings-field-grid">
             <TextInput id="web-search-api-key" label={`${selectedProvider?.label || provider} API Key`}
-              type="password" size="lg" width="100%" value={apiKey} onChange={setApiKey}
+              type="password" size="lg" width="100%" value={apiKey} onChange={value => { dirtyRef.current = true; setApiKey(value); }}
               isDisabled={saving} hasSpellCheck={false} autoComplete="off"
               placeholder={selectedKeySet ? `已保存（${selectedKeyMasked}），留空保持不变` : '粘贴 API Key'} />
             <TextInput id="web-search-api-endpoint" label="自定义 API 端点（可选）"
-              size="lg" width="100%" value={apiEndpoint} onChange={setApiEndpoint}
+              size="lg" width="100%" value={apiEndpoint} onChange={value => { dirtyRef.current = true; setApiEndpoint(value); }}
               isDisabled={saving} inputMode="url" hasSpellCheck={false} autoComplete="off"
               placeholder={selectedProvider?.defaultEndpoint || '留空使用官方默认地址'} />
           </div>
         )}
         <div className="settings-field-grid">
           <TextInput id="web-search-searxng-endpoint" label="SearXNG 地址"
-            size="lg" width="100%" value={searxngEndpoint} onChange={setSearxngEndpoint}
+            size="lg" width="100%" value={searxngEndpoint} onChange={value => { dirtyRef.current = true; setSearxngEndpoint(value); }}
             isDisabled={saving} inputMode="url" hasSpellCheck={false} autoComplete="off"
             placeholder="http://127.0.0.1:8888" />
           <TextInput id="web-search-proxy" label="出网代理（可选，不含账号密码）"
-            size="lg" width="100%" value={proxy} onChange={setProxy}
+            size="lg" width="100%" value={proxy} onChange={value => { dirtyRef.current = true; setProxy(value); }}
             isDisabled={saving} hasSpellCheck={false} autoComplete="off"
             placeholder="例如 http://127.0.0.1:7890" />
         </div>
@@ -269,7 +275,7 @@ export function WebSearchSettings() {
           </div>
           <SegmentedControl id="web-search-fallback" label="自动回退兜底"
             value={fallbackEnabled ? 'on' : 'off'}
-            onChange={value => setFallbackEnabled(value === 'on')}>
+            onChange={value => { dirtyRef.current = true; setFallbackEnabled(value === 'on'); }}>
             <SegmentedControlItem value="on" label="开启" />
             <SegmentedControlItem value="off" label="关闭" />
           </SegmentedControl>
@@ -281,7 +287,7 @@ export function WebSearchSettings() {
           </div>
           <SegmentedControl id="web-search-prefer-pilot" label="优先使用 Pilot 自配置搜索"
             value={preferPilotSearch ? 'on' : 'off'}
-            onChange={value => setPreferPilotSearch(value === 'on')}>
+            onChange={value => { dirtyRef.current = true; setPreferPilotSearch(value === 'on'); }}>
             <SegmentedControlItem value="off" label="跟随模型" />
             <SegmentedControlItem value="on" label="强制自配" />
           </SegmentedControl>
@@ -289,7 +295,13 @@ export function WebSearchSettings() {
         <div className="settings-form-actions">
           {needsKey && selectedKeySet && (
             <Button label="清除密钥" variant="ghost" className="settings-danger"
-              isDisabled={saving} onClick={() => void clearKey()} />
+              isDisabled={saving} onClick={() => useStore.getState().askConfirm({
+                title: '清除搜索 API Key',
+                message: '确定清除当前提供商的搜索 API Key？清除后需要鉴权的商业搜索源将不可用。',
+                confirmText: '清除',
+                danger: true,
+                onConfirm: clearKey
+              })} />
           )}
           {isDirty && <span className="settings-status">有未保存修改</span>}
           <Button type="submit" variant="primary" label={saving ? '保存中…' : '保存设置'} isDisabled={saving} />

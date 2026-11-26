@@ -18,9 +18,25 @@ export function restoreFocus(previous: Element | null | undefined) {
 }
 
 // Windows 的 AltGr 可能同时报告 Ctrl+Alt；输入法候选键也不能触发全局动作。
-export function isShortcutModifier(event: Partial<Pick<KeyboardEvent, 'isComposing' | 'keyCode' | 'ctrlKey' | 'metaKey' | 'getModifierState'>> | null | undefined) {
-  return Boolean(event && !event.isComposing && event.keyCode !== 229
-    && !event.getModifierState?.('AltGraph') && (event.ctrlKey || event.metaKey));
+export function isShortcutModifier(event: Partial<Pick<KeyboardEvent, 'isComposing' | 'keyCode' | 'ctrlKey' | 'metaKey' | 'getModifierState'>> | null | undefined, platform?: string) {
+  if (!event || event.isComposing || event.keyCode === 229 || event.getModifierState?.('AltGraph')) return false;
+  const targetPlatform = platform ?? (globalThis.navigator as (Navigator & { userAgentData?: { platform?: string } }) | undefined)?.userAgentData?.platform ?? globalThis.navigator?.platform ?? '';
+  return /Mac|iPhone|iPad/i.test(targetPlatform)
+    ? Boolean(event.metaKey && !event.ctrlKey)
+    : Boolean(event.ctrlKey && !event.metaKey);
+}
+
+export function isSideChatShortcut(event: Pick<KeyboardEvent, 'code' | 'altKey' | 'metaKey' | 'ctrlKey'>) {
+  return event.code === 'KeyS' && event.altKey && (event.metaKey || event.ctrlKey);
+}
+
+export function shouldReorderQueueOnArrow(event: { key: string; targetTagName: string; altKey: boolean }) {
+  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return false;
+  return event.targetTagName === 'BUTTON' || event.altKey;
+}
+
+export function isModalBlockingShortcuts(root: ParentNode = document) {
+  return Boolean(root.querySelector('dialog[open], [role="dialog"][aria-modal="true"], .modal'));
 }
 
 export function runPhase({running, cancelling, pausing, queueHeld, pendingApprovals = {}, pendingQuestions = {}, pendingArbitrations = {}, thread, lastOutcome}: RunPhaseInput) {
