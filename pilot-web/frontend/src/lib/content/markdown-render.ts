@@ -78,12 +78,15 @@ function copyControl(label: string, getText: () => string, options: { tip?: bool
 }
 
 
-const FENCE_PATTERN = /^\s{0,3}(`{3,}|~{3,})\s*([\w+#.-]*)\s*$/;
+const FENCE_PATTERN = /^\s{0,3}(`{3,}|~{3,})\s*([\w+#.-]*)(?:\s+.*)?$/;
 const HEADING_PATTERN = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/;
 const RULE_PATTERN = /^\s{0,3}([-*_])(\s*\1){2,}\s*$/;
 const QUOTE_PATTERN = /^\s{0,3}>\s?/;
 const LIST_PATTERN = /^\s{0,3}([-*+]|\d+[.)])\s+(.*)$/;
 const TABLE_DIVIDER = /^:?-{2,}:?$/;
+const MAX_QUOTE_DEPTH = 20;
+const MAX_TABLE_ROWS = 200;
+const MAX_TABLE_COLUMNS = 30;
 
 /**
  * 把模型返回的 Markdown 渲染成 DOM。只构造节点、不拼 innerHTML，天然免疫 HTML 注入。
@@ -108,7 +111,7 @@ function markdownBlocks(lines: string[]) {
  * <p>行区间是流式增量渲染的依据：只要一个块的输入没变，它对应 DOM 就可以原样留着。
  * offset 用于解析「从中间某个位置切出来的行片段」时把行号还原成整篇坐标。
  */
-function markdownBlockRecords(lines: string[], offset = 0): MarkdownBlock[] {
+function markdownBlockRecords(lines: string[], offset = 0, depth = 0): MarkdownBlock[] {
   const records: MarkdownBlock[] = [];
   let i = 0;
 
@@ -206,9 +209,8 @@ function markdownBlockRecords(lines: string[], offset = 0): MarkdownBlock[] {
         label.textContent = callout.label;
         blockquote.append(label);
       }
-      for (const node of markdownBlocks(content)) {
-        blockquote.append(node);
-      }
+      if (depth >= MAX_QUOTE_DEPTH) blockquote.append(document.createTextNode(content.join('\n')));
+      else for (const node of markdownBlockRecords(content, 0, depth + 1).map((record) => record.node)) blockquote.append(node);
       push(blockquote, start);
       continue;
     }
@@ -292,6 +294,7 @@ function safeSvg(source: string) {
     USE_PROFILES: { svg: true, svgFilters: true },
     RETURN_DOM_FRAGMENT: true
   });
+  cleaned.querySelectorAll('style').forEach((style) => style.remove());
   return cleaned.firstElementChild instanceof SVGSVGElement ? cleaned.firstElementChild : null;
 }
 
@@ -410,7 +413,10 @@ function loadMermaid() {
     return Promise.resolve(window.mermaid);
   }
   if (!mermaidLoading) {
-    mermaidLoading = loadScript('/vendor/mermaid/mermaid.min.js').then(() => window.mermaid);
+    mermaidLoading = loadScript('/vendor/mermaid/mermaid.min.js').then(() => window.mermaid).catch((error) => {
+      mermaidLoading = undefined;
+      throw error;
+    });
   }
   return mermaidLoading;
 }
@@ -428,7 +434,10 @@ function loadKatex() {
       link.dataset.katex = '1';
       document.head.append(link);
     }
-    katexLoading = loadScript('/vendor/katex/katex.min.js').then(() => window.katex);
+    katexLoading = loadScript('/vendor/katex/katex.min.js').then(() => window.katex).catch((error) => {
+      katexLoading = undefined;
+      throw error;
+    });
   }
   return katexLoading;
 }
@@ -446,7 +455,9 @@ async function renderMermaid(host: HTMLElement, source: string, code: HTMLElemen
     host.replaceChildren();
     const wrap = document.createElement('div');
     wrap.className = 'md-mermaid';
-    wrap.innerHTML = drawn.svg;
+    const safe = DOMPurify.sanitize(drawn.svg, { USE_PROFILES: { svg: true, svgFilters: true }, RETURN_DOM_FRAGMENT: true });
+    safe.querySelectorAll('style').forEach((style) => style.remove());
+    wrap.append(safe);
     host.append(wrap);
   } catch (error) {
     host.hidden = true;
@@ -517,7 +528,8 @@ function isTableStart(lines: string[], index: number) {
 }
 
 function buildTable(lines: string[], start: number) {
-  const header = splitRow(lines[start]);
+  const originalHeader = splitRow(lines[start]);
+  const header = originalHeader.slice(0, MAX_TABLE_COLUMNS);
   const aligns = splitRow(lines[start + 1]).map((cell) => {
     const value = cell.replace(/\s/g, '');
     if (value.startsWith(':') && value.endsWith(':')) {
@@ -546,7 +558,8 @@ function buildTable(lines: string[], start: number) {
   const tbody = document.createElement('tbody');
   let i = start + 2;
   while (i < lines.length && lines[i].trim() && lines[i].includes('|')) {
-    const cells = splitRow(lines[i]);
+    if (i - start - 2 >= MAX_TABLE_ROWS) break;
+    const cells = splitRow(lines[i]).slice(0, MAX_TABLE_COLUMNS);
     const row = document.createElement('tr');
     header.forEach((_ignored, index) => {
       const td = document.createElement('td');
@@ -559,10 +572,18 @@ function buildTable(lines: string[], start: number) {
     tbody.append(row);
     i++;
   }
+  const truncatedRows = i < lines.length && lines[i].trim() && lines[i].includes('|');
+  if (truncatedRows) while (i < lines.length && lines[i].trim() && lines[i].includes('|')) i++;
   table.append(tbody);
   const wrap = document.createElement('div');
   wrap.className = 'md-table-wrap';
   wrap.append(table);
+  if (originalHeader.length > MAX_TABLE_COLUMNS || truncatedRows) {
+    const notice = document.createElement('p');
+    notice.className = 'md-table-truncated';
+    notice.textContent = `表格内容已截断（最多 ${MAX_TABLE_ROWS} 行、${MAX_TABLE_COLUMNS} 列）`;
+    wrap.append(notice);
+  }
   return { node: wrap, next: i };
 }
 
@@ -611,20 +632,58 @@ function buildList(lines: string[], start: number) {
 
 function inlineFragment(text: string) {
   const fragment = document.createDocumentFragment();
-  const pattern = /(!\[[^\]\n]*\]\([^)\s]+\)|(?<!\$)\$(?!\$)(?:\\.|[^$\n])+\$(?!\$)|`[^`\n]+`|\*\*[^*\n]+\*\*|~~[^~\n]+~~|\*[^*\n]+\*|\[[^\]\n]+\]\([^)\s]+\))/g;
   let last = 0;
-  let match;
-  while ((match = pattern.exec(text)) !== null) {
-    if (match.index > last) {
-      fragment.append(document.createTextNode(text.slice(last, match.index)));
-    }
-    fragment.append(inlineToken(match[0]));
-    last = match.index + match[0].length;
+  let index = 0;
+  while (index < text.length) {
+    const match = findInlineToken(text, index);
+    if (!match) break;
+    if (match.index > last) fragment.append(document.createTextNode(text.slice(last, match.index)));
+    fragment.append(inlineToken(match.token));
+    last = match.index + match.token.length;
+    index = last;
   }
-  if (last < text.length) {
-    fragment.append(document.createTextNode(text.slice(last)));
-  }
+  if (last < text.length) fragment.append(document.createTextNode(text.slice(last)));
   return fragment;
+}
+
+const INLINE_PATTERNS = [
+  /!\[[^\]\n]*\]\([^)\s]+\)/y,
+  /`[^`\n]+`/y,
+  /\*\*[^*\n]+\*\*/y,
+  /~~[^~\n]+~~/y,
+  /\*[^*\n]+\*/y,
+  /\[[^\]\n]+\]\([^)\s]+\)/y
+];
+
+function matchInlineMath(text: string, index: number): { token: string } | { noCloseUntil: number } {
+  let end = index + 1;
+  while (end < text.length && text[end] !== '\n') {
+    if (text[end] === '$' && text[end + 1] !== '$') {
+      return end > index + 1 ? { token: text.slice(index, end + 1) } : { noCloseUntil: index };
+    }
+    end += text[end] === '\\' && end + 1 < text.length ? 2 : 1;
+  }
+  return { noCloseUntil: end };
+}
+
+function findInlineToken(text: string, from: number): { index: number; token: string } | null {
+  let noDollarUntil = -1;
+  for (let index = from; index < text.length; index++) {
+    const marker = text[index];
+    if (marker === '$' && index >= noDollarUntil && text[index - 1] !== '$' && text[index + 1] !== '$') {
+      const math = matchInlineMath(text, index);
+      if ('token' in math) return { index, token: math.token };
+      noDollarUntil = Math.max(noDollarUntil, math.noCloseUntil);
+      continue;
+    }
+    if (!'!`*~['.includes(marker)) continue;
+    for (const pattern of INLINE_PATTERNS) {
+      pattern.lastIndex = index;
+      const match = pattern.exec(text);
+      if (match) return { index, token: match[0] };
+    }
+  }
+  return null;
 }
 
 function inlineToken(token: string) {

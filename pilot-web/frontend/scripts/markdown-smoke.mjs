@@ -54,6 +54,9 @@ async function run(page, name, url) {
   assert.equal(await page.locator('.md-preview svg').getAttribute('onload'), null);
   assert.equal(await page.locator('.md-preview svg rect').getAttribute('fill'), 'url(#paint)');
   assert.equal(await page.locator('.md-preview svg linearGradient').count(), 1);
+  await page.evaluate(() => render('```svg\n<svg><style>body{position:fixed;inset:0}</style><rect width="10" height="10"/></svg>\n```'));
+  assert.equal(await page.locator('.md-preview svg style').count(), 0);
+  assert.equal(await page.locator('.md-preview svg rect').count(), 1);
   await page.evaluate(() => render('```svg\n<svg><rect></svg>\n```'));
   assert.equal(await page.locator('.md-preview svg').count(), 0);
   assert.equal(await page.locator('#target pre').isVisible(), true);
@@ -67,6 +70,12 @@ async function run(page, name, url) {
   await page.getByText('公式成功:x^2', { exact: true }).waitFor();
   await page.evaluate(() => { delete window.mermaid; delete window.katex; render('```mermaid\ngraph TD; fail\n```\n\n$$\nfallback^2\n$$'); });
   await page.waitForFunction(() => document.querySelector('#target pre')?.hidden === false && document.querySelector('.md-math')?.textContent === 'fallback^2');
+  await page.evaluate(() => render('```ts title="a"\nconst x = 1\n```\n\n| A | B |\n| --- | --- |\n' + Array.from({length: 205}, (_, i) => `| ${i} | x |`).join('\n')));
+  assert.equal(await page.locator('#target figure pre').innerText(), 'const x = 1');
+  assert.match(await page.locator('.md-table-truncated').innerText(), /200 行/);
+  assert.equal(await page.evaluate(() => { const start = performance.now(); render('$' + '\\'.repeat(60) + '未闭合'); return performance.now() - start; }) < 100, true);
+  await page.evaluate(() => render('> '.repeat(5000) + '深层引用'));
+  assert.equal(await page.locator('#target').count(), 1);
   await page.evaluate(() => { stream.update('# 稳定标题\n\n增长的内容'); window.stableNode = document.querySelector('#stream h1'); stream.update('# 稳定标题\n\n增长的内容，第二段'); });
   assert.equal(await page.evaluate(() => stableNode === document.querySelector('#stream h1')), true);
   await page.evaluate(() => {

@@ -22,18 +22,40 @@ test('审批绑定当前完整 URL，不接受页面变化后的旧审批', () =
 });
 
 class Node {
-  constructor(tag,text='') { this.tag=tag; this.textContent=text; this.children=[]; this.dataset={}; this.attrs={}; }
+  constructor(tag,text='') { this.tag=tag; this.textContent=text; this.children=[]; this.dataset={}; this.attrs={}; this.style={}; this.className=''; }
   append(...children) { this.children.push(...children); }
   setAttribute(name,value) { this.attrs[name]=value; }
+  addEventListener() {}
+  get firstElementChild() { return this.children.find(child => child.tag !== '#text') ?? null; }
+  getElementById() { return null; }
+  getElementsByTagName(name) { return this.children.flatMap(child => [ ...(child.tag === name ? [child] : []), ...child.getElementsByTagName(name) ]); }
 }
-test('列表连续编号、重复1、起始编号、空行与段落边界', async () => {
-  const previous = globalThis.document;
-  globalThis.document = { createElement:tag=>new Node(tag), createDocumentFragment:()=>new Node('#fragment'), createTextNode:text=>new Node('#text',text) };
-  try {
-    const {markdownBlockRecords} = await import('../src/lib/content/markdown-render.js');
-    for (const [input, counts] of [ ['1. A\n\n2. B\n\n3. C',[3]], ['1. A\n\n1. B\n\n1. C',[3]], ['1. A\n\n段落\n\n1. B',[1,1]], ['1. A\n\n- B',[1,1]] ]) {
-      assert.deepEqual(markdownBlockRecords(input.split('\n')).filter(r=>['ol','ul'].includes(r.node.tag)).map(r=>r.node.children.length), counts);
-    }
-    assert.equal(markdownBlockRecords(['3. A','4. B'])[0].node.attrs.start,'3');
-  } finally { globalThis.document=previous; }
+const previousDocument = globalThis.document;
+globalThis.document = { createElement:tag=>new Node(tag), createDocumentFragment:()=>new Node('#fragment'), createTextNode:text=>new Node('#text',text) };
+const { markdownBlockRecords } = await import('../src/lib/content/markdown-render.js');
+test('列表连续编号、重复1、起始编号、空行与段落边界', () => {
+  for (const [input, counts] of [ ['1. A\n\n2. B\n\n3. C',[3]], ['1. A\n\n1. B\n\n1. C',[3]], ['1. A\n\n段落\n\n1. B',[1,1]], ['1. A\n\n- B',[1,1]] ]) {
+    assert.deepEqual(markdownBlockRecords(input.split('\n')).filter(r=>['ol','ul'].includes(r.node.tag)).map(r=>r.node.children.length), counts);
+  }
+  assert.equal(markdownBlockRecords(['3. A','4. B'])[0].node.attrs.start,'3');
 });
+test('Markdown 极端数学与五千层引用不会阻塞或栈溢出', () => {
+  const started = performance.now();
+  markdownBlockRecords(['$' + '\\'.repeat(60) + '未闭合']);
+  assert.ok(performance.now() - started < 100);
+  assert.doesNotThrow(() => markdownBlockRecords(['> '.repeat(5000) + '内容']));
+});
+test('带属性围栏闭合正常，超大表格按行列截断并提示', () => {
+  const fenced = markdownBlockRecords(['```ts title="a"', 'const x = 1', '```', '后续']);
+  assert.equal(fenced.length, 2);
+  assert.equal(fenced[1].node.tag, 'p');
+  const rows = ['a|b', '---|---', ...Array.from({ length: 202 }, (_, i) => `${i}|x`)];
+  const table = markdownBlockRecords(rows)[0].node;
+  const tableRows = (node, tag) => [ ...(node.tag === tag ? [node] : []), ...node.children.flatMap(child => tableRows(child, tag)) ];
+  assert.equal(tableRows(table, 'tr').length, 201);
+  assert.match(table.children[1].textContent, /200 行/);
+  assert.equal(markdownBlockRecords(rows).length, 1);
+});
+test.after(() => { globalThis.document = previousDocument; });
+
+
