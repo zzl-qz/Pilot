@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Assumptions;
@@ -60,6 +61,15 @@ class BundledRuntimeTest {
         BundledRuntime runtime = new BundledRuntime(new PilotDataDir(dataDir.toString()), false);
 
         assertEquals(dataDir.toAbsolutePath().normalize().resolve("runtime"), runtime.runtimeRoot());
+    }
+
+    @Test
+    void tarArchiveArgumentsUseRelativeFileNameForDriveColonCompatibility() {
+        Path parent = Path.of("C:/pilot/runtime");
+        Path archive = parent.resolve("python.download");
+        Path unpack = parent.resolve("python-unpack");
+        assertEquals(List.of("tar", "-xf", "python.download", "-C", "python-unpack"),
+            BundledRuntime.tarExtractCommand(parent, archive, unpack));
     }
 
     /** 没显式配数据目录时，构造函数仍然使用仓库根的 {@code .pilot/runtime}。 */

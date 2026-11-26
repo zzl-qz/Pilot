@@ -23,6 +23,23 @@ class LocalSearchRuntimeTest {
     Path dataDir;
 
     @Test
+    void pythonCandidateFilteringRejectsWindowsStoreZeroByteAliases() throws Exception {
+        Path store = dataDir.resolve("WindowsApps");
+        Files.createDirectories(store);
+        Path stub = Files.createFile(store.resolve("python.exe"));
+        assertFalse(LocalSearchRuntime.usablePythonPath(stub));
+        Path installed = Files.writeString(store.resolve("py.exe"), "python launcher");
+        assertTrue(LocalSearchRuntime.usablePythonPath(installed));
+
+        Path parent = Path.of("C:/pilot/search");
+        var cmd =
+            LocalSearchRuntime.tarExtractCommand(parent, parent.resolve("searxng.tar.gz"), parent.resolve("unpack"));
+        assertEquals("searxng.tar.gz", cmd.get(2));
+        assertEquals("unpack", cmd.get(4));
+        assertFalse(cmd.get(2).contains(":"));
+    }
+
+    @Test
     void staysDownWhenDisabled() {
         LocalSearchRuntime runtime = new LocalSearchRuntime(
             new WebSearchProperties(false, "http://127.0.0.1:9", "", ""), new PilotDataDir(dataDir.toString()));

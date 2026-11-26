@@ -111,7 +111,8 @@ public class BundledRuntime implements SmartLifecycle {
             log.warn("解压目录创建失败：{}", e.toString());
             return;
         }
-        if (run(parent, EXTRACT_TIMEOUT, "tar", "-xf", tar.toString(), "-C", unpack.toString()) != 0) {
+        List<String> extractCmd = tarExtractCommand(parent, tar, unpack);
+        if (run(parent, EXTRACT_TIMEOUT, extractCmd.toArray(String[]::new)) != 0) {
             log.warn("解压 {} 失败", archive.name());
             return;
         }
@@ -289,6 +290,13 @@ public class BundledRuntime implements SmartLifecycle {
             return arm ? "aarch64-apple-darwin" : "x86_64-apple-darwin";
         }
         return arm ? "aarch64-unknown-linux-gnu" : "x86_64-unknown-linux-gnu";
+    }
+
+    static List<String> tarExtractCommand(Path parent, Path tar, Path unpack) {
+        String archiveArg = tar.startsWith(parent) ? parent.relativize(tar).toString() : tar.getFileName().toString();
+        String unpackArg =
+            unpack.startsWith(parent) ? parent.relativize(unpack).toString() : unpack.getFileName().toString();
+        return List.of("tar", "-xf", archiveArg, "-C", unpackArg);
     }
 
     private static int run(Path directory, Duration timeout, String... command) {

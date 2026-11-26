@@ -50,4 +50,28 @@ class LocalCapabilityServiceTest {
         assertTrue(mac.stream().anyMatch(path -> path.startsWith(directory.resolve("Applications"))));
         assertTrue(LocalCapabilityService.applicationCandidates("office", "Linux", Map.of(), directory).isEmpty());
     }
+
+    @Test
+    void windowsCapabilityLookupPrefersExecutableExtensionsAndSkipsStoreStubs() throws Exception {
+        Path extensionless = directory.resolve("npm");
+        Files.writeString(extensionless, "shell shim");
+        extensionless.toFile().setExecutable(true);
+        Files.writeString(directory.resolve("npm.cmd"), "@echo off");
+        var npm = LocalCapabilityService.discoverForTest("npm", "npm", List.of("npm"), List.of(directory), true);
+        assertTrue(npm.available());
+        assertTrue(npm.executable().endsWith("npm.cmd"));
+
+        Path store = directory.resolve("WindowsApps");
+        Files.createDirectories(store);
+        Files.createFile(store.resolve("python.exe"));
+        var python =
+            LocalCapabilityService.discoverForTest("python", "Python", List.of("python.exe"), List.of(store), true);
+        assertFalse(python.available());
+
+        Path nonExecutable = Files.writeString(directory.resolve("fake-docker"), "#!/bin/sh\n");
+        nonExecutable.toFile().setExecutable(false);
+        var docker = LocalCapabilityService.discoverForTest("docker", "Docker", List.of("fake-docker"),
+            List.of(directory), false);
+        assertFalse(docker.available());
+    }
 }

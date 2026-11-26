@@ -532,8 +532,8 @@ public class LocalSearchRuntime implements SmartLifecycle {
         }
         // 仓库里 utils/templates 下的 httpd/nginx 站点模板含 "xxx:socket"，NTFS 建不出来，
         // 而且这些模板跟运行无关，直接跳过
-        int code = run(parent, EXTRACT_TIMEOUT, "tar", "-xzf", tar.toString(), "-C", unpack.toString(),
-            "--exclude=*sites-available*", "--exclude=*sites-enabled*");
+        List<String> extractCmd = tarExtractCommand(parent, tar, unpack);
+        int code = run(parent, EXTRACT_TIMEOUT, extractCmd.toArray(String[]::new));
         // 少数文件解不出来不影响运行，只要 webapp.py 在就继续
         if (!Files.isRegularFile(extracted.resolve("searx").resolve("webapp.py"))) {
             log.warn("解压 SearXNG 源码失败（tar 退出码 {}）", code);
@@ -773,15 +773,29 @@ public class LocalSearchRuntime implements SmartLifecycle {
         return List.of(venvPython(venv).toString(), "-m", "searx.webapp");
     }
 
+    static List<String> tarExtractCommand(Path parent, Path tar, Path unpack) {
+        String archiveArg = tar.startsWith(parent) ? parent.relativize(tar).toString() : tar.getFileName().toString();
+        String unpackArg =
+            unpack.startsWith(parent) ? parent.relativize(unpack).toString() : unpack.getFileName().toString();
+        return List.of("tar", "-xzf", archiveArg, "-C", unpackArg, "--exclude=*sites-available*",
+            "--exclude=*sites-enabled*");
+    }
+
     private String findPython() {
         List<String> candidates = new ArrayList<>();
-        String file = HostOs.isWindows() ? "python.exe" : "python3";
-        ExecutablePath.candidates(ExecutablePath.directories(RuntimeEnvironment.bundledBinPath()), file)
-            .filter(Files::isRegularFile).map(Path::toString).forEach(candidates::add);
+        String[] files =
+            HostOs.isWindows() ? new String[] {"python.exe", "python3.exe", "py.exe"} : new String[] {"python3"};
+        ExecutablePath.candidates(ExecutablePath.directories(RuntimeEnvironment.bundledBinPath()), files)
+            .filter(LocalSearchRuntime::usablePythonPath).map(Path::toString).forEach(candidates::add);
         if (!properties.python().isBlank()) {
             candidates.add(properties.python());
         }
+        ExecutablePath.candidates(ExecutablePath.directories(ExecutablePath.inherited(System.getenv())), files)
+            .filter(LocalSearchRuntime::usablePythonPath).map(Path::toString).forEach(candidates::add);
         candidates.addAll(PYTHON_CANDIDATES);
+        if (HostOs.isWindows()) {
+            candidates.addAll(List.of("python.exe", "py.exe"));
+        }
         if (!HostOs.isWindows()) {
             candidates.addAll(POSIX_PYTHON_CANDIDATES);
         }
@@ -791,6 +805,22 @@ public class LocalSearchRuntime implements SmartLifecycle {
             }
         }
         return null;
+    }
+
+    static boolean usablePythonPath(Path path) {
+        if (!Files.isRegularFile(path)) {
+            return false;
+        }
+        String normalized = path.toString().replace('\\', '/').toLowerCase(java.util.Locale.ROOT);
+        return !normalized.contains("/windowsapps/") || sizeNonzero(path);
+    }
+
+    private static boolean sizeNonzero(Path path) {
+        try {
+            return Files.size(path) > 0;
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     private static boolean supported(String python) {
@@ -803,30 +833,61 @@ public class LocalSearchRuntime implements SmartLifecycle {
         builder.directory(directory.toFile());
         builder.environment().put("GIT_TERMINAL_PROMPT", "0");
         builder.redirectErrorStream(true);
+        Process process = null;
+        java.util.concurrent.FutureTask<byte[]> outputTask = null;
         try {
-            Process process = builder.start();
+            process = builder.start();
             process.getOutputStream().close();
-            byte[] output = process.getInputStream().readAllBytes();
+            Process started = process;
+            outputTask = new java.util.concurrent.FutureTask<>(() -> readBounded(started.getInputStream(), 256 * 1024));
+            Thread.startVirtualThread(outputTask);
             if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
-                process.destroyForcibly();
+                terminateTree(process);
                 log.warn("命令超时：{}", String.join(" ", command));
                 return -1;
             }
+            byte[] output = outputTask.get(5, TimeUnit.SECONDS);
             int code = process.exitValue();
             if (code != 0) {
-                String text = new String(output, java.nio.charset.StandardCharsets.UTF_8).strip();
+                String text = com.pilot.core.exec.ProcessSupport.decode(output).strip();
                 if (text.length() > 1200) {
                     text = text.substring(text.length() - 1200);
                 }
                 log.warn("命令退出 {}：{}{}", code, String.join(" ", command), text.isEmpty() ? "" : "\n" + text);
             }
             return code;
-        } catch (IOException e) {
+        } catch (IOException | java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException e) {
             return -1;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return -1;
+        } finally {
+            if (process != null && process.isAlive()) {
+                terminateTree(process);
+            }
+            if (outputTask != null) {
+                outputTask.cancel(true);
+            }
         }
+    }
+
+    private static byte[] readBounded(java.io.InputStream stream, int maxBytes) throws IOException {
+        try (stream) {
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            int n;
+            while ((n = stream.read(buf)) != -1) {
+                if (out.size() < maxBytes) {
+                    out.write(buf, 0, Math.min(n, maxBytes - out.size()));
+                }
+            }
+            return out.toByteArray();
+        }
+    }
+
+    private static void terminateTree(Process process) {
+        process.descendants().forEach(ProcessHandle::destroyForcibly);
+        process.destroyForcibly();
     }
 
     private void stopProcess() {
