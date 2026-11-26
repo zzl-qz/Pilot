@@ -16,6 +16,27 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const DESKTOP_RUNTIME_FILES = [
+  'package.json', 'main.mjs', 'preload.cjs', 'alert-preload.cjs', 'brand-host.mjs',
+  'desktop-shell.mjs', 'desktop-alerts.mjs', 'browser-control.mjs', 'workbench-security.mjs',
+  'protocol.mjs', 'platform-menu.mjs', 'offline-page.mjs', 'directory-picker.mjs',
+  'media-permission.mjs', 'session-export.mjs', 'mobile-bridge.mjs'
+];
+
+async function copyDesktopRuntime(target) {
+  const desktopDir = path.join(ROOT, 'pilot-desktop');
+  const destination = path.join(target, 'pilot-desktop');
+  await mkdir(destination, { recursive: true });
+  for (const file of DESKTOP_RUNTIME_FILES) {
+    try { await cp(path.join(desktopDir, file), path.join(destination, file)); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
+  try { await cp(path.join(desktopDir, 'assets'), path.join(destination, 'assets'), { recursive: true }); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const bridge = path.join(ROOT, 'mobile-bridge/lib');
+  try { await cp(bridge, path.join(target, 'mobile-bridge/lib'), { recursive: true }); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+}
 
 /** Spring Boot + SQLite + PDFBox + POI + Jackson + HTTP/TLS 所需的最小 JDK 模块集合。 */
 export const PILOT_JLINK_MODULES = [
@@ -147,6 +168,7 @@ export function linuxDesktopEntry() {
 Type=Application
 Name=Pilot
 Comment=Pilot Local Coding Agent
+StartupWMClass=Pilot
 Exec=AppRun
 Icon=pilot
 Categories=Development;IDE;
@@ -207,6 +229,19 @@ async function verifyJdkVersion(javaHome) {
   return javaBin;
 }
 
+async function verifyJdkTarget(javaHome, platform, arch) {
+  const bin = path.join(javaHome, 'bin', executableName('java'));
+  const { stdout, stderr } = await execFileAsync(bin, ['-XshowSettings:properties', '-version']);
+  const details = stdout + stderr;
+  const homePlatform = process.platform;
+  const homeArch = process.arch === 'x64' ? 'x64' : process.arch;
+  const match = details.match(/os\.arch\s*=\s*(\S+)/);
+  const jdkArch = match?.[1] === 'amd64' ? 'x64' : match?.[1] === 'aarch64' ? 'arm64' : match?.[1];
+  if (platform !== homePlatform || arch !== homeArch || (jdkArch && jdkArch !== arch)) {
+    throw new Error(`当前 JDK 只能生成 ${homePlatform}-${jdkArch || homeArch} 运行时，不能安全地打包为 ${platform}-${arch}；请在目标平台/架构使用对应 JDK。`);
+  }
+}
+
 function runCommand(bin, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(bin, args, { stdio: 'inherit', windowsHide: true, ...options });
@@ -248,7 +283,7 @@ async function verifyBundledRuntime(javaBin, jarPath) {
       '-jar', jarPath,
       '--server.address=127.0.0.1',
       '--server.port=0',
-      '--pilot.desktop.open-browser=false'
+      '--pilot.desktop.launch=false'
     ], {
       env: { ...process.env, PILOT_DATA_DIR: tempData },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -304,6 +339,7 @@ export async function packageRelease(rawOptions) {
   const options = { ...rawOptions };
   const javaHome = await resolveJavaHome(options.javaHome);
   await verifyJdkVersion(javaHome);
+  await verifyJdkTarget(javaHome, options.platform, options.arch);
   await access(options.jar);
 
   const finalOut = path.resolve(options.out);
@@ -343,7 +379,8 @@ export async function packageRelease(rawOptions) {
       const appRun = path.join(appImageDir, 'AppRun');
       await writeFile(appRun, linuxAppRunScript());
       await chmod(appRun, 0o755);
-      await writeFile(path.join(appImageDir, 'pilot.desktop'), linuxDesktopEntry());
+      await writeFile(path.join(appImageDir, 'Pilot.desktop'), linuxDesktopEntry());
+      await cp(path.join(ROOT, 'pilot-desktop/assets/icon.png'), path.join(appImageDir, 'pilot.png'));
       artifacts.push('Pilot.AppDir');
     } else {
       throw new Error(`不支持的目标平台：${options.platform}`);
@@ -353,6 +390,7 @@ export async function packageRelease(rawOptions) {
     await runCommand(jlinkBin, buildJlinkArgs(runtimeDir, options.extraModules));
     const bundledJar = path.join(appDir, 'pilot-server.jar');
     await cp(options.jar, bundledJar);
+    await copyDesktopRuntime(appDir);
 
     const bundledJava = path.join(runtimeDir, 'bin', executableName('java', options.platform));
     let verifyResult = null;

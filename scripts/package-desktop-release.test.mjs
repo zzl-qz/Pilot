@@ -54,6 +54,8 @@ test('platform launchers bind localhost and enable native access cleanly', () =>
   assert.ok(linux.includes('usr/lib/pilot/runtime/bin/java'));
   assert.ok(linux.includes('--server.address=127.0.0.1'));
   assert.ok(linuxDesktopEntry().includes('Exec=AppRun'));
+  assert.ok(linuxDesktopEntry().includes('Icon=pilot'));
+  assert.ok(linuxDesktopEntry().includes('StartupWMClass=Pilot'));
 });
 
 test('parseArgs parses flags and rejects unknown flags', () => {
@@ -63,4 +65,11 @@ test('parseArgs parses flags and rejects unknown flags', () => {
   assert.equal(parsed.skipDmg, true);
   assert.equal(parsed.verify, true);
   assert.throws(() => parseArgs(['--bogus']), /未知参数/);
+});
+
+test('verify uses the desktop launch property', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const script = await readFile(new URL('./package-desktop-release.mjs', import.meta.url), 'utf8');
+  assert.match(script, /--pilot\.desktop\.launch=false/);
+  assert.doesNotMatch(script, /--pilot\.desktop\.open-browser=false/);
 });
