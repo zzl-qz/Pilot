@@ -1,6 +1,7 @@
 package com.pilot.core.lint;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,13 +38,14 @@ final class ReuseScan {
     static List<String> scan(String path, String before, String after, List<String> siblings) {
         List<String> beforeLines = meaningful(before);
         List<String> afterLines = meaningful(after);
+        boolean[] added = addedMask(beforeLines, afterLines);
         List<String> out = new ArrayList<>();
-        String exact = copied(beforeLines, afterLines, siblings, WINDOW, false, 1);
-        String renamed = exact == null ? copied(beforeLines, afterLines, siblings, WINDOW, true, 1) : null;
+        String exact = copied(beforeLines, afterLines, added, siblings, WINDOW, false, 1);
+        String renamed = exact == null ? copied(beforeLines, afterLines, added, siblings, WINDOW, true, 1) : null;
         String shortExact = exact == null && renamed == null
-            ? copied(beforeLines, afterLines, siblings, SHORT_WINDOW, false, SHORT_TIMES) : null;
+            ? copied(beforeLines, afterLines, added, siblings, SHORT_WINDOW, false, SHORT_TIMES) : null;
         String shortRenamed = exact == null && renamed == null && shortExact == null
-            ? copied(beforeLines, afterLines, siblings, SHORT_WINDOW, true, SHORT_TIMES) : null;
+            ? copied(beforeLines, afterLines, added, siblings, SHORT_WINDOW, true, SHORT_TIMES) : null;
         if (exact != null) {
             out.add(path + ": 有至少 " + WINDOW + " 行连续代码和已有实现逐字相同，属于原样复制（命中片段：" + exact + "）");
         } else if (renamed != null) {
@@ -61,29 +63,32 @@ final class ReuseScan {
         return List.copyOf(out);
     }
 
-    private static String copied(List<String> beforeLines, List<String> afterLines, List<String> siblings, int window,
-        boolean structural, int times) {
+    private static String copied(List<String> beforeLines, List<String> afterLines, boolean[] added,
+        List<String> siblings, int window, boolean structural, int times) {
         Map<String, Integer> before = windows(beforeLines, structural, window);
         Map<String, String> samples = new HashMap<>();
-        Map<String, Integer> after = countsOf(afterLines, structural, window, samples);
+        Map<String, Integer> after = countsOf(afterLines, null, structural, window, null);
+        Map<String, Integer> fresh = countsOf(afterLines, added, structural, window, samples);
         Map<String, Integer> corpus = new HashMap<>(before);
         if (siblings != null) {
             for (String sibling : siblings) {
                 add(corpus, windows(meaningful(sibling), structural, window));
             }
         }
-        for (Map.Entry<String, Integer> entry : after.entrySet()) {
-            int oldCount = before.getOrDefault(entry.getKey(), 0);
-            int seen = corpus.getOrDefault(entry.getKey(), 0);
-            if (entry.getValue() <= oldCount) {
+        for (Map.Entry<String, Integer> entry : fresh.entrySet()) {
+            String key = entry.getKey();
+            int afterCount = after.getOrDefault(key, 0);
+            int oldCount = before.getOrDefault(key, 0);
+            int seen = corpus.getOrDefault(key, 0);
+            if (afterCount <= oldCount) {
                 continue;
             }
-            if (times <= 1 && (seen > 0 || entry.getValue() >= 2)) {
-                return samples.getOrDefault(entry.getKey(), "");
+            if (times <= 1 && (seen > 0 || afterCount >= 2)) {
+                return samples.getOrDefault(key, "");
             }
-            int total = seen - oldCount + entry.getValue();
+            int total = seen - oldCount + afterCount;
             if (times > 1 && total >= times) {
-                return samples.getOrDefault(entry.getKey(), "");
+                return samples.getOrDefault(key, "");
             }
         }
         return null;
@@ -123,7 +128,7 @@ final class ReuseScan {
     }
 
     private static Map<String, Integer> windows(List<String> lines, boolean structural, int window) {
-        return countsOf(lines, structural, window, null);
+        return countsOf(lines, null, structural, window, null);
     }
 
     private static void add(Map<String, Integer> into, Map<String, Integer> more) {
@@ -132,7 +137,7 @@ final class ReuseScan {
         }
     }
 
-    private static Map<String, Integer> countsOf(List<String> lines, boolean structural, int window,
+    private static Map<String, Integer> countsOf(List<String> lines, boolean[] added, boolean structural, int window,
         Map<String, String> samples) {
         Map<String, Integer> counts = new HashMap<>();
         if (lines.size() < window) {
@@ -141,8 +146,12 @@ final class ReuseScan {
         Map<String, Integer> lastEnd = new HashMap<>();
         int minLogic = window >= WINDOW ? 3 : 2;
         int minKey = window >= WINDOW ? 40 : 24;
+        int minAdded = window >= WINDOW ? 3 : 2;
         for (int i = 0; i + window <= lines.size(); i++) {
             if (allTrivial(lines, i, window)) {
+                continue;
+            }
+            if (added != null && addedInWindow(added, i, window) < minAdded) {
                 continue;
             }
             if (structural && logic(lines, i, window) < minLogic) {
@@ -163,6 +172,96 @@ final class ReuseScan {
             }
         }
         return counts;
+    }
+
+    private static int addedInWindow(boolean[] added, int start, int window) {
+        int count = 0;
+        for (int i = start; i < start + window; i++) {
+            if (added[i]) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /** 标记 afterLines 中相对 beforeLines 真正新增或改写的行，避免向既有相似方法插入 1-2 行守卫时误报换名复制。 */
+    private static boolean[] addedMask(List<String> before, List<String> after) {
+        boolean[] mask = new boolean[after.size()];
+        if (before.isEmpty()) {
+            Arrays.fill(mask, true);
+            return mask;
+        }
+        int prefix = 0;
+        int limit = Math.min(before.size(), after.size());
+        while (prefix < limit && before.get(prefix).equals(after.get(prefix))) {
+            prefix++;
+        }
+        int bEnd = before.size();
+        int aEnd = after.size();
+        while (bEnd > prefix && aEnd > prefix && before.get(bEnd - 1).equals(after.get(aEnd - 1))) {
+            bEnd--;
+            aEnd--;
+        }
+        int m = bEnd - prefix;
+        int n = aEnd - prefix;
+        if (n <= 0) {
+            return mask;
+        }
+        if (m <= 0) {
+            Arrays.fill(mask, prefix, aEnd, true);
+            return mask;
+        }
+        if ((long)m * n > 2_000_000L) {
+            markExcess(before, after, prefix, bEnd, aEnd, mask);
+            return mask;
+        }
+        markLcsDiff(before, after, prefix, m, n, mask);
+        return mask;
+    }
+
+    private static void markLcsDiff(List<String> before, List<String> after, int offset, int m, int n, boolean[] mask) {
+        int[][] dp = new int[m + 1][n + 1];
+        for (int i = m - 1; i >= 0; i--) {
+            String left = before.get(offset + i);
+            for (int j = n - 1; j >= 0; j--) {
+                dp[i][j] =
+                    left.equals(after.get(offset + j)) ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+            }
+        }
+        int i = 0;
+        int j = 0;
+        while (i < m && j < n) {
+            if (before.get(offset + i).equals(after.get(offset + j))) {
+                i++;
+                j++;
+            } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+                i++;
+            } else {
+                mask[offset + j] = true;
+                j++;
+            }
+        }
+        while (j < n) {
+            mask[offset + j] = true;
+            j++;
+        }
+    }
+
+    private static void markExcess(List<String> before, List<String> after, int offset, int bEnd, int aEnd,
+        boolean[] mask) {
+        Map<String, Integer> remaining = new HashMap<>();
+        for (int i = offset; i < bEnd; i++) {
+            remaining.merge(before.get(i), 1, Integer::sum);
+        }
+        for (int j = offset; j < aEnd; j++) {
+            String line = after.get(j);
+            int left = remaining.getOrDefault(line, 0);
+            if (left > 0) {
+                remaining.put(line, left - 1);
+            } else {
+                mask[j] = true;
+            }
+        }
     }
 
     private static String preview(List<String> lines, int start, int window) {

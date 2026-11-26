@@ -78,4 +78,67 @@ class ReuseScanTest {
         List<String> hit = ReuseScan.scan("ModelUsageParser.java", "", disjointCopy, List.of());
         assertTrue(hit.stream().anyMatch(line -> line.contains("换名复制")), "同文件内两段互不重叠的 6 行重复逻辑仍应准确检出: " + hit);
     }
+
+    @Test
+    void insertingOneGuardLineIntoExistingSimilarMethodsDoesNotFalsePositive() {
+        String before = """
+            private static String presentationText(Path file) throws IOException {
+                StringBuilder out = new StringBuilder();
+                try (InputStream in = Files.newInputStream(file); XMLSlideShow deck = new XMLSlideShow(in)) {
+                    for (var slide : deck.getSlides()) {
+                        out.append(slide.getSlideNumber());
+                    }
+                }
+                return out.toString();
+            }
+            private static String documentText(Path file) throws IOException {
+                StringBuilder out = new StringBuilder();
+                try (InputStream in = Files.newInputStream(file); XWPFDocument doc = new XWPFDocument(in)) {
+                    for (var element : doc.getBodyElements()) {
+                        out.append(element.toString());
+                    }
+                }
+                return out.toString();
+            }
+            """;
+        String after = """
+            private static String presentationText(Path file) throws IOException {
+                StringBuilder out = new StringBuilder();
+                hardenZip();
+                try (InputStream in = Files.newInputStream(file); XMLSlideShow deck = new XMLSlideShow(in)) {
+                    for (var slide : deck.getSlides()) {
+                        out.append(slide.getSlideNumber());
+                    }
+                }
+                return out.toString();
+            }
+            private static String documentText(Path file) throws IOException {
+                StringBuilder out = new StringBuilder();
+                hardenZip();
+                try (InputStream in = Files.newInputStream(file); XWPFDocument doc = new XWPFDocument(in)) {
+                    for (var element : doc.getBodyElements()) {
+                        out.append(element.toString());
+                    }
+                }
+                return out.toString();
+            }
+            """;
+        List<String> guardInsertHits = ReuseScan.scan("OfficeSupport.java", before, after, List.of());
+        assertTrue(guardInsertHits.isEmpty(), "向既有相似方法各插入一行守卫调用不得误报换名复制: " + guardInsertHits);
+
+        String pastedDuplicate = before + """
+            private static String archiveText(Path file) throws IOException {
+                StringBuilder out = new StringBuilder();
+                try (InputStream in = Files.newInputStream(file); ZipArchive pack = new ZipArchive(in)) {
+                    for (var item : pack.getEntries()) {
+                        out.append(item.toString());
+                    }
+                }
+                return out.toString();
+            }
+            """;
+        List<String> realCopyHits = ReuseScan.scan("OfficeSupport.java", before, pastedDuplicate, List.of());
+        assertTrue(realCopyHits.stream().anyMatch(line -> line.contains("换名复制")),
+            "真正新增粘贴一整段相似方法时仍应检出换名复制: " + realCopyHits);
+    }
 }
