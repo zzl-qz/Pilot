@@ -22,7 +22,7 @@ export function parseCallout(lines: readonly string[] | null | undefined) {
 }
 
 export function resolveFileReference(href: unknown, workspace: unknown) {
-  if (typeof href !== 'string' || !href.startsWith('/') || href.startsWith('//')) {
+  if (typeof href !== 'string') {
     return null;
   }
 
@@ -35,11 +35,16 @@ export function resolveFileReference(href: unknown, workspace: unknown) {
 
   const location = decoded.match(/:(\d+)(?::(\d+))?$/);
   const rawPath = (location ? decoded.slice(0, location.index) : decoded).replace(/\\/g, '/');
+  const windowsAbsolute = /^[A-Za-z]:\//.test(rawPath);
+  if ((!rawPath.startsWith('/') && !windowsAbsolute) || rawPath.startsWith('//')) return null;
   const cleanWorkspace = String(workspace || '').replace(/\\/g, '/').replace(/\/+$/, '');
   const workspaceName = cleanWorkspace.split('/').filter(Boolean).pop() || '';
   let path = '';
 
-  if (cleanWorkspace && (rawPath === cleanWorkspace || rawPath.startsWith(cleanWorkspace + '/'))) {
+  const sameRoot = cleanWorkspace && (windowsAbsolute
+    ? rawPath.toLowerCase() === cleanWorkspace.toLowerCase() || rawPath.toLowerCase().startsWith(cleanWorkspace.toLowerCase() + '/')
+    : rawPath === cleanWorkspace || rawPath.startsWith(cleanWorkspace + '/'));
+  if (sameRoot) {
     path = rawPath.slice(cleanWorkspace.length).replace(/^\/+/, '');
   } else {
     const relative = rawPath.replace(/^\/+/, '');

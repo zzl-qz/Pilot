@@ -39,6 +39,19 @@ test('resolveFileReference 拒绝外链、越界路径和其他绝对路径', ()
   assert.equal(resolveFileReference('/Users/other/project/file.txt', workspace), null);
 });
 
+test('resolveFileReference 识别 Windows 盘符路径并归一化分隔符', () => {
+  assert.deepEqual(resolveFileReference('C:/src/App.tsx:12', 'C:/src'), {
+    path: 'App.tsx', line: 12, column: null
+  });
+  assert.deepEqual(resolveFileReference('D:\\repo\\foo.ts', 'D:\\repo'), {
+    path: 'foo.ts', line: null, column: null
+  });
+  assert.deepEqual(resolveFileReference('/workspace/src/App.tsx', '/workspace'), {
+    path: 'src/App.tsx', line: null, column: null
+  });
+  assert.equal(resolveFileReference('src/App.tsx', '/workspace'), null);
+});
+
 test('languageLabel 把常见代码围栏名称转成可读标签', () => {
   assert.equal(languageLabel('ts'), 'TypeScript');
   assert.equal(languageLabel('bash'), 'Shell');
