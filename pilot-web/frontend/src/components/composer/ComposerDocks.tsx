@@ -47,11 +47,13 @@ function formatApprovalArgs(name: string, raw: unknown): string {
 }
 
 function blockingModalOpen() {
+  const hasVisibleAriaModal = () => Array.from(document.querySelectorAll('[aria-modal="true"]'))
+    .some((node) => (node as HTMLElement).getClientRects().length > 0);
   try {
-    return Boolean(document.querySelector('dialog[open]:modal'));
+    return Boolean(document.querySelector('dialog[open]:modal')) || hasVisibleAriaModal();
   } catch {
     const open = document.querySelector('dialog[open]') as HTMLElement | null;
-    return Boolean(open && open.getClientRects().length);
+    return Boolean(open && open.getClientRects().length) || hasVisibleAriaModal();
   }
 }
 

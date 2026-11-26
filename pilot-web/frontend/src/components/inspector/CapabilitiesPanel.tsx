@@ -5,6 +5,7 @@ import { MCP_TRUST_LABELS, mcpSourceLabel } from '../../lib/mcp.js';
 import { pluginStatusDetail, pluginStatusLabel, pluginStatusTone, pluginSummary } from '../../lib/plugin-status.js';
 import { toolLabel } from '../../lib/tool-meta.js';
 import { agentSourceLabel } from '../settings/agent-profiles-state.js';
+import { localCapabilitySummary } from '../../lib/local-capability-summary.js';
 
 /* ---------- 能力清单 ---------- */
 
@@ -40,7 +41,8 @@ export function CapabilitiesPanel() {
   const tools = useMemo(() => (Array.isArray(data?.tools) ? [...data.tools] : [])
     .sort((a, b) => Number(b.available) - Number(a.available) || String(a.name).localeCompare(String(b.name))), [data]);
   const servers = Array.isArray(data?.mcpServers) ? data.mcpServers : [];
-  const localCapabilities = Array.isArray(data?.localCapabilities) ? data.localCapabilities : [];
+  const localSummary = useMemo(() => localCapabilitySummary(Array.isArray(data?.localCapabilities) ? data.localCapabilities : []), [data?.localCapabilities]);
+  const localCapabilities = localSummary.items;
   const plugins = Array.isArray(data?.plugins) ? data.plugins : [];
   const hooks = plugins.filter((item) => item.kind === 'hook');
   const available = tools.filter((tool) => tool.available).length;
@@ -101,7 +103,7 @@ export function CapabilitiesPanel() {
           ) : <p className="panel-empty">没有注册任何工具。</p>}
         </section>
         <section className="cap-section">
-          <h3>本机资源<span className="cap-count">{localCapabilities.filter((item) => item.available).length} / {localCapabilities.length}</span></h3>
+          <h3>本机资源<span className="cap-count">{localSummary.available} / {localCapabilities.length}</span></h3>
           <p className="cap-desc">只检查已存在的程序，不会启动、下载或安装。需要补充环境时，先确认任务是否有可用替代方案。</p>
           {localCapabilities.length ? (
             <ul className="cap-list">
