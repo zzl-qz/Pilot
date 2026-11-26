@@ -89,8 +89,10 @@ public final class DocumentRenderer {
                     Path extra;
                     if (mergeBase != null && !name.contains("/") && !name.contains("\\")
                         && name.toLowerCase(Locale.ROOT).endsWith(".pdf")) {
-                        extra = mergeBase.resolve(name).normalize();
-                        if (!extra.startsWith(mergeBase.normalize())) {
+                        Path normalizedBase = mergeBase.toAbsolutePath().normalize();
+                        extra = normalizedBase.resolve(name).normalize();
+                        if (!extra.startsWith(normalizedBase) || Files.isSymbolicLink(extra)
+                            || !extra.toRealPath().startsWith(normalizedBase.toRealPath())) {
                             throw new IllegalArgumentException("merge 文件名非法：" + name);
                         }
                     } else {

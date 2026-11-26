@@ -7,6 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.pilot.core.message.Attachment;
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolNames;
 
@@ -43,7 +44,7 @@ public record ContextComposition(long totalTokens, boolean estimated, int attach
         Map<String, String> calledTools = new HashMap<>();
         int attachments = 0;
         for (Message message : messages) {
-            attachments += message.attachments().size();
+            attachments += (int)message.attachments().stream().filter(Attachment::image).count();
             String remaining = message.content();
             if (message.role().equals("system") || message.role().equals("developer")) {
                 for (Source source : sources == null ? List.<Source>of() : sources) {

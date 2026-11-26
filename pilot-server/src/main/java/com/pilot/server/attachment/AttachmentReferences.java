@@ -3,8 +3,11 @@ package com.pilot.server.attachment;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -13,6 +16,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.event.RunStarted;
+import com.pilot.core.message.Attachment;
 import com.pilot.core.message.Message;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.Session;
@@ -35,9 +39,9 @@ public class AttachmentReferences {
     public record Reference(String owner, String filename) {
     }
 
-    private static final Pattern NOTE = Pattern.compile("(?<=已保存到 )[^\\r\\n]+?(?=，可用 read_attachment 读取)");
     private static final Pattern OWNER = Pattern.compile("[A-Za-z0-9._-]{1,80}");
     private static final Pattern FILENAME = Pattern.compile("[a-fA-F0-9-]{36}-[A-Za-z0-9._-]{1,60}");
+    private static final Pattern SAVED_NOTE = Pattern.compile("(?<=已保存到 )[^\\r\\n]+?(?=，可用 read_attachment 读取)");
 
     private final SqliteStore sqlite;
     private final ObjectMapper mapper;
@@ -60,10 +64,10 @@ public class AttachmentReferences {
         throws SQLException {
         Set<Reference> result = new HashSet<>();
         try (var statement = connection.prepareStatement("""
-            SELECT json_extract(payload, '$.input'), json_extract(payload, '$.attachments')
-              FROM events WHERE type = 'run.started' AND (? IS NULL OR session_id = ?)
+            SELECT json_extract(payload, '$.attachments')
+              FROM events WHERE type = 'run.started' AND json_valid(payload) = 1 AND (? IS NULL OR session_id = ?)
             UNION ALL
-            SELECT CASE WHEN role = 'user' THEN content ELSE NULL END, attachments
+            SELECT attachments
               FROM conversation_messages WHERE (? IS NULL OR session_id = ?)
             """)) {
             for (int parameter = 1; parameter <= 4; parameter++) {
@@ -71,8 +75,7 @@ public class AttachmentReferences {
             }
             try (var rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    collectNote(result, rows.getString(1), attachmentRoot);
-                    String json = rows.getString(2);
+                    String json = rows.getString(1);
                     if (json != null) {
                         for (JsonNode item : mapper.readTree(json)) {
                             add(result, item.path("path").asText(""), attachmentRoot);
@@ -118,6 +121,39 @@ public class AttachmentReferences {
         }
     }
 
+    /** 供会话分支复制历史时提取原会话合法拥有的非图片落盘附件，转为结构化引用；绝不接受未归属原会话的自由文本路径。 */
+    public List<Attachment> ownedTextReferences(String sourceSessionId, String text) {
+        if (sourceSessionId == null || sourceSessionId.isBlank() || text == null || text.isBlank()) {
+            return List.of();
+        }
+        String ownDir = AttachmentService.storageDirectory(sourceSessionId);
+        Set<Reference> inherited = null;
+        Map<String, Attachment> found = new LinkedHashMap<>();
+        var matcher = SAVED_NOTE.matcher(text);
+        while (matcher.find()) {
+            Reference ref = reference(matcher.group(), root()).orElse(null);
+            if (ref == null) {
+                continue;
+            }
+            if (!ref.owner().equals(ownDir)) {
+                if (inherited == null) {
+                    inherited = retained(sourceSessionId);
+                }
+                if (!inherited.contains(ref)) {
+                    continue;
+                }
+            }
+            try {
+                Path file = attachments.resolveAttachment(ref.owner(), ref.filename());
+                String normalized = file.toAbsolutePath().normalize().toString();
+                found.putIfAbsent(normalized, new Attachment(ref.filename(), "application/octet-stream", normalized));
+            } catch (IllegalArgumentException ignored) {
+                // 仅继承真实存在的合法附件
+            }
+        }
+        return found.isEmpty() ? List.of() : new ArrayList<>(found.values());
+    }
+
     /** 工具传入的是完整路径：必须匹配本会话上传或历史中仍保留的同一个文件。 */
     public Path resolvePath(String session, String path) {
         Reference reference = reference(path, root()).orElseThrow(() -> new IllegalArgumentException("无效的附件路径"));
@@ -141,7 +177,6 @@ public class AttachmentReferences {
         for (String id : ids) {
             sessions.events(id).forEach(event -> {
                 if (event.payload() instanceof RunStarted started) {
-                    collectNote(result, started.input(), root());
                     started.attachments().forEach(attachment -> add(result, attachment.path(), root()));
                 }
             });
@@ -156,19 +191,7 @@ public class AttachmentReferences {
 
     private static void collectMessages(Set<Reference> result, List<Message> messages, String root) {
         for (Message message : messages) {
-            if ("user".equals(message.role())) {
-                collectNote(result, message.content(), root);
-            }
             message.attachments().forEach(attachment -> add(result, attachment.path(), root));
-        }
-    }
-
-    private static void collectNote(Set<Reference> result, String text, String root) {
-        if (text != null) {
-            var matches = NOTE.matcher(text);
-            while (matches.find()) {
-                add(result, matches.group(), root);
-            }
         }
     }
 

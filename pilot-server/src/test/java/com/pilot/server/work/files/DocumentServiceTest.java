@@ -6,10 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 import org.apache.pdfbox.Loader;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -99,6 +101,36 @@ class DocumentServiceTest {
         assertThrows(IllegalArgumentException.class, () -> service.get(SESSION, "../escape"));
         assertThrows(IllegalArgumentException.class,
             () -> service.download(SESSION, document.id(), "sta_../../secret"));
+    }
+
+    @Test
+    void rejectsForeignSessionPdfMergeAndSymbolicLinkArtifactDownload() throws Exception {
+        var service = service();
+        var document = service.create(SESSION, "Report", "blocks", SPEC, "human");
+        var otherDocument = service.create("ses_other_0002", "Other", "blocks", SPEC, "human");
+        var artifact =
+            service.render(SESSION, document.id(), JSON.readTree("{\"formats\":[\"pdf\"]}")).artifacts().getFirst();
+        assertThrows(IllegalArgumentException.class, () -> service.render("ses_other_0002", document.id(),
+            JSON.readTree("{\"formats\":[\"pdf\"],\"pdf_operations\":{\"merge\":[\"" + artifact.filename() + "\"]}}")));
+        // 另一会话用自己的文档尝试通过相对路径或 studio 子路径合并本会话的 PDF 产物，必须拒绝
+        for (String foreignRef : new String[] {document.id() + "/" + artifact.filename(),
+            "../" + document.id() + "/" + artifact.filename()}) {
+            assertThrows(IllegalStateException.class,
+                () -> service.render("ses_other_0002", otherDocument.id(),
+                    JSON.readTree("{\"formats\":[\"pdf\"],\"pdf_operations\":{\"merge\":[\"" + foreignRef + "\"]}}")),
+                foreignRef);
+        }
+
+        Path target = temp.resolve("outside.pdf");
+        Files.write(target, Files.readAllBytes(service.download(SESSION, document.id(), artifact.id()).file()));
+        Path artifactPath = temp.resolve("studio").resolve(document.id()).resolve(artifact.filename());
+        Files.delete(artifactPath);
+        try {
+            Files.createSymbolicLink(artifactPath, target);
+        } catch (UnsupportedOperationException | FileSystemException e) {
+            Assumptions.abort("当前平台未提供创建符号链接权限");
+        }
+        assertThrows(IllegalArgumentException.class, () -> service.download(SESSION, document.id(), artifact.id()));
     }
 
     @Test

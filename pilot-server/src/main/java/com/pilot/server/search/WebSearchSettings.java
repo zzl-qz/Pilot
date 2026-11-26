@@ -155,7 +155,7 @@ public class WebSearchSettings implements com.pilot.server.model.SearchPreferenc
     /** 构造一次性代理客户端（供设置页未保存配置测试用）；无变化时直接返回 null 复用默认客户端。 */
     public HttpClient createTemporaryClientIfNeeded(String proxyOverride) {
         String normalized = proxyOverride == null ? current.proxy()
-            : (proxyOverride.isBlank() ? "" : WebSearchProperties.normalizeProxy(proxyOverride));
+            : (proxyOverride.isBlank() ? "" : preserveMaskedProxyPassword(current.proxy(), proxyOverride));
         if (normalized.equals(current.proxy())) {
             return null;
         }
@@ -237,7 +237,7 @@ public class WebSearchSettings implements com.pilot.server.model.SearchPreferenc
 
         String nextProxy = before.proxy();
         if (command.proxy() != null) {
-            nextProxy = command.proxy().isBlank() ? "" : WebSearchProperties.normalizeProxy(command.proxy());
+            nextProxy = command.proxy().isBlank() ? "" : preserveMaskedProxyPassword(before.proxy(), command.proxy());
             writes.put(KEY_PROXY, nextProxy);
         }
 
@@ -351,7 +351,7 @@ public class WebSearchSettings implements com.pilot.server.model.SearchPreferenc
             ? (endpoints.containsKey(provider) ? endpoints.get(provider).toString() : provider.defaultEndpoint())
             : genericEndpoint;
         String probeProxy = overrides.proxy() == null ? base.proxy()
-            : overrides.proxy().isBlank() ? "" : WebSearchProperties.normalizeProxy(overrides.proxy());
+            : overrides.proxy().isBlank() ? "" : preserveMaskedProxyPassword(base.proxy(), overrides.proxy());
         boolean searxngChanged = !provider.requiresApiKey()
             && !com.pilot.server.config.EndpointSecurity.sameOriginOrBothBlank(base.searxngEndpoint(), searxngEndpoint);
         boolean proxyRedirected = !probeProxy.isBlank() && !base.proxy().equals(probeProxy);
@@ -367,6 +367,13 @@ public class WebSearchSettings implements com.pilot.server.model.SearchPreferenc
         URI apiUri = genericEndpoint.isBlank() ? null : URI.create(genericEndpoint);
         return new WebSearchConfig(provider, genericKey, apiUri, URI.create(searxngEndpoint), base.timeout(), fallback,
             Map.copyOf(keys), publicSources, Map.copyOf(endpoints));
+    }
+
+    private static String preserveMaskedProxyPassword(String currentProxy, String requestedProxy) {
+        if (currentProxy != null && !currentProxy.isBlank() && requestedProxy.strip().equals(maskProxy(currentProxy))) {
+            return currentProxy;
+        }
+        return WebSearchProperties.normalizeProxy(requestedProxy);
     }
 
     public View view(LocalSearchRuntime.RuntimeStatus runtimeStatus) {
@@ -396,7 +403,7 @@ public class WebSearchSettings implements com.pilot.server.model.SearchPreferenc
         String nativeSummary = nativeSearch == null ? "" : nativeSearch.summary();
         return new View(snap.provider().id(), snap.effectiveProviderId(), snap.activeApiEndpoint(),
             !activeKey.isBlank(), WebSearchConfig.maskSecret(activeKey), snap.searxngEndpoint(), snap.fallbackEnabled(),
-            snap.preferPilotSearch(), sanitizeProxy(snap.proxy()), proxyNoticeFor(snap.proxy()),
+            snap.preferPilotSearch(), maskProxy(snap.proxy()), proxyNoticeFor(snap.proxy()),
             (int)snap.timeout().toSeconds(), localEnabled, localManaged, localRunning, localPortOpen,
             localSettingsUpToDate, settingsPath, logPath, localMessage, nativeActive, nativeSummary,
             List.copyOf(providers));
@@ -421,19 +428,22 @@ public class WebSearchSettings implements com.pilot.server.model.SearchPreferenc
         return provider.defaultEndpoint();
     }
 
-    private static String sanitizeProxy(String proxy) {
+    private static String maskProxy(String proxy) {
         if (proxy == null || proxy.isBlank()) {
             return "";
         }
         try {
             URI uri = URI.create(proxy);
-            if (uri.getRawUserInfo() == null) {
+            String userInfo = uri.getRawUserInfo();
+            if (userInfo == null || userInfo.isEmpty()) {
                 return proxy;
             }
-            return new URI(uri.getScheme(), null, uri.getHost(), uri.getPort(), uri.getPath(), uri.getQuery(),
+            int colon = userInfo.indexOf(':');
+            String safe = colon >= 0 ? userInfo.substring(0, colon) + ":***" : "***";
+            return new URI(uri.getScheme(), safe, uri.getHost(), uri.getPort(), uri.getPath(), uri.getQuery(),
                 uri.getFragment()).toString();
-        } catch (java.net.URISyntaxException | IllegalArgumentException exception) {
-            return "";
+        } catch (Exception e) {
+            return "[REDACTED]";
         }
     }
 
@@ -518,10 +528,28 @@ public class WebSearchSettings implements com.pilot.server.model.SearchPreferenc
         if (raw == null || raw.isBlank()) {
             return "";
         }
+        String trimmed = raw.strip();
         try {
-            return WebSearchProperties.normalizeProxy(raw);
+            return WebSearchProperties.normalizeProxy(trimmed);
         } catch (IllegalArgumentException e) {
+            // 兼容历史库中带 user:pass@ 的代理配置，只放行合法 HTTP/SOCKS5 URI；其余非法值回退默认值
+            if (isLegacyCredentialProxy(trimmed)) {
+                return trimmed;
+            }
             return fallback == null ? "" : fallback;
+        }
+    }
+
+    private static boolean isLegacyCredentialProxy(String proxy) {
+        try {
+            URI uri = URI.create(proxy);
+            String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+            boolean supported =
+                "http".equals(scheme) || "https".equals(scheme) || "socks5".equals(scheme) || "socks5h".equals(scheme);
+            return supported && uri.getRawUserInfo() != null && uri.getHost() != null && !uri.getHost().isBlank()
+                && !com.pilot.server.config.EndpointSecurity.isCloudMetadataHost(uri.getHost());
+        } catch (IllegalArgumentException ignored) {
+            return false;
         }
     }
 

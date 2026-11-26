@@ -14,6 +14,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -23,6 +24,8 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.pilot.server.config.WebSearchProperties;
+import com.pilot.server.store.InMemorySettingsStore;
 import com.sun.net.httpserver.HttpServer;
 
 /** 联网搜索设置与实时测试接口契约：掩码、保存、清除、校验、只读测试不落盘。 */
@@ -48,15 +51,12 @@ class WebSearchSettingsControllerTest {
 
         // 保存 Bocha 配置与密钥，响应只含掩码不含明文
         mvc.perform(put("/api/settings/web-search").contentType(MediaType.APPLICATION_JSON).content(
-            """
-                {"provider":"bocha","apiKey":"sk-bocha-super-secret-1234","fallbackEnabled":false,"proxy":"http://127.0.0.1:7890"}
-                """))
+            "{\"provider\":\"bocha\",\"apiEndpoint\":\"https://api.bochaai.com/v1\",\"apiKey\":\"sk-bocha-super-secret-1234\",\"fallbackEnabled\":false,\"proxy\":\"http://127.0.0.1:7890\"}"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.provider").value("bocha"))
             .andExpect(jsonPath("$.apiKeySet").value(true)).andExpect(jsonPath("$.fallbackEnabled").value(false))
             .andExpect(jsonPath("$.proxy").value("http://127.0.0.1:7890"))
             .andExpect(content().string(not(containsString("sk-bocha-super-secret-1234"))));
 
-        // 留空 apiKey 保持原值
         mvc.perform(put("/api/settings/web-search").contentType(MediaType.APPLICATION_JSON).content("""
             {"provider":"bocha","fallbackEnabled":true,"proxy":""}
             """)).andExpect(status().isOk()).andExpect(jsonPath("$.apiKeySet").value(true))
@@ -65,6 +65,14 @@ class WebSearchSettingsControllerTest {
         // 显式清除密钥
         mvc.perform(delete("/api/settings/web-search/api-key").param("provider", "bocha")).andExpect(status().isOk())
             .andExpect(jsonPath("$.apiKeySet").value(false));
+
+        mvc.perform(put("/api/settings/web-search").contentType(MediaType.APPLICATION_JSON).content(
+            "{\"provider\":\"bocha\",\"apiEndpoint\":\"https://api.bochaai.com/v1\",\"apiKey\":\"sk-bocha-proxy-secret\",\"proxy\":\"\"}"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.apiKeySet").value(true));
+        mvc.perform(put("/api/settings/web-search").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"proxy\":\"http://user:secret@proxy.example:7890\"}")).andExpect(status().isBadRequest());
+        mvc.perform(put("/api/settings/web-search").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"proxy\":\"http://user:***@proxy.example:7890\"}")).andExpect(status().isBadRequest());
 
         // 非法提供商、非法代理与带内嵌账号密码的代理均返回 400
         mvc.perform(put("/api/settings/web-search").contentType(MediaType.APPLICATION_JSON)
@@ -87,6 +95,19 @@ class WebSearchSettingsControllerTest {
             {"provider":"tavily","proxy":""}
             """)).andExpect(status().isOk()).andExpect(jsonPath("$.provider").value("tavily"))
             .andExpect(jsonPath("$.apiEndpoint").value("")).andExpect(jsonPath("$.proxyNotice").value(""));
+    }
+
+    @Test
+    void masksLegacyProxyCredentialsAndPreservesThemWhenMaskedValueIsSubmitted() throws Exception {
+        var isolatedStore = new InMemorySettingsStore();
+        isolatedStore.save("web-search.proxy", "http://user:secret@proxy.example:7890");
+        var defaults = new WebSearchProperties(false, null, null, null);
+        var settings = new WebSearchSettings(defaults, isolatedStore);
+        Assertions.assertEquals("http://user:***@proxy.example:7890", settings.view(null).proxy());
+        settings.update(new WebSearchSettings.UpdateCommand(null, null, null, null, null, null, null,
+            "http://user:***@proxy.example:7890"));
+        Assertions.assertEquals("http://user:secret@proxy.example:7890",
+            isolatedStore.find("web-search.proxy").orElseThrow());
     }
 
     @Test

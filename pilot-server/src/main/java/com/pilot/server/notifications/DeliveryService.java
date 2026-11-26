@@ -1,6 +1,8 @@
 package com.pilot.server.notifications;
 
+import java.net.InetAddress;
 import java.net.URI;
+import java.net.UnknownHostException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -8,8 +10,10 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -17,10 +21,12 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
+import java.util.stream.Collectors;
 
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import com.pilot.server.config.EndpointSecurity;
 import com.pilot.server.results.ResultInboxService;
 import com.pilot.server.store.AutomationStore;
 import com.pilot.server.store.DataMaintenance;
@@ -82,11 +88,18 @@ public class DeliveryService {
         int send(String target, String id, String payload) throws Exception;
     }
 
+    @FunctionalInterface
+    interface HostResolver {
+        InetAddress[] resolve(String host) throws UnknownHostException;
+    }
+
     private final AutomationStore store;
     private final ObjectMapper mapper;
     private final ResultInboxService results;
     private final Clock clock;
     private final Sender sender;
+    private final HostResolver resolver;
+    private final boolean allowPrivateTargets;
     private final Semaphore slots = new Semaphore(SEND_CONCURRENCY);
     private final ExecutorService executor =
         Executors.newFixedThreadPool(SEND_CONCURRENCY, Thread.ofVirtual().factory());
@@ -97,40 +110,71 @@ public class DeliveryService {
     }
 
     public DeliveryService(AutomationStore store, ObjectMapper mapper, ResultInboxService results, Clock clock) {
-        this(store, mapper, results, clock, httpSender());
+        this(store, mapper, results, clock, httpSender(InetAddress::getAllByName), InetAddress::getAllByName, false);
     }
 
     public DeliveryService(AutomationStore store, ObjectMapper mapper, ResultInboxService results, Clock clock,
         Sender sender) {
+        this(store, mapper, results, clock, sender, InetAddress::getAllByName, false);
+    }
+
+    DeliveryService(AutomationStore store, ObjectMapper mapper, ResultInboxService results, Clock clock, Sender sender,
+        HostResolver resolver) {
+        this(store, mapper, results, clock, sender, resolver, false);
+    }
+
+    DeliveryService(AutomationStore store, ObjectMapper mapper, ResultInboxService results, Clock clock, Sender sender,
+        HostResolver resolver, boolean allowPrivateTargets) {
         this.store = store;
         this.mapper = mapper;
         this.results = results;
         this.clock = clock;
         this.sender = sender;
+        this.resolver = resolver == null ? InetAddress::getAllByName : resolver;
+        this.allowPrivateTargets = allowPrivateTargets;
     }
 
-    private static Sender httpSender() {
+    static Sender httpSender(HostResolver resolver) {
         var client =
             HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).followRedirects(HttpClient.Redirect.NEVER).build();
-        return (target, id, body) -> client
-            .send(HttpRequest.newBuilder(URI.create(target)).timeout(REQUEST_TIMEOUT)
-                .header("Content-Type", "application/json").header("Idempotency-Key", id)
-                .POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.discarding())
-            .statusCode();
+        return (target, id, body) -> {
+            if (resolver != null) {
+                validateTarget(target, resolver);
+            }
+            return client
+                .send(
+                    HttpRequest.newBuilder(URI.create(target)).timeout(REQUEST_TIMEOUT)
+                        .header("Content-Type", "application/json").header("Idempotency-Key", id)
+                        .POST(HttpRequest.BodyPublishers.ofString(body)).build(),
+                    HttpResponse.BodyHandlers.discarding())
+                .statusCode();
+        };
     }
 
     public Settings settings() {
+        return scrubbed(storedSettings());
+    }
+
+    private static Settings scrubbed(Settings stored) {
+        return new Settings(stored.version(), stored.desktop(), scrubWebhook(stored.webhookUrl()),
+            stored.desktopSince(), stored.webhookSince());
+    }
+
+    private Settings storedSettings() {
         return store.get(SETTINGS_KIND, SETTINGS_ID).map(d -> mapper.readValue(d.payload(), Settings.class))
             .orElse(new Settings(0, false, "", null, null));
     }
 
     public synchronized Settings configure(long version, boolean desktop, String webhook) {
-        var old = settings();
+        var old = storedSettings();
         if (old.version() != version) {
             throw new IllegalStateException("通知设置已变化，请刷新");
         }
         String url = webhook == null ? "" : webhook.strip();
-        validateTarget(url);
+        if (!old.webhookUrl().isBlank() && url.equals(scrubWebhook(old.webhookUrl()))) {
+            url = old.webhookUrl();
+        }
+        validateTarget(url, resolver, allowPrivateTargets);
         var next = new Settings(version + 1, desktop, url,
             desktop ? (old.desktop() ? old.desktopSince() : clock.instant()) : null,
             url.isBlank() ? null : url.equals(old.webhookUrl()) ? old.webhookSince() : clock.instant());
@@ -142,22 +186,112 @@ public class DeliveryService {
                 save(d, DeliveryState.CANCELLED, d.attempts, clock.instant(), "", CHANNEL_CLOSED);
             }
         }
-        return next;
+        return scrubbed(next);
     }
 
-    private static void validateTarget(String url) {
+    private static void validateTarget(String url, HostResolver resolver) {
+        validateTarget(url, resolver, false);
+    }
+
+    private static void validateTarget(String url, HostResolver resolver, boolean allowPrivateTargets) {
         if (url.isBlank()) {
             return;
         }
+        if (url.length() > MAX_WEBHOOK_URL_CHARS) {
+            throw new IllegalArgumentException("Webhook URL 过长");
+        }
         try {
             URI uri = URI.create(url);
-            if (url.length() > MAX_WEBHOOK_URL_CHARS || uri.getHost() == null || uri.getUserInfo() != null
-                || uri.getFragment() != null || !Set.of("https", "http").contains(uri.getScheme())) {
+            String host = uri.getHost();
+            if (host == null || uri.getUserInfo() != null || uri.getFragment() != null
+                || !Set.of("https", "http").contains(uri.getScheme())) {
+                throw new IllegalArgumentException();
+            }
+            if (!allowPrivateTargets
+                && (isBlockedHostName(host) || isPrivateLiteral(host) || !isPublicHost(host, resolver))) {
                 throw new IllegalArgumentException();
             }
         } catch (RuntimeException e) {
-            throw new IllegalArgumentException("Webhook 须为有效 HTTP(S) 地址，不能包含账号密码或片段");
+            throw new IllegalArgumentException("Webhook 须为公网 HTTP(S) 地址，不能包含账号密码或片段");
         }
+    }
+
+    private static boolean isBlockedHostName(String host) {
+        String lower = host.strip().toLowerCase(Locale.ROOT);
+        while (lower.endsWith(".")) {
+            lower = lower.substring(0, lower.length() - 1);
+        }
+        return lower.equals("localhost") || lower.endsWith(".localhost") || lower.endsWith(".local")
+            || EndpointSecurity.isCloudMetadataHost(lower);
+    }
+
+    private static String scrubWebhook(String url) {
+        if (url == null || url.isBlank()) {
+            return "";
+        }
+        try {
+            URI uri = URI.create(url);
+            String userInfo = uri.getRawUserInfo();
+            if (userInfo != null) {
+                int colon = userInfo.indexOf(':');
+                userInfo = colon >= 0 ? userInfo.substring(0, colon) + ":***" : "***";
+            }
+            String query = uri.getQuery();
+            if (query != null) {
+                query = Arrays.stream(query.split("&", -1))
+                    .map(part -> part.contains("=") ? part.substring(0, part.indexOf('=') + 1) + "***" : "***")
+                    .collect(Collectors.joining("&"));
+            }
+            String path = uri.getPath();
+            if (path != null) {
+                path =
+                    path.replaceAll("(?i)/(token|key|secret|hook|hooks|webhook|webhooks)/[^/]+(?:/[^/]+)*", "/$1/***");
+                path = path.replaceAll("(?i)/services/[^/]+/[^/]+/[^/]+", "/services/***");
+            }
+            return new URI(uri.getScheme(), userInfo, uri.getHost(), uri.getPort(), path, query, null).toString();
+        } catch (Exception e) {
+            return "[REDACTED]";
+        }
+    }
+
+    private static boolean isPrivateLiteral(String host) {
+        try {
+            String literal = host;
+            if (literal.startsWith("[") && literal.endsWith("]")) {
+                literal = literal.substring(1, literal.length() - 1);
+            }
+            if (literal.matches("[0-9.]+") || literal.contains(":")) {
+                return isPrivateAddress(InetAddress.getByName(literal));
+            }
+        } catch (UnknownHostException e) {
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean isPublicHost(String host, HostResolver resolver) {
+        try {
+            String lookup = host.startsWith("[") && host.endsWith("]") ? host.substring(1, host.length() - 1) : host;
+            InetAddress[] addresses = resolver.resolve(lookup);
+            return addresses != null && addresses.length > 0
+                && Arrays.stream(addresses).noneMatch(DeliveryService::isPrivateAddress);
+        } catch (UnknownHostException e) {
+            return false;
+        }
+    }
+
+    private static boolean isPrivateAddress(InetAddress address) {
+        if (address.isAnyLocalAddress() || address.isLoopbackAddress() || address.isLinkLocalAddress()
+            || address.isSiteLocalAddress() || address.isMulticastAddress()) {
+            return true;
+        }
+        byte[] bytes = address.getAddress();
+        if (bytes.length == 4) {
+            int first = bytes[0] & 0xFF;
+            int second = bytes[1] & 0xFF;
+            return first == 0 || (first == 100 && (second & 0xC0) == 64);
+        }
+        return bytes.length == 16 && (bytes[0] & 0xFE) == 0xFC;
     }
 
     private List<Delivery> candidates() {
@@ -179,7 +313,7 @@ public class DeliveryService {
     }
 
     public synchronized void collect() {
-        var config = settings();
+        var config = storedSettings();
         if (!config.desktop() && config.webhookUrl().isBlank()) {
             return;
         }
@@ -207,14 +341,14 @@ public class DeliveryService {
         store.put(DELIVERY_KIND, key, 0, mapper.writeValueAsString(row));
     }
 
-    private boolean enabled(Delivery d, Settings c) {
-        return DeliveryChannel.DESKTOP.is(d.channel) ? c.desktop()
-            : !c.webhookUrl().isBlank() && c.webhookUrl().equals(d.target);
+    private static boolean enabled(Delivery d, Settings config) {
+        return DeliveryChannel.DESKTOP.is(d.channel) ? config.desktop()
+            : !config.webhookUrl().isBlank() && config.webhookUrl().equals(d.target);
     }
 
     public synchronized Delivery claim(DeliveryChannel channel) {
         Instant now = clock.instant();
-        var config = settings();
+        var config = storedSettings();
         for (var d : candidates().stream().sorted(Comparator.comparing(Delivery::createdAt)).toList()) {
             if (!channel.is(d.channel) || !DeliveryState.open(d.state) || d.nextAt.isAfter(now)) {
                 continue;
@@ -270,7 +404,7 @@ public class DeliveryService {
         if (!DeliveryState.retryable(d.state)) {
             throw new IllegalArgumentException("只有失败的投递可以重试");
         }
-        if (!enabled(d, settings())) {
+        if (!enabled(d, storedSettings())) {
             throw new IllegalArgumentException("通知渠道已关闭或地址已变化，请检查设置");
         }
         if (save(d, DeliveryState.PENDING, 0, clock.instant(), "", "") == null) {
@@ -306,7 +440,7 @@ public class DeliveryService {
         if (!DeliveryChannel.WEBHOOK.is(row.channel) || !validLease(row, claimed.lease)) {
             return false;
         }
-        if (!enabled(row, settings())) {
+        if (!enabled(row, storedSettings())) {
             save(row, DeliveryState.CANCELLED, row.attempts, clock.instant(), "", CHANNEL_CLOSED);
             return false;
         }

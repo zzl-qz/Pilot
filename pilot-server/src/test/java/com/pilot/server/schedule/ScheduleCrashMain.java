@@ -18,7 +18,7 @@ import com.pilot.core.event.RunCompleted;
 import com.pilot.core.message.Attachment;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.notifications.DeliveryChannel;
-import com.pilot.server.notifications.DeliveryService;
+import com.pilot.server.notifications.DeliveryServiceTestSupport;
 import com.pilot.server.results.ResultInboxRepository;
 import com.pilot.server.results.ResultInboxService;
 import com.pilot.server.run.RunStarter;
@@ -69,7 +69,7 @@ public class ScheduleCrashMain {
         var recurring = new RecurringScheduleService(store, mapper, schedules, sessions, clock);
         var results =
             new ResultInboxService(new ResultInboxRepository(db, codec, sessions), sessions, schedules, tasks, mapper);
-        var delivery = new DeliveryService(store, mapper, results, clock);
+        var delivery = DeliveryServiceTestSupport.loopbackForTest(store, mapper, results, clock);
         try {
             if ("seed".equals(phase)) {
                 String source = sessions.createSession("跨进程周期", root.toString()).id();

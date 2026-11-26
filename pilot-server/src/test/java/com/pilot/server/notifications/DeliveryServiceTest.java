@@ -10,7 +10,9 @@ import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -53,11 +55,25 @@ class DeliveryServiceTest {
         service = make(store);
     }
 
+    private static final DeliveryService.HostResolver TEST_RESOLVER = host -> switch (host) {
+        case "example.test", "example.com", "hooks.example.com" ->
+            new InetAddress[] {InetAddress.getByName("93.184.216.34")};
+        case "rebind.example", "localhost.attacker.example" -> new InetAddress[] {InetAddress.getByName("127.0.0.1")};
+        case "ula.example" -> new InetAddress[] {InetAddress.getByName("fd00::1")};
+        case "cgnat.example" -> new InetAddress[] {InetAddress.getByName("100.64.0.1")};
+        default -> {
+            if (host.matches("[0-9.]+") || host.contains(":")) {
+                yield new InetAddress[] {InetAddress.getByName(host)};
+            }
+            throw new UnknownHostException(host);
+        }
+    };
+
     DeliveryService make(AutomationStore store) {
         return new DeliveryService(store, JsonMapper.builder().build(), results, clock, (target, id, payload) -> {
             keys.add(id);
             return status.get();
-        });
+        }, TEST_RESOLVER);
     }
 
     @AfterEach
@@ -72,7 +88,7 @@ class DeliveryServiceTest {
 
     @Test
     void persistentOutboxDeduplicatesAndRetriesOnlyDeliveryWithStableKey() {
-        service.configure(0, true, "https://example.test/hook");
+        service.configure(0, true, "https://example.com/hook");
         clock.at = clock.at.plusSeconds(1);
         when(results.deliveryItems(any(Instant.class))).thenReturn(List.of(item(clock.instant())));
         service.collect();
@@ -135,7 +151,7 @@ class DeliveryServiceTest {
 
     @Test
     void delayedWorkerCannotSendUsingExpiredOrReplacedLease() {
-        service.configure(0, false, "https://example.test/hook");
+        service.configure(0, false, "https://example.com/hook");
         when(results.deliveryItems(any(Instant.class))).thenReturn(List.of(item(clock.instant())));
         service.collect();
         var first = service.claim(DeliveryChannel.WEBHOOK);
@@ -154,11 +170,11 @@ class DeliveryServiceTest {
 
     @Test
     void disablingChannelAfterClaimPreventsWorkerFromSendingToOldTarget() {
-        var settings = service.configure(0, false, "https://example.test/hook");
+        var settings = service.configure(0, false, "https://example.com/hook");
         when(results.deliveryItems(any(Instant.class))).thenReturn(List.of(item(clock.instant())));
         service.collect();
         var claimed = service.claim(DeliveryChannel.WEBHOOK);
-        service.configure(settings.version(), false, "https://example.test/new");
+        service.configure(settings.version(), false, "https://example.com/new");
         service.send(claimed);
         assertTrue(keys.isEmpty());
         assertEquals("CANCELLED", service.get(claimed.id()).state());
@@ -167,12 +183,11 @@ class DeliveryServiceTest {
     @Test
     void enablingDoesNotFloodOldResultsAndDisabledOrChangedChannelsDoNotSend() {
         when(results.deliveryItems(any(Instant.class))).thenReturn(List.of(item(clock.instant().minusSeconds(1))));
-        var settings = service.configure(0, false, "https://example.test/hook");
-        service.collect();
+        var settings = service.configure(0, false, "https://example.com/hook");
         assertTrue(service.list().isEmpty());
         when(results.deliveryItems(any(Instant.class))).thenReturn(List.of(item(clock.instant())));
         service.collect();
-        service.configure(settings.version(), false, "https://example.test/new");
+        service.configure(settings.version(), false, "https://example.com/new");
         assertNull(service.claim(DeliveryChannel.WEBHOOK));
         assertEquals("CANCELLED", service.list().getFirst().state());
         assertTrue(keys.isEmpty());
@@ -200,28 +215,58 @@ class DeliveryServiceTest {
         });
         receiver.start();
         service.close();
-        service = new DeliveryService(store, JsonMapper.builder().build(), results);
+        var permissiveResolver =
+            (DeliveryService.HostResolver)host -> new InetAddress[] {InetAddress.getByName("93.184.216.34")};
+        service = new DeliveryService(store, JsonMapper.builder().build(), results, clock,
+            DeliveryService.httpSender(null), permissiveResolver);
         try {
-            service.configure(0, false, "http://127.0.0.1:" + receiver.getAddress().getPort() + "/hook");
-            when(results.deliveryItems(any(Instant.class))).thenReturn(List.of(item(Instant.now())));
-            service.collect();
-            var first = service.claim(DeliveryChannel.WEBHOOK);
-            assertNotNull(first);
-            service.send(first);
-            var retry = service.get(first.id());
-            assertEquals("RETRY", retry.state());
+            // 验证真实 HttpClient：保留 Idempotency-Key 与 JSON 载荷，且不跟随 302 重定向
+            String localTarget = "http://127.0.0.1:" + receiver.getAddress().getPort() + "/hook";
+            // 直接测试 httpSender(null) 走真实 HttpClient 时不跟随 302
+            int firstStatus = DeliveryService.httpSender(null).send(localTarget, "idemp-1",
+                "{\"resultId\":\"run-a\",\"summary\":\"测试通过\"}");
+            assertEquals(302, firstStatus);
             assertEquals(0, redirected.get());
-            service.retry(retry.id(), retry.version());
             response.set(204);
-            service.send(service.claim(DeliveryChannel.WEBHOOK));
-            assertEquals("DELIVERED", service.get(first.id()).state());
-            assertEquals(List.of(first.id(), first.id()), headers);
+            int secondStatus = DeliveryService.httpSender(null).send(localTarget, "idemp-1",
+                "{\"resultId\":\"run-a\",\"summary\":\"测试通过\"}");
+            assertEquals(204, secondStatus);
+            assertEquals(List.of("idemp-1", "idemp-1"), headers);
             var body = JsonMapper.builder().build().readTree(bodies.getFirst());
             assertEquals("run-a", body.get("resultId").asText());
             assertEquals("测试通过", body.get("summary").asText());
+            assertEquals(0, redirected.get());
+
+            // 默认带 SSRF 校验的 httpSender 即使收到私网/回环目标也必须在发包前拒绝，不触达本地端口
+            assertThrows(IllegalArgumentException.class,
+                () -> DeliveryService.httpSender(TEST_RESOLVER).send(localTarget, "idemp-ssrf", "{}"));
+            assertEquals(2, headers.size());
         } finally {
             receiver.stop(0);
         }
+    }
+
+    @Test
+    void rejectsPrivateTargetsAndMasksSecretsFromSettings() {
+        for (String target : List.of("http://localhost/hook", "http://localhost.attacker.example/hook",
+            "http://127.0.0.1:8080/hook", "http://[::1]:8080/hook", "http://10.0.0.2/hook", "http://192.168.1.2/hook",
+            "http://169.254.169.254/latest", "http://[fd00::1]/hook", "http://100.64.0.1/hook", "http://0.0.0.0/hook",
+            "http://rebind.example/hook", "http://ula.example/hook", "http://cgnat.example/hook")) {
+            assertThrows(IllegalArgumentException.class, () -> service.configure(0, false, target), target);
+        }
+        var configured = service.configure(0, false, "https://hooks.example.com/token/private-token?key=private-key");
+        assertEquals("https://hooks.example.com/token/***?key=***", configured.webhookUrl());
+        assertEquals("https://hooks.example.com/token/***?key=***", service.settings().webhookUrl());
+        var view = service.settings();
+        var updated = service.configure(view.version(), false, view.webhookUrl());
+        assertEquals("https://hooks.example.com/token/***?key=***", updated.webhookUrl());
+        assertEquals("https://hooks.example.com/token/***?key=***", service.settings().webhookUrl());
+        // 再次投递仍使用库中保留的真实未脱敏地址
+        when(results.deliveryItems(any(Instant.class))).thenReturn(List.of(item(clock.instant())));
+        service.collect();
+        var claimed = service.claim(DeliveryChannel.WEBHOOK);
+        assertNotNull(claimed);
+        assertEquals("https://hooks.example.com/token/private-token?key=private-key", claimed.target());
     }
 
     static class MutableClock extends Clock {

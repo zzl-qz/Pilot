@@ -153,12 +153,13 @@ public class DocumentService {
         } catch (RuntimeException e) {
             throw new IllegalArgumentException("可编辑源不是合法 JSON，无法导出");
         }
-        Path directory = documentDir(id);
+        Path directory = documentDir(document);
         List<Artifact> artifacts = new ArrayList<>();
         List<Path> temps = new ArrayList<>();
         try {
-            Files.createDirectories(directory);
-            PathValidator paths = new PathValidator(dataDir.file("studio"));
+            validateDocumentDirectory(document, true);
+            Path realDirectory = directory.toRealPath();
+            PathValidator paths = new PathValidator(realDirectory);
             for (String format : requested) {
                 Path temp = directory.resolve(".tmp-" + UUID.randomUUID() + "." + format);
                 temps.add(temp);
@@ -167,7 +168,7 @@ public class DocumentService {
                 if ("pdf".equals(format) && operations.isObject() && operations.size() > 0) {
                     Path edited = directory.resolve(".tmp-" + UUID.randomUUID() + ".pdf");
                     temps.add(edited);
-                    verification += "；" + DocumentRenderer.editPdf(temp, edited, operations, paths, directory);
+                    verification += "；" + DocumentRenderer.editPdf(temp, edited, operations, paths, realDirectory);
                     Files.move(edited, temp, StandardCopyOption.REPLACE_EXISTING);
                 }
                 verification += "；读回：" + truncate(DocumentRenderer.inspect(temp));
@@ -216,7 +217,7 @@ public class DocumentService {
     }
 
     public Download download(String sessionId, String id, String artifactId) {
-        require(sessionId, id);
+        Document document = require(sessionId, id);
         if (!SAFE_ID.matcher(artifactId).matches()) {
             throw new IllegalArgumentException("产物标识非法");
         }
@@ -227,11 +228,18 @@ public class DocumentService {
             || !artifact.filename().equals(artifactId + "." + artifact.format())) {
             throw new IllegalArgumentException("产物文件名与记录不一致");
         }
-        Path file = documentDir(id).resolve(artifact.filename());
-        if (!Files.isRegularFile(file)) {
-            throw new IllegalArgumentException("产物文件已丢失，请重新导出");
+        try {
+            Path directory = validateDocumentDirectory(document, false);
+            Path realDirectory = directory.toRealPath();
+            Path file = directory.resolve(artifact.filename()).normalize();
+            if (!file.startsWith(directory) || Files.isSymbolicLink(file) || !Files.isRegularFile(file)
+                || !file.toRealPath().startsWith(realDirectory)) {
+                throw new IllegalArgumentException("产物文件已丢失，请重新导出");
+            }
+            return new Download(file, artifact.filename(), mediaType(artifact.format()));
+        } catch (IOException e) {
+            throw new IllegalArgumentException("产物文件已丢失，请重新导出", e);
         }
-        return new Download(file, artifact.filename(), mediaType(artifact.format()));
     }
 
     /** 从已有成果快照导入可编辑源：只带文本，明确不含原排版。 */
@@ -295,7 +303,7 @@ public class DocumentService {
                 deleteRow(ARTIFACT_KIND, row.id());
             }
         }
-        deleteDirectory(documentDir(document.id()));
+        deleteDirectory(documentDir(document));
         deleteRow(KIND, document.id());
     }
 
@@ -310,6 +318,12 @@ public class DocumentService {
     private void deleteDirectory(Path directory) {
         if (!Files.exists(directory)) {
             return;
+        }
+        Path studio = dataDir.file("studio").toAbsolutePath().normalize();
+        try {
+            assertStudioDirectory(studio.toRealPath(), directory);
+        } catch (IOException e) {
+            throw new IllegalStateException("无法验证文档目录", e);
         }
         List<String> failures = new ArrayList<>();
         FileTrees.deleteBestEffort(directory, (path, error) -> failures.add(path + "：" + error.getMessage()));
@@ -332,8 +346,36 @@ public class DocumentService {
             document.specHash(), row.version(), document.createdBy(), document.createdAt(), document.updatedAt());
     }
 
-    private Path documentDir(String id) {
-        return dataDir.file("studio", id);
+    private Path documentDir(Document document) {
+        Path studio = dataDir.file("studio").toAbsolutePath().normalize();
+        if (!SAFE_ID.matcher(document.id()).matches() || !document.id().startsWith("doc_")) {
+            throw new IllegalArgumentException("文档标识非法");
+        }
+        return studio.resolve(document.id()).normalize();
+    }
+
+    private Path validateDocumentDirectory(Document document, boolean create) throws IOException {
+        Path studio = dataDir.file("studio").toAbsolutePath().normalize();
+        if (create) {
+            Files.createDirectories(studio);
+        }
+        Path directory = documentDir(document);
+        if (create) {
+            Files.createDirectories(directory);
+        }
+        try {
+            assertStudioDirectory(studio.toRealPath(), directory);
+        } catch (IOException e) {
+            throw new IllegalArgumentException("文档目录不可用", e);
+        }
+        return directory;
+    }
+
+    private void assertStudioDirectory(Path realStudio, Path directory) throws IOException {
+        Path realDirectory = directory.toRealPath();
+        if (Files.isSymbolicLink(directory) || !realDirectory.startsWith(realStudio)) {
+            throw new IllegalArgumentException("文档目录越界");
+        }
     }
 
     private static String validateSpec(String spec) {

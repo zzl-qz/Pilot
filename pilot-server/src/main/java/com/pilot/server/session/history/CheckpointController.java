@@ -2,7 +2,9 @@ package com.pilot.server.session.history;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import org.springframework.http.HttpStatus;
@@ -17,6 +19,9 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.RunStarted;
+import com.pilot.core.event.SessionEvent;
+import com.pilot.core.message.Attachment;
+import com.pilot.core.message.Message;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.PlanRepository;
 import com.pilot.core.session.Session;
@@ -156,10 +161,10 @@ public class CheckpointController {
                 if (event.sequence() >= request.sequence()) {
                     break;
                 }
-                sessions.publish(fork.id(), event.runId(), event.payload());
+                sessions.publish(fork.id(), event.runId(), copyForkEvent(source.id(), event.payload()));
             }
             tasks.restoreTo(fork.id(), selection.event().runId());
-            conversations.save(fork.id(), checkpoint.messages());
+            conversations.save(fork.id(), copyForkMessages(source.id(), checkpoint.messages()));
             plans.save(fork.id(), checkpoint.plan());
         } catch (RuntimeException e) {
             tasks.delete(fork.id());
@@ -169,6 +174,45 @@ public class CheckpointController {
             throw e;
         }
         return new ForkResponse(fork.id(), fork.title(), fork.workspace(), selection.input());
+    }
+
+    private SessionEvent copyForkEvent(String sourceSessionId, SessionEvent payload) {
+        if (!(payload instanceof RunStarted started)) {
+            return payload;
+        }
+        List<Attachment> merged = mergeOwnedAttachments(sourceSessionId, started.input(), started.attachments());
+        return merged == started.attachments() ? started
+            : new RunStarted(started.input(), merged, started.imagePositions());
+    }
+
+    private List<Message> copyForkMessages(String sourceSessionId, List<Message> messages) {
+        List<Message> copied = new ArrayList<>(messages.size());
+        for (Message message : messages) {
+            if (!"user".equals(message.role())) {
+                copied.add(message);
+                continue;
+            }
+            List<Attachment> merged = mergeOwnedAttachments(sourceSessionId, message.content(), message.attachments());
+            copied.add(merged == message.attachments() ? message
+                : new Message(message.role(), message.content(), message.toolCalls(), message.toolCallId(), merged,
+                    message.imagePositions(), message.reasoningContent()));
+        }
+        return copied;
+    }
+
+    private List<Attachment> mergeOwnedAttachments(String sourceSessionId, String text, List<Attachment> existing) {
+        List<Attachment> inherited = attachmentReferences.ownedTextReferences(sourceSessionId, text);
+        if (inherited.isEmpty()) {
+            return existing;
+        }
+        Map<String, Attachment> merged = new LinkedHashMap<>();
+        for (Attachment item : existing) {
+            merged.put(item.path(), item);
+        }
+        for (Attachment item : inherited) {
+            merged.putIfAbsent(item.path(), item);
+        }
+        return merged.size() == existing.size() ? existing : new ArrayList<>(merged.values());
     }
 
     private void checkRevision(Selection selection, Long revision) {
