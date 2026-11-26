@@ -855,6 +855,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         }
         boolean longCommand = ForegroundPace.expectsLong(String.join(" ", displayTokens));
         long heldFrom = System.nanoTime();
+        long lastSandboxProbe = heldFrom;
         try {
             while (CommandToolSupport.running(task)) {
                 Thread.sleep(50);
@@ -862,13 +863,26 @@ public final class RunCommandTool implements Tool, ProducesCheck {
                 if (!CommandToolSupport.running(task)) {
                     break;
                 }
-                long heldMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - heldFrom);
-                ForegroundPace.Release release = ForegroundPace.release(longCommand,
-                    commandTasks.quietMillis(sessionId, taskId), heldMs, silenceLimitMs, holdLimitMs);
+                long now = System.nanoTime();
+                long quietMs = commandTasks.quietMillis(sessionId, taskId);
+                if (quietMs >= 5_000L && now - lastSandboxProbe >= TimeUnit.SECONDS.toNanos(1)) {
+                    lastSandboxProbe = now;
+                    String liveHint = CommandToolSupport.liveNestedSandboxHint(commandTasks, task, null);
+                    if (!liveHint.isEmpty()) {
+                        commandTasks.markBackground(sessionId, taskId);
+                        task = commandTasks.get(sessionId, taskId);
+                        return new ManagedRun(liveHint + "\n" + handoff(task, ForegroundPace.Release.SILENT), false);
+                    }
+                }
+                long heldMs = TimeUnit.NANOSECONDS.toMillis(now - heldFrom);
+                ForegroundPace.Release release =
+                    ForegroundPace.release(longCommand, quietMs, heldMs, silenceLimitMs, holdLimitMs);
                 if (release != ForegroundPace.Release.NONE) {
                     commandTasks.markBackground(sessionId, taskId);
                     task = commandTasks.get(sessionId, taskId);
-                    return new ManagedRun(handoff(task, release), false);
+                    String liveHint = CommandToolSupport.liveNestedSandboxHint(commandTasks, task, null);
+                    String body = handoff(task, release);
+                    return new ManagedRun(liveHint.isEmpty() ? body : liveHint + "\n" + body, false);
                 }
             }
         } catch (InterruptedException e) {

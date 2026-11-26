@@ -1,12 +1,14 @@
 package com.pilot.core.loop;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
 import com.pilot.core.message.Message;
 import com.pilot.core.tool.ToolOutputArchiveReference;
+import com.pilot.core.tool.ToolResults;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -24,6 +26,7 @@ final class ContextPins {
     private static final int UNWRAP_DEPTH = 16;
     /** 字段内截断的头部占比：首尾都留，任务名和验收条件才都在。 */
     private static final int GOAL_HEAD_PERCENT = 65;
+    private static final int MAX_ENVIRONMENT_CONSTRAINTS = 8;
 
     private ContextPins() {
     }
@@ -31,24 +34,25 @@ final class ContextPins {
     static String capture(List<Message> messages, int end, String source) {
         LinkedHashSet<String> requests = new LinkedHashSet<>();
         LinkedHashSet<String> references = new LinkedHashSet<>();
+        LinkedHashSet<String> constraints = new LinkedHashSet<>();
         for (Message message : messages.subList(1, end)) {
             String text = message.content();
             if (isHandoff(text)) {
-                unwrap(text, requests, references, UNWRAP_DEPTH);
+                unwrap(text, requests, references, constraints, UNWRAP_DEPTH);
             } else if ("user".equals(message.role()) && !isInternal(text)) {
                 requests.add(text);
             }
-            // 只从原始工具消息取引用；摘要 JSON 中已合并的引用不能再次当成原文截取。
+            // 只从原始工具消息取引用与环境受限记录；摘要 JSON 中已合并的不二次截取。
             if ("tool".equals(message.role())) {
                 addReference(text, references);
+                addEnvironmentConstraint(text, constraints);
             }
         }
-        return MARKER + JSON.writeValueAsString(Map.of("schema_version", 1, "source_sha256", source, "covered_messages",
-            end - 1, "user_requests", requests, "evidence_refs", references)) + END;
+        return rendered(1, source, end - 1, requests, references, constraints);
     }
 
     /**
-     * 超长时先丢最旧的已读引用，再淘汰中间较早的请求（保住原始目标与最新用户指令/中途纠正），
+     * 超长时先丢最旧的已读引用，再丢环境提示，再淘汰中间较早的请求（保住原始目标与最新用户指令/中途纠正），
      * 仍超限时先在最新指令字段内截断，最后才在首条原始目标字段内部截断。
      * 输出永远是闭合的元数据块且长度不超过 {@code max}，绝不在闭合标签外拼尾巴。
      */
@@ -65,40 +69,49 @@ final class ContextPins {
         }
         List<String> requests = new ArrayList<>();
         List<String> references = new ArrayList<>();
+        List<String> constraints = new ArrayList<>();
         metadata.path("evidence_refs").forEach(item -> references.add(item.asText()));
         metadata.path("user_requests").forEach(item -> requests.add(item.asText()));
-        while (!references.isEmpty() && rendered(metadata, requests, references).length() > max) {
+        if (metadata.path("environment_constraints").isArray()) {
+            metadata.path("environment_constraints").forEach(item -> constraints.add(item.asText()));
+        }
+        while (!references.isEmpty() && rendered(metadata, requests, references, constraints).length() > max) {
             references.remove(0);
         }
-        while (requests.size() > 2 && rendered(metadata, requests, references).length() > max) {
+        while (!constraints.isEmpty() && rendered(metadata, requests, references, constraints).length() > max) {
+            constraints.remove(0);
+        }
+        while (requests.size() > 2 && rendered(metadata, requests, references, constraints).length() > max) {
             requests.remove(1);
         }
         if (requests.isEmpty()) {
             return emptyMetadata(max);
         }
-        String fitted = rendered(metadata, requests, references);
+        String fitted = rendered(metadata, requests, references, constraints);
         if (fitted.length() <= max) {
             return fitted;
         }
         if (requests.size() == 2) {
-            String withLatest = truncateLatest(metadata, references, requests.get(0), requests.get(1), max);
+            String withLatest =
+                truncateLatest(metadata, references, constraints, requests.get(0), requests.get(1), max);
             if (!withLatest.isEmpty()) {
                 return withLatest;
             }
             requests.remove(1);
-            fitted = rendered(metadata, requests, references);
+            fitted = rendered(metadata, requests, references, constraints);
             if (fitted.length() <= max) {
                 return fitted;
             }
         }
-        return truncateGoal(metadata, references, requests.get(0), max);
+        return truncateGoal(metadata, references, constraints, requests.get(0), max);
     }
 
     /** 同时保留原始目标与最新用户指令的头尾摘录；空间放不下两条时返回空串，回落到只保留原始目标。 */
-    private static String truncateLatest(JsonNode metadata, List<String> references, String goal, String latest,
-        int max) {
+    private static String truncateLatest(JsonNode metadata, List<String> references, List<String> constraints,
+        String goal, String latest, int max) {
         int minKeep = Math.min(32, latest.length());
-        if (minKeep <= 0 || rendered(metadata, List.of(goal, excerpt(latest, minKeep)), references).length() > max) {
+        if (minKeep <= 0
+            || rendered(metadata, List.of(goal, excerpt(latest, minKeep)), references, constraints).length() > max) {
             return "";
         }
         int low = minKeep;
@@ -106,7 +119,7 @@ final class ContextPins {
         String fitted = "";
         while (low <= high) {
             int keep = (low + high) >>> 1;
-            String candidate = rendered(metadata, List.of(goal, excerpt(latest, keep)), references);
+            String candidate = rendered(metadata, List.of(goal, excerpt(latest, keep)), references, constraints);
             if (candidate.length() <= max) {
                 fitted = candidate;
                 low = keep + 1;
@@ -117,22 +130,35 @@ final class ContextPins {
         return fitted;
     }
 
-    private static String rendered(JsonNode metadata, List<String> requests, List<String> references) {
-        return MARKER
-            + JSON.writeValueAsString(Map.of("schema_version", metadata.path("schema_version").asInt(1),
-                "source_sha256", metadata.path("source_sha256").asText(""), "covered_messages",
-                metadata.path("covered_messages").asInt(0), "user_requests", requests, "evidence_refs", references))
-            + END;
+    private static String rendered(JsonNode metadata, List<String> requests, List<String> references,
+        List<String> constraints) {
+        return rendered(metadata.path("schema_version").asInt(1), metadata.path("source_sha256").asText(""),
+            metadata.path("covered_messages").asInt(0), requests, references, constraints);
+    }
+
+    private static String rendered(int schemaVersion, String source, int coveredMessages, Iterable<String> requests,
+        Iterable<String> references, Iterable<String> constraints) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("schema_version", schemaVersion);
+        payload.put("source_sha256", source);
+        payload.put("covered_messages", coveredMessages);
+        payload.put("user_requests", requests);
+        payload.put("evidence_refs", references);
+        if (constraints.iterator().hasNext()) {
+            payload.put("environment_constraints", constraints);
+        }
+        return MARKER + JSON.writeValueAsString(payload) + END;
     }
 
     /** 单条目标自身就超限时只在字段内部截断，外层结构一个字都不动。 */
-    private static String truncateGoal(JsonNode metadata, List<String> references, String goal, int max) {
+    private static String truncateGoal(JsonNode metadata, List<String> references, List<String> constraints,
+        String goal, int max) {
         int low = 0;
         int high = goal.length();
         String fitted = "";
         while (low <= high) {
             int keep = (low + high) >>> 1;
-            String candidate = rendered(metadata, List.of(excerpt(goal, keep)), references);
+            String candidate = rendered(metadata, List.of(excerpt(goal, keep)), references, constraints);
             if (candidate.length() <= max) {
                 fitted = candidate;
                 low = keep + 1;
@@ -189,7 +215,7 @@ final class ContextPins {
     }
 
     private static void unwrap(String text, LinkedHashSet<String> requests, LinkedHashSet<String> references,
-        int depth) {
+        LinkedHashSet<String> constraints, int depth) {
         JsonNode metadata = parsedMetadata(text);
         if (metadata == null) {
             // 没有可解析的结构：这份唯一交接记录不能丢。
@@ -199,10 +225,13 @@ final class ContextPins {
             return;
         }
         metadata.path("evidence_refs").forEach(item -> references.add(item.asText()));
+        if (metadata.path("environment_constraints").isArray()) {
+            metadata.path("environment_constraints").forEach(item -> addBoundedConstraint(item.asText(), constraints));
+        }
         for (JsonNode item : metadata.path("user_requests")) {
             String request = item.asText();
             if (depth > 1 && request.contains(MARKER)) {
-                unwrap(request, requests, references, depth - 1);
+                unwrap(request, requests, references, constraints, depth - 1);
             } else if (!isInternal(request)) {
                 requests.add(request);
             }
@@ -223,5 +252,45 @@ final class ContextPins {
         if (ref != null) {
             references.add(ref);
         }
+    }
+
+    /** 把外层 OS 沙箱导致的嵌套子沙箱受限命令钉入元数据，防止上下文压缩后重复运行同类必然卡死/失败的命令。 */
+    private static void addEnvironmentConstraint(String text, LinkedHashSet<String> constraints) {
+        if (!ToolResults.isNestedSandboxFailure(text)) {
+            return;
+        }
+        String command = extractCommandLine(text);
+        String entry = command.isEmpty() ? "外层 OS 沙箱禁止嵌套子沙箱（Electron/Chromium/bwrap/sandbox-exec），请勿重复运行同类受限命令"
+            : "外层 OS 沙箱禁止嵌套子沙箱（已受阻命令：" + command + "），请勿重复运行同类命令";
+        addBoundedConstraint(entry, constraints);
+    }
+
+    private static void addBoundedConstraint(String entry, LinkedHashSet<String> constraints) {
+        if (entry == null || entry.isBlank()) {
+            return;
+        }
+        if (constraints.size() >= MAX_ENVIRONMENT_CONSTRAINTS && !constraints.contains(entry)) {
+            return;
+        }
+        constraints.add(entry);
+    }
+
+    private static String extractCommandLine(String text) {
+        int outputIndex = text.indexOf("\n输出:\n");
+        String header = outputIndex >= 0 ? text.substring(0, outputIndex) : text;
+        int start = 0;
+        while (start <= header.length()) {
+            int end = header.indexOf('\n', start);
+            String line = end < 0 ? header.substring(start) : header.substring(start, end);
+            if (line.startsWith("命令: ")) {
+                String cmd = line.substring("命令: ".length()).strip();
+                return cmd.length() > 120 ? cmd.substring(0, 120) + "…" : cmd;
+            }
+            if (end < 0) {
+                break;
+            }
+            start = end + 1;
+        }
+        return "";
     }
 }

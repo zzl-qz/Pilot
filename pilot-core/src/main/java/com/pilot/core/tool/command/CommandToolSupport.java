@@ -169,6 +169,25 @@ final class CommandToolSupport {
         return nestedSandboxHint(tasks, task, null);
     }
 
+    /** 仍在运行的后台/前台命令若日志已明确命中嵌套 OS 沙箱失败，立即提前提示，避免死等 Playwright/Electron 180s 超时。 */
+    static String liveNestedSandboxHint(CommandTaskManager tasks, CommandTaskManager.Task task, String ownerSessionId) {
+        if (tasks == null || task == null || !running(task)) {
+            return "";
+        }
+        String session = ownerSessionId == null ? task.sessionId() : ownerSessionId;
+        long total = tasks.logLength(session, task.taskId());
+        if (total <= 0L) {
+            return "";
+        }
+        long offset = Math.max(0L, total - SANDBOX_LOG_TAIL_CHARS);
+        CommandTaskManager.LogChunk tail = tasks.logs(session, task.taskId(), offset, SANDBOX_LOG_TAIL_CHARS + 200);
+        if (tail == null) {
+            return "";
+        }
+        String hint = nestedSandboxHint(tail.text(), null);
+        return hint.isEmpty() ? "" : hint + "（命令仍在挂起中，可直接用 stop_command 终止，无需继续等待或重试同类命令。）";
+    }
+
     /** ownerSessionId 非空时表示任务属于另一个会话，日志也要按那个会话去读。 */
     static String nestedSandboxHint(CommandTaskManager tasks, CommandTaskManager.Task task, String ownerSessionId) {
         if (tasks == null || task == null || running(task) || CommandTaskStatus.COMPLETED.is(task.status())) {

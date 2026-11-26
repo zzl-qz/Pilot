@@ -11,6 +11,7 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 import com.pilot.core.message.Message;
+import com.pilot.core.tool.ToolResults;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -146,6 +147,24 @@ class ContextPinsTest {
         assertEquals(1, occurrences(shell, MARKER));
         assertFalse(shell.contains("钉住的上下文过长"));
         assertTrue(ContextPins.limit(pins, 60).isEmpty());
+    }
+
+    @Test
+    void pinsNestedSandboxEnvironmentConstraintAcrossCompactionRounds() {
+        String blockedToolResult = ToolResults.NESTED_SANDBOX_HINT_PREFIX
+            + "（当前命令已在系统沙箱内运行）\nERROR: 命令未成功完成（FAILED）\n命令: npm run test:usage\n输出:\nsandbox initialization failed";
+        List<Message> firstRound =
+            List.of(Message.system("s"), Message.user("修复前端样式并验证"), Message.tool("call_1", blockedToolResult));
+
+        String pins1 = ContextPins.capture(firstRound, firstRound.size(), "hash1");
+        assertTrue(pins1.contains("environment_constraints"), pins1);
+        assertTrue(pins1.contains("npm run test:usage"), pins1);
+
+        List<Message> secondRound =
+            List.of(Message.system("s"), Message.user("[上下文交接摘要]第一轮摘要" + pins1), Message.user("继续收尾"));
+        String pins2 = ContextPins.limit(ContextPins.capture(secondRound, secondRound.size(), "hash2"), 2_000);
+        assertTrue(pins2.contains("environment_constraints"), pins2);
+        assertTrue(pins2.contains("npm run test:usage"), pins2);
     }
 
     /** 复刻旧版缺陷：尾巴拼在闭合标签外，下一轮把整份旧摘要连同转义反斜杠一起再嵌一层。 */
