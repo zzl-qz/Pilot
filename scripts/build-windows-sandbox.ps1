@@ -33,7 +33,7 @@ if (-not $compiler) {
     exit 1
 }
 New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
-& $compiler.Source -Wall -Wextra -O2 -o $target $source -ladvapi32
+& $compiler.Source -Wall -Wextra -O2 -o $target $source -ladvapi32 -lshell32
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Pilot: building the sandbox runner failed with exit code $LASTEXITCODE."
     exit $LASTEXITCODE

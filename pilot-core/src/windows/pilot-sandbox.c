@@ -232,11 +232,34 @@ static void append_argument(wchar_t *buffer, const wchar_t *argument) {
         buffer[used++] = L'"';
         buffer[used] = 0;
     }
-    for (const wchar_t *cursor = argument; *cursor != 0 && used + 3 < PILOT_MAX_COMMAND; ++cursor) {
-        if (*cursor == L'"' || *cursor == L'\\') {
-            buffer[used++] = L'\\';
+    const wchar_t *cursor = argument;
+    while (*cursor != 0 && used + 3 < PILOT_MAX_COMMAND) {
+        size_t slashes = 0;
+        while (*cursor == L'\\') {
+            ++slashes;
+            ++cursor;
         }
-        buffer[used++] = *cursor;
+        if (*cursor == L'"') {
+            for (size_t i = 0; i < slashes * 2 + 1 && used + 1 < PILOT_MAX_COMMAND; ++i) {
+                buffer[used++] = L'\\';
+            }
+            if (used + 1 < PILOT_MAX_COMMAND) {
+                buffer[used++] = *cursor;
+            }
+            ++cursor;
+        } else if (*cursor == 0) {
+            for (size_t i = 0; i < slashes * 2 && used + 1 < PILOT_MAX_COMMAND; ++i) {
+                buffer[used++] = L'\\';
+            }
+        } else {
+            for (size_t i = 0; i < slashes && used + 1 < PILOT_MAX_COMMAND; ++i) {
+                buffer[used++] = L'\\';
+            }
+            if (used + 1 < PILOT_MAX_COMMAND) {
+                buffer[used++] = *cursor;
+            }
+            ++cursor;
+        }
     }
     if (used + 2 < PILOT_MAX_COMMAND) {
         buffer[used++] = L'"';
@@ -346,12 +369,17 @@ int main(void) {
     int argc = 0;
     wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     const wchar_t *workspace = NULL;
+    const wchar_t *workdir = NULL;
     const wchar_t *temp = NULL;
     static wchar_t workspace_path[PILOT_PATH_CHARS];
+    static wchar_t workdir_path[PILOT_PATH_CHARS];
     static wchar_t temp_path[PILOT_PATH_CHARS];
     static wchar_t write_paths[PILOT_MAX_WRITES][PILOT_PATH_CHARS];
+    static wchar_t deny_paths[PILOT_MAX_WRITES][PILOT_PATH_CHARS];
     const wchar_t *writes[PILOT_MAX_WRITES];
+    const wchar_t *denies[PILOT_MAX_WRITES];
     int write_count = 0;
+    int deny_count = 0;
     PSID sid = NULL;
     HANDLE token = NULL;
     wchar_t *command_line = NULL;
@@ -378,6 +406,9 @@ int main(void) {
         if (wcscmp(argv[index], L"--workspace") == 0) {
             absolute_path(value, workspace_path);
             workspace = workspace_path;
+        } else if (wcscmp(argv[index], L"--workdir") == 0) {
+            absolute_path(value, workdir_path);
+            workdir = workdir_path;
         } else if (wcscmp(argv[index], L"--temp") == 0) {
             absolute_path(value, temp_path);
             temp = temp_path;
@@ -390,6 +421,12 @@ int main(void) {
                 writes[write_count] = write_paths[write_count];
                 ++write_count;
             }
+        } else if (wcscmp(argv[index], L"--deny") == 0) {
+            if (deny_count < PILOT_MAX_WRITES) {
+                absolute_path(value, deny_paths[deny_count]);
+                denies[deny_count] = deny_paths[deny_count];
+                ++deny_count;
+            }
         } else {
             fprintf(stderr, "pilot-sandbox: unknown option %ls\n", argv[index]);
             goto done;
@@ -397,7 +434,7 @@ int main(void) {
         ++index;
     }
     if (workspace == NULL || index >= argc) {
-        fprintf(stderr, "pilot-sandbox: usage: --workspace DIR [--temp DIR] [--write DIR]... -- command args...\n");
+        fprintf(stderr, "pilot-sandbox: usage: --workspace DIR [--workdir DIR] [--temp DIR] [--write DIR]... [--deny PATH]... -- command args...\n");
         goto done;
     }
     if (temp != NULL && !ensure_directory(temp)) {
@@ -425,6 +462,9 @@ int main(void) {
         }
     }
     lock_git(workspace, sid);
+    for (int i = 0; i < deny_count; ++i) {
+        lock_path(denies[i], sid);
+    }
     command_line = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, PILOT_MAX_COMMAND * sizeof(wchar_t));
     environment = child_environment(temp);
     if (command_line == NULL || environment == NULL) {
@@ -433,7 +473,7 @@ int main(void) {
     for (int i = index; i < argc; ++i) {
         append_argument(command_line, argv[i]);
     }
-    status = run(token, workspace, command_line, environment);
+    status = run(token, workdir != NULL ? workdir : workspace, command_line, environment);
 done:
     if (environment != NULL) {
         HeapFree(GetProcessHeap(), 0, environment);

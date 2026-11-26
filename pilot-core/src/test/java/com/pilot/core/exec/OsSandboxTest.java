@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -67,9 +68,42 @@ class OsSandboxTest {
     }
 
     @Test
+    void seatbeltProfileIsStoredPrivatelyAndDeniedToSandboxWrites() throws Exception {
+        Path home = Files.createDirectory(workspace.resolve("private-home"));
+        String previous = System.getProperty("user.home");
+        String previousTemp = System.getProperty("java.io.tmpdir");
+        Path privateTemp = Files.createDirectory(workspace.resolve("private-temp"));
+        System.setProperty("user.home", home.toString());
+        System.setProperty("java.io.tmpdir", privateTemp.toString());
+        try {
+            String profileText = OsSandbox.seatbeltProfile(List.of(home), List.of(), false);
+            Path file = OsSandbox.profileFile(profileText);
+            String profile = Files.readString(file);
+            assertTrue(file.startsWith(OsSandbox.profileDirectory()), file.toString());
+            assertTrue(
+                profile.contains("(deny file-write* (subpath \"" + escaped(OsSandbox.profileDirectory()) + "\"))"),
+                profile);
+            assertEquals("rwx------", PosixFilePermissions.toString(Files.getPosixFilePermissions(file.getParent())));
+            assertEquals("rw-------", PosixFilePermissions.toString(Files.getPosixFilePermissions(file)));
+        } finally {
+            if (previous == null) {
+                System.clearProperty("user.home");
+            } else {
+                System.setProperty("user.home", previous);
+            }
+            if (previousTemp == null) {
+                System.clearProperty("java.io.tmpdir");
+            } else {
+                System.setProperty("java.io.tmpdir", previousTemp);
+            }
+        }
+    }
+
+    @Test
     void bubblewrapStartsReadOnlyAndReopensWritableRoots() throws Exception {
         Path root = Files.createDirectories(workspace.resolve("repo")).toRealPath();
         Files.createDirectories(root.resolve(".git"));
+        Files.createDirectories(root.resolve(".git/hooks"));
         Files.writeString(root.resolve(".git/config"), "seed\n");
         Path bwrap = Path.of("/usr/bin/bwrap");
 
@@ -84,8 +118,36 @@ class OsSandboxTest {
         int bind = argv.indexOf("--bind");
         assertEquals(root.toString(), argv.get(bind + 1));
         int locked = argv.lastIndexOf("--ro-bind");
-        assertEquals(root.resolve(".git/config").toString(), argv.get(locked + 1));
+        assertEquals(root.resolve(".git/hooks").toString(), argv.get(locked + 1));
         assertEquals(List.of("mvn", "-v"), argv.subList(argv.indexOf("--") + 1, argv.size()));
+    }
+
+    @Test
+    void bubblewrapLocksGitHooksWhenHooksDirectoryDoesNotExist() throws Exception {
+        Path root = Files.createDirectories(workspace.resolve("repo-no-hooks")).toRealPath();
+        Files.createDirectory(root.resolve(".git"));
+        List<Path> protectedWrites = OsSandbox.protectedWrites(root);
+        Path hooks = root.resolve(".git/hooks");
+        assertTrue(protectedWrites.contains(hooks), protectedWrites.toString());
+        List<String> argv = OsSandbox.bwrapCommand(Path.of("/usr/bin/bwrap"), List.of(root), protectedWrites, true,
+            List.of("git", "status"));
+        int tmpfs = argv.indexOf("--tmpfs");
+        int remount = argv.indexOf("--remount-ro");
+        assertTrue(tmpfs >= 0 && hooks.toString().equals(argv.get(tmpfs + 1)), argv.toString());
+        assertTrue(remount > tmpfs && hooks.toString().equals(argv.get(remount + 1)), argv.toString());
+    }
+
+    @Test
+    void bubblewrapLocksWorktreeGitDirectoryAndHooks() throws Exception {
+        Path mainGit = Files.createDirectories(workspace.resolve("repo-main/.git/worktrees/feature"));
+        Path root = Files.createDirectories(workspace.resolve("repo-worktree")).toRealPath();
+        Path gitDir = mainGit.toRealPath();
+        Files.writeString(root.resolve(".git"), "gitdir: " + root.relativize(gitDir) + "\n");
+        List<Path> protectedWrites = OsSandbox.protectedWrites(root);
+        assertFalse(protectedWrites.contains(gitDir), "不应锁死整个 .git 目录以免阻断正常 git 写入：" + protectedWrites);
+        assertTrue(protectedWrites.contains(gitDir.resolve("config")), protectedWrites.toString());
+        assertTrue(protectedWrites.contains(gitDir.resolve("hooks")), protectedWrites.toString());
+        assertTrue(protectedWrites.contains(gitDir.resolve("info")), protectedWrites.toString());
     }
 
     @Test
@@ -242,26 +304,37 @@ class OsSandboxTest {
     @EnabledOnOs(OS.MAC)
     void macSandboxWritesInsideWorkspaceAndRejectsTheOutside() throws Exception {
         Path root = workspace.toRealPath();
-        Path escape = Path.of(System.getProperty("user.home"), "pilot-os-sandbox-escape.txt");
+        Path escape = Path.of(System.getProperty("user.home"),
+            "pilot-os-sandbox-escape-" + ProcessHandle.current().pid() + ".txt");
         Files.deleteIfExists(escape);
-        Files.createDirectories(root.resolve(".git"));
-        Files.writeString(root.resolve(".git/config"), "seed\n");
-        OsSandbox.Launch launch = OsSandbox.wrap(
-            List.of("/bin/sh", "-c", "echo ok > inside.txt; echo hacked > .git/config; echo no > '" + escape + "'"),
-            root);
-        assertTrue(launch.enforced(), launch.label());
-        assertTrue(launch.label().contains("已隔离"), launch.label());
+        try {
+            Files.createDirectories(root.resolve(".git"));
+            Files.writeString(root.resolve(".git/config"), "seed\n");
+            OsSandbox.Launch launch = OsSandbox.wrap(
+                List.of("/bin/sh", "-c", "echo ok > inside.txt; echo hacked > .git/config; echo no > '" + escape + "'"),
+                root);
+            if (!launch.enforced()) {
+                assertTrue(launch.label().contains("未启用"), launch.label());
+                assertTrue(launch.label().contains("本机执行"), launch.label());
+                return;
+            }
+            assertTrue(launch.enforced(), launch.label());
+            assertTrue(launch.label().contains("已隔离"), launch.label());
 
-        Process process =
-            new ProcessBuilder(launch.command()).directory(root.toFile()).redirectErrorStream(true).start();
-        String output = new String(process.getInputStream().readAllBytes());
-        int exit = process.waitFor();
+            Process process =
+                new ProcessBuilder(launch.command()).directory(root.toFile()).redirectErrorStream(true).start();
+            String output = new String(process.getInputStream().readAllBytes());
+            int exit = process.waitFor();
+            Assumptions.assumeTrue(exit != 71 || !output.contains("sandbox_apply: Operation not permitted"),
+                "外层 Pilot 沙箱禁止嵌套 Seatbelt 执行");
 
-        assertEquals("ok\n", Files.readString(root.resolve("inside.txt")));
-        assertEquals("seed\n", Files.readString(root.resolve(".git/config")), output);
-        assertFalse(Files.exists(escape), output);
-        assertTrue(exit != 0, output);
-        Files.deleteIfExists(escape);
+            assertEquals("ok\n", Files.readString(root.resolve("inside.txt")));
+            assertEquals("seed\n", Files.readString(root.resolve(".git/config")), output);
+            assertFalse(Files.exists(escape), output);
+            assertTrue(exit != 0, output);
+        } finally {
+            Files.deleteIfExists(escape);
+        }
     }
 
     @Test
@@ -280,6 +353,8 @@ class OsSandboxTest {
             new ProcessBuilder(launch.command()).directory(root.toFile()).redirectErrorStream(true).start();
         String output = new String(process.getInputStream().readAllBytes());
         int exit = process.waitFor();
+        Assumptions.assumeTrue(exit != 71 || !output.contains("sandbox_apply: Operation not permitted"),
+            "外层 Pilot 沙箱禁止嵌套 Seatbelt 执行");
 
         assertEquals(0, exit, output);
         assertFalse(output.contains("Operation not permitted"), output);

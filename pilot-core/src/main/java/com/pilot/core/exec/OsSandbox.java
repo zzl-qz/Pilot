@@ -3,8 +3,13 @@ package com.pilot.core.exec;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -227,16 +232,14 @@ public final class OsSandbox {
     }
 
     static String seatbeltProfile(List<Path> writable, List<Path> locked, boolean network) {
+        Path profileDir = profileDirectory();
         StringBuilder profile = new StringBuilder();
         profile.append("(version 1)\n(deny default)\n");
         profile.append("(allow file-read*)\n(allow file-read-metadata)\n");
         for (Path root : writable) {
             profile.append("(allow file-write* (subpath \"").append(escape(root)).append("\"))\n");
         }
-        // Seatbelt 后写的规则覆盖先写的。保护路径必须放在工作区允许之后。
-        for (Path path : locked) {
-            profile.append("(deny file-write* (subpath \"").append(escape(path)).append("\"))\n");
-        }
+
         profile.append("(allow process*)\n(allow signal)\n(allow sysctl-read)\n");
         profile.append("(allow mach*)\n(allow ipc-posix*)\n");
         profile.append("(allow file-ioctl)\n(allow file-map-executable)\n(allow system-socket)\n");
@@ -246,6 +249,10 @@ public final class OsSandbox {
             profile.append("(allow file-read* (literal \"").append(device).append("\"))\n");
             profile.append("(allow file-write* (literal \"").append(device).append("\"))\n");
         }
+        for (Path path : locked) {
+            profile.append("(deny file-write* (subpath \"").append(escape(path)).append("\"))\n");
+        }
+        profile.append("(deny file-write* (subpath \"").append(escape(profileDir)).append("\"))\n");
         profile.append(network ? "(allow network*)\n" : "(deny network*)\n");
         return profile.toString();
     }
@@ -267,12 +274,18 @@ public final class OsSandbox {
             argv.add(root.toString());
         }
         for (Path path : locked) {
-            if (!Files.exists(path)) {
-                continue;
+            if (Files.exists(path)) {
+                argv.add("--ro-bind");
+                argv.add(path.toString());
+                argv.add(path.toString());
+            } else if ("hooks".equals(path.getFileName() == null ? "" : path.getFileName().toString())
+                && path.getParent() != null && Files.isDirectory(path.getParent())) {
+                // .git/hooks 尚未创建时用只读空 tmpfs 占位，防止沙箱内新建恶意 Git hook。
+                argv.add("--tmpfs");
+                argv.add(path.toString());
+                argv.add("--remount-ro");
+                argv.add(path.toString());
             }
-            argv.add("--ro-bind");
-            argv.add(path.toString());
-            argv.add(path.toString());
         }
         if (!network) {
             argv.add("--unshare-net");
@@ -324,11 +337,28 @@ public final class OsSandbox {
         List<Path> visible = RealPaths.visible(real(workspace), extraWritable, false);
         List<Path> locked = new ArrayList<>();
         for (Path path : visible) {
-            locked.add(path.resolve(".git/config"));
-            locked.add(path.resolve(".git/hooks"));
-            locked.add(path.resolve(".git/info"));
+            Path git = path.resolve(".git");
+            if (Files.isRegularFile(git)) {
+                try {
+                    String pointer = Files.readString(git, StandardCharsets.UTF_8).strip();
+                    if (pointer.startsWith("gitdir:")) {
+                        addGitLocks(locked,
+                            git.getParent().resolve(pointer.substring("gitdir:".length()).strip()).normalize());
+                        continue;
+                    }
+                } catch (IOException ignored) {
+                    // Fall back to conventional .git paths if worktree metadata cannot be read.
+                }
+            }
+            addGitLocks(locked, git);
         }
         return List.copyOf(locked);
+    }
+
+    private static void addGitLocks(List<Path> locked, Path git) {
+        locked.add(git.resolve("config"));
+        locked.add(git.resolve("hooks"));
+        locked.add(git.resolve("info"));
     }
 
     private static String label(String backend, boolean network) {
@@ -358,13 +388,59 @@ public final class OsSandbox {
         return null;
     }
 
-    private static Path profileFile(String profile) throws IOException {
-        Path dir = real(Path.of(System.getProperty("java.io.tmpdir")));
-        Path file = dir.resolve("pilot-seatbelt-" + Integer.toUnsignedString(profile.hashCode()) + ".sb");
-        if (!Files.exists(file) || !profile.equals(Files.readString(file))) {
-            Files.writeString(file, profile, StandardCharsets.UTF_8);
+    static Path profileDirectory() {
+        String home = System.getProperty("user.home", "");
+        if (!home.isBlank()) {
+            return real(Path.of(home)).resolve(".pilot").resolve("sandbox-profiles");
+        }
+        String user = System.getProperty("user.name", "pilot");
+        return real(Path.of(System.getProperty("java.io.tmpdir")))
+            .resolve(".pilot-sandbox-profiles-" + Integer.toUnsignedString(user.hashCode()));
+    }
+
+    static Path profileFile(String profile) throws IOException {
+        Path dir = profileDirectory();
+        Files.createDirectories(dir);
+        var privateDirectory = PosixFilePermissions.fromString("rwx------");
+        var privateFile = PosixFilePermissions.fromString("rw-------");
+        try {
+            Files.setPosixFilePermissions(dir, privateDirectory);
+        } catch (UnsupportedOperationException ignored) {
+            // POSIX permissions are unavailable on non-POSIX filesystems.
+        }
+        Path file = dir.resolve("pilot-seatbelt-" + profileHash(profile) + ".sb");
+        if (!Files.isRegularFile(file) || !profile.equals(Files.readString(file, StandardCharsets.UTF_8))) {
+            Path temp = Files.createTempFile(dir, ".pilot-seatbelt-", ".tmp");
+            try {
+                try {
+                    Files.setPosixFilePermissions(temp, privateFile);
+                } catch (UnsupportedOperationException ignored) {
+                    // POSIX permissions are unavailable on non-POSIX filesystems.
+                }
+                Files.writeString(temp, profile, StandardCharsets.UTF_8);
+                try {
+                    Files.move(temp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                } catch (AtomicMoveNotSupportedException ignored) {
+                    Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING);
+                }
+            } finally {
+                Files.deleteIfExists(temp);
+            }
         }
         return file;
+    }
+
+    private static String profileHash(String profile) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(profile.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(16);
+            for (int i = 0; i < 8; i++) {
+                hex.append(String.format("%02x", digest[i]));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            return Integer.toUnsignedString(profile.hashCode(), 16);
+        }
     }
 
     static Path real(Path path) {
