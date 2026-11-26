@@ -51,4 +51,24 @@ class SlidingWindowRateLimiterTest {
 
         assertTrue(limiter.allow("idle"));
     }
+
+    @Test
+    void allowAutomaticallyPrunesExpiredSources() {
+        AtomicLong clock = new AtomicLong();
+        SlidingWindowRateLimiter limiter = new SlidingWindowRateLimiter(1, Duration.ofSeconds(5), clock::get);
+        assertTrue(limiter.allow("idle"));
+        clock.addAndGet(6_000);
+        assertTrue(limiter.allow("active"));
+        assertTrue(limiter.allow("idle"));
+    }
+
+    @Test
+    void sourceLimitRejectsNewSourcesWithoutDroppingActiveLimits() {
+        SlidingWindowRateLimiter limiter = new SlidingWindowRateLimiter(1, Duration.ofMinutes(1));
+        for (int i = 0; i < 2048; i++) {
+            assertTrue(limiter.allow("source-" + i));
+        }
+        assertFalse(limiter.allow("source-overflow"));
+        assertFalse(limiter.allow("source-0"));
+    }
 }

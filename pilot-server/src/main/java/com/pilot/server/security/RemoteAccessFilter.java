@@ -128,13 +128,19 @@ public class RemoteAccessFilter extends OncePerRequestFilter {
 
     private void accessCookie(HttpServletResponse response, HttpServletRequest request, String token, int seconds) {
         response.addHeader("Set-Cookie", COOKIE_NAME + "=" + token + "; Path=/; HttpOnly; SameSite=Strict; Max-Age="
-            + seconds + (request.isSecure() ? "; Secure" : ""));
+            + seconds + (request.isSecure() || forwardedHttps(request) ? "; Secure" : ""));
+    }
+
+    private static boolean forwardedHttps(HttpServletRequest request) {
+        String forwarded = request.getHeader("X-Forwarded-Proto");
+        return forwarded != null && "https".equalsIgnoreCase(forwarded.split(",", 2)[0].strip());
     }
 
     private void connectPage(HttpServletResponse response) throws IOException {
         String nonce = UUID.randomUUID().toString();
         response.setContentType("text/html;charset=UTF-8");
         response.setHeader("Cache-Control", "no-store");
+        response.setHeader("X-Content-Type-Options", "nosniff");
         response.setHeader("Referrer-Policy", "no-referrer");
         response.setHeader("Content-Security-Policy",
             "default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'nonce-" + nonce
@@ -170,6 +176,8 @@ public class RemoteAccessFilter extends OncePerRequestFilter {
             tokenPresent);
         log.warn("拒绝访问 {} {}（来自 {}）：{}", request.getMethod(), request.getRequestURI(), remote, decision.reason());
         response.setStatus(decision.status());
+        response.setHeader("Cache-Control", "no-store");
+        response.setHeader("X-Content-Type-Options", "nosniff");
         response.setContentType("application/json;charset=UTF-8");
         response.getWriter()
             .write("{\"error\":\"" + escape(decision.reason()) + "\",\"status\":" + decision.status() + "}");

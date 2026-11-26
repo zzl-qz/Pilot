@@ -42,6 +42,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ValidationLedger {
     static final int MAX_ENTRIES = 50;
+    private static final int MAX_STATES = 2048;
 
     /**
      * @param current 最近一条证据是否覆盖当前产物
@@ -118,7 +119,7 @@ public class ValidationLedger {
         }
         String sessionId = evidence.sessionId();
         List<ValidationEvidence> previous = recent(sessionId);
-        states.put(sessionId, new State(previous, "证据正在写入"));
+        putState(sessionId, new State(previous, "证据正在写入"));
         try {
             beginUpdate(sessionId);
             List<ValidationEvidence> entries = new ArrayList<>(previous);
@@ -128,11 +129,11 @@ public class ValidationLedger {
             }
             persist(sessionId, entries);
             finishUpdate(sessionId);
-            states.put(sessionId, new State(List.copyOf(entries), null));
+            putState(sessionId, new State(List.copyOf(entries), null));
             recoverHealth();
         } catch (IOException | RuntimeException e) {
             log.warn("写入校验证据失败: {}", file(sessionId), e);
-            states.put(sessionId, failed(sessionId, previous, "校验证据未能可靠落盘：" + e.getMessage()));
+            putState(sessionId, failed(sessionId, previous, "校验证据未能可靠落盘：" + e.getMessage()));
         }
     }
 
@@ -141,7 +142,24 @@ public class ValidationLedger {
     }
 
     private State state(String sessionId) {
-        return sessionId == null ? new State(List.of(), null) : states.computeIfAbsent(sessionId, this::load);
+        if (sessionId == null) {
+            return new State(List.of(), null);
+        }
+        State existing = states.get(sessionId);
+        if (existing != null) {
+            return existing;
+        }
+        State loaded = load(sessionId);
+        putState(sessionId, loaded);
+        return loaded;
+    }
+
+    private void putState(String sessionId, State state) {
+        if (!states.containsKey(sessionId) && states.size() >= MAX_STATES) {
+            states.keySet().stream().filter(existing -> !existing.equals(sessionId)).findAny()
+                .ifPresent(states::remove);
+        }
+        states.put(sessionId, state);
     }
 
     /** 当前产物是否有可用的通过证据。 */
@@ -176,7 +194,7 @@ public class ValidationLedger {
     public synchronized int deleteBySession(String sessionId) {
         Path file = file(sessionId);
         List<ValidationEvidence> previous = recent(sessionId);
-        states.put(sessionId, new State(previous, "证据正在删除"));
+        putState(sessionId, new State(previous, "证据正在删除"));
         try {
             if (Files.exists(file, LinkOption.NOFOLLOW_LINKS)) {
                 beginUpdate(sessionId);
@@ -188,7 +206,7 @@ public class ValidationLedger {
             return removed;
         } catch (IOException | RuntimeException e) {
             log.warn("删除校验证据失败: {}", file, e);
-            states.put(sessionId, failed(sessionId, previous, "删除校验证据失败：" + e.getMessage()));
+            putState(sessionId, failed(sessionId, previous, "删除校验证据失败：" + e.getMessage()));
             return 0;
         }
     }

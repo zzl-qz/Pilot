@@ -490,7 +490,7 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
                 return PermissionResult.deny("代理 " + profile.name() + " 不允许使用工具 " + call.name());
             }
             Map<String, Object> callArgs = call.args();
-            if (!scope.writable() && !tool.readOnly(callArgs) && !ToolNames.RUN_COMMAND.equals(call.name())) {
+            if (!scope.writable() && !tool.readOnly(callArgs)) {
                 return PermissionResult.deny("代理 " + profile.name() + " 为只读角色，禁止写操作 " + call.name());
             }
             if (ToolNames.RUN_COMMAND.equals(call.name()) && callArgs != null) {
@@ -500,7 +500,7 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
                 }
             }
             if (callArgs != null && (!scope.allowFiles().isEmpty() || !scope.denyFiles().isEmpty())) {
-                for (String key : List.of("path", "from", "to")) {
+                for (String key : List.of("path", "from", "to", "source", "destination")) {
                     String raw = text(callArgs.get(key));
                     if (!raw.isEmpty() && !scope.allowsPath(raw) && !scope.allowsDirectory(raw)) {
                         return PermissionResult.deny("路径 " + raw + " 不在代理 " + profile.name() + " 允许范围内");

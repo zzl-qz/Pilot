@@ -29,6 +29,7 @@ public class SessionNotes {
     static final int MAX_CONTENT = 4000;
     /** 每个会话保留的想法条数上限，防止长期积累把列表撑爆。 */
     static final int MAX_NOTES = 200;
+    private static final int MAX_SOURCES = 10_000;
 
     /** 想法引用的来源消息；来源被历史编辑或清理后 available=false，但引用原文仍保留。 */
     public record Source(Integer sequence, String excerpt, String role, boolean available) {
@@ -94,7 +95,7 @@ public class SessionNotes {
     private final SqliteStore store;
     private final SessionService sessions;
     private final Map<String, LinkedHashMap<String, Note>> memory = new HashMap<>();
-    private final Map<String, SourceInput> sources = new HashMap<>();
+    private final Map<String, SourceInput> sources = new LinkedHashMap<>();
 
     @org.springframework.beans.factory.annotation.Autowired
     public SessionNotes(ObjectProvider<SqliteStore> stores, ObjectProvider<SessionService> services) {
@@ -182,6 +183,7 @@ public class SessionNotes {
             memory.computeIfAbsent(session, key -> new LinkedHashMap<>()).put(note.id(), note);
             if (source != null && source.sequence() != null) {
                 sources.put(note.id(), source);
+                trimSources();
                 return new Note(note.id(), note.content(), note.createdAt(), note.updatedAt(),
                     sourceOf(note.id(), session));
             }
@@ -210,6 +212,7 @@ public class SessionNotes {
                 query.setString(4, source.role());
             }, "保存想法来源失败");
             sources.put(stored.id(), source);
+            trimSources();
             return new Note(stored.id(), stored.content(), stored.createdAt(), stored.updatedAt(),
                 sourceOf(stored.id(), session), stored.status(), stored.link());
         }
@@ -360,6 +363,12 @@ public class SessionNotes {
             return null;
         }
         return new Source(input.sequence(), input.excerpt(), input.role(), eventExists(session, input.sequence()));
+    }
+
+    private void trimSources() {
+        while (sources.size() > MAX_SOURCES) {
+            sources.remove(sources.keySet().iterator().next());
+        }
     }
 
     /** 历史编辑或清理后消息序号可能不存在：来源仍保留原文，只是标记为不可用。 */

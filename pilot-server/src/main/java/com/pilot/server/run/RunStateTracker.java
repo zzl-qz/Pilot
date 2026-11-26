@@ -72,6 +72,7 @@ public class RunStateTracker {
     private final String instanceId;
     private final ConcurrentMap<String, String> activeRuns = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, String> lostLeases = new ConcurrentHashMap<>();
+    private static final int MAX_LOST_LEASES = 2048;
     private LongSupplier wallClock = System::currentTimeMillis;
     private volatile long lastHeartbeatMs = System.currentTimeMillis();
 
@@ -99,7 +100,7 @@ public class RunStateTracker {
         try {
             RunCheckpoint initial = RunCheckpoint.start(runId, sessionId, workspace, instanceId, now, DEFAULT_LEASE);
             if (!repository.claimStart(initial, now, DEFAULT_LEASE)) {
-                lostLeases.put(runId, "运行租约已由其他实例持有");
+                recordLostLease(runId, "运行租约已由其他实例持有");
                 throw new IllegalStateException("运行租约已被其他实例占用：" + runId);
             }
             claimed = true;
@@ -214,6 +215,14 @@ public class RunStateTracker {
         return lostLeases.containsKey(runId);
     }
 
+    private synchronized void recordLostLease(String runId, String state) {
+        if (lostLeases.size() >= MAX_LOST_LEASES) {
+            lostLeases.keySet().stream().filter(key -> !activeRuns.containsKey(key)).findAny()
+                .ifPresent(lostLeases::remove);
+        }
+        lostLeases.put(runId, state);
+    }
+
     public String leaseState(String runId) {
         return lostLeases.get(runId);
     }
@@ -295,7 +304,7 @@ public class RunStateTracker {
                     log.info("系统休眠唤醒后已重新接管本实例运行 {} 的租约", runId);
                     continue;
                 }
-                lostLeases.put(runId, "租约已被其他实例接管或已过期");
+                recordLostLease(runId, "租约已被其他实例接管或已过期");
                 log.error("运行 {} 的租约已丢失，停止把本实例状态当成权威", runId);
             } catch (RuntimeException e) {
                 persistenceFailure(runId, "续租失败", e);
@@ -305,7 +314,7 @@ public class RunStateTracker {
 
     private void persistenceFailure(String runId, String action, RuntimeException cause) {
         if (runId != null) {
-            lostLeases.put(runId, action);
+            recordLostLease(runId, action);
         }
         storageHealth.markDegraded("run-checkpoint", runId == null ? action : action + "：" + runId);
         log.warn("{}，运行 {}", action, runId, cause);

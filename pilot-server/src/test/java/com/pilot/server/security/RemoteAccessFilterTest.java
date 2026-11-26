@@ -51,6 +51,8 @@ class RemoteAccessFilterTest {
         assertFalse(page.getContentAsString().contains("test-secret"));
         assertFalse(page.getContentAsString().contains("__NONCE__"));
         assertTrue(page.getHeader("Content-Security-Policy").contains("frame-ancestors 'none'"));
+        assertEquals("nosniff", page.getHeader("X-Content-Type-Options"));
+        assertEquals("no-store", page.getHeader("Cache-Control"));
         assertEquals(401, run(filter, request("GET", "/api/sessions/s/products")).getStatus());
         assertEquals(401, run(filter, request("GET", "/connect/extra")).getStatus());
     }
@@ -87,12 +89,24 @@ class RemoteAccessFilterTest {
     }
 
     @Test
+    void forwardedHttpsAddsSecureCookieAttribute() throws Exception {
+        var filter = filter("token", 0);
+        var login = request("POST", "/api/access/login");
+        login.setSecure(false);
+        login.addHeader("X-Forwarded-Proto", "HTTPS, http");
+        login.addHeader("X-Pilot-Token", "test-secret");
+        assertTrue(run(filter, login).getHeader("Set-Cookie").contains("; Secure"));
+    }
+
+    @Test
     void invalidOrCrossOriginLoginNeverSetsCookieAndFailuresAreRateLimited() throws Exception {
         var filter = filter("token", 2);
         var bad = request("POST", "/api/access/login");
         bad.addHeader("X-Pilot-Token", "wrong");
         var denied = run(filter, bad);
         assertEquals(401, denied.getStatus());
+        assertEquals("nosniff", denied.getHeader("X-Content-Type-Options"));
+        assertEquals("no-store", denied.getHeader("Cache-Control"));
         assertNull(denied.getHeader("Set-Cookie"));
         var foreign = request("POST", "/api/access/login");
         foreign.addHeader("X-Pilot-Token", "test-secret");

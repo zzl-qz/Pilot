@@ -3,7 +3,6 @@ package com.pilot.server.security;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Deque;
-import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.LongSupplier;
 
@@ -16,11 +15,14 @@ import java.util.function.LongSupplier;
 public final class SlidingWindowRateLimiter {
     /** 没指定窗口时按每分钟限流。 */
     public static final Duration DEFAULT_WINDOW = Duration.ofMinutes(1);
+    private static final int MAX_SOURCES = 2048;
 
     private final int limit;
     private final long windowMillis;
     private final LongSupplier clock;
-    private final Map<String, Deque<Long>> hits = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Deque<Long>> hits = new ConcurrentHashMap<>();
+    private long lastPrune;
+    private int callsSincePrune;
 
     public SlidingWindowRateLimiter(int limitPerWindow, Duration window) {
         this(limitPerWindow, window == null ? DEFAULT_WINDOW : window, System::currentTimeMillis);
@@ -35,7 +37,26 @@ public final class SlidingWindowRateLimiter {
     /** @return true 表示放行；false 表示超过窗口上限 */
     public boolean allow(String key) {
         long now = clock.getAsLong();
-        Deque<Long> window = hits.computeIfAbsent(key == null ? "unknown" : key, ignored -> new ArrayDeque<>());
+        synchronized (this) {
+            callsSincePrune++;
+            if (now - lastPrune >= windowMillis || callsSincePrune >= 1024) {
+                pruneExpired(now);
+                lastPrune = now;
+                callsSincePrune = 0;
+            }
+        }
+        String source = key == null ? "unknown" : key;
+        Deque<Long> window;
+        synchronized (this) {
+            window = hits.get(source);
+            if (window == null) {
+                if (hits.size() >= MAX_SOURCES) {
+                    return false;
+                }
+                window = new ArrayDeque<>();
+                hits.put(source, window);
+            }
+        }
         synchronized (window) {
             while (!window.isEmpty() && now - window.peekFirst() >= windowMillis) {
                 window.pollFirst();
@@ -65,7 +86,10 @@ public final class SlidingWindowRateLimiter {
 
     /** 定期清理不再活跃的来源，避免内存只增不减。 */
     public void prune() {
-        long now = clock.getAsLong();
+        pruneExpired(clock.getAsLong());
+    }
+
+    private void pruneExpired(long now) {
         hits.entrySet().removeIf(entry -> {
             Deque<Long> window = entry.getValue();
             synchronized (window) {

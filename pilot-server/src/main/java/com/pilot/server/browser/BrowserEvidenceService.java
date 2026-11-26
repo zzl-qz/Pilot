@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -37,11 +36,12 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class BrowserEvidenceService implements BrowserEvidenceRecorder {
     static final int MAX_RECORDS_PER_SESSION = 200;
+    private static final int LOCK_STRIPES = 256;
     private static final TypeReference<List<BrowserEvidenceRecord>> RECORD_LIST = new TypeReference<>() {};
 
     private final Path directory;
     private final ObjectMapper mapper;
-    private final ConcurrentHashMap<String, Object> locks = new ConcurrentHashMap<>();
+    private final Object[] locks = new Object[LOCK_STRIPES];
     private final CopyOnWriteArrayList<Consumer<BrowserEvidenceRecord>> listeners = new CopyOnWriteArrayList<>();
 
     @Autowired
@@ -52,6 +52,7 @@ public class BrowserEvidenceService implements BrowserEvidenceRecorder {
     public BrowserEvidenceService(Path directory, ObjectMapper mapper) {
         this.directory = directory.toAbsolutePath().normalize();
         this.mapper = mapper;
+        java.util.Arrays.setAll(locks, ignored -> new Object());
     }
 
     public void addListener(Consumer<BrowserEvidenceRecord> listener) {
@@ -232,6 +233,6 @@ public class BrowserEvidenceService implements BrowserEvidenceRecorder {
     }
 
     private Object lockFor(String sessionId) {
-        return locks.computeIfAbsent(sessionId, ignored -> new Object());
+        return locks[Math.floorMod(sessionId.hashCode(), locks.length)];
     }
 }

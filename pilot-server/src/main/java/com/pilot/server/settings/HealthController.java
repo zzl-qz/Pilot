@@ -6,6 +6,8 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.Stream;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -34,11 +36,24 @@ public class HealthController {
     private final ObjectProvider<ToolRegistry> toolRegistry;
 
     @GetMapping
-    public HealthResponse health() {
+    public HealthResponse health(HttpServletRequest request) {
         ToolRegistry registry = toolRegistry.getIfAvailable();
         List<String> tools = registry == null ? List.of() : registry.tools().stream().map(Tool::name).toList();
+        String workspace = agentProperties.workspace();
+        if (request != null && !isLoopback(request.getRemoteAddr())) {
+            workspace = "";
+        }
         return new HealthResponse("ok", modelSettings.snapshot().model(), tools, permissionSettings.mode().name(),
-            agentProperties.workspace(), frontendStale());
+            workspace, frontendStale());
+    }
+
+    public HealthResponse health() {
+        return health(null);
+    }
+
+    private static boolean isLoopback(String address) {
+        return address != null
+            && (address.startsWith("127.") || "::1".equals(address) || "0:0:0:0:0:0:0:1".equalsIgnoreCase(address));
     }
 
     /**

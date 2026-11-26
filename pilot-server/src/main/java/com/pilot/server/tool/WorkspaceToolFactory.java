@@ -4,11 +4,13 @@ import java.net.http.HttpClient;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import java.util.Map;
 import java.util.function.Supplier;
+
+import jakarta.annotation.PreDestroy;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -61,6 +63,7 @@ import com.pilot.core.tool.git.GitLogTool;
 import com.pilot.core.tool.git.GitStatusTool;
 import com.pilot.core.tool.office.OfficeTool;
 import com.pilot.core.tool.process.ProcessListTool;
+import com.pilot.core.util.HostOs;
 import com.pilot.core.workspace.AgentScope;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.attachment.AttachmentReferences;
@@ -94,7 +97,13 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
     private final ObjectMapper mapper;
     private final HttpClient webClient =
         HttpClient.newBuilder().connectTimeout(WEB_CONNECT_TIMEOUT).followRedirects(HttpClient.Redirect.NEVER).build();
-    private final ConcurrentMap<String, ToolRegistry> cache = new ConcurrentHashMap<>();
+    private static final int CACHE_LIMIT = 64;
+    private final Map<String, ToolRegistry> cache = new LinkedHashMap<>(16, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, ToolRegistry> eldest) {
+            return size() > CACHE_LIMIT;
+        }
+    };
     /** 可选能力：测试里手工构造本工厂时不注入，对应工具就不存在。 */
     private BrowserBackend browser;
     private McpManager mcp;
@@ -136,7 +145,7 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
     }
 
     @Autowired(required = false)
-    public void setDataDir(PilotDataDir dataDir) {
+    public synchronized void setDataDir(PilotDataDir dataDir) {
         this.dataDir = dataDir;
         this.cache.clear();
     }
@@ -157,7 +166,7 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
     }
 
     @Autowired(required = false)
-    public void setWebSearchSettings(WebSearchSettings webSearchSettings) {
+    public synchronized void setWebSearchSettings(WebSearchSettings webSearchSettings) {
         this.webSearchSettings = webSearchSettings;
         this.sharedSearchTool = webSearchSettings == null ? null
             : new WebSearchTool(webSearchSettings::httpClient, mapper, webSearchSettings::toConfig);
@@ -194,10 +203,18 @@ public class WorkspaceToolFactory implements WorkspaceToolLookup {
     }
 
     /** @param workspace 会话工作区；为空时回退到配置中的默认工作区 */
-    public ToolRegistry registryFor(String workspace) {
+    public synchronized ToolRegistry registryFor(String workspace) {
         Path root = resolve(workspace);
-        String key = root.toString().toLowerCase(Locale.ROOT);
+        String key = root.toString();
+        if (HostOs.isWindows()) {
+            key = key.toLowerCase(Locale.ROOT);
+        }
         return cache.computeIfAbsent(key, ignored -> create(root, null));
+    }
+
+    @PreDestroy
+    void closeWebClient() {
+        webClient.close();
     }
 
     /** 独立非缓存工具集：供子代理临时 worktree 使用，每次分配独立 ReadTracker 且不污染全局缓存。 */
