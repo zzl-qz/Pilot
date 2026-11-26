@@ -835,6 +835,13 @@ public class AgentRunService implements RunStarter {
             runs.remove(runId, handle);
             handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
             handle.pendingQuestions.forEach(this::cancelQuestion);
+            if (!continued) {
+                try {
+                    preparation.releaseBrowserControl(sessionId);
+                } catch (RuntimeException e) {
+                    log.warn("清理会话 {} 浏览器控制态失败", sessionId, e);
+                }
+            }
             // 部分交付不是失败：runs 表记成 INTERRUPTED，和 checkpoint 的可恢复语义一致。
             String recordedStatus = RunFailureCode.TASK_INCOMPLETE.is(status) ? "INTERRUPTED" : status;
             try {

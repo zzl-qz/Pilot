@@ -310,6 +310,22 @@ public class BrowserRuntime implements BrowserBackend, SmartLifecycle {
         }
     }
 
+    /** 运行结束时清理主会话及所属浏览器子通道残留的智能体接管态，避免 Web 镜像交互被永久锁死。 */
+    public void releaseSessionControls(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            return;
+        }
+        List<String> targets = new ArrayList<>();
+        for (String key : agentControls.keySet()) {
+            if (sessionId.equals(key) || sessionId.equals(parentSessionOf(key))) {
+                targets.add(key);
+            }
+        }
+        for (String target : targets) {
+            setAgentControl(target, false, "", false);
+        }
+    }
+
     @Override
     public void stopControl(String sessionId) {
         if (sessionId != null && !sessionId.isBlank()) {

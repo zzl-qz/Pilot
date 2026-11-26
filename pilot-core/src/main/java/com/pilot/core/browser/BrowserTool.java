@@ -290,7 +290,32 @@ public final class BrowserTool extends PromptedTool implements LocalInteraction 
 
     @Override
     public ToolResult executeResult(Map<String, Object> args) {
+        try {
+            return dispatchAction(args);
+        } catch (RuntimeException | Error failure) {
+            backend.setAgentControl(sessionId, false, "");
+            throw failure;
+        }
+    }
+
+    private ToolResult dispatchAction(Map<String, Object> args) {
         String action = action(args);
+        ToolResult validation = validateAction(action, args);
+        if (validation != null) {
+            return validation;
+        }
+        if ("handoff".equals(action)) {
+            backend.setAgentControl(sessionId, false, "等待用户接管");
+            try {
+                return handleHandoff(args);
+            } finally {
+                backend.setAgentControl(sessionId, false, "");
+            }
+        }
+        return executeBrowserAction(action, args);
+    }
+
+    private ToolResult validateAction(String action, Map<String, Object> args) {
         if (action == null) {
             return ToolResult.text("ERROR: 缺少参数 action");
         }
@@ -299,10 +324,6 @@ public final class BrowserTool extends PromptedTool implements LocalInteraction 
         }
         if (!allowEvaluate && "evaluate".equals(action)) {
             return ToolResult.text("ERROR: 当前浏览器子代理不允许执行 evaluate 任意脚本；请使用 snapshot / inspect / screenshot 等结构化动作。");
-        }
-        if ("handoff".equals(action)) {
-            backend.setAgentControl(sessionId, false, "等待用户接管");
-            return handleHandoff(args);
         }
         String targetUrl = targetUrl(args);
         if ((INTERACTIONS.contains(action) || "evaluate".equals(action)) && BrowserCommand.isPaymentUrl(targetUrl)) {
@@ -318,6 +339,11 @@ public final class BrowserTool extends PromptedTool implements LocalInteraction 
                 + "登录、验证码或 MFA 请由用户在当前页面完成；snapshot / screenshot / console / network / wait 等观察动作仍可用。"
                 + "用户恢复后先重新 snapshot 验证登录态，不要重放接管前的旧 ref 或交互动作。");
         }
+        return null;
+    }
+
+    private ToolResult executeBrowserAction(String action, Map<String, Object> args) {
+        String targetUrl = targetUrl(args);
         Map<String, Object> command = new LinkedHashMap<>();
         command.put("op", action);
         String error = BrowserCommand.build(action, args, command, paths);

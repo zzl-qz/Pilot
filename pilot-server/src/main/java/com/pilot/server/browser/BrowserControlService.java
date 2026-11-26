@@ -513,8 +513,12 @@ public class BrowserControlService implements BrowserEventListener {
             }
             return;
         }
-        // 订阅清空：停帧、清缓存帧，接管开关一并复位（没人看着页面就不算接管中）
-        runtime.setInteractionsPaused(state.id, false);
+        // 订阅断开不代表用户完成接管；仍有待处理 handoff 时保留暂停状态。
+        boolean pendingHandoff = handoffs != null && !handoffs.pending(state.id).isEmpty();
+        boolean userTakeover = runtime.interactionsPaused(state.id);
+        if (!pendingHandoff && !userTakeover) {
+            runtime.setInteractionsPaused(state.id, false);
+        }
         state.frame = null;
         state.laneFrames.clear();
         String active = state.activeLane;
@@ -565,7 +569,8 @@ public class BrowserControlService implements BrowserEventListener {
         } else {
             if (handoffs == null || handoffs.pendingForBrowser(target).isEmpty()) {
                 runtime.setInteractionsPaused(target, false);
-                controls.execute(() -> runtime.setAgentControl(target, false, "", true));
+                boolean resume = event.eventKind() == BrowserHandoffBroker.EventKind.RESUMED;
+                controls.execute(() -> runtime.setAgentControl(target, false, "", resume));
             }
         }
         State state = states.get(sessionId);

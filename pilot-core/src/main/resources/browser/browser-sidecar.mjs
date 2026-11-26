@@ -79,6 +79,7 @@ const EXTERNAL_CDP = cdpEndpoint(process.env.PILOT_BROWSER_CDP);
 
 let playwright;
 let browserPromise = null;
+let desktopPromise = null;
 let externalPromise = null;
 const sessions = new Map();
 const queues = new Map();
@@ -578,14 +579,17 @@ function readDesktop() {
 }
 
 async function connectDesktop(desktop) {
-  if (!browserPromise) {
+  if (!desktopPromise) {
     const playwright = loadPlaywright();
-    browserPromise = playwright.chromium.connectOverCDP(`http://127.0.0.1:${desktop.cdpPort}`).catch((error) => {
-      browserPromise = null;
+    desktopPromise = playwright.chromium.connectOverCDP(`http://127.0.0.1:${desktop.cdpPort}`).then((browser) => {
+      browser.on('disconnected', () => { desktopPromise = null; });
+      return browser;
+    }).catch((error) => {
+      desktopPromise = null;
       throw error;
     });
   }
-  return browserPromise;
+  return desktopPromise;
 }
 
 /** 外部 CDP 端点：用户自己已经开了调试端口的 Chrome，不归本进程启停。 */
@@ -3384,8 +3388,8 @@ async function dispatch(request) {
       await notifyDesktopControl(existing);
       sessions.delete(request.session);
       try {
-        // 外部 CDP 的 Context 属于用户自己：只关我们开的那一个标签。
-        if (existing.external) await existing.page.close();
+        // 外部 CDP 与桌面内置浏览器的 Context 属于共享上下文：只关我们开的那一个标签。
+        if (existing.external || existing.desktop) await existing.page.close();
         else await existing.context.close();
       } catch {
         // 浏览器已退出
@@ -3518,6 +3522,8 @@ lines.on('close', async () => {
   try {
     const browser = browserPromise ? await browserPromise : null;
     if (browser) await browser.close();
+    const headed = headedPromise ? await headedPromise : null;
+    if (headed) await headed.close();
   } catch {
     // 退出时忽略
   }

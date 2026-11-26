@@ -189,6 +189,14 @@ public final class AgentRunPreparation {
         this.browserHandoffs = browserHandoffs;
     }
 
+    /** 运行彻底结束时释放该会话及子通道残留的浏览器智能体控制态。 */
+    void releaseBrowserControl(String sessionId) {
+        BrowserRuntime runtime = this.browserRuntime;
+        if (runtime != null) {
+            runtime.releaseSessionControls(sessionId);
+        }
+    }
+
     public AgentLoop.Config loopConfig(PreparedRun prepared, String sessionId) {
         return new AgentLoop.Config(properties.maxSteps(), properties.repeatRemindAt(), properties.repeatAbortAt(),
             prepared.systemPrompt(), () -> plans.load(sessionId), properties.maxPlanContinues(),

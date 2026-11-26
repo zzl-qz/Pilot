@@ -327,6 +327,19 @@ class BrowserToolTest {
     }
 
     @Test
+    void handoffTimeoutCancelsWithoutResumingAgentControl() {
+        BrowserHandoffBroker broker = new BrowserHandoffBroker();
+        BrowserTool handoffTool = new BrowserTool(backend, "s1", new PathValidator(workspace)).withHandoffBroker(broker)
+            .withHandoffTimeout(Duration.ofMillis(10));
+
+        String result = handoffTool.execute(Map.of("action", "handoff", "kind", "manual", "reason", "测试取消"));
+
+        assertTrue(result.contains("超时"), result);
+        assertFalse(backend.lastResume);
+        assertFalse(backend.controlActive, "超时 handoff 必须释放智能体控制态");
+    }
+
+    @Test
     void enforcesSubagentEvaluateLockPaymentHardBlockHandoffBrokerAndEvidence() {
         List<BrowserEvidenceRecord> captured = new ArrayList<>();
         BrowserHandoffBroker broker = new BrowserHandoffBroker();
@@ -387,7 +400,7 @@ class BrowserToolTest {
         assertEquals(Map.of("op", "wait", "url", "/dashboard", "selector", ".spinner", "state", "hidden", "ms", 1200L),
             backend.commands.get(4));
 
-        assertTrue(backend.execute("s1", Map.of("op", "snapshot"), Duration.ofSeconds(1)).text().equals("ok"));
+        assertEquals("ok", backend.execute("s1", Map.of("op", "snapshot"), Duration.ofSeconds(1)).text());
         assertTrue(backend.controlActive);
         assertEquals("输入 e2", backend.controlStatus);
 
@@ -474,6 +487,7 @@ class BrowserToolTest {
         private boolean clearedOverlay;
         private boolean invalidatedRefs;
         private boolean controlActive;
+        private boolean lastResume;
         private String controlStatus = "";
 
         @Override
@@ -496,6 +510,7 @@ class BrowserToolTest {
         @Override
         public void setAgentControl(String sessionId, boolean active, String status, boolean resume) {
             controlActive = active;
+            lastResume = resume;
             controlStatus = status == null ? "" : status;
         }
 

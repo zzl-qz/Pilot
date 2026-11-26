@@ -231,15 +231,33 @@ class BrowserControlServiceTest {
     }
 
     @Test
-    void takeoverFlagIsResetWhenTheLastSubscriberLeaves() {
+    void takeoverFlagIsPreservedWhenTheLastSubscriberLeaves() {
         SseEmitter emitter = mock(SseEmitter.class);
         service.subscribe("s1", emitter);
         service.setPaused("s1", true);
+        when(runtime.interactionsPaused("s1")).thenReturn(true);
 
         service.unsubscribe("s1", emitter);
 
-        // 没人看着页面就不算接管中：订阅清空即复位，下个订阅者拿到干净状态
-        verify(runtime, timeout(2000)).setInteractionsPaused("s1", false);
+        // 用户接管属于浏览器状态，短暂 SSE 断开不应撤销。
+        verify(runtime, never()).setInteractionsPaused("s1", false);
+    }
+
+    @Test
+    void disconnectWhileHandoffPendingKeepsUserTakeoverPaused() {
+        BrowserHandoffBroker broker = new BrowserHandoffBroker();
+        service.setHandoffs(broker);
+        SseEmitter emitter = mock(SseEmitter.class);
+        service.subscribe("s1", emitter);
+        when(runtime.parentSessionOf("s1::browser::b1")).thenReturn("s1");
+        broker.request(new BrowserHandoffBroker.PendingHandoff("h1", "s1", "s1::browser::b1", "b1", "auth", "请登录",
+            "https://accounts.example/login", Instant.now(), null), Duration.ofMinutes(1));
+        clearInvocations(runtime);
+
+        service.unsubscribe("s1", emitter);
+
+        verify(runtime, never()).setInteractionsPaused("s1", false);
+        verify(runtime, never()).setInteractionsPaused("s1::browser::b1", false);
     }
 
     @Test
