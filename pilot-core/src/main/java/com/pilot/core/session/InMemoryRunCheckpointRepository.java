@@ -21,6 +21,16 @@ public final class InMemoryRunCheckpointRepository implements RunCheckpointRepos
     }
 
     @Override
+    public synchronized boolean claimStart(RunCheckpoint checkpoint, Instant now, Duration lease) {
+        Instant at = now == null ? Instant.now() : now;
+        checkpoints.putIfAbsent(checkpoint.runId(),
+            new RunCheckpoint(checkpoint.runId(), checkpoint.sessionId(), checkpoint.phase(), checkpoint.step(),
+                checkpoint.lastToolCallId(), checkpoint.lastSuccessfulStep(), checkpoint.nextAction(),
+                checkpoint.workspace(), checkpoint.status(), null, null, checkpoint.heartbeatAt(), at));
+        return claimLease(checkpoint.runId(), checkpoint.owner(), at, lease);
+    }
+
+    @Override
     public synchronized Optional<RunCheckpoint> find(String runId) {
         return Optional.ofNullable(checkpoints.get(runId));
     }
@@ -40,10 +50,10 @@ public final class InMemoryRunCheckpointRepository implements RunCheckpointRepos
     @Override
     public synchronized boolean claimLease(String runId, String owner, Instant now, Duration lease) {
         RunCheckpoint checkpoint = checkpoints.get(runId);
+        Instant at = now == null ? Instant.now() : now;
         if (checkpoint == null) {
             return false;
         }
-        Instant at = now == null ? Instant.now() : now;
         if (checkpoint.leasedByOther(owner, at)) {
             return false;
         }
@@ -66,9 +76,9 @@ public final class InMemoryRunCheckpointRepository implements RunCheckpointRepos
     }
 
     @Override
-    public synchronized void releaseLease(String runId, String status, Instant now) {
+    public synchronized void releaseLease(String runId, String owner, String status, Instant now) {
         RunCheckpoint checkpoint = checkpoints.get(runId);
-        if (checkpoint == null) {
+        if (checkpoint == null || !owner.equals(checkpoint.owner())) {
             return;
         }
         checkpoints.put(runId,

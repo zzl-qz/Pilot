@@ -55,6 +55,32 @@ public final class JdbcRunCheckpointRepository implements RunCheckpointRepositor
     }
 
     @Override
+    public boolean claimStart(RunCheckpoint checkpoint, Instant now, Duration lease) {
+        Instant at = now == null ? Instant.now() : now;
+        return store.transaction(() -> {
+            store.update("""
+                INSERT OR IGNORE INTO run_checkpoints (run_id, session_id, phase, step, last_tool_call_id,
+                    last_successful_step, next_action, workspace, status, owner, lease_expires_at,
+                    heartbeat_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
+                """, statement -> {
+                statement.setString(1, checkpoint.runId());
+                statement.setString(2, checkpoint.sessionId());
+                statement.setString(3, checkpoint.phase());
+                statement.setInt(4, checkpoint.step());
+                statement.setString(5, checkpoint.lastToolCallId());
+                statement.setString(6, checkpoint.lastSuccessfulStep());
+                statement.setString(7, checkpoint.nextAction());
+                statement.setString(8, checkpoint.workspace());
+                statement.setString(9, checkpoint.status());
+                statement.setString(10, text(checkpoint.heartbeatAt()));
+                statement.setString(11, text(checkpoint.updatedAt()));
+            }, "创建运行检查点起点失败: " + checkpoint.runId());
+            return claimLease(checkpoint.runId(), checkpoint.owner(), at, lease);
+        });
+    }
+
+    @Override
     public Optional<RunCheckpoint> find(String runId) {
         return store.queryOne("SELECT * FROM run_checkpoints WHERE run_id = ?",
             statement -> statement.setString(1, runId), JdbcRunCheckpointRepository::map, "读取运行检查点失败: " + runId);
@@ -119,15 +145,16 @@ public final class JdbcRunCheckpointRepository implements RunCheckpointRepositor
     }
 
     @Override
-    public void releaseLease(String runId, String status, Instant now) {
+    public void releaseLease(String runId, String owner, String status, Instant now) {
         Instant at = now == null ? Instant.now() : now;
         store.update("""
             UPDATE run_checkpoints SET status = ?, owner = NULL, lease_expires_at = NULL,
-                   updated_at = ? WHERE run_id = ?
+                   updated_at = ? WHERE run_id = ? AND owner = ?
             """, statement -> {
             statement.setString(1, status == null ? RunCheckpoint.STATUS_COMPLETED : status);
             statement.setString(2, at.toString());
             statement.setString(3, runId);
+            statement.setString(4, owner);
         }, "释放运行租约失败: " + runId);
     }
 

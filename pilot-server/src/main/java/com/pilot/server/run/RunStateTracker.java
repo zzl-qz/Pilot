@@ -92,19 +92,28 @@ public class RunStateTracker {
         return instanceId;
     }
 
-    /** 新运行开始：写入起点并抢占租约。 */
+    /** 新运行开始：先原子写入起点并抢占租约，绝不覆盖其他实例持有的活跃租约。 */
     public void begin(String sessionId, String runId, String workspace) {
         Instant now = Instant.now();
+        boolean claimed = false;
         try {
-            repository.save(RunCheckpoint.start(runId, sessionId, workspace, instanceId, now, DEFAULT_LEASE));
-            if (!repository.claimLease(runId, instanceId, now, DEFAULT_LEASE)) {
+            RunCheckpoint initial = RunCheckpoint.start(runId, sessionId, workspace, instanceId, now, DEFAULT_LEASE);
+            if (!repository.claimStart(initial, now, DEFAULT_LEASE)) {
                 lostLeases.put(runId, "运行租约已由其他实例持有");
-                log.warn("运行 {} 的租约被其他实例持有，本实例不会把它当成独占运行", runId);
-                return;
+                throw new IllegalStateException("运行租约已被其他实例占用：" + runId);
             }
+            claimed = true;
             activeRuns.put(runId, sessionId);
         } catch (RuntimeException e) {
+            if (claimed) {
+                try {
+                    repository.releaseLease(runId, instanceId, RunCheckpoint.STATUS_FAILED, Instant.now());
+                } catch (RuntimeException releaseFailure) {
+                    e.addSuppressed(releaseFailure);
+                }
+            }
             persistenceFailure(runId, "写入运行检查点失败", e);
+            throw e;
         }
     }
 
@@ -162,7 +171,7 @@ public class RunStateTracker {
     public void finish(String sessionId, String runId, String status) {
         activeRuns.remove(runId);
         try {
-            repository.releaseLease(runId, terminalStatus(status), Instant.now());
+            repository.releaseLease(runId, instanceId, terminalStatus(status), Instant.now());
         } catch (RuntimeException e) {
             persistenceFailure(runId, "释放运行租约失败", e);
         }
@@ -226,8 +235,16 @@ public class RunStateTracker {
             String leaseState;
             try {
                 boolean leasedByOther = checkpoint.leasedByOther(instanceId, now);
-                repository.releaseLease(checkpoint.runId(), RunCheckpoint.STATUS_INTERRUPTED, now);
-                leaseState = leasedByOther ? "上一个租约属于其他实例（" + checkpoint.owner() + "），已收敛为中断" : "已释放本机遗留租约";
+                if (leasedByOther && checkpoint.leaseActive(now)) {
+                    continue;
+                }
+                if (!instanceId.equals(checkpoint.owner())
+                    && !repository.claimLease(checkpoint.runId(), instanceId, now, DEFAULT_LEASE)) {
+                    continue;
+                }
+                repository.releaseLease(checkpoint.runId(), instanceId, RunCheckpoint.STATUS_INTERRUPTED, now);
+                leaseState = checkpoint.owner() != null && !instanceId.equals(checkpoint.owner())
+                    ? "上一个租约属于其他实例（" + checkpoint.owner() + "），已接管过期租约并收敛为中断" : "已释放本机遗留租约";
             } catch (RuntimeException e) {
                 leaseState = "租约收敛失败：" + e.getMessage();
                 persistenceFailure(checkpoint.runId(), "收敛运行租约失败", e);

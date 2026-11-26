@@ -413,8 +413,13 @@ public class AgentRunService implements RunStarter {
             handle.paused = true;
             handle.accepting = false;
             handle.cancelled.set(true);
+            // 暂停等待当前工具在安全边界自然结束以保留结果（不强行 interrupt 工作线程），
+            // 但立即解除阻塞在审批、提问和浏览器人工接管上的等待。
             handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
             handle.pendingQuestions.forEach(this::cancelQuestion);
+            if (browserHandoffs != null) {
+                browserHandoffs.cancelBySession(handle.sessionId, "运行已暂停");
+            }
             return true;
         }
     }
@@ -728,10 +733,12 @@ public class AgentRunService implements RunStarter {
         synchronized (inbox(sessionId)) {
             RunHandle handle = new RunHandle(sessionId, skill, planMode);
             runs.put(runId, handle);
+            boolean leaseClaimed = false;
             try {
                 registry.register(runId, sessionId, sessionWorkspace(sessionId));
                 if (runStates != null) {
                     runStates.begin(sessionId, runId, sessionWorkspace(sessionId).toString());
+                    leaseClaimed = true;
                 }
                 snapshots.saveConversation(runId, conversations.load(sessionId), plans.load(sessionId));
                 taskControls.snapshot(sessionId, runId);
@@ -784,6 +791,9 @@ public class AgentRunService implements RunStarter {
                 handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
                 handle.pendingQuestions.forEach(this::cancelQuestion);
                 registry.unregister(runId);
+                if (leaseClaimed) {
+                    runStates.finish(sessionId, runId, TaskControlStatus.FAILED.name());
+                }
                 throw e;
             }
         }
@@ -1117,8 +1127,19 @@ public class AgentRunService implements RunStarter {
         String reason = budgetLimited ? "预算分段继续第 " + attempt + "/" + cap + " 段"
             : goalOpen ? "目标尚未核验，同一会话继续第 " + attempt + " 轮" : "步数触顶，按未完成计划继续";
         publish(sessionId, runId, new RunContinued(attempt, cap, reason));
-        launch(sessionId, runId, null, List.of(), List.of(), true, null, false, null, handle.planMode);
-        return true;
+        try {
+            launch(sessionId, runId, null, List.of(), List.of(), true, null, false, null, handle.planMode);
+            return true;
+        } catch (RuntimeException e) {
+            taskControls.status(sessionId, TaskControlStatus.FAILED);
+            String detail = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            publish(sessionId, runId, new RunFailed(RunFailureCode.INTERNAL_ERROR, "自动续跑启动失败：" + detail, true));
+            registry.unregister(runId);
+            if (runStates != null) {
+                runStates.finish(sessionId, runId, TaskControlStatus.FAILED.name());
+            }
+            return false;
+        }
     }
 
     /** 断网或连接中断导致的可重试 MODEL_ERROR：短暂退避后自动基于已落盘记忆续跑，避免长任务因临时断网中止。 */
@@ -1138,11 +1159,19 @@ public class AgentRunService implements RunStarter {
             return false;
         }
         String runId = "run_" + java.util.UUID.randomUUID();
-        publish(sessionId, runId, new RunStarted("（继续上一次未完成的任务）"));
-        publish(sessionId, runId, new RunContinued(attempt, MAX_NETWORK_AUTO_RECONNECT,
-            "检测到网络断开或服务端波动导致运行中断，进度已保存，正在自动重连续跑第 " + attempt + "/" + MAX_NETWORK_AUTO_RECONNECT + " 次"));
-        launch(sessionId, runId, null, List.of(), List.of(), true, null, false, null, handle.planMode);
-        return true;
+        try {
+            publish(sessionId, runId, new RunStarted("（继续上一次未完成的任务）"));
+            publish(sessionId, runId, new RunContinued(attempt, MAX_NETWORK_AUTO_RECONNECT,
+                "检测到网络断开或服务端波动导致运行中断，进度已保存，正在自动重连续跑第 " + attempt + "/" + MAX_NETWORK_AUTO_RECONNECT + " 次"));
+            launch(sessionId, runId, null, List.of(), List.of(), true, null, false, null, handle.planMode);
+            return true;
+        } catch (RuntimeException e) {
+            networkReconnectAttempts.remove(sessionId);
+            taskControls.status(sessionId, TaskControlStatus.FAILED);
+            String detail = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            publish(sessionId, runId, new RunFailed(RunFailureCode.INTERNAL_ERROR, "网络自动续跑启动失败：" + detail, true));
+            return false;
+        }
     }
 
     private boolean waitReconnectCooldown(RunHandle handle) {
@@ -1375,29 +1404,29 @@ public class AgentRunService implements RunStarter {
         JsonlTraceRecorder traceRecorder =
             new JsonlTraceRecorder(dataDir.file("traces", sessionId + ".jsonl"), objectMapper);
         ApprovalBroker sessionApprovals = ApprovalBroker.forSession(approvals, sessionId);
-        AgentLoop loop =
-            new AgentLoop(executionClient, tools, sessionGate, sessionApprovals, config, handle.cancelled::get,
-                () -> null, traceRecorder, delta -> sessions.preview(sessionId, runId, new AssistantPreview(delta)))
-                .withReadOnlySession(
-                    prepared.planMode() || review.active() || properties.permissionMode() == PermissionMode.READ_ONLY)
-                .withPendingMessages(() -> pollSteering(sessionId))
-                .withLiveReasoning(
-                    delta -> sessions.preview(sessionId, runId, new com.pilot.core.event.AssistantReasoning(delta)))
-                .withTaskContext(runContext.taskContextSource())
-                .withCompletionClaim(() -> claimCompletion(sessionId, handle))
-                .withRestoredPaths(snapshots::restoredPaths).withQualityWorkspace(resolvedWorkspace)
-                .withQualityTexts(snapshots::originalText, path -> WorkspaceTexts.read(resolvedWorkspace, path))
-                .withLintGate(properties.lintGate())
-                .withScopedRules(paths -> com.pilot.server.agent.ProjectRuleLoader.scoped(resolvedWorkspace, paths,
-                    com.pilot.core.prompt.PromptLibrary.standard()))
-                .withIndependentCodeReviewer(review.active() ? null
-                    : new IndependentCodeReviewer(measuredMain, resolvedWorkspace, handle.cancelled::get))
-                // 编辑后自动格式化/lint 之类交给 .pilot/settings.json，不再占用模型注意力
-                .withHooks(com.pilot.core.hook.Hooks.load(toolFactory.resolve(workspace)))
-                .withHookExecution(toolFactory.executionSelection())
-                // 重启接管后重复的写文件调用不重复落盘
-                .withToolJournal(runId, journals == null ? com.pilot.core.tool.ToolCallJournal.none()
-                    : journals.forWorkspace(sessionId, toolFactory.resolve(workspace)));
+        AgentLoop loop = new AgentLoop(executionClient, tools, sessionGate, sessionApprovals, config,
+            () -> handle.cancelled.get() || runStates != null && runStates.leaseLost(runId), () -> null, traceRecorder,
+            delta -> sessions.preview(sessionId, runId, new AssistantPreview(delta)))
+            .withReadOnlySession(
+                prepared.planMode() || review.active() || properties.permissionMode() == PermissionMode.READ_ONLY)
+            .withPendingMessages(() -> pollSteering(sessionId))
+            .withLiveReasoning(
+                delta -> sessions.preview(sessionId, runId, new com.pilot.core.event.AssistantReasoning(delta)))
+            .withTaskContext(runContext.taskContextSource())
+            .withCompletionClaim(() -> claimCompletion(sessionId, handle)).withRestoredPaths(snapshots::restoredPaths)
+            .withQualityWorkspace(resolvedWorkspace)
+            .withQualityTexts(snapshots::originalText, path -> WorkspaceTexts.read(resolvedWorkspace, path))
+            .withLintGate(properties.lintGate())
+            .withScopedRules(paths -> com.pilot.server.agent.ProjectRuleLoader.scoped(resolvedWorkspace, paths,
+                com.pilot.core.prompt.PromptLibrary.standard()))
+            .withIndependentCodeReviewer(review.active() ? null
+                : new IndependentCodeReviewer(measuredMain, resolvedWorkspace, handle.cancelled::get))
+            // 编辑后自动格式化/lint 之类交给 .pilot/settings.json，不再占用模型注意力
+            .withHooks(com.pilot.core.hook.Hooks.load(toolFactory.resolve(workspace)))
+            .withHookExecution(toolFactory.executionSelection())
+            // 重启接管后重复的写文件调用不重复落盘
+            .withToolJournal(runId, journals == null ? com.pilot.core.tool.ToolCallJournal.none()
+                : journals.forWorkspace(sessionId, toolFactory.resolve(workspace)));
 
         com.pilot.core.tool.ReadGuard readGuard = runContext.readGuard();
         if (readGuard != null) {

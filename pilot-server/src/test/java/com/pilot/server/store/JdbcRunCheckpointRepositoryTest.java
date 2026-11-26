@@ -116,7 +116,7 @@ class JdbcRunCheckpointRepositoryTest {
         Instant now = Instant.now();
         repository.save(checkpoint("run_1", "ses_1", "a", now, Duration.ofSeconds(30)));
 
-        repository.releaseLease("run_1", RunCheckpoint.STATUS_INTERRUPTED, now);
+        repository.releaseLease("run_1", "a", RunCheckpoint.STATUS_INTERRUPTED, now);
 
         RunCheckpoint released = repository.find("run_1").orElseThrow();
         assertEquals(RunCheckpoint.STATUS_INTERRUPTED, released.status());
@@ -129,9 +129,9 @@ class JdbcRunCheckpointRepositoryTest {
         JdbcRunCheckpointRepository repository = repository();
         Instant now = Instant.now();
         repository.save(checkpoint("run_ok", "ses_1", "a", now, Duration.ofSeconds(30)));
-        repository.releaseLease("run_ok", RunCheckpoint.STATUS_COMPLETED, now);
+        repository.releaseLease("run_ok", "a", RunCheckpoint.STATUS_COMPLETED, now);
         repository.save(checkpoint("run_bad", "ses_2", "a", now, Duration.ofSeconds(30)));
-        repository.releaseLease("run_bad", RunCheckpoint.STATUS_INTERRUPTED, now);
+        repository.releaseLease("run_bad", "a", RunCheckpoint.STATUS_INTERRUPTED, now);
 
         List<RunCheckpoint> resumable = repository.resumable();
 
@@ -148,5 +148,22 @@ class JdbcRunCheckpointRepositoryTest {
 
         assertEquals(1, repository.deleteBySession("ses_1"));
         assertTrue(repository.find("run_1").isEmpty());
+    }
+
+    @Test
+    void claimStartNeverOverwritesActiveLeaseOfAnotherInstance() {
+        JdbcRunCheckpointRepository repository = repository();
+        Instant now = Instant.now();
+        RunCheckpoint first =
+            RunCheckpoint.start("run_mutex", "ses_1", "/work", "instance-a", now, Duration.ofSeconds(60));
+        RunCheckpoint second = RunCheckpoint.start("run_mutex", "ses_1", "/work", "instance-b", now.plusSeconds(1),
+            Duration.ofSeconds(60));
+
+        assertTrue(repository.claimStart(first, now, Duration.ofSeconds(60)));
+        assertFalse(repository.claimStart(second, now.plusSeconds(1), Duration.ofSeconds(60)),
+            "其他实例持有有效租约时 claimStart 必须拒绝且不得覆写 owner");
+        assertEquals("instance-a", repository.find("run_mutex").orElseThrow().owner());
+        assertTrue(repository.claimStart(second, now.plusSeconds(61), Duration.ofSeconds(60)), "租约过期后另一个实例应能原子接管");
+        assertEquals("instance-b", repository.find("run_mutex").orElseThrow().owner());
     }
 }

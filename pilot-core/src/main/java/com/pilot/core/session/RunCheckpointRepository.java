@@ -16,6 +16,22 @@ public interface RunCheckpointRepository {
     /** 覆盖保存；由租约持有者调用。 */
     void save(RunCheckpoint checkpoint);
 
+    /**
+     * 原子创建并抢占起点租约：若该 runId 尚不存在则写入起点并由 owner 持有租约；
+     * 若已存在且由其他实例持有未过期租约，则不得覆盖原有记录并直接返回 false。
+     */
+    default boolean claimStart(RunCheckpoint checkpoint, Instant now, Duration lease) {
+        Instant at = now == null ? Instant.now() : now;
+        Optional<RunCheckpoint> existing = find(checkpoint.runId());
+        if (existing.isPresent() && existing.get().leasedByOther(checkpoint.owner(), at)) {
+            return false;
+        }
+        if (existing.isEmpty()) {
+            save(checkpoint);
+        }
+        return claimLease(checkpoint.runId(), checkpoint.owner(), at, lease);
+    }
+
     Optional<RunCheckpoint> find(String runId);
 
     Optional<RunCheckpoint> activeForSession(String sessionId);
@@ -33,8 +49,8 @@ public interface RunCheckpointRepository {
     /** 续租。时长默认值与抢占相同，返回 false 表示租约已丢失，调用方应停止推进。 */
     boolean renewLease(String runId, String owner, Instant now, Duration lease);
 
-    /** 主动释放租约（正常结束时），保留检查点用于诊断。 */
-    void releaseLease(String runId, String status, Instant now);
+    /** 主动释放本实例持有的租约，保留检查点用于诊断。 */
+    void releaseLease(String runId, String owner, String status, Instant now);
 
     int deleteBySession(String sessionId);
 }
