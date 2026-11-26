@@ -669,22 +669,43 @@ public final class CommandTaskManager implements AutoCloseable {
 
     private void persist(Entry entry, Task task) {
         Path target = metadata(task);
-        try {
-            Files.createDirectories(target.getParent());
-            Path temp = Files.createTempFile(target.getParent(), "command-", ".tmp");
+        IOException failure = null;
+        for (int attempt = 0; attempt < 4; attempt++) {
+            Path temp = null;
             try {
+                Files.createDirectories(target.getParent());
+                temp = Files.createTempFile(target.getParent(), "command-", ".tmp");
                 Files.writeString(temp, mapper.writeValueAsString(task));
                 try {
                     Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-                } catch (AtomicMoveNotSupportedException e) {
+                } catch (AtomicMoveNotSupportedException unsupported) {
                     Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
                 }
+                return;
+            } catch (java.nio.file.FileSystemException e) {
+                failure = e;
+                if (attempt < 3) {
+                    try {
+                        Thread.sleep(25L * (attempt + 1));
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            } catch (IOException e) {
+                failure = e;
+                break;
             } finally {
-                Files.deleteIfExists(temp);
+                if (temp != null) {
+                    try {
+                        Files.deleteIfExists(temp);
+                    } catch (IOException cleanupFailure) {
+                        log.debug("无法清理命令状态临时文件 {}：{}", temp, cleanupFailure.toString());
+                    }
+                }
             }
-        } catch (IOException e) {
-            throw new UncheckedIOException("保存命令状态失败", e);
         }
+        log.warn("命令状态持久化失败，继续保持进程生命周期：{}（{}）", task.taskId(), failure == null ? "interrupted" : failure.toString());
     }
 
     private Entry owned(String session, String id) {

@@ -251,6 +251,30 @@ class CommandTaskManagerTest {
     }
 
     @Test
+    void persistsTaskStateAndSurvivesMetadataPersistenceFailure() throws Exception {
+        Path release = workspace.resolve("release-persist");
+        try (CommandTaskManager manager = manager()) {
+            CommandTaskManager.Task task = manager.start("session_a", "done", process("done"), true, 10_000);
+            assertEquals("COMPLETED", awaitDone(manager, "session_a", task.taskId()).status());
+            assertTrue(Files.isRegularFile(storage.resolve("session_a").resolve(task.taskId() + ".json")));
+
+            // 运行中将元数据路径替换为非空目录，模拟 Windows/杀软锁文件导致的持久化 FileSystemException，
+            // 进程生命周期应正常完成而不是抛异常中止。
+            CommandTaskManager.Task degraded =
+                manager.start("session_a", "live persist", process("live", release.toString()), true, 10_000);
+            Path metadata = storage.resolve("session_a").resolve(degraded.taskId() + ".json");
+            waitUntil(() -> Files.isRegularFile(metadata));
+            Files.delete(metadata);
+            Files.createDirectory(metadata);
+            Files.writeString(metadata.resolve("lock"), "busy");
+            Files.createFile(release);
+            CommandTaskManager.Task done = awaitDone(manager, "session_a", degraded.taskId());
+            assertEquals("COMPLETED", done.status());
+            assertEquals(0, done.exitCode());
+        }
+    }
+
+    @Test
     void limitsConcurrencyAndRetainedHistoryWithoutDeletingLiveTasks() throws Exception {
         try (CommandTaskManager manager = new CommandTaskManager(storage, JsonMapper.builder().build(), 1024, 1, 2)) {
             CommandTaskManager.Task first = manager.start("session_a", "hold", process("hold"), true, 10_000);

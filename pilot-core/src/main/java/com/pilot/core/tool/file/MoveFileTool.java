@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.message.ToolNames;
@@ -69,12 +70,9 @@ public final class MoveFileTool extends PromptedTool implements WritesFiles {
         Path dest;
         try {
             source = paths.resolveWritableLeaf(rawSource);
-            dest = paths.resolveWritable(rawDest);
+            dest = paths.resolveWritableLeaf(rawDest);
         } catch (RuntimeException e) {
             return ToolResult.text("ERROR: " + e.getMessage());
-        }
-        if (source.equals(dest)) {
-            return ToolResult.text("ERROR: 源路径与目标路径相同: " + rawSource);
         }
         if (!Files.exists(source, LinkOption.NOFOLLOW_LINKS)) {
             return ToolResult.text("ERROR: 源文件不存在: " + rawSource);
@@ -82,12 +80,26 @@ public final class MoveFileTool extends PromptedTool implements WritesFiles {
         if (Files.isSymbolicLink(source) || !Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)) {
             return ToolResult.text("ERROR: 仅支持移动普通文件，不支持目录或符号链接: " + rawSource);
         }
+        if (source.toString().equals(dest.toString())) {
+            return ToolResult.text("ERROR: 源路径与目标路径相同: " + rawSource);
+        }
+        boolean caseOnlyRename = false;
         if (Files.exists(dest, LinkOption.NOFOLLOW_LINKS)) {
-            if (!overwrite) {
-                return ToolResult.text("ERROR: 目标文件已存在（如需覆盖请显式传 overwrite=true）: " + rawDest);
+            try {
+                caseOnlyRename = !Files.isSymbolicLink(dest) && Objects.equals(source.getParent(), dest.getParent())
+                    && source.getFileName() != null && dest.getFileName() != null
+                    && source.getFileName().toString().equalsIgnoreCase(dest.getFileName().toString())
+                    && Files.isSameFile(source, dest);
+            } catch (IOException failure) {
+                return ToolResult.text("ERROR: 移动失败: " + failure.getMessage());
             }
-            if (Files.isSymbolicLink(dest) || !Files.isRegularFile(dest, LinkOption.NOFOLLOW_LINKS)) {
-                return ToolResult.text("ERROR: 目标不是普通文件，无法覆盖: " + rawDest);
+            if (!caseOnlyRename) {
+                if (!overwrite) {
+                    return ToolResult.text("ERROR: 目标文件已存在（如需覆盖请显式传 overwrite=true）: " + rawDest);
+                }
+                if (Files.isSymbolicLink(dest) || !Files.isRegularFile(dest, LinkOption.NOFOLLOW_LINKS)) {
+                    return ToolResult.text("ERROR: 目标不是普通文件，无法覆盖: " + rawDest);
+                }
             }
         }
         if (dest.getParent() == null) {
@@ -99,7 +111,20 @@ public final class MoveFileTool extends PromptedTool implements WritesFiles {
             Files.createDirectories(dest.getParent());
             snapshots.beforeWrite(source);
             snapshots.beforeWrite(dest);
-            if (overwrite) {
+            if (caseOnlyRename) {
+                Path temporary = source.resolveSibling(".pilot-move-" + UUID.randomUUID());
+                Files.move(source, temporary);
+                try {
+                    Files.move(temporary, dest);
+                } catch (IOException failure) {
+                    try {
+                        Files.move(temporary, source);
+                    } catch (IOException rollbackFailure) {
+                        failure.addSuppressed(rollbackFailure);
+                    }
+                    throw failure;
+                }
+            } else if (overwrite) {
                 Files.move(source, dest, StandardCopyOption.REPLACE_EXISTING);
             } else {
                 Files.move(source, dest);

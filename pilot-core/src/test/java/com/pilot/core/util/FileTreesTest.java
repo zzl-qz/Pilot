@@ -58,6 +58,27 @@ class FileTreesTest {
     }
 
     @Test
+    void doesNotAlterPermissionsOfExternalReadOnlySymlinkTarget() throws IOException {
+        Path root = Files.createDirectory(directory.resolve("with-link"));
+        Path external = Files.writeString(directory.resolve("readonly.txt"), "keep");
+        Assumptions.assumeTrue(Files.getFileAttributeView(external, PosixFileAttributeView.class) != null);
+        var original = Files.getPosixFilePermissions(external);
+        try {
+            Files.setPosixFilePermissions(external, PosixFilePermissions.fromString("r--r--r--"));
+            try {
+                Files.createSymbolicLink(root.resolve("link.txt"), external);
+            } catch (IOException | UnsupportedOperationException e) {
+                Assumptions.abort("此系统或当前用户不能创建符号链接");
+            }
+            FileTrees.delete(root);
+            assertFalse(Files.exists(root));
+            assertEquals(PosixFilePermissions.fromString("r--r--r--"), Files.getPosixFilePermissions(external));
+        } finally {
+            Files.setPosixFilePermissions(external, original);
+        }
+    }
+
+    @Test
     void reportsPartialCleanupAndContinuesWithOtherEntries() throws IOException {
         Path root = Files.createDirectory(directory.resolve("cache"));
         Path blocked = Files.createDirectory(root.resolve("blocked"));

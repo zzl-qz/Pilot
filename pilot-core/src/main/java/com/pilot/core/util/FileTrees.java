@@ -3,10 +3,12 @@ package com.pilot.core.util;
 import java.io.IOException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.DosFileAttributeView;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Objects;
@@ -105,10 +107,30 @@ public final class FileTrees {
 
         private FileVisitResult process(Path path) throws IOException {
             try {
+                makeWritable(path);
                 action.accept(path);
                 return FileVisitResult.CONTINUE;
             } catch (IOException error) {
                 return handleFailure(path, error);
+            }
+        }
+
+        private static void makeWritable(Path path) {
+            if (Files.isSymbolicLink(path)) {
+                return;
+            }
+            try {
+                DosFileAttributeView dos =
+                    Files.getFileAttributeView(path, DosFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+                if (dos != null) {
+                    dos.setReadOnly(false);
+                } else if (HostOs.isWindows()) {
+                    path.toFile().setWritable(true);
+                }
+            } catch (IOException | UnsupportedOperationException ignored) {
+                if (HostOs.isWindows()) {
+                    path.toFile().setWritable(true);
+                }
             }
         }
 
