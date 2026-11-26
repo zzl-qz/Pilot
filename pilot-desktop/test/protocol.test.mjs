@@ -5,9 +5,12 @@ import {
   agentMayOperate,
   agentMayTouchPage,
   formatPageLogs,
+  isRegularFileStat,
+  isWindowsUncPath,
   isDangerousDownloadExtension,
   markerPath,
   partitionName,
+  parseClipboardFilePaths,
   sanitizeDownloadFilename,
   snapBounds,
   userPageUrl
@@ -67,9 +70,31 @@ test('下载文件名清理路径穿越并识别危险扩展名', () => {
   assert.equal(sanitizeDownloadFilename('..'), 'download.bin');
   assert.equal(isDangerousDownloadExtension('setup.EXE'), true);
   assert.equal(isDangerousDownloadExtension('payload.exe.'), true);
+  assert.equal(isDangerousDownloadExtension('payload.exe.  '), true);
   assert.equal(isDangerousDownloadExtension('app.desktop'), true);
   assert.equal(isDangerousDownloadExtension('script.ps1'), true);
   assert.equal(isDangerousDownloadExtension('report.pdf'), false);
+});
+
+test('剪贴板文件格式跨平台解析多路径并拒绝 UNC 与非普通文件', () => {
+  const plist = Buffer.from('<array><string>/tmp/one.txt</string><string>/tmp/a&amp;b&apos;s.txt</string></array>');
+  assert.deepEqual(parseClipboardFilePaths('NSFilenamesPboardType', plist, 'darwin'), ['/tmp/one.txt', "/tmp/a&b's.txt"]);
+  const dropHeader = Buffer.alloc(20);
+  dropHeader.writeUInt32LE(20, 0);
+  dropHeader.writeUInt32LE(1, 16);
+  const dropBody = Buffer.from('C:\\one.txt\0D:\\two.txt\0\0', 'utf16le');
+  assert.deepEqual(parseClipboardFilePaths('CF_HDROP', Buffer.concat([dropHeader, dropBody]), 'win32'), ['C:\\one.txt', 'D:\\two.txt']);
+  const wide = Buffer.from('C:\\one.txt\0D:\\two.txt\0\0', 'utf16le');
+  assert.deepEqual(parseClipboardFilePaths('FileNameW', wide, 'win32'), ['C:\\one.txt', 'D:\\two.txt']);
+  const ansi = Buffer.from('C:\\one.txt\0D:\\two.txt\0', 'latin1');
+  assert.deepEqual(parseClipboardFilePaths('FileName', ansi, 'win32'), ['C:\\one.txt', 'D:\\two.txt']);
+  assert.deepEqual(parseClipboardFilePaths('text/uri-list', 'file:///tmp/a%20b.txt\r\n# comment', 'linux'), ['/tmp/a b.txt']);
+  assert.equal(isWindowsUncPath('\\\\server\\share\\file.txt'), true);
+  assert.equal(isWindowsUncPath('//server/share/file.txt'), true);
+  assert.equal(isWindowsUncPath('C:\\file.txt'), false);
+  assert.equal(isRegularFileStat({ isFile: () => true, isSymbolicLink: () => false }), true);
+  assert.equal(isRegularFileStat({ isFile: () => false, isSymbolicLink: () => false }), false);
+  assert.equal(isRegularFileStat({ isFile: () => true, isSymbolicLink: () => true }), false);
 });
 
 test('桌面日志自动脱敏认证令牌和敏感查询参数', () => {

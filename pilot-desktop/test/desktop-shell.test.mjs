@@ -5,7 +5,8 @@ import {
   buildTrayMenuTemplate,
   createOfflineReconnector,
   createPowerAwakeController,
-  normalizeWindowBounds
+  normalizeWindowBounds,
+  shouldHideOnClose
 } from '../desktop-shell.mjs';
 
 test('normalizeWindowBounds clamps bounds onto available display workArea', () => {
@@ -33,6 +34,12 @@ test('normalizeWindowBounds clamps bounds onto available display workArea', () =
   const onSecond = normalizeWindowBounds({ x: 1500, y: 40, width: 1100, height: 760 }, multi);
   assert.equal(onSecond.x, 1500);
   assert.equal(onSecond.y, 40);
+});
+
+test('关闭窗口仅在已创建系统托盘且启用时隐藏', () => {
+  assert.equal(shouldHideOnClose({ minimizeToTray: true, trayAvailable: true }), true);
+  assert.equal(shouldHideOnClose({ minimizeToTray: true, trayAvailable: false }), false);
+  assert.equal(shouldHideOnClose({ minimizeToTray: false, trayAvailable: true }), false);
 });
 
 test('buildTrayMenuTemplate reflects runtime counts, pending shortcut, and prefs', () => {

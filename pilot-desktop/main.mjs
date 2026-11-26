@@ -4,19 +4,23 @@ import { installMicrophonePermissions } from './media-permission.mjs';
 import { configuredWorkbenchUrl, workbenchOrigin, workbenchIpc, installWorkbenchNavigation } from './workbench-security.mjs';
 import { app, BrowserWindow, WebContentsView, ipcMain, session, Menu, Tray, globalShortcut, powerSaveBlocker, nativeImage, systemPreferences, dialog, clipboard, Notification, screen } from 'electron';
 import { createDesktopAlertManager } from './desktop-alerts.mjs';
-import { buildTrayMenuTemplate, createOfflineReconnector, createPowerAwakeController, normalizeWindowBounds } from './desktop-shell.mjs';
+import { buildTrayMenuTemplate, createOfflineReconnector, createPowerAwakeController, normalizeWindowBounds, shouldHideOnClose } from './desktop-shell.mjs';
 import { startBrowserControl } from './browser-control.mjs';
 import { randomBytes, randomInt } from 'node:crypto';
-import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
-import { readFile, stat } from 'node:fs/promises';
+import net from 'node:net';
+import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, lstatSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hostname, homedir } from 'node:os';
 import {
   formatPageLogs,
+  isRegularFileStat,
+  isWindowsUncPath,
   isDangerousDownloadExtension,
   markerPath,
   partitionName,
+  parseClipboardFilePaths,
   sanitizeDownloadFilename,
   snapBounds,
   userPageUrl
@@ -30,6 +34,13 @@ const smoke = process.env.PILOT_DESKTOP_SMOKE === '1';
 const workbenchUrl = configuredWorkbenchUrl();
 const origin = workbenchOrigin(workbenchUrl);
 app.setName('Pilot');
+const singleInstanceLocked = smoke || process.env.PILOT_DISABLE_SINGLE_INSTANCE === '1' || app.requestSingleInstanceLock();
+if (!singleInstanceLocked) {
+  app.exit(0);
+  process.exit(0);
+}
+if (!smoke && process.env.PILOT_DISABLE_SINGLE_INSTANCE !== '1') app.on('second-instance', () => focusMainShell());
+if (process.env.PILOT_DISABLE_SINGLE_INSTANCE === '1') process.stderr.write('PILOT_DISABLE_SINGLE_INSTANCE is enabled; single-instance protection is disabled.\n');
 if (process.platform === 'win32') app.setAppUserModelId('com.pilot.desktop');
 process.on('uncaughtException', (error) => {
   process.stderr.write('uncaught: ' + (error && error.stack || error) + '\n');
@@ -63,7 +74,12 @@ function defaultEndpointFile() {
   return join(base, 'run', 'desktop-browser.json');
 }
 
-const cdpPort = Number(process.env.PILOT_DESKTOP_CDP_PORT) || (42000 + randomInt(20000));
+let cdpPort = Number(process.env.PILOT_DESKTOP_CDP_PORT) || (42000 + randomInt(20000));
+try {
+  cdpPort = await availableCdpPort(cdpPort);
+} catch {
+  /* 端口探测失败时回退原端口 */
+}
 app.commandLine.appendSwitch('remote-debugging-port', String(cdpPort));
 app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1');
 
@@ -82,6 +98,29 @@ const workbench = workbenchIpc(ipcMain, () => shell, workbenchUrl);
 
 function activeTab() {
   return tabs.get(activeId) || null;
+}
+
+function hideInactiveViews() {
+  for (const tab of tabs.values()) {
+    if (tab.detached || tab.view.webContents.isDestroyed()) continue;
+    tab.view.setVisible(tab.id === activeId);
+  }
+}
+
+function availableCdpPort(requested) {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once('error', error => {
+      if (error.code !== 'EADDRINUSE') return reject(error);
+      server.removeAllListeners('error');
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1');
+    });
+    server.listen(requested, '127.0.0.1', () => {
+      const port = server.address().port;
+      server.close(error => error ? reject(error) : resolve(port));
+    });
+  });
 }
 
 function historyOf(contents) {
@@ -186,6 +225,7 @@ function broadcast() {
 
 function place(tab) {
   if (!tab || tab.detached || tab.view.webContents.isDestroyed()) return;
+  hideInactiveViews();
   const bounds = tab.bounds || { x: 0, y: 0, width: 0, height: 0, visible: false };
   const show = tab.id === activeId && bounds.visible && shell && !shell.isDestroyed();
   if (show) {
@@ -514,8 +554,9 @@ function detachActive() {
   win.on('closed', () => {
     tab.detached = false;
     tab.window = null;
-    if (shell && !shell.isDestroyed() && !tab.view.webContents.isDestroyed()) {
+    if (tabs.get(tab.id) === tab && shell && !shell.isDestroyed() && !tab.view.webContents.isDestroyed()) {
       shell.contentView.addChildView(tab.view);
+      tab.attached = true;
       place(tab);
     }
     broadcast();
@@ -589,7 +630,12 @@ function writeEndpoint() {
 }
 
 function clearEndpoint() {
-  if (endpointFile) rmSync(endpointFile, { force: true });
+  if (!endpointFile) return;
+  try {
+    if (JSON.parse(readFileSync(endpointFile, 'utf8')).pid === process.pid) rmSync(endpointFile, { force: true });
+  } catch (error) {
+    if (error.code !== 'ENOENT') process.stderr.write(`endpoint cleanup skipped: ${error.message}\n`);
+  }
 }
 
 const tabActions = {
@@ -788,8 +834,8 @@ function clipboardPath(value) {
     try { return fileURLToPath(new URL(text)); } catch { return ''; }
   }
   if (process.platform === 'win32') {
-    // 盘符路径、UNC（\\server\share）与扩展长度前缀（\\?\）都要接受，否则网络盘文件会被当成普通文本
-    return /^[A-Za-z]:[\\/]/.test(text) || /^\\\\/.test(text) ? text : '';
+    if (isWindowsUncPath(text)) return '';
+    return /^[A-Za-z]:[\\/]/.test(text) ? text : '';
   }
   return text.startsWith('/') ? text : '';
 }
@@ -798,9 +844,9 @@ function clipboardFilePaths(limit) {
   // Windows 不区分大小写：同一个文件可能以不同大小写出现两次，去重但不能改写真实大小写
   const found = new Map();
   const key = path => (process.platform === 'win32' ? path.toLowerCase() : path);
-  const addLines = value => {
-    for (const line of String(value || '').split(/\r?\n/)) {
-      if (found.size > limit) return;
+  const addPaths = values => {
+    for (const line of values) {
+      if (found.size >= limit) return;
       const path = clipboardPath(line);
       if (path && !found.has(key(path))) found.set(key(path), path);
     }
@@ -809,18 +855,12 @@ function clipboardFilePaths(limit) {
   try { formats = clipboard.availableFormats() || []; } catch { /* 无系统剪贴板 */ }
   for (const format of formats) {
     try {
-      if (format === 'FileNameW') {
-        const text = clipboard.readBuffer(format).toString('utf16le');
-        for (const item of text.split('\0')) addLines(item);
-      } else if (format === 'FileName') {
-        addLines(clipboard.read(format));
-      } else if (/uri-list|file-url|gnome-copied-files/i.test(format)) {
-        addLines(clipboard.read(format));
-      }
+      const data = /FileNameW|CF_HDROP/i.test(format) ? clipboard.readBuffer(format) : clipboard.read(format);
+      addPaths(parseClipboardFilePaths(format, data, process.platform));
     } catch { /* 该格式不可读，继续看其他格式 */ }
   }
   if (!found.size) {
-    try { addLines(clipboard.readText()); } catch { /* 忽略 */ }
+    try { addPaths(clipboard.readText().split(/\r?\n/)); } catch { /* 忽略 */ }
   }
   return [...found.values()];
 }
@@ -840,8 +880,8 @@ async function readClipboardFiles(rawLimits) {
   for (const path of paths) {
     const name = basename(path) || '附件';
     let info;
-    try { info = await stat(path); } catch { return { ok: false, error: `无法读取「${name}」，文件可能已移动或没有权限。` }; }
-    if (!info.isFile()) {
+    try { info = lstatSync(path); } catch { return { ok: false, error: `无法读取「${name}」，文件可能已移动或没有权限。` }; }
+    if (!isRegularFileStat(info)) {
       return { ok: false, error: `「${name}」不是普通文件；文件夹请压缩后再拖入，或拖入其中的文件。` };
     }
     if (info.size <= 0) {
@@ -962,15 +1002,6 @@ function refreshTrayMenu() {
     }
   });
   tray.setContextMenu(Menu.buildFromTemplate(template));
-}
-
-if (!smoke && process.env.PILOT_DISABLE_SINGLE_INSTANCE !== '1') {
-  const locked = app.requestSingleInstanceLock();
-  if (!locked) {
-    app.quit();
-  } else {
-    app.on('second-instance', () => focusMainShell());
-  }
 }
 
 workbench.handle('pilot:alert-show', (_event, payload) => alerts ? alerts.show(payload) : { ok: false });
@@ -1144,6 +1175,7 @@ app.whenReady().then(async () => {
       refreshTrayMenu();
     } catch {
       tray = null;
+      if (runtimeStatus.minimizeToTray) runtimeStatus.minimizeToTray = false;
     }
   }
   shell.on('resize', scheduleSaveBounds);
@@ -1154,7 +1186,7 @@ app.whenReady().then(async () => {
   shell.on('hide', refreshTrayMenu);
   shell.on('close', (event) => {
     if (quitting || smoke) return;
-    if (runtimeStatus.minimizeToTray) {
+    if (shouldHideOnClose({ minimizeToTray: runtimeStatus.minimizeToTray, trayAvailable: Boolean(tray) })) {
       event.preventDefault();
       shell.hide();
       refreshTrayMenu();
@@ -1167,16 +1199,18 @@ app.whenReady().then(async () => {
         type: 'question',
         title: '关闭 Pilot 主窗口',
         message: `当前仍有 ${total} 项运行中或待处理的任务。`,
-        detail: '隐藏到后台会继续执行并在完成或需要批准时提醒你；直接退出将中断本地桌面会话视图。',
-        buttons: ['隐藏到后台继续', '仍要退出', '取消'],
+        detail: tray
+          ? '隐藏到后台会继续执行并在完成或需要批准时提醒你；直接退出将中断本地桌面会话视图。'
+          : '直接退出将中断本地桌面会话视图。当前系统没有可用托盘，无法隐藏到后台。',
+        buttons: tray ? ['隐藏到后台继续', '仍要退出', '取消'] : ['仍要退出', '取消'],
         defaultId: 0,
-        cancelId: 2
+        cancelId: tray ? 2 : 1
       }).then(({ response }) => {
         if (!shell || shell.isDestroyed()) return;
-        if (response === 0) {
+        if (response === 0 && tray) {
           shell.hide();
           refreshTrayMenu();
-        } else if (response === 1) {
+        } else if ((tray && response === 1) || (!tray && response === 0)) {
           quitting = true;
           shell.close();
         }
@@ -1206,10 +1240,26 @@ app.whenReady().then(async () => {
     shell.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(offlinePage(workbenchUrl))}`).catch(() => {});
     offlineReconnector.start();
   });
+  shell.webContents.on('render-process-gone', (_event, details) => {
+    if (smoke || shell?.isDestroyed()) return;
+    process.stderr.write(`主窗口渲染进程异常退出（${details?.reason || 'unknown'}），正在恢复。\n`);
+    const contents = shell.webContents;
+    setTimeout(() => {
+      if (!shell || shell.isDestroyed()) return;
+      try {
+        if (contents.isCrashed()) contents.reload();
+      } catch {
+        contents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent('<meta charset="utf-8"><h1>Pilot 已恢复</h1><p>渲染进程意外退出，请重新加载工作台。</p><button onclick="location.reload()">重新加载</button>')}`).catch(() => {});
+      }
+    }, 250);
+  });
   if (!smoke) shell.loadURL(workbenchUrl).catch(() => {});
   else shell.loadURL('about:blank');
   writeEndpoint();
   shell.on('closed', () => {
+    for (const tab of tabs.values()) {
+      if (tab.detached && tab.window && !tab.window.isDestroyed()) tab.window.close();
+    }
     clearTimeout(boundsSaveTimer);
     offlineReconnector.stop();
     alerts?.destroy();

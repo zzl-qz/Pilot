@@ -7,6 +7,10 @@ export const DEFAULT_WINDOW_BOUNDS = { width: 1280, height: 840, maximized: fals
 const MIN_WIDTH = 720;
 const MIN_HEIGHT = 520;
 
+export function shouldHideOnClose({ minimizeToTray, trayAvailable }) {
+  return Boolean(minimizeToTray && trayAvailable);
+}
+
 export function normalizeWindowBounds(saved, displays, fallback = DEFAULT_WINDOW_BOUNDS) {
   const baseWidth = Math.max(MIN_WIDTH, Math.round(Number(fallback?.width) || DEFAULT_WINDOW_BOUNDS.width));
   const baseHeight = Math.max(MIN_HEIGHT, Math.round(Number(fallback?.height) || DEFAULT_WINDOW_BOUNDS.height));

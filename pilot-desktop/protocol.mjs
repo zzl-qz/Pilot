@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 
 /** 人在地址栏输入的地址。本机没写协议时用 http，其它主机用 https。 */
 export function userPageUrl(input) {
@@ -108,9 +109,66 @@ export function sanitizeDownloadFilename(raw) {
 }
 
 export function isDangerousDownloadExtension(filename) {
-  const clean = String(filename || '').trim().toLowerCase().replace(/[\s.]+$/, '');
+  const clean = String(filename || '').replace(/[\s.]+$/, '').toLowerCase();
   const dot = clean.lastIndexOf('.');
   return dot >= 0 && DANGEROUS_DOWNLOAD_EXTENSIONS.has(clean.slice(dot));
+}
+
+export function isWindowsUncPath(value) {
+  return /^(?:\\\\|\/\/)[^\\/]+[\\/][^\\/]+/.test(String(value || ''));
+}
+
+function decodeXmlEntities(text) {
+  return String(text || '')
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#([0-9]+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)))
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+function decodeWin32DropFiles(buffer) {
+  let payload = buffer;
+  let wide = true;
+  if (buffer.length >= 20) {
+    const pFiles = buffer.readUInt32LE(0);
+    const fWide = buffer.readUInt32LE(16);
+    if (pFiles >= 20 && pFiles < buffer.length && (fWide === 0 || fWide === 1)) {
+      payload = buffer.subarray(pFiles);
+      wide = fWide === 1;
+    }
+  }
+  const text = (wide ? payload.toString('utf16le') : payload.toString('latin1')).replace(/^\uFEFF/, '');
+  const end = text.indexOf('\0\0');
+  const slice = end >= 0 ? text.slice(0, end) : text;
+  return slice.split('\0');
+}
+
+export function parseClipboardFilePaths(format, input, platform) {
+  const buffer = Buffer.isBuffer(input) ? input : Buffer.from(String(input || ''));
+  let paths = [];
+  if (platform === 'darwin' && /NSFilenamesPboardType/i.test(format)) {
+    paths = [...buffer.toString('utf8').matchAll(/<string>([\s\S]*?)<\/string>/gi)]
+      .map(match => decodeXmlEntities(match[1]));
+  } else if (platform === 'win32' && /CF_HDROP/i.test(format)) {
+    paths = decodeWin32DropFiles(buffer);
+  } else if (platform === 'win32' && /FileNameW/i.test(format)) {
+    paths = buffer.toString('utf16le').replace(/^\uFEFF/, '').split('\0');
+  } else if (platform === 'win32' && /FileName/i.test(format)) {
+    paths = buffer.toString('latin1').split('\0');
+  } else if (/uri-list|file-url|gnome-copied-files/i.test(format)) {
+    paths = buffer.toString('utf8').split(/\r?\n/).filter(line => !line.trim().startsWith('#')).map(value => {
+      if (!/^file:/i.test(value)) return value;
+      try { return fileURLToPath(new URL(value)); } catch { return ''; }
+    });
+  }
+  return [...new Set(paths.map(value => String(value).trim()).filter(Boolean))];
+}
+
+export function isRegularFileStat(info) {
+  return Boolean(info?.isFile?.() && !info.isSymbolicLink?.());
 }
 
 function scrubLogText(text) {
