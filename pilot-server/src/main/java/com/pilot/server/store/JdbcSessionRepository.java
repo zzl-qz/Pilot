@@ -212,7 +212,10 @@ public final class JdbcSessionRepository implements SessionRepository {
             ArrayList<EventEnvelope> page = new ArrayList<EventEnvelope>();
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    page.add(mapEvent(rows, sessionId));
+                    EventEnvelope event = mapEvent(rows, sessionId);
+                    if (event != null) {
+                        page.add(event);
+                    }
                 }
             }
             Collections.reverse(page);
@@ -233,7 +236,10 @@ public final class JdbcSessionRepository implements SessionRepository {
             ArrayList<EventEnvelope> page = new ArrayList<EventEnvelope>();
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    page.add(mapEvent(rows, sessionId));
+                    EventEnvelope event = mapEvent(rows, sessionId);
+                    if (event != null) {
+                        page.add(event);
+                    }
                 }
             }
             return List.copyOf(page);
@@ -394,7 +400,10 @@ public final class JdbcSessionRepository implements SessionRepository {
                 try (ResultSet rows = statement.executeQuery()) {
                     ArrayList<EventEnvelope> result = new ArrayList<EventEnvelope>();
                     while (rows.next()) {
-                        result.add(mapEvent(rows, sessionId));
+                        EventEnvelope event = mapEvent(rows, sessionId);
+                        if (event != null) {
+                            result.add(event);
+                        }
                     }
                     return List.copyOf(result);
                 }
@@ -410,7 +419,8 @@ public final class JdbcSessionRepository implements SessionRepository {
         String type = rows.getString("type");
         String payload = rows.getString("payload");
         Instant timestamp = Instant.parse(rows.getString("created_at"));
-        return new EventEnvelope(sequence, timestamp, type, sessionId, runId, codec.decode(type, payload));
+        var event = codec.decode(type, payload);
+        return event == null ? null : new EventEnvelope(sequence, timestamp, type, sessionId, runId, event);
     }
 
     private static Session map(ResultSet rows) throws SQLException {

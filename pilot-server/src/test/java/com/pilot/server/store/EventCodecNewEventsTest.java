@@ -200,6 +200,12 @@ class EventCodecNewEventsTest {
     }
 
     @Test
+    void skipsUnknownHistoricalEventTypes() {
+        assertEquals(null, codec.decode("user.message", "{\"text\":\"legacy\"}"));
+        assertEquals(null, codec.decode("future.event", "{}"));
+    }
+
+    @Test
     void roundTripsRunEndedWithArtifacts() {
         RunEnded event = new RunEnded(RunOutcome.PARTIAL, "TASK_INCOMPLETE", "部分交付", List.of("src/A.java"),
             List.of("npm test → exit 0"), 1, 3, List.of("验证"), List.of("浏览器回归"), List.of("查看差异"), true);

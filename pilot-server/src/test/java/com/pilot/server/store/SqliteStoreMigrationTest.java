@@ -1,5 +1,6 @@
 package com.pilot.server.store;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
@@ -95,6 +96,39 @@ class SqliteStoreMigrationTest {
                 assertTrue("看图".equals(rows.getString(1)));
                 assertTrue(rows.getString(2) == null, "旧消息附件列应保持 NULL");
             }
+        }
+    }
+
+    @Test
+    void appliesConnectionPragmasAndRebuildSkipsMalformedJson() throws Exception {
+        Path db = dir.resolve("connection-pragmas.db");
+        SqliteStore store = new SqliteStore(db);
+        try (Connection connection = store.open(); Statement statement = connection.createStatement()) {
+            try (ResultSet rows = statement.executeQuery("PRAGMA foreign_keys")) {
+                assertTrue(rows.next());
+                assertEquals(1, rows.getInt(1));
+            }
+            try (ResultSet rows = statement.executeQuery("PRAGMA synchronous")) {
+                assertTrue(rows.next());
+                assertEquals(1, rows.getInt(1));
+            }
+            try (ResultSet rows = statement.executeQuery("PRAGMA temp_store")) {
+                assertTrue(rows.next());
+                assertEquals(2, rows.getInt(1));
+            }
+            statement.execute("INSERT INTO events(session_id,sequence,run_id,type,payload,created_at) "
+                + "VALUES('legacy',1,'run_legacy','user.message','not-json','2026-01-01T00:00:00Z')");
+            statement.execute("DELETE FROM schema_meta WHERE key='message_search_v1'");
+            statement.execute("DELETE FROM message_search");
+        }
+
+        new SqliteStore(db);
+
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + db);
+            Statement statement = connection.createStatement();
+            ResultSet rows = statement.executeQuery("SELECT count(*) FROM message_search")) {
+            assertTrue(rows.next());
+            assertEquals(0, rows.getInt(1));
         }
     }
 }

@@ -220,8 +220,8 @@ public final class SqliteStore {
                 throw failure;
             }
         }
-        try (Connection connection = open()) {
-            connection.setAutoCommit(false);
+        try (Connection connection = open(); Statement statement = connection.createStatement()) {
+            statement.execute("BEGIN IMMEDIATE");
             Transaction scope = new Transaction(connection);
             transaction.set(scope);
             try {
@@ -229,11 +229,11 @@ public final class SqliteStore {
                 if (scope.rollbackOnly) {
                     throw new IllegalStateException("事务已标记回滚，不能提交部分历史修改");
                 }
-                connection.commit();
+                statement.execute("COMMIT");
                 return result;
             } catch (RuntimeException | Error | SQLException failure) {
                 try {
-                    connection.rollback();
+                    statement.execute("ROLLBACK");
                 } catch (SQLException rollback) {
                     failure.addSuppressed(rollback);
                 }
@@ -374,6 +374,9 @@ public final class SqliteStore {
         Connection connection = DriverManager.getConnection(url);
         try (Statement statement = connection.createStatement()) {
             statement.execute("PRAGMA busy_timeout = 4000");
+            statement.execute("PRAGMA foreign_keys = ON");
+            statement.execute("PRAGMA synchronous = NORMAL");
+            statement.execute("PRAGMA temp_store = MEMORY");
         }
         return connection;
     }
@@ -565,7 +568,7 @@ public final class SqliteStore {
             }
         }
         s.execute(
-            "INSERT OR REPLACE INTO message_search(rowid,session_id,sequence,text) SELECT rowid,session_id,sequence,COALESCE(json_extract(payload,'$.input'),json_extract(payload,'$.text'),'') FROM events WHERE type IN ("
+            "INSERT OR REPLACE INTO message_search(rowid,session_id,sequence,text) SELECT rowid,session_id,sequence,COALESCE(json_extract(payload,'$.input'),json_extract(payload,'$.text'),'') FROM events WHERE json_valid(payload) = 1 AND type IN ("
                 + types + ")");
         s.execute("INSERT INTO schema_meta(key,value) VALUES('message_search_v1','1')");
     }
