@@ -51,6 +51,39 @@ class SecretScrubberTest {
     }
 
     @Test
+    void scrubsDatabaseAndQueueUrlsQuotedCloudSecretsAndJwt() {
+        String jwt = "eyJabcdefghijk.eyJabcdefghijk.signature";
+        String raw = "postgres://user:pass1234@db/test mysql://u:p12345@db mongodb+srv://u:p12345@db "
+            + "rediss://u:p12345@cache amqps://u:p12345@queue api_key='single-secret-value' "
+            + "'secret': 'json-secret-value' \\\"api_key\\\":\\\"escaped-secret-value\\\" "
+            + "AWS_SECRET_ACCESS_KEY=aws-secret-value AccountKey=azure-secret-value sig=sas-secret-value " + jwt;
+        String scrubbed = SecretScrubber.scrub(raw);
+        assertTrue(scrubbed.contains("***"), scrubbed);
+        assertFalse(scrubbed.contains("escaped-secret-value"), scrubbed);
+
+        for (String secret : List.of("pass1234", "p12345", "single-secret-value", "json-secret-value",
+            "escaped-secret-value", "aws-secret-value", "azure-secret-value", "sas-secret-value", jwt)) {
+            assertFalse(scrubbed.contains(secret), scrubbed);
+        }
+        assertTrue(SecretScrubber.containsSecretPattern(raw));
+    }
+
+    @Test
+    void containsSecretPatternDoesNotFlagNormalJsonKeys() {
+        assertFalse(SecretScrubber.containsSecretPattern("key: \"explorer\""));
+        assertFalse(SecretScrubber.containsSecretPattern("process exited with sig=SIGTERM"));
+        assertEquals("process exited with sig=SIGTERM", SecretScrubber.scrub("process exited with sig=SIGTERM"));
+    }
+
+    @Test
+    void escapedJsonScrubbingPreservesUnrelatedEscapedQuotes() {
+        String text = "note=\\\"keep\\\" \\\"api_key\\\":\\\"escaped-secret-value\\\"";
+        String scrubbed = SecretScrubber.scrub(text);
+        assertTrue(scrubbed.contains("note=\\\"keep\\\""), scrubbed);
+        assertFalse(scrubbed.contains("escaped-secret-value"), scrubbed);
+    }
+
+    @Test
     void modelRequestDumperScrubsSecretsInsideBodyTextAndEndpoint(@TempDir Path tempDir) throws Exception {
         ModelRequestDumper.configure(true, tempDir);
         try {

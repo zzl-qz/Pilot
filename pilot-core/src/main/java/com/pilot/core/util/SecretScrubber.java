@@ -13,16 +13,26 @@ public final class SecretScrubber {
     private static final Pattern PEM_PRIVATE_KEY =
         Pattern.compile("-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----");
     private static final Pattern AUTH_SCHEME = Pattern.compile("(?i)(\\b(?:bearer|basic)\\s+)[A-Za-z0-9._~+/=-]{6,}");
-    private static final Pattern URL_CREDENTIALS =
-        Pattern.compile("(?i)\\b((?:https?|socks5?|ftp)://)([^:/@\\s]+):([^/@\\s]{2,})@");
+    private static final Pattern URL_CREDENTIALS = Pattern.compile(
+        "(?i)\\b((?:https?|socks5?|ftp|postgres(?:ql)?|mysql|mongodb(?:\\+srv)?|rediss?|amqps?)://)([^:/@\\s]+):([^/@\\s]{2,})@");
     private static final Pattern JSON_SECRET = Pattern.compile(
         "(?i)(\"(?:api[_-]?key|apikey|x-api-key|x_api_key|access[_-]?token|refresh[_-]?token|secret|client[_-]?secret|"
             + "private[_-]?key|password|passwd|authorization)\"\\s*:\\s*\")([^\"]{4,})(\")");
+    private static final Pattern QUOTED_SECRET = Pattern
+        .compile("(?i)((?:'|\")?(?:api[_-]?key|apikey|secret|token|password)(?:'|\")?\\s*:\\s*)(['\"])([^'\"]{4,})\\2");
+    private static final Pattern ESCAPED_JSON_SECRET = Pattern.compile(
+        "(?i)(\\\\\\\"(?:api[_-]?key|apikey|secret|token|password)\\\\\\\"\\s*:\\s*\\\\\\\")([^\\\\\\\"]{4,})(\\\\\\\")");
     private static final Pattern KEY_VALUE = Pattern
         .compile("(?i)((?:api[_-]?key|apikey|x-api-key|x_api_key|access[_-]?token|refresh[_-]?token|token|secret|"
-            + "client[_-]?secret|private[_-]?key|password|passwd|authorization)\\s*[=:]\\s*)(\"?)([^\\s\"',;&]{4,})");
+            + "client[_-]?secret|private[_-]?key|password|passwd|authorization|aws_secret_access_key)\\s*[=:]\\s*)([\\\"']?)([^\\s\\\"',;&}（）()]{4,})");
+    private static final Pattern AZURE_ACCOUNT_KEY =
+        Pattern.compile("(?i)(?<![A-Za-z0-9_])(accountkey\\s*[=:]\\s*)([\"']?)([^\\s\"',;&}]{8,})");
+    private static final Pattern SAS_SIGNATURE =
+        Pattern.compile("(?i)(?<![A-Za-z0-9_])(sig\\s*=\\s*)([\"']?)([A-Za-z0-9%+/_=-]{16,})");
+    private static final Pattern JWT =
+        Pattern.compile("eyJ[A-Za-z0-9_-]{8,}\\.eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}");
     private static final Pattern KNOWN_PREFIX = Pattern
-        .compile("(?<![A-Za-z0-9_-])(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{16,}|"
+        .compile("(?<![A-Za-z0-9_-])(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,}|"
             + "AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|glpat-[A-Za-z0-9_-]{10,}|"
             + "hf_[A-Za-z0-9]{12,})");
 
@@ -38,7 +48,12 @@ public final class SecretScrubber {
         result = URL_CREDENTIALS.matcher(result).replaceAll("$1$2:" + MASK + "@");
         result = AUTH_SCHEME.matcher(result).replaceAll("$1" + MASK);
         result = JSON_SECRET.matcher(result).replaceAll("$1" + MASK + "$3");
+        result = ESCAPED_JSON_SECRET.matcher(result).replaceAll("$1" + MASK + "$3");
+        result = QUOTED_SECRET.matcher(result).replaceAll("$1$2" + MASK + "$2");
         result = KEY_VALUE.matcher(result).replaceAll("$1$2" + MASK);
+        result = AZURE_ACCOUNT_KEY.matcher(result).replaceAll("$1$2" + MASK);
+        result = SAS_SIGNATURE.matcher(result).replaceAll("$1$2" + MASK);
+        result = JWT.matcher(result).replaceAll(MASK);
         result = KNOWN_PREFIX.matcher(result).replaceAll(MASK);
         return result;
     }
@@ -49,6 +64,10 @@ public final class SecretScrubber {
             return false;
         }
         return PEM_PRIVATE_KEY.matcher(value).find() || AUTH_SCHEME.matcher(value).find()
-            || URL_CREDENTIALS.matcher(value).find() || KNOWN_PREFIX.matcher(value).find();
+            || URL_CREDENTIALS.matcher(value).find() || KNOWN_PREFIX.matcher(value).find()
+            || JSON_SECRET.matcher(value).find() || ESCAPED_JSON_SECRET.matcher(value).find()
+            || QUOTED_SECRET.matcher(value).find() || KEY_VALUE.matcher(value).find()
+            || AZURE_ACCOUNT_KEY.matcher(value).find() || SAS_SIGNATURE.matcher(value).find()
+            || JWT.matcher(value).find();
     }
 }

@@ -17,6 +17,7 @@ import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.event.ToolStarted;
 import com.pilot.core.message.Message;
 import com.pilot.core.session.Session;
+import com.pilot.core.util.SecretScrubber;
 
 /**
  * 把一次会话整理成可以转发的 Markdown。复查的人不用打开 Pilot，也能看到失败、工具和对话。
@@ -125,21 +126,11 @@ public final class SessionExport {
                 out.append(outcome).append("\n");
             }
         }
-        return redact(out.toString());
+        return SecretScrubber.scrub(out.toString());
     }
 
     static String redact(String text) {
-        if (text == null || text.isEmpty()) {
-            return "";
-        }
-        return text.replaceAll("(?i)(https?://)[^:/\\s@]+:[^@/\\s]+@", "$1***:***@")
-            .replaceAll("(?i)(Bearer\\s+)[A-Za-z0-9._\\-]{8,}", "$1***")
-            .replaceAll("(?i)(sk-(?:proj-|ant-|or-)?)[A-Za-z0-9_-]{8,}", "$1***")
-            .replaceAll("(?i)(ghp_|github_pat_)[A-Za-z0-9_]{8,}", "$1***")
-            .replaceAll("(?i)(xox[baprs]-)[A-Za-z0-9-]{10,}", "$1***")
-            .replaceAll("(?i)(AIza)[A-Za-z0-9_-]{20,}", "$1***").replaceAll("(?i)(AKIA)[A-Z0-9]{12,}", "$1***")
-            .replaceAll("(?i)([\"']?(?:(?:api|access|secret|private)[_-]?key|token|secret|password|passwd)[\"']?"
-                + "\\s*[:=]\\s*[\"']?)[^\"'\\s,}()（）]{4,}", "$1***");
+        return SecretScrubber.scrub(text);
     }
 
     private static String safeBody(String text, int limit) {

@@ -47,7 +47,7 @@ class SessionExportTest {
         assertTrue(text.contains("### 你"), text);
         assertFalse(text.contains("sk-abcdefghijklmnopqrstuvwxyz"), text);
         assertFalse(text.contains("hunter2hunter2"), text);
-        assertTrue(text.contains("sk-***"), text);
+        assertTrue(text.contains("密钥 ***"), text);
     }
 
     @Test
@@ -75,7 +75,20 @@ class SessionExportTest {
         assertFalse(text.contains("single-quoted-tok"), text);
         assertFalse(text.contains("123456789012345678901"), text);
         assertTrue(text.contains("key: \"explorer\""), text);
-        assertTrue(text.contains("https://***:***@example.com/path"), text);
+        assertTrue(text.contains("https://user:***@example.com/path"), text);
+    }
+
+    @Test
+    void redactsConversationAndToolOutputCredentials() {
+        String message = "api_key='single-secret-value' \\\"api_key\\\":\\\"escaped-secret-value\\\"";
+        String summary = "AWS_SECRET_ACCESS_KEY=aws-secret-value AccountKey=azure-secret-value sig=sas-secret-value "
+            + "eyJabcdefghijk.eyJabcdefghijk.signature";
+        String text = SessionExport.markdown(session("export"), List.of(Message.user(message)),
+            List.of(envelope(1, new ToolCompleted("c1", summary, 1))), Instant.parse("2026-11-19T04:00:00Z"));
+        for (String secret : List.of("single-secret-value", "escaped-secret-value", "aws-secret-value",
+            "azure-secret-value", "sas-secret-value", "eyJabcdefghijk.eyJabcdefghijk.signature")) {
+            assertFalse(text.contains(secret), text);
+        }
     }
 
     @Test
