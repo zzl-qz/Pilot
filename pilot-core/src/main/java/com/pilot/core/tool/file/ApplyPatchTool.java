@@ -173,7 +173,13 @@ public final class ApplyPatchTool extends PromptedTool implements WritesFiles {
         requireExistingFile(file, shown);
         requireObserved(file, shown);
         String content = EditableText.readForPatch(file, shown);
-        PatchedText updated = applyHunks(content, op.hunks(), shown);
+        PatchedText updated;
+        try {
+            updated = applyHunks(content, op.hunks(), shown);
+        } catch (PatchException e) {
+            reads.invalidateDeliveredView(file);
+            throw e;
+        }
 
         Path target = file;
         String targetShown = shown;

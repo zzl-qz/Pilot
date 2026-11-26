@@ -481,7 +481,38 @@ final class ExactEditBatch {
             }
             out.append(i + 1).append(": ").append(sourceLines[i]);
         }
+        String mismatch = firstMismatchHint(sourceLines, bestLine, searchLines);
+        if (!mismatch.isEmpty()) {
+            out.append('\n').append(mismatch);
+        }
         return out.toString();
+    }
+
+    /** 对比最接近片段与传入 old_string，指出首次字符级不一致的精确行列与局部片段，帮助模型一次修正转义或符号笔误。 */
+    private static String firstMismatchHint(String[] sourceLines, int bestLine, String[] searchLines) {
+        int startOffset = 0;
+        while (startOffset < searchLines.length && searchLines[startOffset].isBlank()) {
+            startOffset++;
+        }
+        int limit = Math.min(searchLines.length - startOffset, sourceLines.length - bestLine);
+        for (int k = 0; k < limit; k++) {
+            String actual = sourceLines[bestLine + k];
+            String expected = searchLines[startOffset + k];
+            if (!actual.equals(expected)) {
+                int col = commonPrefix(actual, expected);
+                return "首次不一致：第 " + (bestLine + k + 1) + " 行第 " + (col + 1) + " 列\n  文件：" + snippetAround(actual, col)
+                    + "\n  传入：" + snippetAround(expected, col);
+            }
+        }
+        return "";
+    }
+
+    private static String snippetAround(String line, int column) {
+        int start = Math.max(0, column - 20);
+        int end = Math.min(line.length(), column + 40);
+        String prefix = start > 0 ? "…" : "";
+        String suffix = end < line.length() ? "…" : "";
+        return prefix + line.substring(start, end) + suffix;
     }
 
     private static int lineSimilarity(String candidate, String needle) {

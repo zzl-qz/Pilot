@@ -99,6 +99,7 @@ public final class EditFileTool extends PromptedTool implements WritesFiles {
                 content = EditableText.readForReplacement(file, rawPath);
                 applied = ExactEditBatch.apply(content, edits);
             } catch (IllegalArgumentException e) {
+                reads.invalidateDeliveredView(file);
                 return "ERROR: " + e.getMessage();
             }
             snapshots.beforeWrite(file);

@@ -131,6 +131,16 @@ public final class ReadTracker implements ReadGuard {
     }
 
     @Override
+    public void invalidateDeliveredView(Path file) {
+        if (file == null) {
+            return;
+        }
+        if (deliveredViews.remove(normalize(file)) != null) {
+            viewEpoch.incrementAndGet();
+        }
+    }
+
+    @Override
     public int viewEpoch() {
         return viewEpoch.get();
     }

@@ -113,6 +113,10 @@ public interface ReadGuard {
     default void invalidateDeliveredViews() {
     }
 
+    /** 清空单个文件的已交付读取视图（如编辑/补丁匹配失败后允许模型立即重读原文核对）；保留 {@link #isObserved} 与 {@link #isFresh}。 */
+    default void invalidateDeliveredView(Path file) {
+    }
+
     /** 视图失效纪元：每次 {@link #invalidateDeliveredViews()} 调用时递增。 */
     default int viewEpoch() {
         return 0;

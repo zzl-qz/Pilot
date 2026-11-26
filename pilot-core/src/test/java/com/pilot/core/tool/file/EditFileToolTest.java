@@ -255,4 +255,25 @@ class EditFileToolTest {
         assertTrue(overlap.contains("重叠或嵌套"), overlap);
         assertEquals(original, Files.readString(file));
     }
+
+    @Test
+    void failedEditReportsExactMismatchColumnAndAllowsImmediateReread() throws IOException {
+        Path file = workspace.resolve("regex.ts");
+        Files.writeString(file, "const a = 1;\nconst re = /^!\\[[^\\]\\n]*\\]\\([^\\)\\s]+\\)/;\nconst b = 2;\n");
+        PathValidator paths = new PathValidator(workspace);
+        ReadTracker reads = new ReadTracker();
+        ReadFileTool reader = new ReadFileTool(paths, reads);
+        EditFileTool editor = new EditFileTool(paths, SnapshotSink.none(), reads);
+
+        assertTrue(reader.execute(Map.of("path", "regex.ts")).contains("const re ="));
+        // 故意少写一个反斜杠（[^)\s]+ vs [^\)\s]+）
+        String error = editor.execute(Map.of("path", "regex.ts", "old_string",
+            "const re = /^!\\[[^\\]\\n]*\\]\\([^)\\s]+\\)/;", "new_string", "const re = /x/;"));
+        assertTrue(error.contains("首次不一致：第 2 行"), error);
+        assertTrue(error.contains("文件：") && error.contains("传入："), error);
+        // 失配后立即重读同一区间，不得被 ReadTracker 去重拦截
+        String reread = reader.execute(Map.of("path", "regex.ts", "start_line", 1, "line_count", 10));
+        assertFalse(reread.contains("文件未变化"), "编辑失配后应允许立即重读核对原文: " + reread);
+        assertTrue(reread.contains("const re ="), reread);
+    }
 }

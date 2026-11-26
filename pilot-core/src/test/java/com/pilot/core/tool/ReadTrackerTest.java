@@ -83,4 +83,25 @@ class ReadTrackerTest {
         assertTrue(tracker.isObserved(file), "压缩清视图后必须保留已读登记，不破坏先读后改");
         assertTrue(tracker.isFresh(file), "文件本身未变时 isFresh 仍应为 true");
     }
+
+    @Test
+    void invalidateDeliveredViewClearsSingleFileWithoutAffectingOthers() throws Exception {
+        Path a = directory.resolve("A.java");
+        Path b = directory.resolve("B.java");
+        Files.writeString(a, "class A {}\n");
+        Files.writeString(b, "class B {}\n");
+        ReadTracker tracker = new ReadTracker();
+        tracker.observed(a);
+        tracker.observed(b);
+        String stampA = tracker.observationStamp(a);
+        String stampB = tracker.observationStamp(b);
+        tracker.recordDelivered(a, stampA, 1, 1, 1);
+        tracker.recordDelivered(b, stampB, 1, 1, 1);
+
+        tracker.invalidateDeliveredView(a);
+
+        assertEquals(0.0, tracker.checkDelivered(a, stampA, 1, 10).overlapRatio(), 0.001);
+        assertEquals(1.0, tracker.checkDelivered(b, stampB, 1, 10).overlapRatio(), 0.001);
+        assertTrue(tracker.isObserved(a), "单文件清视图后仍应保留已读安全记录");
+    }
 }
