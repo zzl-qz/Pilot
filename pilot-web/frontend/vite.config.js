@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { fileURLToPath } from 'node:url';
 
-function isEntryStatic(id, getModuleInfo, cache, visiting = new Set()) {
+export function isEntryStatic(id, getModuleInfo, cache, visiting = new Set()) {
   if (cache.has(id)) return cache.get(id);
   if (visiting.has(id)) return false;
   visiting.add(id);
@@ -17,7 +17,7 @@ function isEntryStatic(id, getModuleInfo, cache, visiting = new Set()) {
     }
   }
   visiting.delete(id);
-  cache.set(id, staticHit);
+  if (staticHit || visiting.size === 0) cache.set(id, staticHit);
   return staticHit;
 }
 

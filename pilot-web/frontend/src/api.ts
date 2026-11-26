@@ -49,6 +49,7 @@ export async function apiJson<T = unknown>(url: RequestInfo | URL, init?: Reques
     let uncertain = false;
     try {
       const body = await response.json() as { message?: unknown; error?: unknown; uncertain?: boolean } | null;
+      if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('非对象错误响应');
       uncertain = body?.uncertain === true;
       // Spring 的错误响应体固定带 error（HTTP 状态短语，如「Bad Gateway」），
       // 真正的原因在 message 里。优先 message，否则界面只会显示 "Bad Gateway" 这类英文短语。
@@ -66,7 +67,12 @@ export async function apiJson<T = unknown>(url: RequestInfo | URL, init?: Reques
   }
   if (typeof response.text === 'function') {
     const text = await response.text();
-    return text ? JSON.parse(text) as T : null;
+    if (!text.trim()) return null;
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new ApiError('服务端返回了非预期的非 JSON 响应', response.status);
+    }
   }
   return response.json() as Promise<T>;
 }

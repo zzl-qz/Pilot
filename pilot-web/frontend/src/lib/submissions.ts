@@ -3,7 +3,7 @@ import type { InputMessage, SubmissionResult } from '../types/api.js';
 import { errorInfo } from './errors.js';
 import { safeLocalStorage, type SafeStorage } from './safe-storage.js';
 
-export interface PendingSubmission { requestId: string; sessionId: string; createdAt: number; preview: string; resolved?: 'accepted' | 'rejected' }
+export interface PendingSubmission { requestId: string; sessionId: string; createdAt: number; preview: string; tabId?: string; status?: 'in-flight' | 'unknown'; leaseUntil?: number; resolved?: 'accepted' | 'rejected' }
 /** 无法解析的旧凭据：保留原文供核对与导出，不参与任何会话的阻止判断。 */
 export interface CorruptedSubmission { key: string; raw: string }
 type Outcome = { state: SubmissionResult['state'] | 'blocked'; message?: string; response?: SubmissionResult['response'] };
@@ -14,9 +14,11 @@ const unknownMessage = '提交结果尚未确认，任务可能已经执行。�
 const active = new Set<string>();
 const listeners = new Set<() => void>();
 const changed = () => { for (const listener of listeners) listener(); };
+const LEASE_MS = 15000;
+const newTabId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 
 /** 仅存凭据与短摘要，不把附件再次写入浏览器存储。每个请求独立键，窗口之间不会覆盖凭据。 */
-export function createSubmissions(client = api, storage: () => SafeStorage = safeLocalStorage) {
+export function createSubmissions(client = api, storage: () => SafeStorage = safeLocalStorage, tabId = newTabId()) {
   const acknowledging = new Set<string>();
   function acknowledge(record: PendingSubmission) {
     if (acknowledging.has(record.requestId)) return;
@@ -94,20 +96,27 @@ export function createSubmissions(client = api, storage: () => SafeStorage = saf
     return { state: 'unknown', message: unknownMessage };
   }
   async function submit(sessionId: string, body: InputMessage, beforeSend: () => boolean, operation?: SubmissionOperation): Promise<Outcome> {
-    if (active.has(sessionId)) return { state: 'blocked', message: '消息正在提交，请等待本次结果。' };
-    active.add(sessionId);
+    const lock = `${tabId}:${sessionId}`;
+    if (active.has(lock)) return { state: 'blocked', message: '消息正在提交，请等待本次结果。' };
+    active.add(lock);
     try { return await perform(sessionId, body, beforeSend, operation); }
-    finally { active.delete(sessionId); }
+    finally { active.delete(lock); }
   }
+  const blockedMessage = (existing: PendingSubmission[]) => {
+    const inFlight = existing.some((item) => item.status === 'in-flight' && (item.leaseUntil ?? 0) > Date.now() && item.tabId !== tabId);
+    return inFlight ? '另一标签页正在提交，请等待本次结果。' : unknownMessage;
+  };
   async function perform(sessionId: string, body: InputMessage, beforeSend: () => boolean, operation?: SubmissionOperation): Promise<Outcome> {
     let record: PendingSubmission | undefined;
     try {
-      if (pending(sessionId).length) return { state: 'blocked', message: unknownMessage };
+      const existing = pending(sessionId);
+      if (existing.length) return { state: 'blocked', message: blockedMessage(existing) };
       const token = await client.submissionToken();
       if (!token?.requestId) throw Error('服务器未提供提交凭据，请更新服务端后重试。');
       // 等待令牌期间可能切换会话、窗口或模型；此时尚未提交业务请求。
-      if (pending(sessionId).length) return { state: 'blocked', message: unknownMessage };
-      record = { requestId: token.requestId, sessionId, createdAt: Date.now(), preview: body.content.slice(0, 100) || '附件消息' };
+      const concurrent = pending(sessionId);
+      if (concurrent.length) return { state: 'blocked', message: blockedMessage(concurrent) };
+      record = { requestId: token.requestId, sessionId, createdAt: Date.now(), preview: body.content.slice(0, 100) || '附件消息', tabId, status: 'in-flight', leaseUntil: Date.now() + LEASE_MS };
       const key = PREFIX + record.requestId;
       const value = JSON.stringify(record);
       storage().setItem(key, value);
@@ -129,6 +138,9 @@ export function createSubmissions(client = api, storage: () => SafeStorage = saf
         return { state: 'rejected', message: error.message };
       }
       // 只读核对一次；5xx、超时、取消及正文读取失败都不是明确拒绝。
+      record.status = 'unknown';
+      record.leaseUntil = undefined;
+      storage().setItem(PREFIX + record.requestId, JSON.stringify(record));
       return await check(record);
     }
   }

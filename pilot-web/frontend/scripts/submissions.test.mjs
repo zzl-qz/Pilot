@@ -117,6 +117,25 @@ test('同窗口并发提交只执行一次；令牌期间切换会话取消尚�
   f.client.submissionToken=async()=>({requestId:'next'});
   assert.equal((await f.manager.submit('s',{content:'任务'},()=>true)).state,'accepted');
 });
+test('另一标签页识别在途租约；租约过期仍保留崩溃恢复防重发', async () => {
+  const f = fixture();
+  const gate = deferred();
+  f.client.sendMessage = async () => gate.promise;
+  const firstTab = createSubmissions(f.client, () => f.storage, 'tab-a');
+  const secondTab = createSubmissions(f.client, () => f.storage, 'tab-b');
+  const first = firstTab.submit('shared', { content: '任务' }, () => true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(firstTab.pending('shared')[0].tabId, 'tab-a');
+  assert.equal((await secondTab.submit('shared', { content: '另一任务' }, () => true)).message, '另一标签页正在提交，请等待本次结果。');
+  assert.equal(f.calls.length, 0);
+  const record = firstTab.pending('shared')[0];
+  f.data.set('pilot.pending-submission:' + record.requestId, JSON.stringify({ ...record, leaseUntil: Date.now() - 1 }));
+  assert.equal((await secondTab.submit('shared', { content: '重试' }, () => true)).state, 'blocked');
+  assert.equal(f.calls.length, 0);
+  gate.resolve({ sessionId: 'shared', runId: 'r' });
+  assert.equal((await first).state, 'accepted');
+});
+
 test('查询失败、空响应和确认回执失败均不会自动重做任务', async () => {
   const f=fixture(); f.client.sendMessage=async(...args)=>{f.calls.push(args);return null;};
   f.client.submissionResult=async()=>{throw Error('offline');};
