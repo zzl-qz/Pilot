@@ -45,11 +45,12 @@ public class AgentProfilesController {
         String workspace = workspace(sessionId);
         Path projectRoot = profiles.projectRootFor(workspace);
         Path userRoot = profiles.userRoot();
+        boolean rootsOverlap = projectRoot.equals(userRoot);
         AgentProfileCatalog all = profiles.catalogFor(workspace);
         AgentProfileCatalog project = AgentProfileCatalog.scan(List.of(projectRoot));
         AgentProfileCatalog user = AgentProfileCatalog.scan(List.of(userRoot));
         List<ProfilePayload> result = all.profiles().values().stream().map(profile -> {
-            String source = resolveSource(profile.name(), project, user);
+            String source = resolveSource(profile.name(), project, user, rootsOverlap);
             String content = readContent(source, profile.name(), projectRoot, userRoot);
             boolean hasUserOverride = user.find(profile.name()).isPresent();
             return ProfilePayload.of(profile, source, content, hasUserOverride);
@@ -101,8 +102,9 @@ public class AgentProfilesController {
         return ResponseEntity.noContent().build();
     }
 
-    private static String resolveSource(String name, AgentProfileCatalog project, AgentProfileCatalog user) {
-        if (project.find(name).isPresent()) {
+    private static String resolveSource(String name, AgentProfileCatalog project, AgentProfileCatalog user,
+        boolean rootsOverlap) {
+        if (!rootsOverlap && project.find(name).isPresent()) {
             return "project";
         }
         if (user.find(name).isPresent()) {

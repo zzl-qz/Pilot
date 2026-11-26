@@ -2,7 +2,9 @@ package com.pilot.server.agent;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -24,11 +26,24 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.pilot.core.session.SessionService;
 import com.pilot.server.WindowsJdkLoopbackSensitive;
+import com.pilot.server.config.AgentProperties;
+import com.pilot.server.store.PilotDataDir;
 
 @SpringBootTest(properties = {"pilot.store=memory", "pilot.runtime.provision=false", "pilot.web-search.local=false"})
 @AutoConfigureMockMvc
 @WindowsJdkLoopbackSensitive
 class AgentProfilesApiTest {
+    @Test
+    void defaultUserRootDoesNotCollideWithWorkspaceProjectRoot() {
+        PilotDataDir defaultDataDir = new PilotDataDir("");
+        AgentProperties properties = new AgentProperties(null, null, 1_000, null, null, 30, 1, null, null, null);
+        AgentProfileService service = new AgentProfileService(properties, defaultDataDir);
+        Path workspace = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
+
+        assertNotEquals(service.projectRootFor(workspace.toString()), service.userRoot());
+        assertEquals(defaultDataDir.file("user-agents"), service.userRoot());
+    }
+
     @TempDir
     static Path data;
 

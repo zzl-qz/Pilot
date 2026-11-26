@@ -41,13 +41,13 @@ public class AgentProfileService {
         return resolve(workspace).resolve(".pilot").resolve("agents");
     }
 
-    /** 用户级代理目录：环境变量 {@code PILOT_AGENTS_DIR} > {@code <dataDir>/agents}。 */
+    /** 用户级代理目录：环境变量 {@code PILOT_AGENTS_DIR} > 数据目录下的用户代理根目录。 */
     public Path userRoot() {
         String fromEnv = System.getenv("PILOT_AGENTS_DIR");
         if (fromEnv != null && !fromEnv.isBlank()) {
             return Path.of(fromEnv.strip()).toAbsolutePath().normalize();
         }
-        return dataDir.file("agents");
+        return dataDir.file(dataDir.explicitlyConfigured() ? "agents" : "user-agents");
     }
 
     private Path resolve(String workspace) {
