@@ -593,13 +593,23 @@ test('更晚历史并发请求合并，返回事件按 sequence 去重', async (
   } finally { fetchHandler = saved; }
 });
 
-test('重试和恢复只替换当前推理，不清除先前已完成的说明', () => {
+test('重试和恢复只替换当前推理，不清除先前已完成的说明与已落定思考', () => {
   reset(); const state = useStore.getState();
-  for (const [sequence, type, payload] of [[1, 'run.started', { input: '任务' }], [2, 'assistant.delta', { text: '先检查' }], [3, 'tool.started', { callId: 'c', name: 'read_file', summary: '读文件' }], [3, 'assistant.reasoning', { text: '旧思考' }], [3, 'assistant.reasoning', { reset: true }], [3, 'assistant.reasoning', { text: '新思考' }]]) {
+  for (const [sequence, type, payload] of [
+    [1, 'run.started', { input: '任务' }],
+    [1, 'assistant.reasoning', { text: '首段思考。' }],
+    [2, 'assistant.delta', { text: '先检查' }],
+    [3, 'tool.started', { callId: 'c', name: 'read_file', summary: '读文件' }],
+    [3, 'assistant.reasoning', { text: '旧思考' }],
+    [3, 'assistant.reasoning', { reset: true }],
+    [3, 'assistant.reasoning', { text: '新思考' }]
+  ]) {
     state.handleEvent({ sequence, type, payload, sessionId: 's', runId: 'r' });
   }
   state.flushEvents();
-  assert.equal(useStore.getState().thread.rows.at(-1).thinking.text, '先检查新思考');
+  const turn = useStore.getState().thread.rows.at(-1);
+  assert.deepEqual(turn.commentaries, ['先检查']);
+  assert.equal(turn.thinking.text, '首段思考。新思考');
   closeStreams();
 });
 

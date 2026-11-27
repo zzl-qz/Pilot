@@ -1,6 +1,9 @@
 import type { StoreContext, StoreSlice } from './context.js';
 import type { EventEnvelope } from '../types/events.js';
+import type { HistoryPage } from '../types/api.js';
 import type { ResultRow } from '../types/thread.js';
+import type { Draft } from 'immer';
+import type { StoreState } from '../types/store.js';
 import { api } from '../api.js';
 import { sortChangeFiles } from '../lib/changes.js';
 import { errorInfo } from '../lib/errors.js';
@@ -21,12 +24,30 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
    * 不放进 zustand state：预取不该触发任何重渲染；插入时机由组件按「滚动是否停稳」决定，
    * 因为滚动过程中前插内容——浏览器的 scroll anchoring 在滚动时会被抑制——视口会被推走一截。
    */
-  let earlierPage: { sessionId: string; before: number; events: EventEnvelope[]; hasMore: boolean } | null = null;
+  let earlierPage: { sessionId: string; before: number; events: EventEnvelope[]; hasMore: boolean; runChanges?: HistoryPage['runChanges'] } | null = null;
   let earlierInflight: { sessionId: string; before: number; promise: Promise<boolean> } | null = null;
   let earlierRequest: Promise<boolean> | null = null;   // 同一次边界触发的并发去重
   let laterInflight: { sessionId: string; after: number; promise: Promise<boolean> } | null = null;
   // 已经问过差异的结果卡。空快照也记在这里，避免上翻时反复打同一轮。
   let attachedDiffs = new Set<string>();
+
+  /** 将随 /history 批量返回的 runChanges 摘要同步落回结果卡，消除加载后的 N+1 请求与二次撑高跳动。 */
+  function hydrateEmbeddedRunDiffs(draft: Draft<StoreState>, runChanges: HistoryPage['runChanges'], sessionEpoch: number) {
+    if (!runChanges || typeof runChanges !== 'object') return;
+    for (const row of draft.thread.rows) {
+      if (row.type !== 'result') continue;
+      const runId = row.key.startsWith('result:run_') ? row.key.slice('result:'.length) : row.runIds?.at(-1) || '';
+      if (!runId) continue;
+      const report = runChanges[runId];
+      if (!report) continue;
+      attachedDiffs.add(`${sessionEpoch}:${row.key}`);
+      const files = sortChangeFiles(report.files || []);
+      if (files.length) {
+        row.changedFiles = files;
+        row.changedSummary = (report as { summary?: string | null }).summary || null;
+      }
+    }
+  }
 
   /**
    * 把每一轮结束时存下的文件差异挂回对应的结果卡。
@@ -72,7 +93,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
     return true;
   }
 
-  const actions: StoreSlice<'loadHistory' | 'prefetchEarlier' | 'applyEarlierPage' | 'loadEarlier' | 'requestEarlierHistory' | 'loadLater' | 'requestLaterHistory'> = {
+  const actions: StoreSlice<'loadHistory' | 'loadHistoryAround' | 'returnToLatest' | 'prefetchEarlier' | 'applyEarlierPage' | 'loadEarlier' | 'requestEarlierHistory' | 'loadLater' | 'requestLaterHistory'> = {
     /* ---------- 历史 ---------- */
     async loadHistory() {
       const { sessionId, thread } = get();
@@ -87,10 +108,13 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
       earlierRequest = null;
       laterInflight = null;
       try {
-        const data = requireData(await api.history(sessionId, { limit: thread.history.pageSize, compactTools: true }));
+        const data = requireData(await api.history(sessionId, {
+          limit: thread.history.pageSize, compactTools: true, alignTurns: true, includeRunChanges: true
+        }));
         if (get().sessionId !== sessionId || historyGeneration !== generation) {
           return false;
         }
+        const epoch = get().sessionEpoch;
         set((draft) => {
           draft.historyRevision = data.historyRevision ?? 0;
           draft.thread = initialThread();
@@ -115,6 +139,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
           draft.thread.history.hasNewer = false;
           draft.thread.history.error = false;
           draft.thread.history.forwardError = false;
+          hydrateEmbeddedRunDiffs(draft, data.runChanges, epoch);
           // 窗口整体重建（切会话 / 重连）后落在最新一条，而不是停在上次的滚动位置。
           draft.ui.bottomSignal += 1;
         });
@@ -124,6 +149,66 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
         if (get().sessionId === sessionId && historyGeneration === generation) get().showNotice('读取历史失败：' + errorInfo(error).message);
         return false;
       }
+    },
+
+    /** 锚点直达：一次请求载入目标消息序号前后上下文窗口（支持搜索与远距书签 1 跳直达）。 */
+    async loadHistoryAround(sequence) {
+      const { sessionId, thread } = get();
+      if (!sessionId || !Number.isSafeInteger(sequence) || sequence < 1) {
+        return false;
+      }
+      const generation = ++historyGeneration;
+      attachedDiffs = new Set();
+      earlierPage = null;
+      earlierInflight = null;
+      earlierRequest = null;
+      laterInflight = null;
+      try {
+        const data = requireData(await api.history(sessionId, {
+          limit: thread.history.pageSize, around: sequence, compactTools: true, alignTurns: true, includeRunChanges: true
+        }));
+        if (get().sessionId !== sessionId || historyGeneration !== generation) {
+          return false;
+        }
+        const events = Array.isArray(data.events) ? data.events : [];
+        if (!events.length) {
+          return false;
+        }
+        const epoch = get().sessionEpoch;
+        set((draft) => {
+          draft.historyRevision = data.historyRevision ?? draft.historyRevision ?? 0;
+          draft.thread = initialThread();
+          draft.thread.replaying = true;
+          draft.thread.rows = [];
+          draft.thread.windowEvents = [];
+          draft.thread.cursor = 0;
+          for (const event of events) {
+            applyEvent(draft, event, { live: false });
+          }
+          if (!draft.running) settleStoppedWork(draft);
+          draft.thread.replaying = false;
+          draft.thread.history.hasMore = Boolean(data.hasMore === true);
+          draft.thread.history.hasNewer = Boolean(data.hasNewer === true);
+          draft.thread.history.error = false;
+          draft.thread.history.forwardError = false;
+          hydrateEmbeddedRunDiffs(draft, data.runChanges, epoch);
+        });
+        attachRunDiffs();
+        return true;
+      } catch {
+        return false;
+      }
+    },
+
+    /** 从锚点历史片段一键回到最新尾部并续接实时 SSE。 */
+    async returnToLatest() {
+      const sessionId = get().sessionId;
+      if (!sessionId) return false;
+      const loaded = await get().loadHistory();
+      if (loaded && get().sessionId === sessionId) {
+        get().connectSse(sessionId, get().thread.cursor);
+      }
+      return loaded;
     },
 
     /**
@@ -146,7 +231,9 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
       if (earlierInflight && earlierInflight.sessionId === sessionId && earlierInflight.before === before) {
         return earlierInflight.promise;
       }
-      const promise = api.history(sessionId, { limit: thread.history.pageSize, before, compactTools: true })
+      const promise = api.history(sessionId, {
+        limit: thread.history.pageSize, before, compactTools: true, alignTurns: true, includeRunChanges: true
+      })
         .then((result) => {
           const data = requireData(result);
           if (!currentHistoryPage(sessionId, generation, data.historyRevision)) {
@@ -159,7 +246,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
             }
             return false;
           }
-          earlierPage = { sessionId, before, events, hasMore: data.hasMore === true };
+          earlierPage = { sessionId, before, events, hasMore: data.hasMore === true, runChanges: data.runChanges };
           return true;
         })
         .catch(() => false)
@@ -181,6 +268,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
         return false;
       }
       earlierPage = null;
+      const epoch = get().sessionEpoch;
       set((draft) => {
         const known = new Set(draft.thread.windowEvents.map((event) => event.sequence));
         const fresh = page.events.filter((event) => !known.has(event.sequence));
@@ -189,6 +277,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
         }
         draft.thread.history.hasMore = page.hasMore;
         draft.thread.history.error = false;
+        hydrateEmbeddedRunDiffs(draft, page.runChanges, epoch);
       });
       // 用掉一页就顺手补下一页：连续上滑时第二屏开始也不必等网络。
       get().prefetchEarlier();
@@ -213,11 +302,14 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
         draft.thread.history.error = false;
       });
       try {
-        const data = requireData(await api.history(sessionId, { limit: thread.history.pageSize, before, compactTools: true }));
+        const data = requireData(await api.history(sessionId, {
+          limit: thread.history.pageSize, before, compactTools: true, alignTurns: true, includeRunChanges: true
+        }));
         if (!currentHistoryPage(sessionId, generation, data.historyRevision)) {
           return false;
         }
         const older = Array.isArray(data.events) ? data.events : [];
+        const epoch = get().sessionEpoch;
         set((draft) => {
           draft.thread.history.loading = false;
           if (!older.length) {
@@ -232,6 +324,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
           }
           prependHistoryPage(draft, fresh);
           draft.thread.history.hasMore = Boolean(data.hasMore === true && (data.events?.length || 0) > 0);
+          hydrateEmbeddedRunDiffs(draft, data.runChanges, epoch);
         });
         attachRunDiffs();
         return true;
@@ -300,11 +393,14 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
       if (laterInflight?.sessionId === sessionId && laterInflight.after === after) return laterInflight.promise;
       const promise = (async () => {
         try {
-        const data = requireData(await api.history(sessionId, { limit: thread.history.pageSize, after, compactTools: true }));
+        const data = requireData(await api.history(sessionId, {
+          limit: thread.history.pageSize, after, compactTools: true, includeRunChanges: true
+        }));
         if (!currentHistoryPage(sessionId, generation, data.historyRevision)) {
           return false;
         }
         const newer = Array.isArray(data.events) ? data.events : [];
+        const epoch = get().sessionEpoch;
         set((draft) => {
           draft.thread.history.forwardError = false;
           if (!newer.length) {
@@ -316,6 +412,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
           if (!fresh.length) { draft.thread.history.hasNewer = data.hasMore === true; return; }
           appendHistoryPage(draft, fresh);
           draft.thread.history.hasNewer = data.hasMore === true;
+          hydrateEmbeddedRunDiffs(draft, data.runChanges, epoch);
         });
         attachRunDiffs();
         return true;

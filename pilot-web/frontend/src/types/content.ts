@@ -1,5 +1,5 @@
 export interface HistoryRange { start: number; end: number }
-export interface MarkdownBlock extends HistoryRange { node: Node; source?: string }
+export interface MarkdownBlock extends HistoryRange { node: Node; source?: string; settled?: boolean; kind?: string; language?: string; code?: string }
 export interface SimpleEvent { type?: string; sequence?: number; payload?: object }
 export interface SideMessage { role: 'user' | 'assistant'; text: string }
 export interface SideTranscript { messages: SideMessage[]; live: string }

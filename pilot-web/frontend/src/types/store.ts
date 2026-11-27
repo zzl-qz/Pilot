@@ -72,7 +72,7 @@ export interface UiState {
   mobileConnectionOpen?: boolean; notificationsOpen?: boolean; recurringOpen?: boolean; resultsOpen?: boolean;
   schedulesOpen?: boolean; searchOpen?: boolean; shortcutsOpen?: boolean; composerEnabled?: boolean; resultUnread?: number;
   resultTarget?: string | null; scheduleTarget?: string | null; scheduleDraft?: string | null; scheduleRepeat?: boolean;
-  navigationTarget?: { sessionId: string; sequence: number } | null; changeCount?: number;
+  navigationTarget?: { sessionId: string; sequence: number; around?: boolean } | null; changeCount?: number;
   /** 执行模式：act 允许修改文件与运行命令，plan 为只读分析/规划模式。 */
   executionMode: ExecutionMode;
   /** 文件工作台要聚焦的工作区文件 id；不改文件本身，只影响面板选中项。 */
@@ -81,7 +81,7 @@ export interface UiState {
 /** 命令面板也接受历史版本的 id 字段。 */
 export type CommandTask = Partial<S.CommandTaskManagerTask> & { id?: string };
 export interface StoreData extends Omit<ReducerState, 'ui'> {
-  sessionId: string | null; sessionEpoch: number; ready: boolean; draftSession: DraftSession | null;
+  sessionId: string | null; sessionEpoch: number; ready: boolean; sessionLoading: boolean; draftSession: DraftSession | null;
   historyRevision: number | null;
   embeddedSessionId: string | null; sessionTitle: string; workspace: string; sessions: SessionSummary[];
   projects: ProjectSummary[]; currentProjectId: string | null; inputHistory: string[]; inputHistoryIndex: number; inputHistoryDraft: string;
@@ -130,7 +130,7 @@ export interface StoreActions {
   editNote(id: string, content: string): Promise<boolean>; removeNote(id: string): Promise<boolean>;
   setNoteStatus(id: string, status: string): Promise<boolean>; promoteNote(id: string): Promise<string | null>;
   startNewSession(options?: Partial<DraftSession>): null; ensureSession(): Promise<string | null>; activate(id: string): Promise<boolean>;
-  loadHistory(): Promise<boolean>; prefetchEarlier(): Promise<boolean>; applyEarlierPage(): boolean; loadEarlier(): Promise<boolean>;
+  loadHistory(): Promise<boolean>; loadHistoryAround(sequence: number): Promise<boolean>; returnToLatest(): Promise<boolean>; prefetchEarlier(): Promise<boolean>; applyEarlierPage(): boolean; loadEarlier(): Promise<boolean>;
   requestEarlierHistory(options?: ForceOptions): Promise<boolean>; loadLater(): Promise<boolean>; requestLaterHistory(options?: ForceOptions): Promise<boolean>;
   connectSse(id: string, cursor: number): void; scheduleReconnect(id: string): void; handleEvent(event: EventEnvelope): void;
   flushEvents(): void; settleEvent(event: EventEnvelope, after: StoreState): void;

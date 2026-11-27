@@ -320,7 +320,7 @@ export function ResultCard({ row, duplicate, hasPrecedingReply = false, isLastRe
   row: ResultRow; duplicate: boolean; hasPrecedingReply?: boolean; isLastResult?: boolean;
 }) {
   const rollbackRun = useStore((state) => state.rollbackRun);
-  const running = useStore((state) => state.running);
+  const running = useStore((state) => isLastResult && state.running);
   const files = row.changedFiles || [];
   const settled = row.tone === 'ok' || row.tone === 'text';
   // 失败时结论收成一行，改动卡不跟着失败原因换样子。

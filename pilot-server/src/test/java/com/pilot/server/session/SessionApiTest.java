@@ -41,6 +41,7 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
 
 import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.event.EventEnvelope;
+import com.pilot.core.event.RunCompleted;
 import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.RunStarted;
 import com.pilot.core.message.Message;
@@ -48,6 +49,7 @@ import com.pilot.core.project.ProjectRepository;
 import com.pilot.core.session.ConversationRepository;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.run.RunStarter;
+import com.pilot.server.workspace.RunSnapshotService;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -249,6 +251,9 @@ class SessionApiTest {
 
     @Autowired
     private ConversationRepository conversations;
+
+    @Autowired
+    private RunSnapshotService runSnapshots;
 
     @TempDir
     Path workspace;
@@ -494,6 +499,91 @@ class SessionApiTest {
 
         mvc.perform(get("/api/sessions/{id}/history", sessionId).param("before", "4").param("after", "2"))
             .andExpect(status().isBadRequest());
+    }
+
+    /** 历史接口支持 around 1 跳锚点窗口、Turn 边界自动对齐与互斥参数校验。 */
+    @Test
+    void historySupportsAroundWindowAndTurnAlignment() throws Exception {
+        String sessionId = createSession();
+        // Turn 1: seq 1..3
+        sessions.publish(sessionId, "run_1", new RunStarted("t1"));
+        sessions.publish(sessionId, "run_1", new AssistantDelta("a1"));
+        sessions.publish(sessionId, "run_1", new RunCompleted("done1", List.of(), List.of()));
+        // Turn 2: seq 4..7
+        sessions.publish(sessionId, "run_2", new RunStarted("t2"));
+        sessions.publish(sessionId, "run_2", new AssistantDelta("a2-1"));
+        sessions.publish(sessionId, "run_2", new AssistantDelta("a2-2"));
+        sessions.publish(sessionId, "run_2", new RunCompleted("done2", List.of(), List.of()));
+        // Turn 3: seq 8..10
+        sessions.publish(sessionId, "run_3", new RunStarted("t3"));
+        sessions.publish(sessionId, "run_3", new AssistantDelta("a3"));
+        sessions.publish(sessionId, "run_3", new RunCompleted("done3", List.of(), List.of()));
+
+        // 中部锚点：一次取回前后窗口，hasMore=true 且 hasNewer=true
+        mvc.perform(get("/api/sessions/{id}/history", sessionId).param("around", "5").param("limit", "4"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.hasMore").value(true))
+            .andExpect(jsonPath("$.hasNewer").value(true)).andExpect(jsonPath("$.events.length()").value(4))
+            .andExpect(jsonPath("$.events[0].sequence").value(4)).andExpect(jsonPath("$.events[3].sequence").value(7));
+
+        // 头部锚点：前侧不足自动向后补足，hasMore=false 且 hasNewer=true
+        mvc.perform(get("/api/sessions/{id}/history", sessionId).param("around", "1").param("limit", "4"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.hasMore").value(false))
+            .andExpect(jsonPath("$.hasNewer").value(true)).andExpect(jsonPath("$.events.length()").value(4))
+            .andExpect(jsonPath("$.events[0].sequence").value(1)).andExpect(jsonPath("$.events[3].sequence").value(4));
+
+        // 尾部锚点：后侧不足自动向前补足，hasMore=true 且 hasNewer=false
+        mvc.perform(get("/api/sessions/{id}/history", sessionId).param("around", "10").param("limit", "4"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.hasMore").value(true))
+            .andExpect(jsonPath("$.hasNewer").value(false)).andExpect(jsonPath("$.events.length()").value(4))
+            .andExpect(jsonPath("$.events[0].sequence").value(7)).andExpect(jsonPath("$.events[3].sequence").value(10));
+
+        // Turn 边界对齐：limit=2 原本落到 seq 9..10（截断 Turn 3），开启 alignTurns 后回退包含 seq 8 (run.started)
+        mvc.perform(get("/api/sessions/{id}/history", sessionId).param("limit", "2").param("alignTurns", "true"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.events.length()").value(3))
+            .andExpect(jsonPath("$.events[0].sequence").value(8))
+            .andExpect(jsonPath("$.events[0].type").value("run.started"))
+            .andExpect(jsonPath("$.events[2].sequence").value(10)).andExpect(jsonPath("$.hasMore").value(true))
+            .andExpect(jsonPath("$.hasNewer").value(false));
+
+        // 非法参数与互斥游标应返回 400
+        mvc.perform(get("/api/sessions/{id}/history", sessionId).param("around", "0"))
+            .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/sessions/{id}/history", sessionId).param("around", "5").param("before", "8"))
+            .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/sessions/{id}/history", sessionId).param("around", "5").param("after", "3"))
+            .andExpect(status().isBadRequest());
+    }
+
+    /** includeRunChanges=true 时随页附带已保存快照的文件统计摘要，并剔除 diff 正文以控制载荷体积。 */
+    @Test
+    void historyIncludeRunChangesEmbedsSummaryWithoutDiffBody() throws Exception {
+        String sessionId = createSession();
+        String runId = "run_snap_" + UUID.randomUUID();
+        Path file = workspace.resolve("hello.txt");
+        Files.writeString(file, "line1\n");
+        runSnapshots.bind(runId, workspace);
+        try {
+            runSnapshots.beforeWrite(file);
+            Files.writeString(file, "line1\nline2\nline3\n");
+            runSnapshots.finish();
+        } finally {
+            runSnapshots.clear();
+        }
+
+        sessions.publish(sessionId, runId, new RunStarted("修改 hello.txt"));
+        sessions.publish(sessionId, runId, new AssistantDelta("已更新文件。"));
+        sessions.publish(sessionId, runId, new RunCompleted("已完成", List.of("hello.txt"), List.of()));
+
+        mvc.perform(
+            get("/api/sessions/{id}/history", sessionId).param("limit", "10").param("includeRunChanges", "true"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.runChanges." + runId + ".files[0].path").value("hello.txt"))
+            .andExpect(jsonPath("$.runChanges." + runId + ".added").value(2))
+            .andExpect(jsonPath("$.runChanges." + runId + ".files[0].diff").doesNotExist());
+
+        // 默认不请求 includeRunChanges 时，不返回 runChanges 字段
+        mvc.perform(get("/api/sessions/{id}/history", sessionId).param("limit", "10")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.runChanges").doesNotExist());
     }
 
     /** 同一项目下不允许出现第二条空白对话；要求确认后可以「归档旧的再新建」。 */

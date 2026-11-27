@@ -24,7 +24,7 @@ export interface Reply { text: string; preview?: string; live: boolean; needsBre
 export interface Thinking { preview?: string; text: string; live: boolean; action: string; startedAt?: number; finishedAt?: number | null }
 interface RowBase { key: string; start: number; end: number; text?: string; detail?: string | null }
 export interface UserRow extends RowBase { type: 'user'; sequence: number | null; text: string; attachments: MessageAttachment[]; imagePositions: number[]; steered?: boolean }
-export interface TurnRow extends RowBase { type: 'turn'; runIds: string[]; tools: ToolRow[]; toolIndex: Record<string, ToolRow>; thinking: Thinking | null; reply: Reply; stats: RunUsage | null; agents: Record<string, AgentView>; requests?: RequestReport[] }
+export interface TurnRow extends RowBase { type: 'turn'; runIds: string[]; tools: ToolRow[]; toolIndex: Record<string, ToolRow>; thinking: Thinking | null; commentaries?: string[]; reply: Reply; stats: RunUsage | null; agents: Record<string, AgentView>; requests?: RequestReport[] }
 export interface ResultRow extends RowBase { type: 'result'; tone: string; title: string; detail: string | null; changedFiles: ChangeFile[]; changedSummary?: string | null; runIds: string[]; outcome?: string; resumable?: boolean; errorCode?: string | null; continued?: boolean }
 export interface CompactionRow extends RowBase { type: 'compaction'; coveredMessages: number; charactersBefore: number; charactersAfter: number; summary: string }
 export interface PlanRow extends RowBase { type: 'plan'; items: PlanItem[] }

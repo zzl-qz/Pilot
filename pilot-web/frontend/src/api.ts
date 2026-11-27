@@ -192,12 +192,18 @@ export const api = {
   ),
   answerQuestion: (id: string, callId: string, choice: string) => apiJson<ApiResults['answerQuestion']>(`/api/sessions/${encodeURIComponent(id)}/questions/${encodeURIComponent(callId)}`, jsonBody('POST', { choice })),
   pendingInteractions: () => apiJson<ApiResults['pendingInteractions']>('/api/interactions/pending'),
-  history: (id: string, { limit, before, after, compactTools }: { limit?: number; before?: number; after?: number; compactTools?: boolean } = {}) => {
+  history: (id: string, { limit, before, after, around, compactTools, alignTurns, includeRunChanges }: {
+    limit?: number; before?: number; after?: number; around?: number;
+    compactTools?: boolean; alignTurns?: boolean; includeRunChanges?: boolean;
+  } = {}) => {
     const params = new URLSearchParams();
     if (limit) params.set('limit', String(limit));
     if (before != null) params.set('before', String(before));
     if (after != null) params.set('after', String(after));
+    if (around != null) params.set('around', String(around));
     if (compactTools) params.set('compactTools', 'true');
+    if (alignTurns) params.set('alignTurns', 'true');
+    if (includeRunChanges) params.set('includeRunChanges', 'true');
     return apiJson<ApiResults['history']>(`/api/sessions/${encodeURIComponent(id)}/history?${params}`);
   },
   event: (id: string, sequence: number, revision: number) => apiJson<{ event: import('./types/events.js').EventEnvelope; historyRevision: number }>(

@@ -45,6 +45,35 @@ export function createSessionStreams(
   let globalSource: EventSource | null = null;
   let globalReconnectTimer: ReturnType<typeof setTimeout> | undefined;
   let globalAttempt = 0;
+  let taskRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastTaskRefreshAt = 0;
+  const TASK_REFRESH_THROTTLE_MS = 1500;
+
+  function clearTaskRefreshTimer() {
+    clearTimeout(taskRefreshTimer);
+    taskRefreshTimer = undefined;
+  }
+
+  function scheduleTaskRefresh(immediate: boolean) {
+    const sessionId = get().sessionId;
+    const sessionEpoch = get().sessionEpoch;
+    if (!sessionId) return;
+    const now = Date.now();
+    if (immediate || now - lastTaskRefreshAt >= TASK_REFRESH_THROTTLE_MS) {
+      clearTaskRefreshTimer();
+      lastTaskRefreshAt = now;
+      get().loadTask();
+      return;
+    }
+    if (taskRefreshTimer != null) return;
+    taskRefreshTimer = setTimeout(() => {
+      taskRefreshTimer = undefined;
+      if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
+      lastTaskRefreshAt = Date.now();
+      get().loadTask();
+    }, Math.max(100, TASK_REFRESH_THROTTLE_MS - (now - lastTaskRefreshAt)));
+    unrefTimer(taskRefreshTimer);
+  }
 
   /*
    * SSE 事件按帧合并。
@@ -158,6 +187,8 @@ export function createSessionStreams(
       mirrorSource = null;
     }
     clearCommandTimer();
+    clearTaskRefreshTimer();
+    lastTaskRefreshAt = 0;
     commandPollSession = null;
     clearTimeout(reconnectTimer);
     reconnectTimer = undefined;
@@ -286,6 +317,38 @@ export function createSessionStreams(
     scheduleCommandPoll(sessionId, sessionEpoch, panelVisible);
   }
 
+  function enqueueEvent(event: EventEnvelope, estimatedBytes?: number) {
+    const { sessionId, sessionEpoch } = get();
+    if (!sessionId || streamPaused || event?.sessionId !== sessionId) {
+      return;
+    }
+    if (!Number.isSafeInteger(event.sequence) || event.sequence < 0 || typeof event.type !== 'string'
+        || !event.payload || typeof event.payload !== 'object' || Array.isArray(event.payload)) {
+      recoverEventStream(sessionId, '事件格式无效');
+      return;
+    }
+    const thread = get().thread;
+    if (!isEphemeral(event.type) && event.sequence <= thread.cursor) {
+      // 重连/重放重复推送：同一序号不再应用一次
+      return;
+    }
+    const bytes = estimatedBytes != null && estimatedBytes < MAX_QUEUED_BYTES
+      ? estimatedBytes
+      : wireEncoder.encode(JSON.stringify(event)).byteLength;
+    if (eventQueue.length >= MAX_QUEUED_EVENTS || queuedBytes + bytes > MAX_QUEUED_BYTES) {
+      // 优先应用已有的有效批次，后台节流也不能无限堆积。
+      get().flushEvents();
+    }
+    if (streamPaused) return;
+    if (bytes > MAX_QUEUED_BYTES) {
+      recoverEventStream(sessionId, '单条事件超过可处理大小');
+      return;
+    }
+    eventQueue.push({ event, sessionId, sessionEpoch });
+    queuedBytes += bytes;
+    scheduleFlush();
+  }
+
   const actions: StoreSlice<'connectSse' | 'scheduleReconnect' | 'handleEvent' | 'flushEvents' | 'settleEvent' | 'ensureMirror' | 'connectGlobalInteractions'> = {
     /* ---------- SSE ---------- */
     connectSse(sessionId, cursor) {
@@ -303,9 +366,10 @@ export function createSessionStreams(
       const handle = (message: MessageEvent<string>) => {
         if (!current()) return;
         try {
-          const event = JSON.parse(message.data) as EventEnvelope;
+          const raw = typeof message.data === 'string' ? message.data : '';
+          const event = JSON.parse(raw) as EventEnvelope;
           if (!event || typeof event !== 'object' || event.sessionId !== sessionId) throw new Error('事件会话无效');
-          get().handleEvent(event);
+          enqueueEvent(event, raw.length * 2);
         } catch (error) {
           console.warn('[sse] 事件解析失败', error);
           recoverEventStream(sessionId, '事件数据无法解析');
@@ -423,33 +487,7 @@ export function createSessionStreams(
 
     /** SSE 事件统一入口：先入队，帧末合并提交（见 eventQueue 注释）。 */
     handleEvent(event) {
-      const { sessionId, sessionEpoch } = get();
-      if (!sessionId || streamPaused || event?.sessionId !== sessionId) {
-        return;
-      }
-      if (!Number.isSafeInteger(event.sequence) || event.sequence < 0 || typeof event.type !== 'string'
-          || !event.payload || typeof event.payload !== 'object' || Array.isArray(event.payload)) {
-        recoverEventStream(sessionId, '事件格式无效');
-        return;
-      }
-      const thread = get().thread;
-      if (!isEphemeral(event.type) && event.sequence <= thread.cursor) {
-        // 重连/重放重复推送：同一序号不再应用一次
-        return;
-      }
-      const bytes = wireEncoder.encode(JSON.stringify(event)).byteLength;
-      if (eventQueue.length >= MAX_QUEUED_EVENTS || queuedBytes + bytes > MAX_QUEUED_BYTES) {
-        // 优先应用已有的有效批次，后台节流也不能无限堆积。
-        get().flushEvents();
-      }
-      if (streamPaused) return;
-      if (bytes > MAX_QUEUED_BYTES) {
-        recoverEventStream(sessionId, '单条事件超过可处理大小');
-        return;
-      }
-      eventQueue.push({ event, sessionId, sessionEpoch });
-      queuedBytes += bytes;
-      scheduleFlush();
+      enqueueEvent(event);
     },
 
     /** 把这一帧攒下的事件一次性折进状态，再统一触发联动刷新。 */
@@ -523,9 +561,11 @@ export function createSessionStreams(
         set((draft) => { draft.hasRun = true; if (event.type === 'run.started') draft.validation = null; });
         void get().loadValidation();
       }
-      // 任务契约面板刷新
-      if (sessionChanged || event.type === 'run.continued' || event.type === 'tool.completed' || event.type === 'execution.updated') {
-        get().loadTask();
+      // 任务契约面板刷新：状态边界立即拉取，高频 tool.completed / execution.updated 合并节流避免请求风暴
+      if (sessionChanged || event.type === 'run.continued') {
+        scheduleTaskRefresh(true);
+      } else if (event.type === 'tool.completed' || event.type === 'execution.updated') {
+        scheduleTaskRefresh(false);
       }
       if (runChanged) {
         get().loadQueue();

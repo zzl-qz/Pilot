@@ -348,7 +348,8 @@ function diffLineKind(line: string) {
  * 直接跳过比对。默认收起为单行摘要，展开后在固定最大高度内滚动，不把对话拉成无限高度。
  */
 export const ToolGroup = memo(function ToolGroup({ tools }: { tools: ToolView[] }) {
-  const sessionLive = useStore(state => state.running);
+  const hasActive = tools.some(tool => tool.status === 'run');
+  const sessionLive = useStore(state => hasActive && state.running);
   const running = sessionLive ? tools.filter(tool => tool.status === 'run').length : 0;
   // 会话已停时，还停在 run 的行界面上会当成中断；组头统计也要跟显示一致，别再写「正在执行」。
   const attention = tools.filter((tool) => {
@@ -491,7 +492,7 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
   const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => { if (autoReveal) setOpen(true); }, [autoReveal]);
   useEffect(() => () => clearTimeout(copyTimer.current), []);
-  const sessionLive = useStore(state => state.running);
+  const sessionLive = useStore(state => tool.status === 'run' && state.running);
   const sessionId = useStore(state => state.sessionId);
   const sessionEpoch = useStore(state => state.sessionEpoch);
   const historyRevision = useStore(state => state.historyRevision);
@@ -729,8 +730,9 @@ export const ThinkingBlock = memo(function ThinkingBlock({ thinking }: { thinkin
 
 /** 每秒重渲染一次，给计时类文案（思考中 Ns、运行耗时）用。 */
 export const AgentGroup = memo(function AgentGroup({ agents }: { agents: Record<string, AgentView> }) {
-  const sessionLive = useStore(state => state.running);
   const list = Object.values(agents || {});
+  const hasRunning = list.some(agent => agent.status === 'running');
+  const sessionLive = useStore(state => hasRunning && state.running);
   const [open, setOpen] = useState(false);
   if (!list.length) return null;
   const effective = sessionLive
@@ -759,7 +761,7 @@ export const AgentGroup = memo(function AgentGroup({ agents }: { agents: Record<
 });
 
 const AgentCard = memo(function AgentCard({ agent }: { agent: AgentView }) {
-  const sessionLive = useStore(state => state.running);
+  const sessionLive = useStore(state => agent.status === 'running' && state.running);
   const live = agent.status === 'running' && sessionLive;
   useSecondTick(live);
   // 回传正文末尾的 <subagent_result> 是给父模型合并用的清单，不该原样糊在界面上

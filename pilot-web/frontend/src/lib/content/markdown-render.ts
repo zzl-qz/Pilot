@@ -6,7 +6,64 @@ import DOMPurify from 'dompurify';
  */
 
 import { writeClipboard as tryWriteClipboard } from '../clipboard.js';
+import { tokenizeCodeLine } from '../code-highlight.js';
 import { parseCallout, resolveFileReference, languageLabel, outputKind, safeImageSource } from './content-format.js';
+
+const CODE_HIGHLIGHT_MAX_CHARS = 60_000;
+const FENCE_HIGHLIGHT_LANG: Record<string, string> = {
+  java: 'java', kt: 'java', kotlin: 'java', kts: 'java', cs: 'java', csharp: 'java',
+  ts: 'ts', typescript: 'ts', tsx: 'ts', js: 'ts', javascript: 'ts', jsx: 'ts', mjs: 'ts', cjs: 'ts',
+  py: 'py', python: 'py',
+  go: 'go', golang: 'go',
+  rs: 'rust', rust: 'rust',
+  c: 'c', h: 'c', cpp: 'c', 'c++': 'c', cc: 'c', hpp: 'c',
+  json: 'json', jsonc: 'json',
+  yml: 'yaml', yaml: 'yaml',
+  xml: 'xml', html: 'xml', htm: 'xml', svg: 'xml',
+  css: 'css', scss: 'css', less: 'css',
+  sql: 'sql',
+  sh: 'sh', bash: 'sh', zsh: 'sh', shell: 'sh', ps1: 'sh', powershell: 'sh', cmd: 'sh', bat: 'sh'
+};
+const codeBlockTextStore = new WeakMap<Node, string>();
+
+function normalizeHighlightLang(language: string): string | null {
+  const key = (language || '').trim().toLowerCase();
+  return key ? (FENCE_HIGHLIGHT_LANG[key] ?? null) : null;
+}
+
+function clearNode(node: HTMLElement) {
+  if (typeof node.replaceChildren === 'function') {
+    node.replaceChildren();
+  } else {
+    node.textContent = '';
+  }
+}
+
+function populateCodeElement(el: HTMLElement, code: string, language: string) {
+  const highlightLang = normalizeHighlightLang(language);
+  if (el.childNodes?.length) clearNode(el);
+  if (!highlightLang || !code || code.length > CODE_HIGHLIGHT_MAX_CHARS) {
+    el.textContent = code;
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  const lines = code.split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    if (i > 0) fragment.append(document.createTextNode('\n'));
+    const tokens = tokenizeCodeLine(lines[i], highlightLang);
+    for (const token of tokens) {
+      if (token.kind === 'plain') {
+        fragment.append(document.createTextNode(token.text));
+      } else {
+        const span = document.createElement('span');
+        span.className = `tok-${token.kind}`;
+        span.textContent = token.text;
+        fragment.append(span);
+      }
+    }
+  }
+  el.append(fragment);
+}
 
 let notify: (text: string) => void = () => {};
 /** React 侧把 showNotice 注入进来，渲染引擎不依赖框架。 */
@@ -111,13 +168,19 @@ function markdownBlocks(lines: string[]) {
  * <p>行区间是流式增量渲染的依据：只要一个块的输入没变，它对应 DOM 就可以原样留着。
  * offset 用于解析「从中间某个位置切出来的行片段」时把行号还原成整篇坐标。
  */
-function markdownBlockRecords(lines: string[], offset = 0, depth = 0): MarkdownBlock[] {
+function markdownBlockRecords(
+  lines: string[],
+  offset = 0,
+  depthOrOptions: number | { streaming?: boolean; depth?: number } = 0
+): MarkdownBlock[] {
+  const depth = typeof depthOrOptions === 'number' ? depthOrOptions : (depthOrOptions?.depth ?? 0);
+  const streaming = typeof depthOrOptions === 'object' && Boolean(depthOrOptions?.streaming);
   const records: MarkdownBlock[] = [];
   let i = 0;
 
   /** blocks 的每一次 Push 都带上当前块的起止行；end 是不包含的下标。 */
-  const push = (node: Node, start: number) => {
-    records.push({ node, start: start + offset, end: i + offset });
+  const push = (node: Node, start: number, extra?: Partial<Omit<MarkdownBlock, 'node' | 'start' | 'end'>>) => {
+    records.push({ node, start: start + offset, end: i + offset, ...extra });
   };
 
   while (i < lines.length) {
@@ -133,21 +196,34 @@ function markdownBlockRecords(lines: string[], offset = 0, depth = 0): MarkdownB
     if (line.trim() === '$$') {
       const math = [];
       i++;
+      let closed = false;
       while (i < lines.length && lines[i].trim() !== '$$') {
         math.push(lines[i]);
         i++;
       }
       if (i < lines.length) {
         i++;
+        closed = true;
       }
-      push(mathBlock(math.join('\n')), start);
+      const tex = math.join('\n');
+      if (streaming && !closed) {
+        push(codeBlock(tex, 'math', { deferRichPreview: true }), start, {
+          settled: false, kind: 'math-streaming', language: 'math', code: tex
+        });
+      } else {
+        push(mathBlock(tex), start, { settled: true, kind: 'math' });
+      }
       continue;
     }
 
     const source = sourceBlockAt(lines, i);
     if (source) {
       i = source.next;
-      push(codeBlock(source.lines.join('\n'), source.language), start);
+      const code = source.lines.join('\n');
+      const deferRichPreview = streaming && !source.closed;
+      push(codeBlock(code, source.language, { deferRichPreview }), start, {
+        settled: !deferRichPreview, kind: 'code', language: source.language, code
+      });
       continue;
     }
 
@@ -158,16 +234,24 @@ function markdownBlockRecords(lines: string[], offset = 0, depth = 0): MarkdownB
       const language = fence[2] || '';
       i++;
       const code = [];
+      let closed = false;
       while (i < lines.length) {
         const closing = lines[i].match(/^\s{0,3}(`{3,}|~{3,})\s*$/);
         if (closing && closing[1][0] === marker && closing[1].length >= length) {
           i++;
+          closed = true;
           break;
         }
         code.push(lines[i]);
         i++;
       }
-      push(codeBlock(code.join('\n'), language), start);
+      const joined = code.join('\n');
+      const kind = outputKind(language, joined);
+      const isRich = kind !== 'code' && kind !== 'diff';
+      const deferRichPreview = streaming && !closed && isRich;
+      push(codeBlock(joined, language, { deferRichPreview }), start, {
+        settled: !deferRichPreview, kind: deferRichPreview ? `${kind}-streaming` : kind, language, code: joined
+      });
       continue;
     }
 
@@ -280,7 +364,7 @@ function sourceBlockAt(lines: string[], start: number) {
   if (tagLines.length < 3) {
     return null;
   }
-  return { lines: taken, next: end, language: svg ? 'svg' : 'html' };
+  return { lines: taken, next: end, language: svg ? 'svg' : 'html', closed };
 }
 
 function safeSvg(source: string) {
@@ -298,19 +382,34 @@ function safeSvg(source: string) {
   return cleaned.firstElementChild instanceof SVGSVGElement ? cleaned.firstElementChild : null;
 }
 
-function codeBlock(code: string, language: string) {
+function codeLineCountLabel(text: string): string {
+  if (!text) return '';
+  const count = text.split('\n').length;
+  return count >= 2 ? `${count} 行` : '';
+}
+
+function codeBlock(code: string, language: string, options: { deferRichPreview?: boolean } = {}) {
   const text = code.replace(/\n+$/, '');
   const kind = outputKind(language, text);
+  const defer = Boolean(options.deferRichPreview);
   const figure = document.createElement('figure');
-  figure.className = 'md-code' + (kind === 'code' || kind === 'diff' ? '' : ' is-rich');
+  figure.className = 'md-code' + (!defer && kind !== 'code' && kind !== 'diff' ? ' is-rich' : '') + (defer ? ' is-streaming-rich' : '');
+  figure.dataset.codeLang = language;
+  figure.dataset.codeKind = defer ? `${kind}-streaming` : kind;
+  codeBlockTextStore.set(figure, text);
   const head = document.createElement('figcaption');
   head.className = 'md-code-head';
   const label = document.createElement('span');
   label.className = 'md-code-language';
-  label.textContent = languageLabel(kind === 'code' ? language : kind);
+  const baseLabel = languageLabel(kind === 'code' ? language : kind);
+  label.textContent = defer ? `${baseLabel} · 生成中` : baseLabel;
+  const lineBadge = document.createElement('span');
+  lineBadge.className = 'md-code-lines';
+  lineBadge.textContent = codeLineCountLabel(text);
   const source = sourcePre(text, language);
-  head.append(label);
-  const preview = buildPreview(kind, text, source);
+  head.append(label, lineBadge);
+  const getText = () => codeBlockTextStore.get(figure) ?? text;
+  const preview = defer ? null : buildPreview(kind, text, source);
   if (preview) {
     source.hidden = true;
     const toggle = document.createElement('button');
@@ -323,11 +422,11 @@ function codeBlock(code: string, language: string) {
       preview.hidden = showCode;
       toggle.textContent = showCode ? '预览' : '代码';
     });
-    head.append(toggle, copyControl('复制代码', () => text, { tip: false }));
+    head.append(toggle, copyControl('复制代码', getText, { tip: false }));
     figure.append(head, preview, source);
     return figure;
   }
-  head.append(copyControl('复制代码', () => text, { tip: false }));
+  head.append(copyControl('复制代码', getText, { tip: false }));
   figure.append(head, source);
   return figure;
 }
@@ -475,30 +574,37 @@ async function renderMath(host: HTMLElement, tex: string, display: boolean) {
   }
 }
 
+function populateDiffPre(pre: HTMLElement, code: string) {
+  if (pre.childNodes?.length) clearNode(pre);
+  pre.className = 'is-diff';
+  const fragment = document.createDocumentFragment();
+  code.split('\n').forEach((line) => {
+    const row = document.createElement('span');
+    row.className = 'diff-line';
+    if (line.startsWith('@@')) {
+      row.classList.add('is-hunk');
+    } else if (line.startsWith('+') && !line.startsWith('+++')) {
+      row.classList.add('is-add');
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      row.classList.add('is-del');
+    }
+    row.textContent = line.length ? line : ' ';
+    fragment.append(row);
+  });
+  pre.append(fragment);
+}
+
 function sourcePre(code: string, language: string) {
   const pre = document.createElement('pre');
   if (outputKind(language, code) === 'diff') {
-    pre.className = 'is-diff';
-    code.split('\n').forEach((line) => {
-      const row = document.createElement('span');
-      row.className = 'diff-line';
-      if (line.startsWith('@@')) {
-        row.classList.add('is-hunk');
-      } else if (line.startsWith('+') && !line.startsWith('+++')) {
-        row.classList.add('is-add');
-      } else if (line.startsWith('-') && !line.startsWith('---')) {
-        row.classList.add('is-del');
-      }
-      row.textContent = line.length ? line : ' ';
-      pre.append(row);
-    });
+    populateDiffPre(pre, code);
     return pre;
   }
   const el = document.createElement('code');
   if (language) {
     el.dataset.lang = language;
   }
-  el.textContent = code;
+  populateCodeElement(el, code, language);
   pre.append(el);
   return pre;
 }
@@ -762,4 +868,74 @@ function inlineToken(token: string) {
   return document.createTextNode(token);
 }
 
-export { renderMarkdown, markdownBlocks, markdownBlockRecords, actionIconSvg, actionIcon };
+/**
+ * 流式尾块就地更新：避免每帧 replaceChild 销毁重建节点导致划选打断、横向滚动条归零与滚动锚点抖动。
+ */
+function patchMarkdownBlock(existing: Node, next: MarkdownBlock, _previous?: MarkdownBlock): boolean {
+  if (!(existing instanceof HTMLElement) || !(next.node instanceof HTMLElement)) {
+    return false;
+  }
+  // 1. 普通代码块 / 流式未闭合代码块：保持 figure + figcaption + pre 原位（保留横向滚动位置），只更新代码体与行数
+  if (existing.tagName === 'FIGURE' && next.node.tagName === 'FIGURE'
+      && existing.classList.contains('md-code') && next.node.classList.contains('md-code')
+      && !existing.classList.contains('is-rich') && !next.node.classList.contains('is-rich')
+      && existing.dataset.codeKind === next.node.dataset.codeKind
+      && existing.dataset.codeLang === next.node.dataset.codeLang) {
+    const nextCode = codeBlockTextStore.get(next.node);
+    const existingPre = existing.querySelector('pre');
+    if (nextCode == null || !existingPre) return false;
+    const prevScrollLeft = existingPre.scrollLeft;
+    const prevScrollTop = existingPre.scrollTop;
+    codeBlockTextStore.set(existing, nextCode);
+    const linesEl = existing.querySelector('.md-code-lines');
+    if (linesEl) linesEl.textContent = codeLineCountLabel(nextCode);
+    const language = existing.dataset.codeLang || '';
+    if (outputKind(language, nextCode) === 'diff') {
+      populateDiffPre(existingPre, nextCode);
+      if (prevScrollLeft > 0) existingPre.scrollLeft = prevScrollLeft;
+      if (prevScrollTop > 0) existingPre.scrollTop = prevScrollTop;
+      return true;
+    }
+    const existingCodeEl = existingPre.querySelector('code');
+    if (!existingCodeEl) return false;
+    populateCodeElement(existingCodeEl, nextCode, language);
+    if (prevScrollLeft > 0) existingPre.scrollLeft = prevScrollLeft;
+    if (prevScrollTop > 0) existingPre.scrollTop = prevScrollTop;
+    return true;
+  }
+  // 2. 普通段落：纯文本增长直接改 Text.data（用户划选不会断开），含行内格式则保留 <p> 节点本身替换子节点
+  if (existing.tagName === 'P' && next.node.tagName === 'P') {
+    if (existing.childNodes.length === 1 && existing.firstChild?.nodeType === Node.TEXT_NODE
+        && next.node.childNodes.length === 1 && next.node.firstChild?.nodeType === Node.TEXT_NODE) {
+      const nextText = next.node.firstChild.nodeValue ?? '';
+      if (existing.firstChild.nodeValue !== nextText) {
+        existing.firstChild.nodeValue = nextText;
+      }
+      return true;
+    }
+    existing.replaceChildren(...Array.from(next.node.childNodes));
+    return true;
+  }
+  // 3. 有序/无序列表：保留前缀未变的 <li> 节点，只更新变更项与新增项
+  if ((existing.tagName === 'UL' || existing.tagName === 'OL') && existing.tagName === next.node.tagName
+      && existing.getAttribute('start') === next.node.getAttribute('start')) {
+    const nextItems = Array.from(next.node.children);
+    while (existing.children.length > nextItems.length) {
+      existing.lastElementChild?.remove();
+    }
+    for (let index = 0; index < nextItems.length; index += 1) {
+      const nextItem = nextItems[index];
+      const currentItem = existing.children[index];
+      if (!currentItem) {
+        existing.append(nextItem);
+      } else if (currentItem.innerHTML !== nextItem.innerHTML || currentItem.className !== nextItem.className) {
+        currentItem.className = nextItem.className;
+        currentItem.replaceChildren(...Array.from(nextItem.childNodes));
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+export { renderMarkdown, markdownBlocks, markdownBlockRecords, patchMarkdownBlock, actionIconSvg, actionIcon };

@@ -122,6 +122,7 @@ export const useStore = create<StoreState>()(immer((set, get) => {
   sessionEpoch: 0,
   historyRevision: null,
   ready: false,
+  sessionLoading: false,
   refreshWorkbench: createWorkbenchRefresher({ get, set, api, isCircuitOpen: () => streamCircuitOpen(), resetCircuit: () => resetStreamCircuit() }),
   async reloadWorkbench() {
     const state = get();

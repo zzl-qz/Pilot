@@ -58,14 +58,18 @@ export function resumeLineIndex(blocks: readonly HistoryRange[] | null | undefin
   return Math.max(0, lineIndex);
 }
 
-/** 两个块是否可以复用同一个 DOM 节点：区间与原文都要一致。 */
-export function sameBlock(left: Pick<MarkdownBlock, 'start' | 'end' | 'source'> | null | undefined, right: Pick<MarkdownBlock, 'start' | 'end' | 'source'> | null | undefined) {
+/** 两个块是否可以复用同一个 DOM 节点：区间、原文与是否已落定（如未闭合富预览升级）都要一致。 */
+export function sameBlock(
+  left: Pick<MarkdownBlock, 'start' | 'end' | 'source' | 'settled'> | null | undefined,
+  right: Pick<MarkdownBlock, 'start' | 'end' | 'source' | 'settled'> | null | undefined
+) {
   if (!left || !right) {
     return false;
   }
   return left.start === right.start
     && left.end === right.end
-    && left.source === right.source;
+    && left.source === right.source
+    && (left.settled ?? true) === (right.settled ?? true);
 }
 
 /** 新旧块序列从头开始能原样保留多少个。 */
@@ -95,14 +99,22 @@ function continuesList(block: MarkdownBlock | undefined, line: string | undefine
  * @param {(lines: string[], offset: number) => Array<{node: Node, start: number, end: number}>} options.parse
  *        把行切片解析成块节点；start/end 是相对于整段文本的绝对行号。
  */
-export function createBlockStreamRenderer(container: HTMLElement, { parse }: { parse?: (lines: string[], offset: number) => MarkdownBlock[] } = {}) {
+export interface BlockStreamOptions {
+  parse?: (lines: string[], offset: number, options?: { streaming?: boolean }) => MarkdownBlock[];
+  /** 尝试对已有块节点做就地更新（保持选区、横向滚动条与滚动锚点），返回 true 表示复用原节点。 */
+  patch?: (existing: Node, next: MarkdownBlock, previous?: MarkdownBlock) => boolean;
+}
+
+export function createBlockStreamRenderer(container: HTMLElement, { parse, patch }: BlockStreamOptions = {}) {
   if (!container || typeof parse !== 'function') {
     throw new Error('createBlockStreamRenderer: 需要容器与 parse 函数');
   }
 
   const parseBlocks = parse;
+  const patchBlock = typeof patch === 'function' ? patch : null;
   let lines: string[] = [];
   let blocks: MarkdownBlock[] = [];
+  let lastStreaming = false;
 
   function normalize(text: unknown) {
     return String(text == null ? '' : text).replace(/\r\n/g, '\n').split('\n');
@@ -111,6 +123,7 @@ export function createBlockStreamRenderer(container: HTMLElement, { parse }: { p
   function reset() {
     lines = [];
     blocks = [];
+    lastStreaming = false;
     container.replaceChildren();
   }
 
@@ -119,11 +132,18 @@ export function createBlockStreamRenderer(container: HTMLElement, { parse }: { p
    *
    * @returns {boolean} 是否真的动过 DOM；没动可以用来跳过滚动写入。
    */
-  function update(text: unknown) {
+  function update(text: unknown, options: { streaming?: boolean } = {}) {
+    const streaming = Boolean(options.streaming);
     const nextLines = normalize(text);
-    const changedAt = firstDifferenceIndex(lines, nextLines);
-    if (changedAt < 0) {
+    let changedAt = firstDifferenceIndex(lines, nextLines);
+    const settlingUnfinished = lastStreaming && !streaming && blocks.some(block => block.settled === false);
+    if (changedAt < 0 && !settlingUnfinished) {
+      lastStreaming = streaming;
       return false;
+    }
+    if (changedAt < 0 && settlingUnfinished) {
+      const firstUnsettled = blocks.find(block => block.settled === false);
+      changedAt = firstUnsettled ? firstUnsettled.start : 0;
     }
     let resume = resumeLineIndex(blocks, changedAt);
     const precedingBlock = blocks.find((block) => Number(block.end) === changedAt);
@@ -137,8 +157,9 @@ export function createBlockStreamRenderer(container: HTMLElement, { parse }: { p
       resume = Math.min(resume, lastBlock.start);
     }
     const head = blocks.filter((block) => Number(block.end) <= resume);
-    const parsed = parseBlocks(nextLines.slice(resume), resume) || [];
-    const next = head.concat(parsed.map((record) => ({
+    const parsed = parseBlocks(nextLines.slice(resume), resume, { streaming }) || [];
+    const next: MarkdownBlock[] = head.concat(parsed.map((record) => ({
+      ...record,
       node: record.node,
       start: Number(record.start),
       end: Number(record.end),
@@ -153,12 +174,17 @@ export function createBlockStreamRenderer(container: HTMLElement, { parse }: { p
       removed = true;
     }
     for (let index = shared; index < next.length; index += 1) {
-      const node = next[index].node;
+      const record = next[index];
+      const node = record.node;
       const existing = container.childNodes[index];
       if (existing === node) {
         continue;
       }
       if (existing) {
+        if (patchBlock && patchBlock(existing, record, blocks[index])) {
+          record.node = existing;
+          continue;
+        }
         container.replaceChild(node, existing);
       } else {
         container.append(node);
@@ -167,6 +193,7 @@ export function createBlockStreamRenderer(container: HTMLElement, { parse }: { p
     const touched = removed || shared < next.length;
     lines = nextLines;
     blocks = next;
+    lastStreaming = streaming;
     return touched;
   }
 

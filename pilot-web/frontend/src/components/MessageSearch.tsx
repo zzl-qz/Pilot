@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Banner } from '@astryxdesign/core/Banner';
 import { Button } from '@astryxdesign/core/Button';
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput';
@@ -15,6 +15,30 @@ import './message-search.css';
 
 const emptyPage: MessageLibraryPage = { items: [], hasMore: false, nextOffset: 0 };
 const anchorKey = (hit: MessageLibraryHit) => `${hit.sessionId}:${hit.anchor}`;
+const SEARCH_DEBOUNCE_MS = 300;
+
+function HighlightedExcerpt({ text, term }: { text: string; term: string }) {
+  if (!term || !text) return <>{text}</>;
+  const lowerText = text.toLowerCase();
+  const lowerTerm = term.toLowerCase();
+  const parts: Array<{ text: string; hit: boolean }> = [];
+  let cursor = 0;
+  let index = lowerText.indexOf(lowerTerm, cursor);
+  while (index >= 0 && parts.length < 40) {
+    if (index > cursor) parts.push({ text: text.slice(cursor, index), hit: false });
+    parts.push({ text: text.slice(index, index + term.length), hit: true });
+    cursor = index + term.length;
+    index = lowerText.indexOf(lowerTerm, cursor);
+  }
+  if (cursor < text.length) parts.push({ text: text.slice(cursor), hit: false });
+  return (
+    <>
+      {parts.map((part, idx) => (
+        part.hit ? <mark key={idx} className="search-hit-mark">{part.text}</mark> : <span key={idx}>{part.text}</span>
+      ))}
+    </>
+  );
+}
 
 export default function MessageSearch() {
   const open = useStore(state => state.ui.searchOpen);
@@ -24,14 +48,19 @@ export default function MessageSearch() {
 function MessageSearchDialog() {
   const revision = useRef(0);
   const alive = useRef(false);
+  const composing = useRef(false);
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const resultsHeading = useRef<HTMLHeadingElement>(null);
   const nextPageButton = useRef<HTMLButtonElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
   const [session] = useState(() => useStore.getState().sessionId);
   const [query, setQuery] = useState('');
   const [scope, setScope] = useState<'all' | 'current'>('all');
   const [onlySaved, setOnlySaved] = useState(false);
   const [savedAnchors, setSavedAnchors] = useState(() => new Set<string>());
   const [page, setPage] = useState(emptyPage);
+  const [appliedFilterKey, setAppliedFilterKey] = useState('');
+  const [activeIndex, setActiveIndex] = useState(0);
   const [searched, setSearched] = useState(false);
   const [loading, setLoading] = useState(false);
   const [action, setAction] = useState<'open' | 'bookmark' | null>(null);
@@ -43,7 +72,9 @@ function MessageSearchDialog() {
   const term = query.trim();
   const tooLong = term.length > 200;
   const busy = loading || Boolean(action);
-  const canSearch = !busy && !syncing && !tooLong && (Boolean(term) || onlySaved);
+  const filterKey = `${scope}|${onlySaved ? '1' : '0'}|${term}`;
+  // 旧书签同步改为后台静默执行，不再阻塞搜索输入与提交
+  const canSearch = !busy && !tooLong && (Boolean(term) || onlySaved);
 
   useLayoutEffect(() => {
     const previous = document.getElementById('nav-message-search');
@@ -58,7 +89,11 @@ function MessageSearchDialog() {
   useEffect(() => {
     alive.current = true;
     void migrate();
-    return () => { alive.current = false; revision.current++; };
+    return () => {
+      alive.current = false;
+      revision.current++;
+      clearTimeout(debounceTimer.current);
+    };
   }, []);
 
   async function migrate() {
@@ -79,34 +114,30 @@ function MessageSearchDialog() {
     }
   }
 
-  function changeFilters(update: () => void) {
-    revision.current++;
-    setLoading(false);
-    setSearched(false);
-    setPage(emptyPage);
-    setError('');
-    setFeedback('');
-    update();
-  }
-
-  async function search(more = false) {
-    if (!canSearch) return;
+  const executeSearch = useCallback(async (params: {
+    term: string; scope: 'all' | 'current'; onlySaved: boolean; more?: boolean; offset?: number;
+  }) => {
+    clearTimeout(debounceTimer.current);
+    if (params.term.length > 200 || (!params.term && !params.onlySaved)) return;
     const token = ++revision.current;
+    const more = Boolean(params.more);
     setLoading(true);
     setSearched(true);
     setError('');
     setFeedback('');
     try {
       const data = await api.searchMessages({
-        q: term,
-        sessionId: scope === 'current' ? session || '' : '',
-        saved: onlySaved,
-        offset: more ? page.nextOffset : 0,
+        q: params.term,
+        sessionId: params.scope === 'current' ? session || '' : '',
+        saved: params.onlySaved,
+        offset: more ? (params.offset ?? 0) : 0,
       });
       if (!data || !Array.isArray(data.items)) throw new Error('搜索返回无效结果，请重试。');
       if (!alive.current || token !== revision.current) return;
       const restore = more && !data.hasMore && document.activeElement === nextPageButton.current;
       setPage(current => ({ ...data, items: more ? [...current.items, ...data.items] : data.items }));
+      setAppliedFilterKey(`${params.scope}|${params.onlySaved ? '1' : '0'}|${params.term}`);
+      if (!more) setActiveIndex(0);
       if (restore) requestAnimationFrame(() => {
         if (alive.current && token === revision.current && document.activeElement === document.body) {
           resultsHeading.current?.focus({ preventScroll: true });
@@ -117,7 +148,43 @@ function MessageSearchDialog() {
     } finally {
       if (alive.current && token === revision.current) setLoading(false);
     }
+  }, [session]);
+
+  function search(more = false) {
+    if (!canSearch) return;
+    void executeSearch({ term, scope, onlySaved, more, offset: page.nextOffset });
   }
+
+  function changeFilters(update: () => void) {
+    clearTimeout(debounceTimer.current);
+    revision.current++;
+    setLoading(false);
+    setSearched(false);
+    setPage(emptyPage);
+    setAppliedFilterKey('');
+    setActiveIndex(0);
+    setError('');
+    setFeedback('');
+    update();
+  }
+
+  // 防抖即时检索：用户停顿 300ms 后自动查询（中文组字中不触发；手动回车/点击立即查询并取消防抖）
+  useEffect(() => {
+    clearTimeout(debounceTimer.current);
+    if (composing.current || action || tooLong || (!term && !onlySaved) || appliedFilterKey === filterKey) {
+      return undefined;
+    }
+    debounceTimer.current = setTimeout(() => {
+      if (!alive.current || composing.current) return;
+      void executeSearch({ term, scope, onlySaved, more: false, offset: 0 });
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(debounceTimer.current);
+  }, [term, scope, onlySaved, tooLong, action, appliedFilterKey, filterKey, executeSearch]);
+
+  useEffect(() => {
+    const activeEl = listRef.current?.querySelector<HTMLElement>(`[data-hit-index="${activeIndex}"]`);
+    activeEl?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex]);
 
   async function runAction(kind: 'open' | 'bookmark', task: () => Promise<void>) {
     if (busy) return;
@@ -139,7 +206,10 @@ function MessageSearchDialog() {
       if (!alive.current) return;
       if (activated === false) throw new Error('无法打开该对话，请刷新搜索结果后重试。');
       if (useStore.getState().sessionId !== hit.sessionId) throw new Error('对话已变化，请重新选择。');
-      useStore.getState().setUi({ navigationTarget: { sessionId: hit.sessionId, sequence: hit.anchor }, searchOpen: false });
+      useStore.getState().setUi({
+        navigationTarget: { sessionId: hit.sessionId, sequence: hit.anchor, around: true },
+        searchOpen: false
+      });
     });
   }
 
@@ -157,10 +227,10 @@ function MessageSearchDialog() {
   const status = loading ? '正在搜索…'
     : action === 'open' ? '正在打开对话…'
     : action === 'bookmark' ? '正在收藏轮次…'
-    : feedback || (page.items.length ? `已显示 ${page.items.length} 条消息` : '');
+    : feedback || (page.items.length ? `已找到 ${page.items.length}${page.hasMore ? '+' : ''} 条消息` : '');
 
   return (
-    <Dialog isOpen onOpenChange={open => { if (!open) close(); }} width={640}
+    <Dialog isOpen onOpenChange={open => { if (!open) close(); }} width={660}
       maxHeight="calc(100dvh - 32px)" padding={0} purpose="form"
       className="search-dialog pilot-message-search" aria-labelledby="message-search-title"
       onKeyDown={event => {
@@ -169,20 +239,46 @@ function MessageSearchDialog() {
         if (event.key === 'Escape' && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
           event.preventDefault();
           close();
+          return;
+        }
+        if (!event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229 && page.items.length > 0) {
+          if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            setActiveIndex(prev => (prev + 1) % page.items.length);
+            return;
+          }
+          if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            setActiveIndex(prev => (prev - 1 + page.items.length) % page.items.length);
+            return;
+          }
         }
       }}>
       <header className="message-search-head">
-        <h2 id="message-search-title">搜索消息与书签</h2>
+        <div className="message-search-title-group">
+          <h2 id="message-search-title">搜索消息与书签</h2>
+          <span className="message-search-kbd-hint" aria-hidden="true">↑↓ 选择 · Enter 跳转 · Esc 关闭</span>
+        </div>
         <Button label="关闭消息搜索" icon={<Icon name="close" />} isIconOnly variant="ghost" onClick={close} />
       </header>
       <div className="message-search-scroll">
-        <form className="message-search-form" onSubmit={event => { event.preventDefault(); void search(); }}
+        <form className="message-search-form" onSubmit={event => {
+          event.preventDefault();
+          if (appliedFilterKey === filterKey && page.items.length > 0 && !busy
+              && document.activeElement?.id === 'message-search-query') {
+            const picked = page.items[activeIndex] ?? page.items[0];
+            if (picked) { openResult(picked); return; }
+          }
+          search();
+        }}
+          onCompositionStart={() => { composing.current = true; }}
+          onCompositionEnd={() => { composing.current = false; }}
           onKeyDown={event => {
             if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault();
           }}>
           <TextInput id="message-search-query" label="搜索消息内容" type="search" value={query} size="lg" width="100%"
             hasAutoFocus hasSpellCheck={false} autoComplete="off" enterKeyHint="search" startIcon={<Icon name="search" />}
-            placeholder="输入关键词、中文或代码片段" isReadOnly={Boolean(action)} controlClassName="message-search-field"
+            placeholder="输入关键词、中文或代码片段，即时检索历史记录" isReadOnly={Boolean(action)} controlClassName="message-search-field"
             status={tooLong ? { type: 'error' } : undefined} aria-describedby={tooLong ? 'message-search-limit' : undefined}
             onChange={value => changeFilters(() => setQuery(value))} />
           {tooLong && <p className="message-search-limit" id="message-search-limit" role="alert">关键词最多 200 个字符。</p>}
@@ -208,15 +304,29 @@ function MessageSearchDialog() {
           {!loading && !error && !page.items.length && <p className="message-search-empty">
             {searched ? '没有匹配的消息，请更换关键词或搜索范围。' : '输入关键词，或勾选「仅书签」查看收藏。'}
           </p>}
-          {page.items.length > 0 && <ul className="message-search-list" aria-busy={loading}>
-            {page.items.map(hit => {
+          {page.items.length > 0 && <ul className="message-search-list" ref={listRef} aria-busy={loading}>
+            {page.items.map((hit, index) => {
               const saved = hit.bookmarked || savedAnchors.has(anchorKey(hit));
+              const isSelected = index === activeIndex;
               return (
-                <li className="message-search-row" key={`${hit.sessionId}:${hit.sequence}`}>
+                <li
+                  className={`message-search-row${isSelected ? ' is-active' : ''}`}
+                  key={`${hit.sessionId}:${hit.sequence}`}
+                  data-hit-index={index}
+                  onMouseEnter={() => setActiveIndex(index)}
+                >
                   <button type="button" className="search-hit" aria-disabled={busy}
                     onClick={() => openResult(hit)}>
-                    <strong>{hit.title || '未命名对话'}</strong>
-                    <span className="message-search-excerpt">{hit.text}</span>
+                    <span className="message-search-row-top">
+                      <strong>{hit.title || '未命名对话'}</strong>
+                      <span className={`message-search-role is-${hit.role === 'assistant' ? 'assistant' : 'user'}`}>
+                        {hit.role === 'assistant' ? '助手' : '你'}
+                      </span>
+                      <span className="message-search-seq">#{hit.sequence}</span>
+                    </span>
+                    <span className="message-search-excerpt">
+                      <HighlightedExcerpt text={hit.text} term={term} />
+                    </span>
                     <span className="message-search-meta">{hit.role === 'assistant' ? '助手' : '你'} · 消息 #{hit.sequence}</span>
                   </button>
                   <Button label={saved ? '已收藏' : '收藏所在轮次'} variant="ghost" size="sm"
@@ -227,7 +337,7 @@ function MessageSearchDialog() {
             })}
           </ul>}
           {page.hasMore && <Button label="加载更多结果" variant="secondary" aria-disabled={!canSearch}
-            className="message-search-more" ref={nextPageButton} onClick={() => { void search(true); }} />}
+            className="message-search-more" ref={nextPageButton} onClick={() => { search(true); }} />}
         </section>
       </div>
       <footer className="message-search-sync">

@@ -1,5 +1,7 @@
 import type { StoreContext, StoreSlice } from './context.js';
 import type { StoreState, MirrorState } from '../types/store.js';
+import type { ThreadState, PlanItem, RunUsage } from '../types/thread.js';
+import type * as S from '../types/server.js';
 import { api } from '../api.js';
 import { initialThread } from '../thread-reducer.js';
 import { errorInfo } from '../lib/errors.js';
@@ -9,6 +11,23 @@ import { normalizePermission } from '../lib/permission.js';
 import { sortSessions } from '../lib/project/sessions.js';
 import { NOTE_COUNT_LIMIT, createDraftNote, noteContentError, readDraftNotes, uploadDraftNotes, writeDraftNotes } from '../lib/notes.js';
 import { sideChatsFor, writeSideChats } from '../lib/side-chat.js';
+
+const MAX_SESSION_SNAPSHOTS = 12;
+
+interface SessionSnapshot {
+  thread: ThreadState;
+  historyRevision: number;
+  workspace: string;
+  sessionTitle: string;
+  currentProjectId: string | null;
+  permissionMode: string;
+  hasRun: boolean;
+  lastOutcome: string;
+  lastRunId: string | null;
+  runUsage: RunUsage | null;
+  planItems: PlanItem[];
+  validation: S.DiagnosticsControllerValidationView | null;
+}
 
 function saveDraftNotes(notes: Parameters<typeof writeDraftNotes>[1]) { writeDraftNotes(localStore, notes); }
 interface SessionConnections {
@@ -48,6 +67,7 @@ export function resetFilePreview(draft: StoreState) {
 
 function resetSessionState(draft: StoreState) {
   draft.historyRevision = null;
+  draft.sessionLoading = false;
   // 结论条属于单个会话：切走时清空，避免把上一个会话的结论显示成这一个的。
   draft.validation = null;
   draft.hasRun = false;
@@ -127,6 +147,42 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
   let projectLoadSequence = 0;
   let sessionLoadSequence = 0;
   let notesLoadSequence = 0;
+  const snapshots = new Map<string, SessionSnapshot>();
+
+  function captureSnapshot(state: StoreState) {
+    const id = state.sessionId;
+    if (!id || state.sessionLoading || state.running || state.historyRevision == null) return;
+    if (!state.thread.rows.length || state.thread.cursor <= 0 || state.thread.history.hasNewer) return;
+    snapshots.delete(id);
+    snapshots.set(id, {
+      thread: structuredClone(state.thread),
+      historyRevision: state.historyRevision,
+      workspace: state.workspace,
+      sessionTitle: state.sessionTitle,
+      currentProjectId: state.currentProjectId,
+      permissionMode: state.permissionMode,
+      hasRun: state.hasRun,
+      lastOutcome: state.lastOutcome,
+      lastRunId: state.lastRunId,
+      runUsage: state.runUsage ? structuredClone(state.runUsage) : null,
+      planItems: structuredClone(state.planItems || []),
+      validation: state.validation ? structuredClone(state.validation) : null
+    });
+    while (snapshots.size > MAX_SESSION_SNAPSHOTS) {
+      const oldest = snapshots.keys().next().value;
+      if (oldest) snapshots.delete(oldest);
+      else break;
+    }
+  }
+
+  function takeSnapshot(id: string): SessionSnapshot | null {
+    const hit = snapshots.get(id);
+    if (!hit) return null;
+    // LRU 刷新热度
+    snapshots.delete(id);
+    snapshots.set(id, hit);
+    return hit;
+  }
   return {
     async loadProjects({ strict = false } = {}) {
       const request = ++projectLoadSequence;
@@ -418,6 +474,7 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
      */
     startNewSession(options = {}) {
       const current = get();
+      captureSnapshot(current);
       const projectId = options.projectId !== undefined ? options.projectId : (current.currentProjectId || current.draftSession?.projectId || null);
       const workspace = options.workspace !== undefined ? options.workspace : (current.workspace || current.draftSession?.workspace || null);
       closeStreams();
@@ -502,22 +559,58 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
     async activate(sessionId) {
       const activation = ++activationSequence;
       const current = () => activation === activationSequence && get().sessionId === sessionId;
+      const previous = get();
+      if (previous.sessionId && previous.sessionId !== sessionId) {
+        captureSnapshot(previous);
+      }
+      const cached = takeSnapshot(sessionId);
       closeStreams();
       set((draft) => {
         resetSessionState(draft);
         draft.sessionId = sessionId;
         draft.draftSession = null;
+        if (cached) {
+          // 命中内存 LRU 快照：0ms 瞬切渲染，后台静默核验 revision 并按旧游标续接 SSE
+          draft.sessionLoading = false;
+          draft.historyRevision = cached.historyRevision;
+          draft.thread = structuredClone(cached.thread);
+          draft.workspace = cached.workspace;
+          draft.sessionTitle = cached.sessionTitle;
+          draft.currentProjectId = cached.currentProjectId;
+          draft.permissionMode = cached.permissionMode;
+          draft.hasRun = cached.hasRun;
+          draft.lastOutcome = cached.lastOutcome;
+          draft.lastRunId = cached.lastRunId;
+          draft.runUsage = cached.runUsage ? structuredClone(cached.runUsage) : null;
+          draft.planItems = structuredClone(cached.planItems);
+          draft.validation = cached.validation ? structuredClone(cached.validation) : null;
+          draft.sideChats.activeId = sideChatsFor(draft.sideChats, {
+            sessionId, workspace: draft.workspace
+          }).activeId;
+          draft.ui.bottomSignal += 1;
+        } else {
+          // 冷切：标为加载态，防止闪出「从一个任务开始」空态页
+          draft.sessionLoading = true;
+        }
       });
+
+      const detailPromise = api.session(sessionId);
+      const historyPromise = cached ? Promise.resolve(true) : get().loadHistory();
       let detail = null;
       try {
-        detail = await api.session(sessionId);
+        detail = await detailPromise;
       } catch (error) {
-        if (current()) get().showNotice('读取会话失败：' + errorInfo(error).message);
+        if (current()) {
+          closeStreams();
+          set((draft) => { draft.sessionLoading = false; });
+          get().showNotice('读取会话失败：' + errorInfo(error).message);
+        }
         return false;
       }
       if (!current()) return false;
-      if (detail?.unread) await get().updateSessionPreferences(sessionId, {unread:false});
-      if (!current()) return false;
+      const unreadClear = detail?.unread
+        ? get().updateSessionPreferences(sessionId, { unread: false })
+        : Promise.resolve(true);
       set((draft) => {
         draft.workspace = detail?.workspace || '';
         draft.sessionTitle = detail?.title || '';
@@ -530,9 +623,13 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
           sessionId, workspace: draft.workspace
         }).activeId;
       });
-      if (!await get().loadHistory()) return false;
+      const historyLoaded = await historyPromise;
+      await unreadClear;
       if (!current()) return false;
-      // 历史窗口就绪后再按当前游标续订，避免事件落在重建窗口之前被覆盖
+      set((draft) => { draft.sessionLoading = false; });
+      if (!historyLoaded) return false;
+      // 历史窗口就绪后再按当前游标续订，避免事件落在重建窗口之前被覆盖；
+      // 若命中缓存但远端历史版本已变，SSE stream.reset 会无缝触发重建。
       get().connectSse(sessionId, get().thread.cursor);
       await Promise.all([
         get().loadPlan(), get().loadQueue(), get().loadTask(), get().loadNotes(), get().refreshContext(),
@@ -594,6 +691,7 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
     async archiveSession(id, archived = true) {
       try {
         await api.archiveSession(id, archived);
+        if (archived) snapshots.delete(id);
         await get().loadSessions();
         if (archived && get().sessionId === id) {
           const next = get().sessions.find((session) => !session.archived);
@@ -616,6 +714,7 @@ export function createSessionActions({ set, get }: StoreContext, { closeStreams,
     async deleteSession(id) {
       try {
         await api.deleteSession(id);
+        snapshots.delete(id);
         // 会话没了，它的草稿正文与附件副本也不再需要
         dropDraft(localStore, id);
         dropDraftSnapshot(localStore, id);

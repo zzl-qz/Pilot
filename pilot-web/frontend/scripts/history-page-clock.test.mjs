@@ -44,12 +44,12 @@ function replay(root = newerRoot()) {
   return produce(root, (draft) => prependHistoryPage(draft, earlierPage));
 }
 
-test('上滑翻页后，拆到更早一页的 run.started 仍然决定耗时起点', () => {
+test('上滑翻页后，拆到更早一页的 run.started 仍然决定耗时起点且无缝合并为单回合', () => {
   const root = replay();
   const turns = root.thread.rows.filter((row) => row.type === 'turn');
-  assert.equal(turns.length, 2, '同一段运行被翻页拆成两段回合');
-  assert.equal(turns[0].stats.startedAt, start + 2000, '更早一段取真实 run.started，不取本页首个事件时间');
-  assert.equal(turns[1].stats.finishedAt, start + 5000000, '更晚一段保留 run.completed 的终点');
+  assert.equal(turns.length, 1, '同一段运行跨页拼接后应无缝合并为单个回合');
+  assert.equal(turns[0].stats.startedAt, start + 2000, '起点取更早页的真实 run.started，不取后页首个事件时间');
+  assert.equal(turns[0].stats.finishedAt, start + 5000000, '终点保留更晚页的 run.completed 时间');
 });
 
 test('翻页拼接后展示出的耗时等于真实时长，不再塌成 0:00', () => {

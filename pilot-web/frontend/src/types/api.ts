@@ -5,7 +5,14 @@ import type { DraftAttachment } from './input.js';
 
 import type { EventEnvelope } from './events.js';
 export type { EventEnvelope } from './events.js';
-export interface HistoryPage { events: EventEnvelope[]; hasMore: boolean; total?: number; historyRevision?: number }
+export interface HistoryPage {
+  events: EventEnvelope[];
+  hasMore: boolean;
+  hasNewer?: boolean;
+  total?: number;
+  historyRevision?: number;
+  runChanges?: Record<string, S.ChangeServiceRunChangeReport>;
+}
 export interface ActionResponse { ok?: boolean; message?: string; error?: string }
 export interface BrowserLane {
   browserSessionId: string;

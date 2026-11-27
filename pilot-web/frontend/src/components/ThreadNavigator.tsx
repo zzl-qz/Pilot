@@ -78,8 +78,9 @@ function Navigation({ session, rows, scrollRef, contentRef, stopFollowing, befor
       setActive(selected);
     };
     const schedule = () => { if (frame == null) frame = requestAnimationFrame(measure); };
+    // 只观察滚动视口尺寸变化，不观察 contentRef：流式吐字每帧长高时无需全量 querySelectorAll + getBoundingClientRect 重排。
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null;
-    observer?.observe(content); observer?.observe(scroll); scroll.addEventListener('scroll', schedule, { passive: true }); window.addEventListener('resize', schedule); schedule();
+    observer?.observe(scroll); scroll.addEventListener('scroll', schedule, { passive: true }); window.addEventListener('resize', schedule); schedule();
     return () => { if (frame != null) cancelAnimationFrame(frame); observer?.disconnect(); scroll.removeEventListener('scroll', schedule); window.removeEventListener('resize', schedule); };
   }, [identities, scrollRef, contentRef, target]);
   useEffect(() => {
@@ -106,7 +107,8 @@ function Navigation({ session, rows, scrollRef, contentRef, stopFollowing, befor
   useEffect(() => {
     if (!navigationTarget || navigationTarget.sessionId !== session || !Number.isFinite(navigationTarget.sequence)) return;
     const entry = { id: String(navigationTarget.sequence), key: '', sequence: navigationTarget.sequence };
-    jump(entry); useStore.getState().setUi({ navigationTarget: null });
+    void jump(entry, false, { around: Boolean(navigationTarget.around) });
+    useStore.getState().setUi({ navigationTarget: null });
   }, [navigationTarget]);
   function closePanel(restoreFocus = false) {
     clearTimeout(closeTimer.current);
@@ -178,12 +180,30 @@ function Navigation({ session, rows, scrollRef, contentRef, stopFollowing, befor
       if (written && !bookmarksChanged(session) && mounted.current) setSyncError('书签已保存。跨窗口即时通知不可用，切回窗口或稍后会自动刷新。');
     }
   }
-  async function jump(entry: JumpEntry, focusTarget = false) {
+  async function jump(entry: JumpEntry, focusTarget = false, options: { around?: boolean } = {}) {
     const token = ++operation.current;
     stopFollowing(); beforeJump(); setJumping(entry.id);
     try {
       let el = target(entry);
-      // 历史窗口会淘汰旧消息；书签仍保留，复用现有分页逐页定位，不把所有正文装进 DOM。
+      // 跨远距历史（搜索直达或超出单页跨度）优先走 /history?around= 一步载入目标上下文窗口，避免逐页拉几十趟撑爆 DOM。
+      if (!el && typeof entry.sequence === 'number' && Number.isFinite(entry.sequence)) {
+        const state = useStore.getState();
+        const first = state.thread.windowEvents[0]?.sequence;
+        const last = state.thread.windowEvents.at(-1)?.sequence;
+        const pageSize = state.thread.history.pageSize || 80;
+        const farAway = Boolean(options.around)
+          || (first != null && entry.sequence < first && first - entry.sequence > pageSize)
+          || (last != null && entry.sequence > last && entry.sequence - last > pageSize);
+        if (farAway && typeof state.loadHistoryAround === 'function') {
+          const loaded = await state.loadHistoryAround(entry.sequence);
+          if (loaded) {
+            await afterNavigationPaint();
+            if (useStore.getState().sessionId !== session || token !== operation.current) return;
+            el = target(entry);
+          }
+        }
+      }
+      // 近距或回退路径：复用已预取的历史分页逐页定位，不把所有正文装进 DOM。
       while (!el && typeof entry.sequence === 'number' && Number.isFinite(entry.sequence)) {
         const state = useStore.getState();
         if (state.sessionId !== session || token !== operation.current) return;

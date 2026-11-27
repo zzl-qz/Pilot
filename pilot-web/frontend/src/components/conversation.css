@@ -6,29 +6,112 @@
 
 html[data-theme] .conversation-thread > .thread {
   padding-inline: max(48px, var(--conversation-gutter)) var(--conversation-gutter);
-  padding-block: 20px 14px;
+  padding-block: 22px 18px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--ink) 18%, transparent) transparent;
+}
+html[data-theme] .conversation-thread > .thread::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+html[data-theme] .conversation-thread > .thread::-webkit-scrollbar-track {
+  background: transparent;
+}
+html[data-theme] .conversation-thread > .thread::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 16%, transparent);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+html[data-theme] .conversation-thread > .thread:hover::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--ink) 28%, transparent);
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 html[data-theme] .conversation-thread > .thread.is-empty {
   padding-inline: var(--conversation-gutter);
 }
-html[data-theme] .conversation-thread .thread-column { gap: 20px; }
-html[data-theme] .conversation-thread .turn-shell { gap: 8px; }
-html[data-theme] .conversation-thread :is(.turn-shell, .turn-card, .changed-card) + .msg-user { margin-top: 6px; }
+html[data-theme] .conversation-thread .thread-column { gap: 22px; }
+html[data-theme] .conversation-thread .turn-shell { gap: 10px; }
+html[data-theme] .conversation-thread :is(.turn-shell, .turn-card, .changed-card) + .msg-user { margin-top: 8px; }
 .conversation-thread > .thread:focus-visible { outline: 2px solid var(--ink-2); outline-offset: -2px; }
+
+/* 冷切会话骨架占位：切会话绝不闪回空态页，保持与真实对话列一致的节奏与留白。 */
+.thread-skeleton-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-block: 4px;
+}
+.thread-skeleton-user {
+  align-self: flex-end;
+  width: min(260px, 58%);
+  height: 36px;
+  border-radius: 16px 16px 4px 16px;
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  animation: pilot-skeleton-pulse 1.5s ease-in-out infinite;
+}
+.thread-skeleton-user.is-short { width: min(190px, 44%); }
+.thread-skeleton-line {
+  height: 13px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  animation: pilot-skeleton-pulse 1.5s ease-in-out infinite;
+}
+.thread-skeleton-line.is-long { width: min(620px, 92%); }
+.thread-skeleton-line.is-medium { width: min(460px, 72%); }
+.thread-skeleton-line.is-short { width: min(290px, 48%); }
+@keyframes pilot-skeleton-pulse {
+  0%, 100% { opacity: 0.48; }
+  50% { opacity: 0.92; }
+}
+
 /*
- * 回到底部按钮独占 transcript 与执行计划条之间的一行停靠带（对齐 Codex 的 composer gap）：
- * 空着也占位，因此计划条展开多高都压不到它。左右留白沿用消息列取值，按钮横向仍在消息列中心。
+ * 回到底部按钮独占 transcript 与执行计划条之间的一行固定高度停靠带（对齐 Codex 的 composer gap）：
+ * 无论按钮显隐，停靠带始终占用完全一致的 40px 高度，杜绝贴底临界时滚动容器高度反复跳动 40px。
  */
 html[data-theme] .conversation-thread > .thread-bottom-dock {
+  position: relative;
   flex: none;
   display: flex;
+  flex-direction: row;
+  align-items: center;
   justify-content: center;
+  height: 40px;
+  min-height: 40px;
   padding-inline: max(48px, var(--conversation-gutter)) var(--conversation-gutter);
-  padding-block: 2px 8px;
+  padding-block: 4px;
+  pointer-events: none;
+}
+html[data-theme] .conversation-thread > .thread-bottom-dock::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 18px;
+  background: linear-gradient(to top, var(--bg), transparent);
+  pointer-events: none;
+}
+html[data-theme] .conversation-thread > .thread-bottom-dock.is-visible {
+  pointer-events: auto;
 }
 .conversation-thread .conversation-latest {
   width: var(--conversation-control);
   min-height: var(--conversation-control);
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--line) 90%, transparent);
+  background: color-mix(in srgb, var(--panel) 94%, var(--bg));
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.22);
+}
+html[data-theme="light"] .conversation-thread .conversation-latest {
+  background: #ffffff;
+  border-color: #dde3ec;
+  box-shadow: 0 3px 12px rgb(15 23 42 / 0.08), 0 1px 2px rgb(15 23 42 / 0.04);
+}
+.conversation-thread .conversation-return-latest {
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.18);
 }
 .conversation-thread :is(button, summary, [tabindex]):focus-visible,
 .conversation-composer :is(button, textarea, summary, pre):focus-visible {
@@ -161,151 +244,485 @@ html[data-theme="light"] .conversation-composer .composer:focus-within {
 html[data-theme] .conversation-thread .msg { animation: none; }
 html[data-theme] .conversation-thread .msg-user :is(.bubble, .msg-peek) {
   padding: 10px 15px;
-  border-radius: 16px 16px 4px 16px;
-  font-size: 14px;
+  border-radius: 16px 16px 5px 16px;
+  font-size: 14.5px;
   line-height: 1.62;
+  letter-spacing: -0.005em;
+  background: color-mix(in srgb, var(--ink) 6%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--ink) 9%, transparent);
 }
 html[data-theme="light"] .conversation-thread .msg-user :is(.bubble, .msg-peek) {
-  background: color-mix(in srgb, var(--accent) 8%, var(--bg-soft));
-  border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--line-soft));
-}
-html[data-theme="light"] .conversation-thread .msg-user .bubble {
-  background: #f3f5f8;
-  border-color: #e6eaf0;
+  background: #f3f5f9;
+  border: 1px solid #e4e9f1;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.03);
 }
 html[data-theme] .conversation-thread .msg-user .msg-actions {
   gap: 2px;
   height: auto;
-  margin: 1px 0 0;
+  margin: 2px 0 0;
   opacity: 1;
   transform: none;
   transition: opacity 0.14s ease;
 }
-.conversation-reply-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 26px; }
+
+/* 调工具前的过程说明（append-only）：就地保留为克制的次级叙事，绝不整块抽走引发高度塌陷 */
+html[data-theme] .conversation-thread .turn-commentaries {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+html[data-theme] .conversation-thread .turn-commentary {
+  padding: 2px 0 2px 12px;
+  border-inline-start: 2px solid color-mix(in srgb, var(--ink) 14%, transparent);
+  color: var(--ink-2);
+}
+html[data-theme] .conversation-thread .turn-commentary .bubble-md {
+  max-width: 74ch;
+  font-size: 13.5px;
+  line-height: 1.66;
+  color: var(--ink-2);
+}
+html[data-theme] .conversation-thread .turn-commentary .bubble-md > :first-child { margin-top: 0; }
+html[data-theme] .conversation-thread .turn-commentary .bubble-md > :last-child { margin-bottom: 0; }
+
+.conversation-reply-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
 html[data-theme] .conversation-thread .conversation-reply-head .who {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   margin: 0;
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
-  opacity: 1;
+  letter-spacing: 0.015em;
+  opacity: 0.92;
+}
+html[data-theme] .conversation-thread .conversation-reply-head .who::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 72%, var(--ink));
+  opacity: 0.85;
+}
+.conversation-streaming {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 540;
+  line-height: 1.5;
+}
+.conversation-streaming-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 1.3s ease-in-out infinite;
 }
 html[data-theme] .conversation-thread .conversation-reply-foot {
   display: flex;
   align-items: center;
   gap: 2px;
-  margin: 2px 0 0 -4px;
+  min-height: 28px;
+  margin: 4px 0 0 -4px;
   opacity: 1;
   transition: opacity 0.14s ease;
+}
+html[data-theme] .conversation-thread .conversation-reply-foot.is-placeholder {
+  visibility: hidden;
+  pointer-events: none;
 }
 html[data-theme] .conversation-thread .conversation-reply-time {
   margin-left: 6px;
   color: var(--dim);
-  font-size: 12px;
+  font-size: 11.5px;
   font-variant-numeric: tabular-nums;
 }
 @media (hover: hover) and (pointer: fine) {
   html[data-theme] .conversation-thread .msg-user:not(:hover):not(:focus-within) .msg-actions {
-    opacity: 0.35;
+    opacity: 0.28;
   }
   html[data-theme] .conversation-thread .msg-assistant:not(:hover):not(:focus-within) .conversation-reply-foot {
-    opacity: 0.55;
+    opacity: 0.48;
   }
 }
-html[data-theme] .conversation-thread .message-action { width: 28px; height: 28px; border-radius: 6px; }
-.conversation-streaming { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+html[data-theme] .conversation-thread .message-action { width: 28px; height: 28px; border-radius: 7px; }
+
+/* ---------- 编辑级正文排版（对标 Codex / Claude Desktop / Linear） ---------- */
+html[data-theme] .conversation-thread .msg-assistant .bubble {
+  color: var(--ink);
+}
+html[data-theme] .conversation-thread .msg-assistant .bubble > * + * {
+  margin-top: 0;
+}
 html[data-theme] .conversation-thread .msg-assistant .bubble-md {
   max-width: 74ch;
-  font-size: 14px;
-  line-height: 1.75;
+  font-size: 14.5px;
+  line-height: 1.74;
+  letter-spacing: -0.004em;
   color: var(--ink);
+  font-kerning: normal;
 }
-html[data-theme] .conversation-thread .msg-assistant .bubble-md :is(h1, h2, h3, h4) {
+html[data-theme] .conversation-thread .msg-assistant .bubble-md > p {
+  margin: 0.72em 0;
+}
+html[data-theme] .conversation-thread .msg-assistant .bubble-md > :first-child { margin-top: 0; }
+html[data-theme] .conversation-thread .msg-assistant .bubble-md > :last-child { margin-bottom: 0; }
+html[data-theme] .conversation-thread .msg-assistant .bubble-md strong {
   color: var(--ink);
   font-weight: 620;
-  letter-spacing: -0.015em;
-  line-height: 1.38;
-  margin: 20px 0 8px;
 }
-html[data-theme] .conversation-thread .msg-assistant .bubble-md > :is(h1, h2, h3, h4):first-child { margin-top: 0; }
-html[data-theme] .conversation-thread .msg-assistant .bubble-md h1 { font-size: 18px; }
-html[data-theme] .conversation-thread .msg-assistant .bubble-md h2 { font-size: 16px; }
-html[data-theme] .conversation-thread .msg-assistant .bubble-md h3 { font-size: 14.5px; }
-html[data-theme] .conversation-thread .msg-assistant .bubble-md h4 { font-size: 14px; color: var(--ink-2); }
+html[data-theme] .conversation-thread .msg-assistant .bubble-md :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--ink);
+  font-weight: 640;
+  letter-spacing: -0.02em;
+  line-height: 1.35;
+  margin: 22px 0 8px;
+}
+html[data-theme] .conversation-thread .msg-assistant .bubble-md > :is(h1, h2, h3, h4, h5, h6):first-child { margin-top: 0; }
+html[data-theme] .conversation-thread .msg-assistant .bubble-md h1 {
+  font-size: 19px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line-soft) 95%, transparent);
+}
+html[data-theme] .conversation-thread .msg-assistant .bubble-md h2 {
+  font-size: 16.5px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line-soft) 75%, transparent);
+}
+html[data-theme] .conversation-thread .msg-assistant .bubble-md h3 { font-size: 15px; margin-top: 18px; }
+html[data-theme] .conversation-thread .msg-assistant .bubble-md h4 { font-size: 14px; color: var(--ink-2); margin-top: 14px; }
 html[data-theme] .conversation-thread .msg-assistant .bubble-md :is(ul, ol) {
   margin: 10px 0;
-  padding-inline-start: 20px;
+  padding-inline-start: 22px;
 }
 html[data-theme] .conversation-thread .msg-assistant .bubble-md ul { list-style: disc; }
 html[data-theme] .conversation-thread .msg-assistant .bubble-md ul ul { list-style: circle; }
 html[data-theme] .conversation-thread .msg-assistant .bubble-md ol { list-style: decimal; }
-html[data-theme] .conversation-thread .msg-assistant .bubble-md li { margin: 0; }
-html[data-theme] .conversation-thread .msg-assistant .bubble-md li + li { margin-top: 5px; }
-html[data-theme] .conversation-thread .msg-assistant .bubble-md li.md-task-item { list-style: none; }
-html[data-theme] .conversation-thread .msg-assistant .bubble-md li::marker { color: var(--muted); }
+html[data-theme] .conversation-thread .msg-assistant .bubble-md li {
+  margin: 0;
+  padding-inline-start: 2px;
+}
+html[data-theme] .conversation-thread .msg-assistant .bubble-md li + li { margin-top: 6px; }
+html[data-theme] .conversation-thread .msg-assistant .bubble-md li.md-task-item {
+  list-style: none;
+  margin-inline-start: -18px;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+html[data-theme] .conversation-thread .msg-assistant .bubble-md li.md-task-item > input[type="checkbox"] {
+  accent-color: var(--accent);
+  flex: none;
+}
+html[data-theme] .conversation-thread .msg-assistant .bubble-md li::marker {
+  color: color-mix(in srgb, var(--muted) 82%, transparent);
+  font-variant-numeric: tabular-nums;
+}
 html[data-theme] .conversation-thread .msg-assistant .bubble-md hr {
   border: 0;
-  border-top: 1px solid var(--line-soft);
-  margin: 18px 0;
+  border-top: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
+  margin: 20px 0;
 }
 html[data-theme] .conversation-thread .bubble-md :not(pre) > code {
-  padding: 1px 5px;
-  border: 0;
+  padding: 0.12em 0.42em;
+  border: 1px solid color-mix(in srgb, var(--ink) 8%, transparent);
   border-radius: 5px;
-  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  background: color-mix(in srgb, var(--ink) 5.5%, transparent);
   color: var(--ink);
   font-family: var(--mono);
-  font-size: 0.89em;
+  font-size: 0.865em;
+  font-weight: 460;
+}
+html[data-theme="light"] .conversation-thread .bubble-md :not(pre) > code {
+  background: #f1f4f9;
+  border-color: #e2e8f0;
+  color: #1e293b;
+}
+html[data-theme] .conversation-thread .bubble-md .external-ref {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, var(--accent) 42%, transparent);
+  transition: text-decoration-color 0.14s ease;
+}
+html[data-theme] .conversation-thread .bubble-md .external-ref:hover {
+  text-decoration-color: var(--accent);
+}
+html[data-theme] .conversation-thread .bubble-md .file-ref {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 0.08em 0.45em;
+  margin-inline: 1px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.85em;
+  line-height: 1.45;
+  cursor: pointer;
+  vertical-align: baseline;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+html[data-theme] .conversation-thread .bubble-md .file-ref:hover {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--line));
+}
+html[data-theme] .conversation-thread .bubble-md .file-ref-line {
+  color: var(--accent);
+  font-size: 0.92em;
+  font-variant-numeric: tabular-nums;
 }
 html[data-theme] .conversation-thread .bubble-md blockquote {
-  margin-block: 12px;
-  padding: 3px 0 3px 14px;
-  border-inline-start: 2.5px solid color-mix(in srgb, var(--accent) 45%, var(--line));
-  color: var(--muted);
+  margin-block: 14px;
+  padding: 6px 12px 6px 14px;
+  border-inline-start: 3px solid color-mix(in srgb, var(--accent) 46%, var(--line));
+  border-radius: 0 8px 8px 0;
+  background: color-mix(in srgb, var(--ink) 2.2%, transparent);
+  color: var(--ink-2);
 }
+html[data-theme] .conversation-thread .bubble-md blockquote > p { margin: 0.4em 0; }
+html[data-theme] .conversation-thread .bubble-md blockquote > :first-child { margin-top: 0; }
+html[data-theme] .conversation-thread .bubble-md blockquote > :last-child { margin-bottom: 0; }
+html[data-theme] .conversation-thread .bubble-md blockquote.md-callout {
+  padding: 10px 14px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  border-inline-start-width: 3px;
+}
+html[data-theme] .conversation-thread .bubble-md blockquote.md-callout .md-callout-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 640;
+  letter-spacing: 0.02em;
+}
+html[data-theme] .conversation-thread .bubble-md blockquote.md-callout.is-note {
+  border-inline-start-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+html[data-theme] .conversation-thread .bubble-md blockquote.md-callout.is-note .md-callout-label { color: var(--accent); }
+html[data-theme] .conversation-thread .bubble-md blockquote.md-callout.is-tip {
+  border-inline-start-color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 6%, transparent);
+}
+html[data-theme] .conversation-thread .bubble-md blockquote.md-callout.is-tip .md-callout-label { color: var(--ok); }
+html[data-theme] .conversation-thread .bubble-md blockquote.md-callout.is-warning {
+  border-inline-start-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 7%, transparent);
+}
+html[data-theme] .conversation-thread .bubble-md blockquote.md-callout.is-warning .md-callout-label { color: var(--warn); }
+html[data-theme] .conversation-thread .bubble-md blockquote.md-callout.is-caution {
+  border-inline-start-color: var(--err);
+  background: color-mix(in srgb, var(--err) 7%, transparent);
+}
+html[data-theme] .conversation-thread .bubble-md blockquote.md-callout.is-caution .md-callout-label { color: var(--err); }
+html[data-theme] .conversation-thread .bubble-md blockquote.md-callout.is-important {
+  border-inline-start-color: var(--violet);
+  background: color-mix(in srgb, var(--violet) 7%, transparent);
+}
+html[data-theme] .conversation-thread .bubble-md blockquote.md-callout.is-important .md-callout-label { color: var(--violet); }
+
+/* 流式输出尾光标：柔和脉冲，落位即消失 */
+html[data-theme] .conversation-thread .msg-assistant .bubble-md.is-streaming > :is(p, li, h1, h2, h3, h4):last-child::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-inline-start: 3px;
+  border-radius: 1px;
+  background: var(--accent);
+  vertical-align: -0.16em;
+  animation: pilot-stream-caret 0.9s ease-in-out infinite;
+}
+@keyframes pilot-stream-caret {
+  0%, 100% { opacity: 0.9; }
+  50% { opacity: 0.18; }
+}
+
+/* 代码块：IDE 级质感、语义语法高亮、柔和圆角头部与行数徽标 */
 html[data-theme] .conversation-thread .bubble .md-code {
-  margin-block: 12px;
-  border: 1px solid var(--line-soft);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--ink) 3%, var(--bg));
+  margin-block: 14px;
+  border: 1px solid color-mix(in srgb, var(--ink) 10%, transparent);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--bg) 52%, #05070b);
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.16);
+}
+html[data-theme="light"] .conversation-thread .bubble .md-code {
+  border-color: #e2e8f0;
+  background: #f6f8fa;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.035);
 }
 html[data-theme] .conversation-thread .bubble .md-code-head {
-  min-height: 32px;
-  padding: 0 8px 0 12px;
-  border-bottom: 1px solid var(--line-soft);
-  background: color-mix(in srgb, var(--ink) 2.5%, transparent);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 10px 0 13px;
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 8%, transparent);
+  background: color-mix(in srgb, var(--ink) 3%, transparent);
+}
+html[data-theme="light"] .conversation-thread .bubble .md-code-head {
+  border-bottom-color: #e5eaf1;
+  background: #eef2f6;
+}
+html[data-theme] .conversation-thread .bubble .md-code-language {
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 560;
+  letter-spacing: 0.01em;
+}
+html[data-theme] .conversation-thread .bubble .md-code-lines {
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+html[data-theme] .conversation-thread .bubble .md-code-lines:empty { display: none; }
+html[data-theme] .conversation-thread .bubble .md-code-head > .md-code-toggle:first-of-type {
+  margin-inline-start: auto;
+}
+html[data-theme] .conversation-thread .bubble .md-code-toggle {
+  padding: 3px 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: 500 11.5px/1.35 var(--sans);
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+html[data-theme] .conversation-thread .bubble .md-code-toggle:hover {
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  border-color: color-mix(in srgb, var(--ink) 10%, transparent);
+  color: var(--ink);
 }
 html[data-theme] .conversation-thread .bubble .md-code pre {
   margin: 0;
-  padding: 12px 14px;
+  padding: 13px 15px;
   border: 0;
   border-radius: 0;
   background: transparent;
-  font-size: 12.5px;
-  line-height: 1.65;
+  font-size: 12.75px;
+  line-height: 1.66;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--ink) 20%, transparent) transparent;
 }
 html[data-theme] .conversation-thread .bubble .md-code pre code {
+  display: block;
+  width: max-content;
+  min-width: 100%;
   padding: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
-  font-size: 12.5px;
+  font-family: var(--mono);
+  font-size: 12.75px;
+  white-space: pre;
+  overflow-wrap: normal;
   color: var(--ink);
+  tab-size: 2;
 }
+/* 语法高亮配色：暗色（温和 One Dark / GitHub Dark）与浅色（高对比 GitHub Light） */
+html[data-theme] .bubble-md pre code .tok-kw { color: #c695ff; }
+html[data-theme] .bubble-md pre code .tok-str { color: #8fd4a4; }
+html[data-theme] .bubble-md pre code .tok-num { color: #f0b27a; }
+html[data-theme] .bubble-md pre code .tok-com { color: #748194; font-style: italic; }
+html[data-theme] .bubble-md pre code .tok-type { color: #79c0ff; }
+html[data-theme] .bubble-md pre code .tok-fn { color: #7dd3fc; }
+html[data-theme="light"] .bubble-md pre code .tok-kw { color: #8250df; }
+html[data-theme="light"] .bubble-md pre code .tok-str { color: #116329; }
+html[data-theme="light"] .bubble-md pre code .tok-num { color: #953800; }
+html[data-theme="light"] .bubble-md pre code .tok-com { color: #6e7781; font-style: italic; }
+html[data-theme="light"] .bubble-md pre code .tok-type { color: #0550ae; }
+html[data-theme="light"] .bubble-md pre code .tok-fn { color: #6639ba; }
+
+html[data-theme] .conversation-thread .bubble .md-code pre.is-diff {
+  padding: 8px 0;
+}
+html[data-theme] .conversation-thread .bubble .md-code pre.is-diff .diff-line {
+  display: block;
+  padding: 0 14px;
+}
+html[data-theme] .conversation-thread .bubble .md-code pre.is-diff .diff-line.is-add {
+  background: color-mix(in srgb, var(--ok) 13%, transparent);
+  color: var(--ok);
+}
+html[data-theme] .conversation-thread .bubble .md-code pre.is-diff .diff-line.is-del {
+  background: color-mix(in srgb, var(--err) 13%, transparent);
+  color: var(--err);
+}
+html[data-theme] .conversation-thread .bubble .md-code pre.is-diff .diff-line.is-hunk {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+/* 表格：去掉旧式粗糙竖线，改为现代极简横隔线 + 悬停行高亮 */
 html[data-theme] .conversation-thread .bubble .md-table-wrap {
-  margin-block: 12px;
-  border: 1px solid var(--line-soft);
+  margin-block: 14px;
+  border: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
   border-radius: 10px;
+  overflow-x: auto;
+  background: color-mix(in srgb, var(--ink) 1.5%, var(--bg));
 }
-html[data-theme] .conversation-thread .msg-assistant .bubble-md .md-table-wrap > table { margin: 0; }
+html[data-theme="light"] .conversation-thread .bubble .md-table-wrap {
+  border-color: #e2e8f0;
+  background: #ffffff;
+}
+html[data-theme] .conversation-thread .msg-assistant .bubble-md .md-table-wrap > table {
+  display: table;
+  width: 100%;
+  margin: 0;
+  border-collapse: collapse;
+}
 html[data-theme] .conversation-thread .md-table-wrap th {
-  padding: 8px 12px;
-  background: color-mix(in srgb, var(--ink) 3%, var(--bg));
+  padding: 9px 13px;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 90%, transparent);
+  background: color-mix(in srgb, var(--ink) 3.5%, var(--bg));
   color: var(--muted);
   font-size: 12px;
-  font-weight: 560;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
 }
-html[data-theme] .conversation-thread .md-table-wrap td { padding: 8px 12px; font-size: 13px; }
-html[data-theme] .conversation-thread .md-table-wrap tbody tr:nth-child(even) { background: transparent; }
+html[data-theme="light"] .conversation-thread .md-table-wrap th {
+  background: #f6f8fa;
+  border-bottom-color: #e2e8f0;
+}
+html[data-theme] .conversation-thread .md-table-wrap td {
+  padding: 9px 13px;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--line-soft) 95%, transparent);
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+html[data-theme] .conversation-thread .md-table-wrap tbody tr:last-child td {
+  border-bottom: 0;
+}
+html[data-theme] .conversation-thread .md-table-wrap tbody tr:nth-child(even) {
+  background: transparent;
+}
+html[data-theme] .conversation-thread .md-table-wrap tbody tr:hover td {
+  background: color-mix(in srgb, var(--ink) 2.5%, transparent);
+}
 .conversation-thread .bubble-md :is(.md-table-wrap, .md-code, pre) { max-width: 100%; overscroll-behavior-inline: contain; }
 
 /* ---------- 回合过程（思考 / 操作流 / 子智能体）：默认收起，展开限高滑动 + 上下渐隐 ---------- */
@@ -325,6 +742,7 @@ html .conversation-thread .turn-process :is(.think-block, .conversation-tools, .
   border-radius: 0;
   background: transparent;
   box-shadow: none;
+  overflow: visible;
 }
 
 html .conversation-thread .turn-process .think-block > summary,
@@ -1169,6 +1587,9 @@ html .conversation-thread .turn-stats-detail {
   min-width: 0;
   border-radius: 9px;
 }
+html .conversation-thread .msg-assistant + .turn-stats-detail {
+  margin-top: -6px;
+}
 
 html .conversation-thread .turn-stats-detail > summary {
   display: inline-flex;
@@ -1295,6 +1716,8 @@ html .conversation-thread .plan-card .plan-head::-webkit-details-marker {
 }
 
 html .conversation-thread .plan-card .plan-title {
+  flex: none;
+  white-space: nowrap;
   color: var(--ink-2);
   font-size: 12.5px;
   font-weight: 560;
@@ -1618,6 +2041,10 @@ html .conversation-thread .turn-card-more > summary:hover {
   html .conversation-thread .process-chevron,
   html .conversation-thread .turn-process .tool-row-chevron,
   html .conversation-thread .turn-process .think-block.is-live > summary::before,
+  html .conversation-thread .conversation-streaming-dot,
+  html[data-theme] .conversation-thread .msg-assistant .bubble-md.is-streaming > :is(p, li, h1, h2, h3, h4):last-child::after,
+  .thread-skeleton-user,
+  .thread-skeleton-line,
   html .conversation-thread .plan-card .plan-bar i,
   html .conversation-thread .plan-card .plan-item.is-in_progress .plan-status::before,
   html[data-theme] .conversation-empty .conversation-prompt,
@@ -2891,22 +3318,25 @@ html[data-theme] .composer-changes-action:focus-visible {
   color: var(--ink-2);
 }
 .onboarding-steps li.is-done { color: var(--ok); }
-.thread-bottom-dock {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-}
 .thread-bottom-dock .latest-hint {
-  padding: 2px 8px;
+  position: absolute;
+  left: calc(50% + 26px);
+  padding: 2px 9px;
   border-radius: 999px;
-  border: 1px solid var(--line);
-  background: var(--panel);
+  border: 1px solid color-mix(in srgb, var(--line) 90%, transparent);
+  background: color-mix(in srgb, var(--panel) 94%, var(--bg));
   color: var(--ink-2);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 560;
   white-space: nowrap;
   pointer-events: none;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.14);
+}
+@media (max-width: 600px), (pointer: coarse) {
+  html[data-theme] .conversation-thread > .thread-bottom-dock {
+    height: 52px;
+    min-height: 52px;
+  }
 }
 .tool-slow-hint {
   display: flex;
@@ -2924,6 +3354,20 @@ html[data-theme] .composer-changes-action:focus-visible {
 .result-next-steps {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 8px;
+  margin-top: 10px;
+}
+html[data-theme] .conversation-thread .result-next-steps button {
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 2.5%, var(--bg));
+  color: var(--ink-2);
+  font-size: 12.5px;
+  padding-inline: 12px;
+  transition: border-color 0.14s ease, background-color 0.14s ease, color 0.14s ease;
+}
+html[data-theme] .conversation-thread .result-next-steps button:hover {
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--line));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+  color: var(--ink);
 }

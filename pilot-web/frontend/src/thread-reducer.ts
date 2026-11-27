@@ -94,26 +94,28 @@ function turnOwning(draft: ReducerState, callId: string | null | undefined): Tur
     ?? rows.findLast(row => row.type === 'turn') ?? null;
 }
 
-function ensureTurn(draft: ReducerState): TurnRow {
+function ensureTurn(draft: ReducerState, eventRunId?: string | null): TurnRow {
   const thread = draft.thread;
+  const runId = eventRunId || draft.runId;
   let turn = openTurn(draft);
   if (!turn) {
     turn = {
-      key: `turn:${draft.runId || 'live'}:${thread.cursor}`,
+      key: `turn:${runId || 'live'}:${thread.cursor}`,
       type: 'turn',
-      runIds: draft.runId ? [draft.runId] : [],
+      runIds: runId ? [runId] : [],
       start: thread.cursor,
       end: thread.cursor,
       tools: [],
       toolIndex: {},
       thinking: null,
+      commentaries: [],
       reply: { text: '', preview: '', live: false, needsBreak: false, breakReason: '', committed: '' },
       stats: null,
       agents: {}
     };
     thread.rows.push(turn);
-  } else if (draft.runId && !turn.runIds.includes(draft.runId)) {
-    turn.runIds.push(draft.runId);
+  } else if (runId && !turn.runIds.includes(runId)) {
+    turn.runIds.push(runId);
   }
   return turn;
 }
@@ -541,7 +543,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
           imagePositions: payload.imagePositions || []
         });
       }
-      ensureTurn(draft);
+      ensureTurn(draft, event.runId);
       record(draft, event, { kind: 'run', tone: 'run', status: '开始', title: '运行开始', detail: input || null });
       if (live) {
         draft.promoteBlank = { input };
@@ -561,7 +563,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
           draft.latestContextReport = report;
       }
       if (!compaction) {
-        const turn = draft.thread.rows.findLast((row): row is TurnRow => row.type === 'turn' && row.runIds.includes(event.runId!)) || (current ? ensureTurn(draft) : null);
+        const turn = draft.thread.rows.findLast((row): row is TurnRow => row.type === 'turn' && row.runIds.includes(event.runId!)) || (current ? ensureTurn(draft, event.runId) : null);
         if (turn && !(turn.requests || []).some(item => item.id === report.id)) turn.requests = [...(turn.requests || []), report].slice(-200);
       }
       break;
@@ -599,7 +601,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
         reported: true
       });
       draft.liveOutputTokens = 0;
-      const turn = ensureTurn(draft);
+      const turn = ensureTurn(draft, event.runId);
       turn.stats = { ...draft.runUsage };
       draft.contextStatus = {
         ...(draft.contextStatus || {}),
@@ -624,7 +626,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
         break;
       }
       // 预览只是「模型还在吐字」，落库的 assistant.delta 才是正文：两段不能都往正文里接。
-      const turn = ensureTurn(draft);
+      const turn = ensureTurn(draft, event.runId);
       turn.reply.preview = (turn.reply.preview || '') + (event.payload?.text || '');
       turn.reply.live = true;
       draft.liveOutputTokens = estimateTokens((turn.reply.text || '') + (turn.reply.preview || ''));
@@ -634,7 +636,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
     }
 
     case 'assistant.delta': {
-      const turn = ensureTurn(draft);
+      const turn = ensureTurn(draft, event.runId);
       turn.reply.text += event.payload?.text || '';
       if (turn.thinking) turn.thinking.preview = '';
       thread.previewId = ''; thread.previewOffset = 0;
@@ -652,7 +654,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
         if (turn) replaceReasoning(turn, '');
         break;
       }
-      const activeTurn = turn || ensureTurn(draft);
+      const activeTurn = turn || ensureTurn(draft, event.runId);
       const text = event.payload?.text || '';
       if (!text) break;
       if (!activeTurn.thinking) {
@@ -667,14 +669,16 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
     }
 
     case 'tool.started': {
-      const turn = ensureTurn(draft);
-      // 调工具前那句还在往外吐的「我先去看…」是思考，不是结论。已经收住的回复不能再挪走。
-      if (turn.reply.live && turn.reply.text) {
-        if (!turn.thinking) {
-          turn.thinking = { text: '', live: true, action: '', startedAt: eventTimestamp(event) };
+      const turn = ensureTurn(draft, event.runId);
+      // 调工具前那句还在往外吐的「我先去看…」保留为只增不删的过程说明（append-only），
+      // 不再清空后塞进折叠思考块，避免气泡凭空消失引发整页高度塌陷。
+      const commentary = `${turn.reply.text || ''}${turn.reply.preview || ''}`.trim();
+      if (turn.reply.live && commentary) {
+        turn.commentaries ??= [];
+        if (turn.commentaries[turn.commentaries.length - 1] !== commentary) {
+          turn.commentaries.push(commentary);
         }
-        turn.thinking.text += (turn.thinking.text ? '\n\n' : '') + turn.reply.text;
-        turn.reply = { text: '', live: false, needsBreak: true, breakReason: '', committed: turn.reply.committed };
+        turn.reply = { text: '', preview: '', live: false, needsBreak: true, breakReason: '', committed: turn.reply.committed };
       }
       // 思考块的摘要行显示「思考中 12 秒 · 执行命令」这种当前动作
       if (turn.thinking && turn.thinking.live) {
@@ -752,7 +756,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
     }
 
     case 'approval.required': {
-      const turn = ensureTurn(draft);
+      const turn = ensureTurn(draft, event.runId);
       draft.ui.attentionKind = 'attention';
       const requestedAt = eventTimestamp(event);
       const row = {
@@ -852,7 +856,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
       if (event.runId) {
         draft.runId = event.runId;
       }
-      const turn = ensureTurn(draft);
+      const turn = ensureTurn(draft, event.runId);
       if (event.runId && !turn.runIds.includes(event.runId)) {
         turn.runIds.push(event.runId);
       }
@@ -897,7 +901,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
     }
 
     case 'subagent.started': {
-      const turn = ensureTurn(draft);
+      const turn = ensureTurn(draft, event.runId);
       const id = event.payload?.agentId || event.payload?.id;
       if (id && !turn.agents[id]) {
         turn.agents[id] = {
@@ -1074,6 +1078,76 @@ function openReplayScope(root: ReducerState): ReplayScope {
   };
 }
 
+function sharesRunId(left: TurnRow, right: TurnRow): boolean {
+  if (!left.runIds?.length || !right.runIds?.length) return false;
+  return left.runIds.some(id => right.runIds.includes(id));
+}
+
+/** 跨页被拆成两半的同一轮 Turn 合回一体：保留已挂载行的 key 以维持浏览器滚动锚定。 */
+function mergeSplitTurn(older: TurnRow, newer: TurnRow, keepKey: string): TurnRow {
+  const toolIndex: Record<string, ToolRow> = {};
+  const tools: ToolRow[] = [];
+  for (const item of older.tools || []) {
+    const copy = { ...item };
+    tools.push(copy);
+    if (copy.callId) toolIndex[copy.callId] = copy;
+  }
+  for (const item of newer.tools || []) {
+    const existing = item.callId ? toolIndex[item.callId] : undefined;
+    if (existing) {
+      const merged: ToolRow = { ...existing, ...item, startedAt: existing.startedAt ?? item.startedAt };
+      const idx = tools.findIndex(entry => entry.callId === item.callId);
+      if (idx >= 0) tools[idx] = merged;
+      toolIndex[item.callId] = merged;
+    } else {
+      const copy = { ...item };
+      tools.push(copy);
+      if (copy.callId) toolIndex[copy.callId] = copy;
+    }
+  }
+  const runIds = [...(older.runIds || [])];
+  for (const id of newer.runIds || []) if (id && !runIds.includes(id)) runIds.push(id);
+  const commentaries = [...(older.commentaries || [])];
+  for (const note of newer.commentaries || []) {
+    if (note && commentaries[commentaries.length - 1] !== note) commentaries.push(note);
+  }
+  const requests = [...(older.requests || [])];
+  const seenReq = new Set(requests.map(r => r.id));
+  for (const req of newer.requests || []) if (!seenReq.has(req.id)) { seenReq.add(req.id); requests.push(req); }
+  const thinking = older.thinking && newer.thinking
+    ? {
+        ...newer.thinking,
+        text: newer.thinking.text.startsWith(older.thinking.text)
+          ? newer.thinking.text
+          : `${older.thinking.text}${older.thinking.text && newer.thinking.text ? '\n\n' : ''}${newer.thinking.text}`,
+        startedAt: older.thinking.startedAt ?? newer.thinking.startedAt
+      }
+    : (newer.thinking || older.thinking);
+  const replyText = older.reply?.text && newer.reply?.text
+    ? (newer.reply.text.startsWith(older.reply.text) ? newer.reply.text : `${older.reply.text}${newer.reply.text}`)
+    : (newer.reply?.text || older.reply?.text || '');
+  const startedAt = older.stats?.startedAt && newer.stats?.startedAt
+    ? Math.min(older.stats.startedAt, newer.stats.startedAt)
+    : (older.stats?.startedAt ?? newer.stats?.startedAt);
+  const finishedAt = newer.stats?.finishedAt ?? older.stats?.finishedAt ?? null;
+  const stats = newer.stats || older.stats ? { ...(older.stats || {}), ...(newer.stats || {}), startedAt, finishedAt } : null;
+  return {
+    ...newer,
+    key: keepKey,
+    start: Math.min(older.start, newer.start),
+    end: Math.max(older.end, newer.end),
+    runIds,
+    tools,
+    toolIndex,
+    thinking,
+    commentaries,
+    reply: { ...newer.reply, text: replyText },
+    stats,
+    agents: { ...(older.agents || {}), ...(newer.agents || {}) },
+    requests: requests.length ? requests : undefined
+  };
+}
+
 /** 历史页（更早）前插：合并事件窗口 + 行注册表，位置由浏览器 scroll anchoring 保持。 */
 export function prependHistoryPage(draft: ReducerState, events: EventEnvelope[]) {
   const thread = draft.thread;
@@ -1086,7 +1160,13 @@ export function prependHistoryPage(draft: ReducerState, events: EventEnvelope[])
   for (const event of events) {
     applyEventInto(draft, event, replayed, scope);
   }
-  thread.rows = [...replayed, ...thread.rows];
+  const tail = replayed[replayed.length - 1];
+  const head = thread.rows[0];
+  if (tail?.type === 'turn' && head?.type === 'turn' && sharesRunId(tail, head)) {
+    thread.rows = [...replayed.slice(0, -1), mergeSplitTurn(tail, head, head.key), ...thread.rows.slice(1)];
+  } else {
+    thread.rows = [...replayed, ...thread.rows];
+  }
   void added;
 }
 
@@ -1185,5 +1265,11 @@ export function appendHistoryPage(draft: ReducerState, events: EventEnvelope[]) 
   for (const event of events) {
     applyEventInto(draft, event, bucket, scope);
   }
-  thread.rows = [...thread.rows, ...bucket];
+  const tail = thread.rows[thread.rows.length - 1];
+  const head = bucket[0];
+  if (tail?.type === 'turn' && head?.type === 'turn' && sharesRunId(tail, head)) {
+    thread.rows = [...thread.rows.slice(0, -1), mergeSplitTurn(tail, head, tail.key), ...bucket.slice(1)];
+  } else {
+    thread.rows = [...thread.rows, ...bucket];
+  }
 }

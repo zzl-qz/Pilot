@@ -53,6 +53,10 @@ function mergeTurns(base: TurnRow, next: TurnRow): TurnRow {
       mergedRequests.push(req);
     }
   }
+  const mergedCommentaries = [...(base.commentaries || [])];
+  for (const note of next.commentaries || []) {
+    if (note && mergedCommentaries[mergedCommentaries.length - 1] !== note) mergedCommentaries.push(note);
+  }
   return {
     ...next,
     key: base.key,
@@ -62,6 +66,7 @@ function mergeTurns(base: TurnRow, next: TurnRow): TurnRow {
     tools: mergedTools,
     toolIndex: { ...(base.toolIndex || {}), ...(next.toolIndex || {}) },
     thinking: next.thinking || base.thinking,
+    commentaries: mergedCommentaries.length ? mergedCommentaries : undefined,
     agents: { ...(base.agents || {}), ...(next.agents || {}) },
     requests: mergedRequests.length ? mergedRequests : undefined,
     stats: mergeStats(base.stats, next.stats)
