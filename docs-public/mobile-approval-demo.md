@@ -1,68 +1,42 @@
-# 手机审批的端到端演示
+# Mobile Approval End-to-End Demo
 
-> 最后更新：2026-11-16
-> 对应 issue：#IKVGSA
+[English](mobile-approval-demo.md) | [简体中文](zh-CN/mobile-approval-demo.md)
 
-## 这条链路要证明什么
+> Last updated: 2026-11-27
 
-不是「手机上有个批准按钮」，而是四件事同时成立：
+## What This Flow Proves
 
-1. 电脑发起需要授权的操作，**手机能收到**；
-2. 手机批准后，**电脑按批准继续**，不是自己猜的；
-3. 手机在审批中途断网，重连后**不会盲目重发**，而是让你核对结果；
-4. 审批归属正确：别的任务的审批不会串到当前任务上。
+Remote mobile approval must guarantee four invariants simultaneously:
 
-第 3 条是这个产品与「把 Agent 放公网服务器再配个 App」最实质的差别——它在不可靠网络上仍然说得清「这次提交到底成没成」。
+1. Host approval requests reach the paired phone reliably.
+2. Approving on mobile unblocks the exact waiting run on the host.
+3. **Disconnecting mid-approval never blindly replays**—reconnecting asks the user to reconcile whether the host already received the decision.
+4. Strict session attribution prevents approving Task A from advancing Task B.
 
-## 准备
+## Setup
 
-1. 电脑启动 Pilot，权限档位切到 **`ASK`**（默认 `AUTO` 不会产生审批）；
-2. 手机与电脑配对成功（工作台 → 连接手机 → 扫码）；
-3. 手机底部导航停在「收件箱」，方便观察审批是否出现。
+1. Launch Pilot on desktop and switch permissions to **`ASK`** (`AUTO` skips routine approvals).
+2. Pair the Android client (**Workbench → Connect Mobile → Scan QR**).
+3. Open the mobile **Inbox** tab.
 
-> 为什么用 `ASK`：这个档位下文件写入和命令都要逐项确认，最容易复现审批链路。
+## Verification Scenarios
 
-## 正常路径
+### Happy Path
+1. On desktop, prompt: `Create hello.txt in the workspace containing ok`.
+2. Confirm the approval card appears in the mobile Inbox with the matching session/run label.
+3. Tap **Approve** on mobile; verify `hello.txt` is created once on desktop and both surfaces display the same validation fingerprint prefix.
 
-| 步骤 | 操作 | 应当看到 |
-| --- | --- | --- |
-| 1 | 电脑上给一个任务发消息：`在当前工作区新建 hello.txt，内容写 ok` | 任务卡出现待审批条目 |
-| 2 | 看手机收件箱 | 出现同一条审批，带任务名与运行归属 |
-| 3 | 手机上点「批准」 | 手机条目消失；电脑继续执行并写出文件 |
-| 4 | 电脑上检查文件 | `hello.txt` 存在且内容为 `ok` |
-| 5 | 回到手机任务详情 | 状态与电脑一致，验证结论区显示同一枚指纹前缀 |
+### Disconnect & Reconcile Path (Critical)
+1. Prompt: `Create second.txt`.
+2. Enable **Airplane Mode** on mobile, then tap **Approve**—the UI must not falsely claim success.
+3. Wait 10 seconds and restore connectivity: mobile must show a **reconcile status** prompt rather than auto-replaying.
+4. Reconcile; verify `second.txt` was created **at most once** (idempotent receipt on retry if already executed).
 
-**要截图的**：第 2 步的审批卡片（含任务归属）、第 5 步两端同屏的指纹前缀。
+### Attribution & Deduplication
+- **Multi-task isolation**: Trigger two approvals across two tasks; approving Task A never advances Task B.
+- **Double-tap idempotency**: Rapidly tapping Approve executes once and returns the same receipt.
+- **Stale approval**: Rejecting on desktop removes the pending card on mobile without re-executing.
 
-## 断网重连路径（关键）
+## Current Status
 
-| 步骤 | 操作 | 应当看到 |
-| --- | --- | --- |
-| 1 | 电脑再发一条：`再新建 second.txt` | 手机收到新审批 |
-| 2 | 手机上**先断网**（飞行模式），再点「批准」 | 请求发不出去；界面不应假装成功 |
-| 3 | 保持断网 10 秒后恢复网络 | 手机显示「核对提交结果」一类提示，**不会自动重发** |
-| 4 | 按提示核对 | 若电脑端确实没执行，再手动重试一次；若已执行，重试得到的是同一条回执 |
-
-**判据**：断网恢复后，电脑端 `second.txt` 只被创建一次。若出现「文件被写两次」或「手机显示已批准但电脑没动」，这一条就不算通过。
-
-## 归属与去重
-
-| 检查 | 做法 | 期望 |
-| --- | --- | --- |
-| 归属正确 | 同时开两个任务，各产生一条审批 | 手机上每条都标明属于哪个任务；批准 A 不会推进 B |
-| 重复点击 | 快速连点「批准」两次 | 只执行一次；第二次得到相同回执 |
-| 过期审批 | 电脑上先拒绝，再在手机上批准 | 手机提示已处理并移除，不重复执行 |
-
-## 记录要写什么
-
-新建 `evaluation/MOBILE_APPROVAL_<日期>.md`，包含：
-
-- 机型、系统版本、App 版本（`pilot-mobile/README.md` 里的 preview 版本号）；
-- 电脑端操作系统与 Pilot 提交号；
-- 每条路径的实际结果，**包括没通过的**；
-- 至少两张截图：正常审批、断网重连提示；
-- 断网重连那一步的时长（从断网到恢复）。
-
-## 当前状态
-
-代码侧已就绪：审批归属、占位回执、断网不自动重发、跨端同一份验证结论都已实现并有自动化测试。**真机上的实际演示与截图尚未完成**——这一项在拿到真机结果之前不算完成。
+Backend attribution, idempotent receipts, non-replaying disconnect reconciliation, and cross-surface validation status are implemented with automated tests. Physical-device demo captures are tracked separately prior to final release.

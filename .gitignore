@@ -54,6 +54,14 @@ identifier.sqlite
 ### 评估与窄屏检查产物 ###
 .pilot-eval/
 evaluation/harness/runs/
+evaluation/multi-swe-bench/runs/
+evaluation/multi-swe-bench/jars/
+evaluation/multi-swe-bench/build-src/
+evaluation/multi-swe-bench/preflight/
+evaluation/multi-swe-bench/pilot-jre*/
+evaluation/multi-swe-bench/multi-swe-bench/
+evaluation/multi-swe-bench/.venv/
+evaluation/multi-swe-bench/datasets/*.jsonl
 pilot-web/target/viewport/
 pilot-web/node_modules/
 pilot-web/frontend/node_modules/

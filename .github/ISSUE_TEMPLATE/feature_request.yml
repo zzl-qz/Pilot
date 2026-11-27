@@ -1,0 +1,24 @@
+name: Feature Request
+description: Propose a new capability, tool, or harness improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: Describe the workflow gap or failure mode this feature addresses.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+      description: Outline the desired behavior, API/UI surface, and security/permission boundaries.
+    validations:
+      required: true
+  - type: textarea
+    id: cross-platform
+    attributes:
+      label: Cross-Platform Considerations
+      description: Any OS-specific behavior across Windows, macOS, and Linux?

@@ -1,119 +1,178 @@
+<div align="center">
+
 # Pilot
 
-<p align="center"><strong>在本机工作区中运行的任务执行 Agent</strong><br>阅读项目、执行文件与工具任务，并把改动、验证和结果留给你审阅。</p>
+**A Local-First, Verifiable Coding & Task Execution Agent**
 
-<p align="center">
+Read repositories, execute tools inside OS-level sandboxes, automate browsers with live human takeover, and deliver cryptographically fingerprinted completion bundles—all running locally on your machine.
+
+<p>
   <a href="https://github.com/zzl-qz/Pilot/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/zzl-qz/Pilot/actions/workflows/ci.yml/badge.svg?branch=master"></a>
   <img alt="Java 25" src="https://img.shields.io/badge/Java-25-orange?logo=openjdk&logoColor=white">
   <img alt="Spring Boot 4" src="https://img.shields.io/badge/Spring%20Boot-4.0-brightgreen?logo=springboot&logoColor=white">
-  <img alt="阶段" src="https://img.shields.io/badge/status-development%20preview-yellow">
+  <img alt="Multi-SWE-bench" src="https://img.shields.io/badge/Multi--SWE--bench--flash-60.0%25%20(Java%2075.0%25)-2563eb">
+  <img alt="License" src="https://img.shields.io/badge/License-Apache--2.0-blue">
+  <img alt="Status" src="https://img.shields.io/badge/Status-Development%20Preview-yellow">
 </p>
 
-Pilot 提供 Web 与 Electron 工作台，并附带 Android 远程客户端。模型支持 OpenAI Chat Completions、OpenAI Responses 与 Anthropic Messages（含原生 SSE 流式与 Prompt Caching）；任务数据、工作区和执行环境由你自己的 Pilot 实例管理。
+<p>
+  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a> ·
+  <a href="docs-public/getting-started.md">Quick Start</a> ·
+  <a href="docs-public/architecture.md">Architecture</a> ·
+  <a href="docs-public/benchmarks.md">Benchmarks</a> ·
+  <a href="docs-public/security.md">Security</a>
+</p>
 
-> **当前阶段：开发预览。** 功能与平台覆盖仍在验证中，不建议用于无人监督的生产工作。macOS（Seatbelt）与 Linux（bubblewrap）对主会话命令默认启用文件系统沙箱（Windows 可选独立运行器），但权限策略与本地沙箱仍不等同于多租户虚拟机隔离。
+</div>
 
-## 界面
+---
+
+> **Development Preview**: Pilot is built for supervised local engineering and verification. macOS (**Seatbelt**) and Linux (**bubblewrap**) enable OS-level filesystem sandboxing for main-session commands by default (Windows supports an optional restricted-token runner), but local sandboxes are not equivalent to multi-tenant VM isolation. See [Security & Privacy](docs-public/security.md) and [Scope & Boundaries](docs-public/scope.md).
+
+## Showcase
 
 <p align="center">
-  <img src="docs-public/images/pilot-work-product-desktop.png" alt="Pilot 工作台与成果文件预览" width="100%">
+  <img src="docs-public/images/pilot-work-product-desktop.png" alt="Pilot Desktop Workbench and Work Product Preview" width="100%">
 </p>
 
 <p align="center">
-  <img src="docs-public/images/pilot-inbox-desktop.png" alt="Pilot 桌面工作台中的任务结果收件箱" width="49%">
-  <img src="docs-public/images/pilot-result-detail-desktop.png" alt="Pilot 展示任务验收、验证记录和文件改动" width="49%">
+  <img src="docs-public/images/pilot-inbox-desktop.png" alt="Pilot Task Inbox" width="49%">
+  <img src="docs-public/images/pilot-result-detail-desktop.png" alt="Pilot Verification Evidence and File Diffs" width="49%">
 </p>
 
+<details>
+<summary>Mobile responsive views (Dark & Light)</summary>
 <p align="center">
-  <img src="docs-public/images/pilot-result-detail-mobile.png" alt="窄屏暗色主题下的任务结果详情" width="32%">
-  <img src="docs-public/images/pilot-result-detail-light-mobile.png" alt="窄屏浅色主题下的任务结果详情" width="32%">
+  <img src="docs-public/images/pilot-result-detail-mobile.png" alt="Mobile Dark Theme Result Detail" width="32%">
+  <img src="docs-public/images/pilot-result-detail-light-mobile.png" alt="Mobile Light Theme Result Detail" width="32%">
 </p>
+</details>
 
-截图由项目的 Playwright UI 回归场景生成，使用模拟 API 响应和示例任务数据；展示的是实际 React 工作台界面，不代表真实模型运行或线上任务记录。
+<sub>*UI screenshots are generated from Pilot's Playwright regression suite using mock API fixtures and sample workspaces; they illustrate the real React workbench rather than live model output.*</sub>
 
-## 功能
+---
 
-- **可审阅的执行过程**：流式显示消息和工具活动；支持消息级分析（`plan`，源头剥离写工具）与执行（`act`）模式切换、`/review` 只读审查、审批前文件改动 Diff 预览、计划与验证状态展示，以及检查点与受校验的回退。
-- **内置浏览器与独立浏览器子代理**：支持 `/browser` 与独立隔离的 `browser_agent` 子代理，提供多层同源 `iframe` / 开放 Shadow DOM 穿透、遮挡校验防偏、拖拽与视觉坐标兜底、原生弹窗与动态 `filechooser` 上传、常驻「Take Control」蓝框与 Stop 即时中断、用户接管唤醒，以及跨平台过程录像与交互式时间轴回放（任意帧暂停框选并发回坐标反馈）。
-- **本机工作区与通用文件预览**：读取、搜索和精确编辑文件，工作区文件树支持快速过滤与 Git 改动徽标；内置跨平台通用文件预览（代码高亮、DOCX/XLSX/PPTX 结构化解析、PDF/图片/音视频流式预览及压缩包清单），支持 Office/PDF 生成与成果快照留存。
-- **长期记忆、规则与长任务韧性**：支持外置分类长期记忆（`MEMORY.md` 索引 + `remember` 草稿人工审阅 + `read_memory` 按需检索）、`.pilot/rules` 标准 Glob 规则、两段式摘要压缩与前缀缓存复用、HTTP 429/5xx 分级退避与休眠/断网有界自动恢复，以及多会话协调看板与死锁/停滞告警。
-- **可选的桌面与移动工作流**：Electron 桌面壳支持系统托盘常驻、失焦置顶审批悬浮窗、防休眠与离线自动重连，并提供基于 `jlink` 最小 JRE 的三平台自包含发行包构建脚本；Android 客户端复用本机服务，远程连接默认关闭。
-- **可替换模型端点与脱敏诊断**：支持 OpenAI Chat Completions、OpenAI Responses 与 Anthropic Messages 原生流式及 Prompt Caching，可按端点与模型配置时限与计价；没有模型密钥时可用 Mock 模式体验界面流程，支持在设置页一键导出脱敏诊断包。
-- **可复核的完成凭证**：把任务契约、验证证据、浏览器宿主机证据（`browserEvidence`）、改动差异与验证策略收成可导出的 JSON/Markdown；策略未通过时任务不会被标记为完成，任务还能打包成交接胶囊。
+## Why Pilot?
 
-这些是项目当前实现的能力范围，不表示模型每次都能正确完成任务。详细边界见[安全与隐私](docs-public/security.md)和[功能与配置参考](docs-public/user-guide.md)。
+Most local coding agents stop at *"Done!"*—leaving you to guess which files changed, whether tests actually ran after the last edit, or what happens if the server crashes mid-run. Pilot embeds **verification, isolation, and crash recovery directly into the runtime**:
 
-## 快速开始
+- **Verifiable Execution Harness**: Pre-flight code localization (`PreFlightLocator` + repository briefs), message-level read-only `plan` vs. `act` modes (`Shift+Tab`), 4-tier prefix-cache-preserving context compaction, and runtime-native `CompletionGate` / `LintGate` checks backed by `pilot.policy.yaml`. Modifying any file after verification automatically marks old evidence `STALE`.
+- **Durable Event-Sourced Runtime**: Built on **Java 25 + Spring Boot 4 + SQLite (WAL)**. Every state change persists as a monotonic event before broadcast, enabling lossless SSE cursor replay on disconnect, `SIGKILL` crash takeover without replaying completed tool side effects (**8/8** recovery assertions passing), and tiered 429/5xx backoff with automatic backup model failover.
+- **Defense-in-Depth Local Safety**: Platform-native **Seatbelt (macOS)** and **bubblewrap (Linux)** command sandboxes (`.git/config` & `hooks` locked read-only, optional outbound network block), `PathValidator` symlink escape prevention, non-bypassable `CommandRiskGuard` redlines even under `AUTO`, unified `SecretScrubber` credential redaction, and **SHA-256 MCP config + tool-definition pinning** against rug-pull attacks.
+- **Isolated Browser Subagent & Live Human Takeover**: Dedicated Playwright `browser_agent` (isolated from workspace files/shell and `evaluate`) with same-origin nested `iframe`/Shadow DOM traversal, occlusion checks, hard-blocked payment pages with user `handoff`, instant **Take Control / Stop** preemption, and zero-dependency `.replay.json` session recordings with frame-level bounding-box feedback.
+- **Multi-Protocol & Multi-Surface**: Native SSE streaming and Prompt Caching for **OpenAI Chat Completions**, **OpenAI Responses**, and **Anthropic Messages**—plus keyless local models (Ollama, LM Studio, llama.cpp, vLLM). Accessible via **Web**, **Electron desktop** (with self-contained `jlink` packaging), and optional **Android** remote approval client.
 
-克隆仓库后，在仓库根目录按操作系统启动：
+---
+
+## Architecture
+
+```mermaid
+flowchart LR
+    UI["Web / Electron / Android<br/>SSE Cursor · Diff Approval · Take Control"] <-->|"REST + SSE"| Server["pilot-server (Spring Boot 4)<br/>SQLite WAL · Crash Recovery · ValidationLedger"]
+    Server <--> Core["pilot-core (Java 25, Framework-Free)<br/>AgentLoop · ContextBudget · CompletionGate"]
+    Core --> Models["ModelClient<br/>OpenAI Chat/Responses · Anthropic · Local"]
+    Core --> Exec["OsSandbox & CommandRiskGuard<br/>Seatbelt · bubblewrap · PathValidator"]
+    Core --> Ext["Extensions<br/>MCP (SHA-256 Pinned) · browser_agent (Playwright)"]
+```
+
+See [docs-public/architecture.md](docs-public/architecture.md) for sequence diagrams and module invariants.
+
+---
+
+## Benchmarks & Verification
+
+Pilot is evaluated on an official stratified 40-task split of **[ByteDance-Seed/Multi-SWE-bench-flash](https://huggingface.co/datasets/ByteDance-Seed/Multi-SWE-bench-flash)** (20 Java + 20 TypeScript across 7 real open-source repositories; **40/40 golden-patch preflight verified**). Every run uses an ephemeral sanitized Docker container (all `/home/*.patch` / `*run.sh` stripped, git history collapsed to a single `baseline` commit, **0/104 anti-cheat violations**) and upstream `multi_swe_bench` hidden-test grading (`--workers 1`).
+
+**Controlled Vertical A/B** — identical model (`gpt-6.1-sol`) and endpoint, strictly interleaved (`--interleave`) comparing pre-optimization baseline `v0-0caa2257` vs. current `v1-9b862d35`:
+
+| Metric | `v0-0caa2257` (Before) | `v1-9b862d35` (After) | Delta |
+| --- | ---: | ---: | ---: |
+| **Official `pass@1`** (95% Wilson CI) | **50.0%** (20/40) | **60.0%** (24/40) | **+10.0 pp** |
+| **Strict `COMPLETED & Pass`** (95% CI) | **45.0%** (18/40) | **57.5%** (23/40) | **+12.5 pp** |
+| — **Java Subset** (20 tasks: Jackson, Gson, Jib) | 50.0% (10/20) | **75.0%** (15/20) | **+25.0 pp (5W / 0L)** |
+| **Avg Requests Before First Edit** | 9.87 | **5.85** | **-40.7%** |
+| **Avg Model Requests / Task** | 29.0 | **23.1** | **-20.3%** |
+| **Repeat Consistency** (`v1`, 12 tasks × `k=3`) | — | **`avg@3 55.6%` / `pass^3 50.0%`** | **11/12 zero-variance** |
+| **Crash & SSE Recovery Smoke** (0-token) | — | **8 / 8 assertions passed** | Zero side-effect replay |
+
+> **Transparent Scope**: Conducted via proxy endpoint (`gpt-6.1-sol`); full-set exact McNemar `p = 0.289` (official) / `0.180` (strict), Java 20-task `p = 0.0625` (5W/0L). Results demonstrate controlled paired harness delta rather than cross-model leaderboard claims. Full methodology, per-task matrix, and reproduction scripts live in [docs-public/benchmarks.md](docs-public/benchmarks.md) and [evaluation/multi-swe-bench/](evaluation/multi-swe-bench/README.md).
+
+---
+
+## Quick Start
+
+### 1. Clone & Launch
 
 ```sh
 git clone https://github.com/zzl-qz/Pilot.git
 cd Pilot
+```
+
+**macOS / Linux:**
+
+```sh
 bash start.sh
 ```
 
-Windows PowerShell 或命令提示符：
+**Windows (PowerShell / CMD):**
 
 ```powershell
-git clone https://github.com/zzl-qz/Pilot.git
-cd Pilot
 .\start.cmd
 ```
 
-启动器会准备所需的 Java 25、Node.js 运行环境和桌面依赖，并构建、测试后端；首次联网准备可能需要几分钟。服务默认监听 `http://localhost:9999`，也可以直接用浏览器访问。按步骤配置模型、数据目录和工作区，请看[首次启动指南](docs-public/getting-started.md)。
+First launch automatically provisions Java 25, Node.js 22, and desktop dependencies into Pilot's private cache, builds and verifies the server, and opens `http://localhost:9999` (plus the Electron desktop shell when available).
 
-## 安全提示
+### 2. Configure a Model & Try Safely
 
-Pilot 可以读取和修改你选定的工作区，也能执行本机命令。默认权限档位为 `AUTO`（内置删除系统/根/工作区目录硬阻断，以及强推受保护分支与敏感凭证外发的不可绕过二次确认），但普通工具仍可能不经逐项确认直接执行。第一次试用请使用可丢弃的工作区，并先切换到 `ASK` 或 `READ_ONLY`（或使用输入栏的 `plan` 分析模式）；不要把密钥或私人数据放进工作区。完整说明见[安全与隐私](docs-public/security.md)。
-
-## 文档
-
-| 你要做什么 | 文档 |
-| --- | --- |
-| 安全地完成首次启动与模型配置 | [首次启动指南](docs-public/getting-started.md) |
-| 查找功能、设置项、浏览器能力与常用配置 | [功能与配置参考](docs-public/user-guide.md) |
-| 确认 Pilot 不做什么、面向谁 | [范围与边界](docs-public/scope.md) |
-| 了解完成凭证、验证策略即代码与任务交接 | [完成凭证与任务交接](docs-public/completion-capsule.md) |
-| 了解插件如何声明依赖、升级为什么不会打掉生态 | [插件契约](docs-public/plugin-contracts.md) |
-| 了解「完成」如何被验证，与外部验证工具的差异 | [与验证类工具的差异](docs-public/verification-approach.md) |
-| 了解 MCP 启动命令信任与工具定义钉住规则 | [MCP 信任模型](docs-public/design-mcp-trust.md) |
-| 浏览公开文档与开发入口 | [文档索引](docs-public/README.md) |
-| 理解系统模块与关键数据流 | [技术导览](PROJECT_TECHNICAL_GUIDE.md) |
-| 配置源码运行时自动准备 | [源码环境自动准备](SOURCE_ENVIRONMENT.md) |
-| 了解桌面端、自包含打包或 Android 端 | [Electron 桌面端](pilot-desktop/README.md) · [三平台自包含发行包](pilot-desktop/RELEASE_PACKAGING.md) · [Android 与移动连接](pilot-mobile/README.md) |
-| 参与贡献 | [贡献指南](CONTRIBUTING.md) |
-| 了解安全边界、浏览器隐私与脱敏规则 | [安全与隐私](docs-public/security.md) |
-| 私下报告安全漏洞 | [Security Policy](SECURITY.md) |
-
-## 开发与验证
-
-完整 CI 基线见 [GitHub Actions](.github/workflows/ci.yml)：覆盖 Windows、macOS、Linux，并包含 Android 构建与模拟器检查。服务端完整验证命令：
+Switch permission mode to `ASK` or `READ_ONLY` (or toggle `plan` mode via `Shift+Tab`) inside a disposable repository first. You can explore the UI with **Mock mode** (no API key), connect keyless local models (**Ollama / LM Studio / vLLM**), or pass a live endpoint:
 
 ```sh
-sh mvnw -B -ntp verify
+PILOT_MODEL_API_KEY="your-api-key" \
+PILOT_MODEL_ENDPOINT="https://api.openai.com/v1/chat/completions" \
+PILOT_MODEL_MODEL="gpt-4o-mini" \
+PILOT_WORKSPACE="/path/to/test-repo" \
+bash start.sh
 ```
 
-Windows 可使用 Maven Wrapper 命令：
+See [Getting Started](docs-public/getting-started.md) for Windows PowerShell commands, custom ports, and multi-preset failover setup.
 
-```powershell
-.\mvnw.cmd -B -ntp verify
-```
+---
 
-详细模块测试和跨平台验证范围见[贡献指南](CONTRIBUTING.md)。本机一次通过不等于其他操作系统已实机验证。
+## Documentation
 
-## 仓库结构
+| Category | Guides |
+| --- | --- |
+| **Start & Usage** | [Getting Started](docs-public/getting-started.md) · [User & Configuration Guide](docs-public/user-guide.md) · [Documentation Index](docs-public/README.md) |
+| **Architecture & Verification** | [Architecture](docs-public/architecture.md) · [Benchmarks](docs-public/benchmarks.md) · [Verification Approach](docs-public/verification-approach.md) · [Completion Bundles & Policies](docs-public/completion-capsule.md) |
+| **Security & Trust** | [Security & Privacy](docs-public/security.md) · [MCP Trust Model](docs-public/design-mcp-trust.md) · [Scope & Boundaries](docs-public/scope.md) · [Security Policy](SECURITY.md) |
+| **Extensibility & Clients** | [Plugin Contracts](docs-public/plugin-contracts.md) · [Desktop & Release Packaging](pilot-desktop/RELEASE_PACKAGING.md) · [Android Companion](pilot-mobile/README.md) |
+| **Engineering & Contributing** | [Technical Guide (zh-CN)](PROJECT_TECHNICAL_GUIDE.md) · [Contributing](CONTRIBUTING.md) · [Multi-SWE-bench Suite](evaluation/multi-swe-bench/README.md) |
+
+---
+
+## Repository Structure
 
 ```text
-pilot-core/       Agent、模型协议、工具和权限机制
-pilot-server/     Spring Boot 服务、持久化与运行时装配
-pilot-web/        Web 工作台与前端资源
-pilot-desktop/    Electron 桌面宿主
-pilot-mobile/     Android 客户端与连接组件
-docs-public/      面向 GitHub 访客的公开文档与截图
-evaluation/       自动化评测规格和验证记录
+pilot-core/       Framework-free agent loop, model protocols, tools, sandboxes & trust policies
+pilot-server/     Spring Boot 4 runtime, SQLite WAL event store, recovery & verification ledger
+pilot-web/        React + TypeScript workbench frontend
+pilot-desktop/    Electron desktop host & cross-platform jlink self-contained packaging
+pilot-mobile/     Optional Android remote approval client & P2P/relay bridge
+docs-public/      Bilingual public documentation (English primary + zh-CN/)
+evaluation/       Automated harnesses, Multi-SWE-bench suite & archived reports
+site/             Static GitHub Pages landing site (English + zh-CN)
 ```
 
-## 许可证
+## Development & Verification
 
-Pilot 自有源码和文档采用 [Apache License 2.0](LICENSE)。第三方代码和素材适用各自的许可证及版权声明。
+Full cross-platform CI runs on Windows, macOS, and Linux ([ci.yml](.github/workflows/ci.yml)). Run server verification locally:
+
+```sh
+sh mvnw -B -ntp verify          # macOS / Linux
+.\mvnw.cmd -B -ntp verify        # Windows
+node scripts/check-doc-links.mjs # Verify all repository documentation links
+```
+
+## License
+
+Pilot's original source code and documentation are licensed under the [Apache License 2.0](LICENSE). Third-party components retain their respective licenses.

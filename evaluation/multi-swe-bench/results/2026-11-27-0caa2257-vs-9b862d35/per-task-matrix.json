@@ -1,0 +1,1426 @@
+{
+  "tasks40": [
+    {
+      "instance_id": "darkreader__darkreader-6747",
+      "language": "typescript",
+      "repo": "darkreader/darkreader",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 109,
+        "requests": 16,
+        "firstEditRequest": 5,
+        "compactions": 0,
+        "patchBytes": 1033
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 94,
+        "requests": 9,
+        "firstEditRequest": 5,
+        "compactions": 0,
+        "patchBytes": 1135
+      }
+    },
+    {
+      "instance_id": "darkreader__darkreader-7241",
+      "language": "typescript",
+      "repo": "darkreader/darkreader",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 154,
+        "requests": 12,
+        "firstEditRequest": 5,
+        "compactions": 0,
+        "patchBytes": 548
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 124,
+        "requests": 11,
+        "firstEditRequest": 4,
+        "compactions": 0,
+        "patchBytes": 548
+      }
+    },
+    {
+      "instance_id": "fasterxml__jackson-databind-4048",
+      "language": "java",
+      "repo": "fasterxml/jackson-databind",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 140,
+        "requests": 12,
+        "firstEditRequest": 5,
+        "compactions": 0,
+        "patchBytes": 788
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 301,
+        "requests": 15,
+        "firstEditRequest": 5,
+        "compactions": 0,
+        "patchBytes": 881
+      }
+    },
+    {
+      "instance_id": "fasterxml__jackson-databind-4131",
+      "language": "java",
+      "repo": "fasterxml/jackson-databind",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 435,
+        "requests": 29,
+        "firstEditRequest": 9,
+        "compactions": 0,
+        "patchBytes": 3376
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 205,
+        "requests": 15,
+        "firstEditRequest": 8,
+        "compactions": 0,
+        "patchBytes": 1765
+      }
+    },
+    {
+      "instance_id": "fasterxml__jackson-databind-4159",
+      "language": "java",
+      "repo": "fasterxml/jackson-databind",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 813,
+        "requests": 67,
+        "firstEditRequest": 16,
+        "compactions": 4,
+        "patchBytes": 0
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 275,
+        "requests": 17,
+        "firstEditRequest": 6,
+        "compactions": 0,
+        "patchBytes": 1683
+      }
+    },
+    {
+      "instance_id": "fasterxml__jackson-databind-4219",
+      "language": "java",
+      "repo": "fasterxml/jackson-databind",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 240,
+        "requests": 18,
+        "firstEditRequest": 6,
+        "compactions": 0,
+        "patchBytes": 1360
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 140,
+        "requests": 8,
+        "firstEditRequest": 3,
+        "compactions": 0,
+        "patchBytes": 1360
+      }
+    },
+    {
+      "instance_id": "fasterxml__jackson-databind-4228",
+      "language": "java",
+      "repo": "fasterxml/jackson-databind",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 441,
+        "requests": 53,
+        "firstEditRequest": 16,
+        "compactions": 2,
+        "patchBytes": 2273
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 405,
+        "requests": 23,
+        "firstEditRequest": 12,
+        "compactions": 0,
+        "patchBytes": 2537
+      }
+    },
+    {
+      "instance_id": "fasterxml__jackson-databind-4257",
+      "language": "java",
+      "repo": "fasterxml/jackson-databind",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 180,
+        "requests": 17,
+        "firstEditRequest": 11,
+        "compactions": 0,
+        "patchBytes": 802
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 285,
+        "requests": 20,
+        "firstEditRequest": 7,
+        "compactions": 0,
+        "patchBytes": 1052
+      }
+    },
+    {
+      "instance_id": "fasterxml__jackson-databind-4360",
+      "language": "java",
+      "repo": "fasterxml/jackson-databind",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 156,
+        "requests": 14,
+        "firstEditRequest": 8,
+        "compactions": 0,
+        "patchBytes": 678
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 155,
+        "requests": 10,
+        "firstEditRequest": 4,
+        "compactions": 0,
+        "patchBytes": 678
+      }
+    },
+    {
+      "instance_id": "fasterxml__jackson-databind-4615",
+      "language": "java",
+      "repo": "fasterxml/jackson-databind",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 436,
+        "requests": 31,
+        "firstEditRequest": 7,
+        "compactions": 0,
+        "patchBytes": 5304
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 145,
+        "requests": 10,
+        "firstEditRequest": 5,
+        "compactions": 0,
+        "patchBytes": 3660
+      }
+    },
+    {
+      "instance_id": "fasterxml__jackson-databind-4641",
+      "language": "java",
+      "repo": "fasterxml/jackson-databind",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 149,
+        "requests": 13,
+        "firstEditRequest": 7,
+        "compactions": 0,
+        "patchBytes": 1546
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 220,
+        "requests": 15,
+        "firstEditRequest": 6,
+        "compactions": 0,
+        "patchBytes": 1576
+      }
+    },
+    {
+      "instance_id": "fasterxml__jackson-dataformat-xml-531",
+      "language": "java",
+      "repo": "fasterxml/jackson-dataformat-xml",
+      "v0": {
+        "status": "INTERRUPTED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 1128,
+        "requests": 102,
+        "firstEditRequest": 30,
+        "compactions": 3,
+        "patchBytes": 0
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 1280,
+        "requests": 108,
+        "firstEditRequest": 8,
+        "compactions": 0,
+        "patchBytes": 5996
+      }
+    },
+    {
+      "instance_id": "fasterxml__jackson-dataformat-xml-544",
+      "language": "java",
+      "repo": "fasterxml/jackson-dataformat-xml",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 325,
+        "requests": 24,
+        "firstEditRequest": 11,
+        "compactions": 0,
+        "patchBytes": 811
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 241,
+        "requests": 17,
+        "firstEditRequest": 9,
+        "compactions": 0,
+        "patchBytes": 1945
+      }
+    },
+    {
+      "instance_id": "fasterxml__jackson-dataformat-xml-590",
+      "language": "java",
+      "repo": "fasterxml/jackson-dataformat-xml",
+      "v0": {
+        "status": "INTERRUPTED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 742,
+        "requests": 63,
+        "firstEditRequest": 15,
+        "compactions": 1,
+        "patchBytes": 0
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 1590,
+        "requests": 102,
+        "firstEditRequest": 18,
+        "compactions": 0,
+        "patchBytes": 1543
+      }
+    },
+    {
+      "instance_id": "fasterxml__jackson-dataformat-xml-638",
+      "language": "java",
+      "repo": "fasterxml/jackson-dataformat-xml",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 89,
+        "requests": 7,
+        "firstEditRequest": 3,
+        "compactions": 0,
+        "patchBytes": 843
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 124,
+        "requests": 11,
+        "firstEditRequest": 5,
+        "compactions": 0,
+        "patchBytes": 843
+      }
+    },
+    {
+      "instance_id": "fasterxml__jackson-dataformat-xml-644",
+      "language": "java",
+      "repo": "fasterxml/jackson-dataformat-xml",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 446,
+        "requests": 20,
+        "firstEditRequest": 7,
+        "compactions": 1,
+        "patchBytes": 1531
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 159,
+        "requests": 15,
+        "firstEditRequest": 6,
+        "compactions": 0,
+        "patchBytes": 1079
+      }
+    },
+    {
+      "instance_id": "google__gson-1093",
+      "language": "java",
+      "repo": "google/gson",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 139,
+        "requests": 13,
+        "firstEditRequest": 5,
+        "compactions": 0,
+        "patchBytes": 724
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 171,
+        "requests": 10,
+        "firstEditRequest": 2,
+        "compactions": 0,
+        "patchBytes": 724
+      }
+    },
+    {
+      "instance_id": "google__gson-1391",
+      "language": "java",
+      "repo": "google/gson",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 271,
+        "requests": 17,
+        "firstEditRequest": 7,
+        "compactions": 0,
+        "patchBytes": 845
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 450,
+        "requests": 25,
+        "firstEditRequest": 4,
+        "compactions": 0,
+        "patchBytes": 3928
+      }
+    },
+    {
+      "instance_id": "google__gson-1555",
+      "language": "java",
+      "repo": "google/gson",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 461,
+        "requests": 30,
+        "firstEditRequest": 6,
+        "compactions": 0,
+        "patchBytes": 4672
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 320,
+        "requests": 17,
+        "firstEditRequest": 5,
+        "compactions": 0,
+        "patchBytes": 3701
+      }
+    },
+    {
+      "instance_id": "googlecontainertools__jib-2536",
+      "language": "java",
+      "repo": "googlecontainertools/jib",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 732,
+        "requests": 25,
+        "firstEditRequest": 9,
+        "compactions": 1,
+        "patchBytes": 1300
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 275,
+        "requests": 10,
+        "firstEditRequest": 5,
+        "compactions": 0,
+        "patchBytes": 963
+      }
+    },
+    {
+      "instance_id": "googlecontainertools__jib-2542",
+      "language": "java",
+      "repo": "googlecontainertools/jib",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 516,
+        "requests": 22,
+        "firstEditRequest": 7,
+        "compactions": 0,
+        "patchBytes": 1099
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 295,
+        "requests": 10,
+        "firstEditRequest": 5,
+        "compactions": 0,
+        "patchBytes": 1145
+      }
+    },
+    {
+      "instance_id": "googlecontainertools__jib-4035",
+      "language": "java",
+      "repo": "googlecontainertools/jib",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 1283,
+        "requests": 43,
+        "firstEditRequest": 5,
+        "compactions": 0,
+        "patchBytes": 801
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 802,
+        "requests": 24,
+        "firstEditRequest": 2,
+        "compactions": 0,
+        "patchBytes": 961
+      }
+    },
+    {
+      "instance_id": "mui__material-ui-23778",
+      "language": "typescript",
+      "repo": "mui/material-ui",
+      "v0": {
+        "status": "INTERRUPTED",
+        "officialPass": true,
+        "strictPass": false,
+        "runSeconds": 633,
+        "requests": 32,
+        "firstEditRequest": 8,
+        "compactions": 0,
+        "patchBytes": 543
+      },
+      "v1": {
+        "status": "INTERRUPTED",
+        "officialPass": true,
+        "strictPass": false,
+        "runSeconds": 568,
+        "requests": 32,
+        "firstEditRequest": 4,
+        "compactions": 0,
+        "patchBytes": 543
+      }
+    },
+    {
+      "instance_id": "vuejs__core-10027",
+      "language": "typescript",
+      "repo": "vuejs/core",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 130,
+        "requests": 11,
+        "firstEditRequest": 5,
+        "compactions": 0,
+        "patchBytes": 665
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 154,
+        "requests": 11,
+        "firstEditRequest": 4,
+        "compactions": 0,
+        "patchBytes": 654
+      }
+    },
+    {
+      "instance_id": "vuejs__core-10416",
+      "language": "typescript",
+      "repo": "vuejs/core",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 89,
+        "requests": 10,
+        "firstEditRequest": 5,
+        "compactions": 0,
+        "patchBytes": 666
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 124,
+        "requests": 8,
+        "firstEditRequest": 4,
+        "compactions": 0,
+        "patchBytes": 445
+      }
+    },
+    {
+      "instance_id": "vuejs__core-10939",
+      "language": "typescript",
+      "repo": "vuejs/core",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 175,
+        "requests": 21,
+        "firstEditRequest": 10,
+        "compactions": 0,
+        "patchBytes": 893
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 140,
+        "requests": 10,
+        "firstEditRequest": 4,
+        "compactions": 0,
+        "patchBytes": 1025
+      }
+    },
+    {
+      "instance_id": "vuejs__core-11165",
+      "language": "typescript",
+      "repo": "vuejs/core",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 155,
+        "requests": 18,
+        "firstEditRequest": 14,
+        "compactions": 0,
+        "patchBytes": 750
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 190,
+        "requests": 14,
+        "firstEditRequest": 5,
+        "compactions": 0,
+        "patchBytes": 677
+      }
+    },
+    {
+      "instance_id": "vuejs__core-11491",
+      "language": "typescript",
+      "repo": "vuejs/core",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 175,
+        "requests": 18,
+        "firstEditRequest": 9,
+        "compactions": 0,
+        "patchBytes": 1528
+      },
+      "v1": {
+        "status": "TIMEOUT",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 1817,
+        "requests": 125,
+        "firstEditRequest": 5,
+        "compactions": 0,
+        "patchBytes": 793
+      }
+    },
+    {
+      "instance_id": "vuejs__core-11625",
+      "language": "typescript",
+      "repo": "vuejs/core",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 79,
+        "requests": 10,
+        "firstEditRequest": 6,
+        "compactions": 0,
+        "patchBytes": 507
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 435,
+        "requests": 16,
+        "firstEditRequest": 5,
+        "compactions": 0,
+        "patchBytes": 507
+      }
+    },
+    {
+      "instance_id": "vuejs__core-11761",
+      "language": "typescript",
+      "repo": "vuejs/core",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 124,
+        "requests": 15,
+        "firstEditRequest": 7,
+        "compactions": 0,
+        "patchBytes": 538
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 170,
+        "requests": 13,
+        "firstEditRequest": 8,
+        "compactions": 0,
+        "patchBytes": 538
+      }
+    },
+    {
+      "instance_id": "vuejs__core-11854",
+      "language": "typescript",
+      "repo": "vuejs/core",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 1508,
+        "requests": 97,
+        "firstEditRequest": 8,
+        "compactions": 2,
+        "patchBytes": 2367
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 130,
+        "requests": 9,
+        "firstEditRequest": 5,
+        "compactions": 0,
+        "patchBytes": 644
+      }
+    },
+    {
+      "instance_id": "vuejs__core-11899",
+      "language": "typescript",
+      "repo": "vuejs/core",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 210,
+        "requests": 22,
+        "firstEditRequest": 7,
+        "compactions": 0,
+        "patchBytes": 984
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 205,
+        "requests": 11,
+        "firstEditRequest": 4,
+        "compactions": 0,
+        "patchBytes": 996
+      }
+    },
+    {
+      "instance_id": "vuejs__core-8402",
+      "language": "typescript",
+      "repo": "vuejs/core",
+      "v0": {
+        "status": "INTERRUPTED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 135,
+        "requests": 18,
+        "firstEditRequest": 11,
+        "compactions": 0,
+        "patchBytes": 491
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 416,
+        "requests": 15,
+        "firstEditRequest": 5,
+        "compactions": 0,
+        "patchBytes": 491
+      }
+    },
+    {
+      "instance_id": "vuejs__core-8470",
+      "language": "typescript",
+      "repo": "vuejs/core",
+      "v0": {
+        "status": "INTERRUPTED",
+        "officialPass": true,
+        "strictPass": false,
+        "runSeconds": 135,
+        "requests": 14,
+        "firstEditRequest": 6,
+        "compactions": 0,
+        "patchBytes": 848
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 210,
+        "requests": 14,
+        "firstEditRequest": 5,
+        "compactions": 0,
+        "patchBytes": 848
+      }
+    },
+    {
+      "instance_id": "vuejs__core-8511",
+      "language": "typescript",
+      "repo": "vuejs/core",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 1095,
+        "requests": 108,
+        "firstEditRequest": 35,
+        "compactions": 5,
+        "patchBytes": 2009
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 718,
+        "requests": 33,
+        "firstEditRequest": 7,
+        "compactions": 0,
+        "patchBytes": 2723
+      }
+    },
+    {
+      "instance_id": "vuejs__core-8535",
+      "language": "typescript",
+      "repo": "vuejs/core",
+      "v0": {
+        "status": "INTERRUPTED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 281,
+        "requests": 23,
+        "firstEditRequest": null,
+        "compactions": 0,
+        "patchBytes": 0
+      },
+      "v1": {
+        "status": "INTERRUPTED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 502,
+        "requests": 40,
+        "firstEditRequest": 17,
+        "compactions": 0,
+        "patchBytes": 0
+      }
+    },
+    {
+      "instance_id": "vuejs__core-8538",
+      "language": "typescript",
+      "repo": "vuejs/core",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 120,
+        "requests": 15,
+        "firstEditRequest": 8,
+        "compactions": 0,
+        "patchBytes": 840
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 778,
+        "requests": 26,
+        "firstEditRequest": 5,
+        "compactions": 0,
+        "patchBytes": 754
+      }
+    },
+    {
+      "instance_id": "vuejs__core-8911",
+      "language": "typescript",
+      "repo": "vuejs/core",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": true,
+        "strictPass": true,
+        "runSeconds": 1285,
+        "requests": 56,
+        "firstEditRequest": 34,
+        "compactions": 1,
+        "patchBytes": 561
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 416,
+        "requests": 24,
+        "firstEditRequest": 5,
+        "compactions": 0,
+        "patchBytes": 672
+      }
+    },
+    {
+      "instance_id": "vuejs__core-9507",
+      "language": "typescript",
+      "repo": "vuejs/core",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 130,
+        "requests": 13,
+        "firstEditRequest": 6,
+        "compactions": 0,
+        "patchBytes": 657
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 151,
+        "requests": 11,
+        "firstEditRequest": 4,
+        "compactions": 0,
+        "patchBytes": 722
+      }
+    },
+    {
+      "instance_id": "vuejs__core-9532",
+      "language": "typescript",
+      "repo": "vuejs/core",
+      "v0": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 135,
+        "requests": 11,
+        "firstEditRequest": 6,
+        "compactions": 0,
+        "patchBytes": 703
+      },
+      "v1": {
+        "status": "COMPLETED",
+        "officialPass": false,
+        "strictPass": false,
+        "runSeconds": 220,
+        "requests": 10,
+        "firstEditRequest": 4,
+        "compactions": 0,
+        "patchBytes": 604
+      }
+    }
+  ],
+  "stabilityK3": [
+    {
+      "instance_id": "fasterxml__jackson-databind-4159",
+      "language": "java",
+      "officialPasses": 0,
+      "strictPasses": 0,
+      "attempts": [
+        {
+          "attempt": 1,
+          "source": "phase2",
+          "status": "COMPLETED",
+          "official": false,
+          "strict": false,
+          "seconds": 275,
+          "reqs": 17
+        },
+        {
+          "attempt": 2,
+          "source": "phase3-a1",
+          "status": "INTERRUPTED",
+          "official": false,
+          "strict": false,
+          "seconds": 447,
+          "reqs": 24
+        },
+        {
+          "attempt": 3,
+          "source": "phase3-a2",
+          "status": "COMPLETED",
+          "official": false,
+          "strict": false,
+          "seconds": 210,
+          "reqs": 13
+        }
+      ]
+    },
+    {
+      "instance_id": "fasterxml__jackson-databind-4360",
+      "language": "java",
+      "officialPasses": 3,
+      "strictPasses": 3,
+      "attempts": [
+        {
+          "attempt": 1,
+          "source": "phase2",
+          "status": "COMPLETED",
+          "official": true,
+          "strict": true,
+          "seconds": 155,
+          "reqs": 10
+        },
+        {
+          "attempt": 2,
+          "source": "phase3-a1",
+          "status": "COMPLETED",
+          "official": true,
+          "strict": true,
+          "seconds": 155,
+          "reqs": 13
+        },
+        {
+          "attempt": 3,
+          "source": "phase3-a2",
+          "status": "COMPLETED",
+          "official": true,
+          "strict": true,
+          "seconds": 286,
+          "reqs": 15
+        }
+      ]
+    },
+    {
+      "instance_id": "fasterxml__jackson-databind-4615",
+      "language": "java",
+      "officialPasses": 0,
+      "strictPasses": 0,
+      "attempts": [
+        {
+          "attempt": 1,
+          "source": "phase2",
+          "status": "COMPLETED",
+          "official": false,
+          "strict": false,
+          "seconds": 145,
+          "reqs": 10
+        },
+        {
+          "attempt": 2,
+          "source": "phase3-a1",
+          "status": "COMPLETED",
+          "official": false,
+          "strict": false,
+          "seconds": 476,
+          "reqs": 24
+        },
+        {
+          "attempt": 3,
+          "source": "phase3-a2",
+          "status": "COMPLETED",
+          "official": false,
+          "strict": false,
+          "seconds": 336,
+          "reqs": 27
+        }
+      ]
+    },
+    {
+      "instance_id": "google__gson-1093",
+      "language": "java",
+      "officialPasses": 3,
+      "strictPasses": 3,
+      "attempts": [
+        {
+          "attempt": 1,
+          "source": "phase2",
+          "status": "COMPLETED",
+          "official": true,
+          "strict": true,
+          "seconds": 171,
+          "reqs": 10
+        },
+        {
+          "attempt": 2,
+          "source": "phase3-a1",
+          "status": "COMPLETED",
+          "official": true,
+          "strict": true,
+          "seconds": 110,
+          "reqs": 9
+        },
+        {
+          "attempt": 3,
+          "source": "phase3-a2",
+          "status": "COMPLETED",
+          "official": true,
+          "strict": true,
+          "seconds": 156,
+          "reqs": 13
+        }
+      ]
+    },
+    {
+      "instance_id": "google__gson-1391",
+      "language": "java",
+      "officialPasses": 3,
+      "strictPasses": 3,
+      "attempts": [
+        {
+          "attempt": 1,
+          "source": "phase2",
+          "status": "COMPLETED",
+          "official": true,
+          "strict": true,
+          "seconds": 450,
+          "reqs": 25
+        },
+        {
+          "attempt": 2,
+          "source": "phase3-a1",
+          "status": "COMPLETED",
+          "official": true,
+          "strict": true,
+          "seconds": 215,
+          "reqs": 16
+        },
+        {
+          "attempt": 3,
+          "source": "phase3-a2",
+          "status": "COMPLETED",
+          "official": true,
+          "strict": true,
+          "seconds": 180,
+          "reqs": 13
+        }
+      ]
+    },
+    {
+      "instance_id": "google__gson-1555",
+      "language": "java",
+      "officialPasses": 3,
+      "strictPasses": 3,
+      "attempts": [
+        {
+          "attempt": 1,
+          "source": "phase2",
+          "status": "COMPLETED",
+          "official": true,
+          "strict": true,
+          "seconds": 320,
+          "reqs": 17
+        },
+        {
+          "attempt": 2,
+          "source": "phase3-a1",
+          "status": "COMPLETED",
+          "official": true,
+          "strict": true,
+          "seconds": 200,
+          "reqs": 19
+        },
+        {
+          "attempt": 3,
+          "source": "phase3-a2",
+          "status": "COMPLETED",
+          "official": true,
+          "strict": true,
+          "seconds": 271,
+          "reqs": 18
+        }
+      ]
+    },
+    {
+      "instance_id": "darkreader__darkreader-6747",
+      "language": "typescript",
+      "officialPasses": 0,
+      "strictPasses": 0,
+      "attempts": [
+        {
+          "attempt": 1,
+          "source": "phase2",
+          "status": "COMPLETED",
+          "official": false,
+          "strict": false,
+          "seconds": 94,
+          "reqs": 9
+        },
+        {
+          "attempt": 2,
+          "source": "phase3-a1",
+          "status": "COMPLETED",
+          "official": false,
+          "strict": false,
+          "seconds": 170,
+          "reqs": 10
+        },
+        {
+          "attempt": 3,
+          "source": "phase3-a2",
+          "status": "COMPLETED",
+          "official": false,
+          "strict": false,
+          "seconds": 190,
+          "reqs": 10
+        }
+      ]
+    },
+    {
+      "instance_id": "mui__material-ui-23778",
+      "language": "typescript",
+      "officialPasses": 3,
+      "strictPasses": 0,
+      "attempts": [
+        {
+          "attempt": 1,
+          "source": "phase2",
+          "status": "INTERRUPTED",
+          "official": true,
+          "strict": false,
+          "seconds": 568,
+          "reqs": 32
+        },
+        {
+          "attempt": 2,
+          "source": "phase3-a1",
+          "status": "INTERRUPTED",
+          "official": true,
+          "strict": false,
+          "seconds": 483,
+          "reqs": 26
+        },
+        {
+          "attempt": 3,
+          "source": "phase3-a2",
+          "status": "INTERRUPTED",
+          "official": true,
+          "strict": false,
+          "seconds": 839,
+          "reqs": 22
+        }
+      ]
+    },
+    {
+      "instance_id": "vuejs__core-11491",
+      "language": "typescript",
+      "officialPasses": 2,
+      "strictPasses": 2,
+      "attempts": [
+        {
+          "attempt": 1,
+          "source": "phase2",
+          "status": "TIMEOUT",
+          "official": false,
+          "strict": false,
+          "seconds": 1817,
+          "reqs": 125
+        },
+        {
+          "attempt": 2,
+          "source": "phase3-a1",
+          "status": "COMPLETED",
+          "official": true,
+          "strict": true,
+          "seconds": 874,
+          "reqs": 30
+        },
+        {
+          "attempt": 3,
+          "source": "phase3-a2",
+          "status": "COMPLETED",
+          "official": true,
+          "strict": true,
+          "seconds": 200,
+          "reqs": 16
+        }
+      ]
+    },
+    {
+      "instance_id": "vuejs__core-11761",
+      "language": "typescript",
+      "officialPasses": 3,
+      "strictPasses": 3,
+      "attempts": [
+        {
+          "attempt": 1,
+          "source": "phase2",
+          "status": "COMPLETED",
+          "official": true,
+          "strict": true,
+          "seconds": 170,
+          "reqs": 13
+        },
+        {
+          "attempt": 2,
+          "source": "phase3-a1",
+          "status": "COMPLETED",
+          "official": true,
+          "strict": true,
+          "seconds": 240,
+          "reqs": 13
+        },
+        {
+          "attempt": 3,
+          "source": "phase3-a2",
+          "status": "COMPLETED",
+          "official": true,
+          "strict": true,
+          "seconds": 200,
+          "reqs": 11
+        }
+      ]
+    },
+    {
+      "instance_id": "vuejs__core-11854",
+      "language": "typescript",
+      "officialPasses": 0,
+      "strictPasses": 0,
+      "attempts": [
+        {
+          "attempt": 1,
+          "source": "phase2",
+          "status": "COMPLETED",
+          "official": false,
+          "strict": false,
+          "seconds": 130,
+          "reqs": 9
+        },
+        {
+          "attempt": 2,
+          "source": "phase3-a1",
+          "status": "COMPLETED",
+          "official": false,
+          "strict": false,
+          "seconds": 859,
+          "reqs": 72
+        },
+        {
+          "attempt": 3,
+          "source": "phase3-a2",
+          "status": "COMPLETED",
+          "official": false,
+          "strict": false,
+          "seconds": 492,
+          "reqs": 41
+        }
+      ]
+    },
+    {
+      "instance_id": "vuejs__core-11899",
+      "language": "typescript",
+      "officialPasses": 0,
+      "strictPasses": 0,
+      "attempts": [
+        {
+          "attempt": 1,
+          "source": "phase2",
+          "status": "COMPLETED",
+          "official": false,
+          "strict": false,
+          "seconds": 205,
+          "reqs": 11
+        },
+        {
+          "attempt": 2,
+          "source": "phase3-a1",
+          "status": "COMPLETED",
+          "official": false,
+          "strict": false,
+          "seconds": 552,
+          "reqs": 20
+        },
+        {
+          "attempt": 3,
+          "source": "phase3-a2",
+          "status": "COMPLETED",
+          "official": false,
+          "strict": false,
+          "seconds": 181,
+          "reqs": 11
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "sourceDataset": "ByteDance-Seed/Multi-SWE-bench-flash",
+  "seed": 42,
+  "goldenVerified": "40/40 (100%) on local Apple Silicon + OrbStack",
+  "excludedBeforeModelEval": {
+    "upstreamFlakySuspenseTimer": [
+      "vuejs__core-10218",
+      "vuejs__core-11026",
+      "vuejs__core-11338",
+      "vuejs__core-11515",
+      "vuejs__core-11813",
+      "vuejs__core-9492",
+      "vuejs__core-9572"
+    ],
+    "upstreamGsonParserMismatch": [
+      "google__gson-1703",
+      "google__gson-1787"
+    ]
+  },
+  "backfilledDeterministically": [
+    "fasterxml__jackson-databind-4131",
+    "fasterxml__jackson-databind-4641"
+  ],
+  "totalTasks": 40,
+  "byLanguage": {
+    "java": 20,
+    "typescript": 20
+  },
+  "byRepo": {
+    "fasterxml/jackson-databind": 9,
+    "fasterxml/jackson-dataformat-xml": 5,
+    "google/gson": 3,
+    "googlecontainertools/jib": 3,
+    "darkreader/darkreader": 2,
+    "mui/material-ui": 1,
+    "vuejs/core": 17
+  },
+  "instanceIds": [
+    "fasterxml__jackson-databind-4048",
+    "fasterxml__jackson-databind-4131",
+    "fasterxml__jackson-databind-4159",
+    "fasterxml__jackson-databind-4219",
+    "fasterxml__jackson-databind-4228",
+    "fasterxml__jackson-databind-4257",
+    "fasterxml__jackson-databind-4360",
+    "fasterxml__jackson-databind-4615",
+    "fasterxml__jackson-databind-4641",
+    "fasterxml__jackson-dataformat-xml-531",
+    "fasterxml__jackson-dataformat-xml-544",
+    "fasterxml__jackson-dataformat-xml-590",
+    "fasterxml__jackson-dataformat-xml-638",
+    "fasterxml__jackson-dataformat-xml-644",
+    "google__gson-1093",
+    "google__gson-1391",
+    "google__gson-1555",
+    "googlecontainertools__jib-2536",
+    "googlecontainertools__jib-2542",
+    "googlecontainertools__jib-4035",
+    "darkreader__darkreader-6747",
+    "darkreader__darkreader-7241",
+    "mui__material-ui-23778",
+    "vuejs__core-10027",
+    "vuejs__core-10416",
+    "vuejs__core-10939",
+    "vuejs__core-11165",
+    "vuejs__core-11491",
+    "vuejs__core-11625",
+    "vuejs__core-11761",
+    "vuejs__core-11854",
+    "vuejs__core-11899",
+    "vuejs__core-8402",
+    "vuejs__core-8470",
+    "vuejs__core-8511",
+    "vuejs__core-8535",
+    "vuejs__core-8538",
+    "vuejs__core-8911",
+    "vuejs__core-9507",
+    "vuejs__core-9532"
+  ]
+}

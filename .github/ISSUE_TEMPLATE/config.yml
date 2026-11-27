@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security Vulnerability Disclosure
+    url: https://github.com/zzl-qz/Pilot/blob/master/SECURITY.md
+    about: Please report security vulnerabilities privately rather than opening a public issue.
+  - name: Public Documentation
+    url: https://github.com/zzl-qz/Pilot/blob/master/docs-public/README.md
+    about: Getting started, architecture, benchmarks, and configuration guides.

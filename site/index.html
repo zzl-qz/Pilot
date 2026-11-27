@@ -1,19 +1,19 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pilot · 在你工作区里运行的任务执行 Agent</title>
-<meta name="description" content="Pilot 是一个用 Java 25 构建、可自托管的本机任务执行与 Coding Agent。支持 Web、Electron 桌面与 Android 客户端，内置浏览器子代理、文件系统沙箱与可复核完成凭证。">
+<title>Pilot · Local-First Verifiable Coding &amp; Task Execution Agent</title>
+<meta name="description" content="Pilot is a self-hosted coding and task execution agent built on Java 25 and Spring Boot 4. Features OS-level command sandboxes, isolated Playwright browser subagent, crash recovery, and cryptographically fingerprinted completion bundles.">
 <meta name="theme-color" content="#0a0c10">
-<meta property="og:title" content="Pilot · 在你工作区里运行的任务执行 Agent">
-<meta property="og:description" content="Java 25 构建、可自托管：读仓库、改代码、自动测页面、跑验证并留下可复核的完成凭证。">
+<meta property="og:title" content="Pilot · Local-First Verifiable Coding &amp; Task Execution Agent">
+<meta property="og:description" content="Java 25 · Self-hosted: read repositories, edit code, automate browsers with live takeover, run verification, and deliver auditable completion bundles.">
 <meta property="og:type" content="website">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230a0c10'/%3E%3Cpath d='M11 23V9h6.5a5 5 0 0 1 0 10H15' stroke='%236ea8ff' stroke-width='2.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<a class="skip" href="#mechanics">跳到主要内容</a>
+<a class="skip" href="#mechanics">Skip to main content</a>
 
 <header class="topbar" id="topbar">
   <a class="brand" href="#top">
@@ -21,16 +21,18 @@
       <svg viewBox="0 0 24 24" fill="none"><path d="M6 19V5h6.8a4.6 4.6 0 0 1 0 9.2H11" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/></svg>
     </span>
     Pilot
-    <span class="brand-sub">本机任务执行 Agent</span>
+    <span class="brand-sub">Local Coding Agent</span>
   </a>
-  <nav class="nav" aria-label="主导航">
-    <a href="#demo">界面</a>
-    <a href="#mechanics">机制</a>
-    <a href="#evidence">代码</a>
-    <a href="#permissions">安全</a>
-    <a href="#start">上手</a>
+  <nav class="nav" aria-label="Primary navigation">
+    <a href="#demo">Workbench</a>
+    <a href="#mechanics">Architecture</a>
+    <a href="#evidence">Code</a>
+    <a href="#benchmarks">Benchmarks</a>
+    <a href="#permissions">Security</a>
+    <a href="#start">Quick Start</a>
   </nav>
-  <a class="gh" href="https://github.com/zzl-qz/Pilot" rel="noopener" aria-label="GitHub 仓库">
+  <a class="gh" href="zh-CN/index.html" aria-label="切换到简体中文"><span>中文</span></a>
+  <a class="gh" href="https://github.com/zzl-qz/Pilot" rel="noopener" aria-label="GitHub repository">
     <svg viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A7.99 7.99 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
     <span>GitHub</span>
   </a>
@@ -47,106 +49,106 @@
     </div>
 
     <div class="hero-inner">
-      <p class="eyebrow"><span class="dot"></span>Java 25 · 自托管 · Web / 桌面 / Android</p>
+      <p class="eyebrow"><span class="dot"></span>Java 25 · Self-Hosted · Web / Electron / Android</p>
 
-      <h1>它在你自己的<br><span class="grad">工作区里执行与验证</span></h1>
+      <h1>Execute &amp; verify right inside<br><span class="grad">your own workspace</span></h1>
 
       <p class="lede">
-        提交任务，Pilot 读仓库、列计划、改文件、操作内置浏览器、跑验证，然后把每一步证据摊开给你审阅。
-        支持 OpenAI 与 Anthropic 多协议端点，路径、权限、高危命令红线全部在后端硬校验。
+        Submit a task—Pilot reads the repository, plans changes, edits files, drives an isolated browser, runs tests,
+        and presents verifiable evidence for review. Supports OpenAI &amp; Anthropic SSE protocols with backend-enforced
+        path, permission, and command redlines.
       </p>
 
-      <div class="install" role="group" aria-label="安装命令">
+      <div class="install" role="group" aria-label="Install command">
         <span class="install-prompt" aria-hidden="true">$</span>
         <code>git clone https://github.com/zzl-qz/Pilot.git &amp;&amp; cd Pilot &amp;&amp; bash start.sh</code>
-        <button class="copy icon-only" data-copy="git clone https://github.com/zzl-qz/Pilot.git && cd Pilot && bash start.sh" aria-label="复制安装命令">
+        <button class="copy icon-only" data-copy="git clone https://github.com/zzl-qz/Pilot.git && cd Pilot && bash start.sh" aria-label="Copy install command">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M15 6H6a2 2 0 0 0-2 2v9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
         </button>
       </div>
 
       <div class="cta">
         <a class="btn btn-primary" href="#start">
-          快速开始
+          Quick Start
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </a>
-        <a class="btn btn-ghost" href="#demo">看看界面</a>
+        <a class="btn btn-ghost" href="#benchmarks">View Benchmarks</a>
       </div>
 
-      <dl class="stats" aria-label="项目规模">
-        <div><dt>核心机制</dt><dd><span class="count" data-count="24">24</span></dd></div>
-        <div><dt>内置工具</dt><dd><span class="count" data-count="30">30</span><small>+</small></dd></div>
-        <div><dt>权限档位</dt><dd><span class="count" data-count="4" data-pad="2">04</span></dd></div>
-        <div><dt>运行终端</dt><dd><span class="count" data-count="3" data-pad="2">03</span></dd></div>
+      <dl class="stats" aria-label="Project highlights">
+        <div><dt>Multi-SWE-bench (Java)</dt><dd><span class="count" data-count="75">75</span><small>%</small></dd></div>
+        <div><dt>Built-in Tools</dt><dd><span class="count" data-count="30">30</span><small>+</small></dd></div>
+        <div><dt>Permission Tiers</dt><dd><span class="count" data-count="4" data-pad="2">04</span></dd></div>
+        <div><dt>Recovery Smoke</dt><dd><span class="count" data-count="8">8</span><small>/8</small></dd></div>
       </dl>
     </div>
   </section>
 
-  <!-- ══ 技术栈流动条 ══════════════════════════════════ -->
-  <div class="marquee" aria-label="技术栈">
+  <!-- ══ Tech Marquee ═════════════════════════════════ -->
+  <div class="marquee" aria-label="Technology stack">
     <div class="marquee-track">
       <span>Java 25</span><i>·</i><span>Spring Boot 4</span><i>·</i><span>SQLite WAL</span><i>·</i>
-      <span>Server-Sent Events</span><i>·</i><span>OpenAI / Anthropic SSE</span><i>·</i><span>Playwright 浏览器子代理</span><i>·</i>
-      <span>Electron 桌面壳</span><i>·</i><span>Android 客户端</span><i>·</i><span>Seatbelt / bubblewrap</span><i>·</i>
+      <span>Server-Sent Events</span><i>·</i><span>OpenAI / Anthropic SSE</span><i>·</i><span>Playwright Subagent</span><i>·</i>
+      <span>Electron Desktop</span><i>·</i><span>Android Client</span><i>·</i><span>Seatbelt / bubblewrap</span><i>·</i>
       <span aria-hidden="true">Java 25</span><i aria-hidden="true">·</i><span aria-hidden="true">Spring Boot 4</span><i aria-hidden="true">·</i>
       <span aria-hidden="true">SQLite WAL</span><i aria-hidden="true">·</i><span aria-hidden="true">Server-Sent Events</span><i aria-hidden="true">·</i>
-      <span aria-hidden="true">OpenAI / Anthropic SSE</span><i aria-hidden="true">·</i><span aria-hidden="true">Playwright 浏览器子代理</span><i aria-hidden="true">·</i>
-      <span aria-hidden="true">Electron 桌面壳</span><i aria-hidden="true">·</i><span aria-hidden="true">Android 客户端</span><i aria-hidden="true">·</i><span aria-hidden="true">Seatbelt / bubblewrap</span><i aria-hidden="true">·</i>
+      <span aria-hidden="true">OpenAI / Anthropic SSE</span><i aria-hidden="true">·</i><span aria-hidden="true">Playwright Subagent</span><i aria-hidden="true">·</i>
+      <span aria-hidden="true">Electron Desktop</span><i aria-hidden="true">·</i><span aria-hidden="true">Android Client</span><i aria-hidden="true">·</i><span aria-hidden="true">Seatbelt / bubblewrap</span><i aria-hidden="true">·</i>
     </div>
   </div>
 
-  <!-- ══ 交互界面 ═════════════════════════════════════ -->
+  <!-- ══ Workbench Preview ════════════════════════════ -->
   <section class="section" id="demo">
     <header class="section-head">
-      <p class="kicker">界面</p>
-      <h2>过程本身就是证据</h2>
-      <p class="sub">不给你一句「已完成」，而是给出可复核的调用链、待批的操作和可回退的时间点。</p>
+      <p class="kicker">Workbench</p>
+      <h2>The execution trace is the evidence</h2>
+      <p class="sub">Never a blind "Done!"—inspect every tool call, approve diffs before writes, and rewind verified checkpoints.</p>
     </header>
 
     <div class="app-frame reveal">
-      <div class="app-tabs" role="tablist" aria-label="界面视图">
+      <div class="app-tabs" role="tablist" aria-label="Workbench views">
         <button role="tab" id="tab-run" aria-selected="true" aria-controls="panel-run" data-panel="panel-run" class="tab active">
-          <span class="tab-dot"></span>运行与事件
+          <span class="tab-dot"></span>Run &amp; Event Stream
         </button>
         <button role="tab" id="tab-approve" aria-selected="false" aria-controls="panel-approve" data-panel="panel-approve" class="tab" tabindex="-1">
-          <span class="tab-dot"></span>审批挂起
+          <span class="tab-dot"></span>Approval Suspend
         </button>
         <button role="tab" id="tab-rewind" aria-selected="false" aria-controls="panel-rewind" data-panel="panel-rewind" class="tab" tabindex="-1">
-          <span class="tab-dot"></span>检查点回退
+          <span class="tab-dot"></span>Checkpoint Rewind
         </button>
       </div>
 
-      <!-- 视图 1：运行与事件 -->
       <div class="app-body" id="panel-run" role="tabpanel" aria-labelledby="tab-run">
         <aside class="app-side">
           <div class="side-group">
-            <p class="side-label">项目</p>
-            <p class="side-project">Pilot <span class="side-badge">3 对话</span></p>
+            <p class="side-label">Project</p>
+            <p class="side-project">Pilot <span class="side-badge">3 sessions</span></p>
           </div>
           <ul class="side-list">
             <li class="active">
-              <span class="side-title">修复登录失败提示</span>
-              <span class="side-meta">12 事件 · 刚才</span>
+              <span class="side-title">Fix login error message</span>
+              <span class="side-meta">12 events · just now</span>
             </li>
             <li>
-              <span class="side-title">补充注册页测试</span>
-              <span class="side-meta">3 事件 · 8 分钟前</span>
+              <span class="side-title">Add signup unit tests</span>
+              <span class="side-meta">3 events · 8m ago</span>
             </li>
             <li>
-              <span class="side-title">梳理 SSE 重连流程</span>
-              <span class="side-meta">已归档</span>
+              <span class="side-title">Audit SSE reconnect flow</span>
+              <span class="side-meta">Archived</span>
             </li>
           </ul>
         </aside>
 
         <div class="app-main">
           <div class="msg user">
-            <span class="msg-role">你</span>
-            <p>修复登录失败时的提示文案，保持登录 API 兼容。</p>
+            <span class="msg-role">You</span>
+            <p>Fix the login failure message while keeping the existing login API contract compatible.</p>
           </div>
 
           <div class="msg agent">
             <span class="msg-role">Pilot <span class="msg-tag">run_8f2c</span></span>
-            <p>先定位错误提示的来源，再改文案并跑相关测试。</p>
+            <p>Locating the error response path, applying a minimal fix, and verifying with targeted tests.</p>
 
             <div class="tool">
               <span class="tool-name">read_file</span>
@@ -161,7 +163,7 @@
             <div class="tool">
               <span class="tool-name">edit_file</span>
               <span class="tool-arg">LoginController.java  +4 −2</span>
-              <span class="tool-time ok">已审批</span>
+              <span class="tool-time ok">Approved</span>
             </div>
             <div class="tool">
               <span class="tool-name">run_command</span>
@@ -170,14 +172,14 @@
             </div>
 
             <p class="msg-done">
-              改了 1 个文件，验证 <code>mvn -q test → exit 0</code>。
-              计划 3/3 完成，没有越过你设置的「保持 API 兼容」约束。
+              Edited 1 file, verified <code>mvn -q test → exit 0</code>.
+              Plan 3/3 completed while respecting the "API compatible" constraint.
             </p>
           </div>
         </div>
 
         <aside class="app-timeline">
-          <p class="side-label">事件流 <span class="live"><i></i>SSE</span></p>
+          <p class="side-label">Events <span class="live"><i></i>SSE</span></p>
           <ol class="tl">
             <li><span class="tl-type">run.started</span><span class="tl-t">09:41:02</span></li>
             <li><span class="tl-type">assistant.delta</span><span class="tl-t">09:41:04</span></li>
@@ -191,218 +193,216 @@
         </aside>
       </div>
 
-      <!-- 视图 2：审批挂起 -->
       <div class="app-body" id="panel-approve" role="tabpanel" aria-labelledby="tab-approve" hidden>
         <aside class="app-side">
           <div class="side-group">
-            <p class="side-label">权限</p>
-            <p class="side-project">ASK <span class="side-badge">每次确认</span></p>
+            <p class="side-label">Permission</p>
+            <p class="side-project">ASK <span class="side-badge">Per action</span></p>
           </div>
           <ul class="side-list muted">
-            <li class="active"><span class="side-title">写文件</span><span class="side-meta">需批准</span></li>
-            <li><span class="side-title">执行命令</span><span class="side-meta">需批准</span></li>
-            <li><span class="side-title">只读工具</span><span class="side-meta">直接放行</span></li>
+            <li class="active"><span class="side-title">File writes</span><span class="side-meta">Approval</span></li>
+            <li><span class="side-title">Shell commands</span><span class="side-meta">Approval</span></li>
+            <li><span class="side-title">Read-only tools</span><span class="side-meta">Allowed</span></li>
           </ul>
         </aside>
 
         <div class="app-main">
           <div class="approval-card">
             <div class="approval-head">
-              <span class="approval-badge">待批准</span>
+              <span class="approval-badge">Pending</span>
               <span class="approval-tool">edit_file</span>
               <span class="approval-call">call_a1f9</span>
             </div>
             <p class="approval-target">src/main/java/com/acme/auth/LoginController.java</p>
             <pre class="approval-diff"><span class="d-del">- throw new IllegalStateException("bad credentials");</span>
-<span class="d-add">+ throw new BadCredentialsException("用户名或密码不正确");</span></pre>
+<span class="d-add">+ throw new BadCredentialsException("Invalid username or password");</span></pre>
             <div class="approval-actions">
-              <button class="btn btn-primary btn-sm" type="button" disabled>允许</button>
-              <button class="btn btn-ghost btn-sm" type="button" disabled>拒绝</button>
-              <span class="approval-note">附改动 Diff 预览；默认等待 300 秒后按拒绝处理</span>
+              <button class="btn btn-primary btn-sm" type="button" disabled>Approve</button>
+              <button class="btn btn-ghost btn-sm" type="button" disabled>Reject</button>
+              <span class="approval-note">Inline diff preview; times out to reject after 300s by default</span>
             </div>
           </div>
-          <p class="mock-note">Agent 线程停在 <code>CompletableFuture.join()</code> 上，不轮询、不占 CPU；超时由 broker 直接完成成拒绝。</p>
+          <p class="mock-note">The worker parks on <code>CompletableFuture.join()</code> with zero polling CPU; timeouts fail closed via the broker.</p>
         </div>
 
         <aside class="app-timeline">
-          <p class="side-label">状态</p>
+          <p class="side-label">State</p>
           <ol class="tl">
             <li><span class="tl-type">tool.started</span><span class="tl-t">09:41:09</span></li>
             <li><span class="tl-type warn">approval.required</span><span class="tl-t">09:41:09</span></li>
-            <li><span class="tl-type dim">approval.resolved</span><span class="tl-t">等待中</span></li>
-            <li><span class="tl-type dim">tool.completed</span><span class="tl-t">等待中</span></li>
+            <li><span class="tl-type dim">approval.resolved</span><span class="tl-t">waiting</span></li>
+            <li><span class="tl-type dim">tool.completed</span><span class="tl-t">waiting</span></li>
           </ol>
         </aside>
       </div>
 
-      <!-- 视图 3：检查点回退 -->
       <div class="app-body" id="panel-rewind" role="tabpanel" aria-labelledby="tab-rewind" hidden>
         <aside class="app-side">
           <div class="side-group">
-            <p class="side-label">回退范围</p>
-            <p class="side-project">第 7 条消息前</p>
+            <p class="side-label">Rewind Scope</p>
+            <p class="side-project">Before message #7</p>
           </div>
           <ul class="side-list muted">
-            <li class="active"><span class="side-title">只撤代码</span><span class="side-meta">保留对话</span></li>
-            <li><span class="side-title">只撤对话</span><span class="side-meta">保留文件</span></li>
-            <li><span class="side-title">一起撤</span><span class="side-meta">先校验</span></li>
+            <li class="active"><span class="side-title">Code only</span><span class="side-meta">Keep chat</span></li>
+            <li><span class="side-title">Chat only</span><span class="side-meta">Keep files</span></li>
+            <li><span class="side-title">Both</span><span class="side-meta">Verified</span></li>
           </ul>
         </aside>
 
         <div class="app-main">
-          <p class="rewind-title">涉及 2 轮运行、3 个文件</p>
+          <p class="rewind-title">Spans 2 runs, 3 files</p>
           <ul class="file-list">
-            <li><span class="f-path">src/main/java/com/acme/auth/LoginController.java</span><span class="f-state ok">可恢复</span></li>
-            <li><span class="f-path">src/test/java/com/acme/auth/LoginControllerTest.java</span><span class="f-state ok">可恢复</span></li>
-            <li><span class="f-path">src/main/resources/messages_zh.properties</span><span class="f-state warn">检测到手工修改</span></li>
+            <li><span class="f-path">src/main/java/com/acme/auth/LoginController.java</span><span class="f-state ok">Safe to restore</span></li>
+            <li><span class="f-path">src/test/java/com/acme/auth/LoginControllerTest.java</span><span class="f-state ok">Safe to restore</span></li>
+            <li><span class="f-path">src/main/resources/messages.properties</span><span class="f-state warn">Manual edit detected</span></li>
           </ul>
-          <p class="mock-note">指纹链对不上时直接拒绝恢复，<strong>不提供强制覆盖</strong>——宁可让你重跑，也不静默丢改动。</p>
+          <p class="mock-note">When content fingerprints diverge, restore refuses rather than silently overwriting manual work.</p>
         </div>
 
         <aside class="app-timeline">
-          <p class="side-label">校验</p>
+          <p class="side-label">Check</p>
           <ol class="tl">
-            <li><span class="tl-type">快照链</span><span class="tl-t ok">一致</span></li>
-            <li><span class="tl-type">当前指纹</span><span class="tl-t">已比对</span></li>
-            <li><span class="tl-type warn">冲突</span><span class="tl-t">1 处</span></li>
-            <li><span class="tl-type dim">写入</span><span class="tl-t">已阻止</span></li>
+            <li><span class="tl-type">Snapshot chain</span><span class="tl-t ok">valid</span></li>
+            <li><span class="tl-type">Fingerprints</span><span class="tl-t">checked</span></li>
+            <li><span class="tl-type warn">Conflict</span><span class="tl-t">1 file</span></li>
+            <li><span class="tl-type dim">Write</span><span class="tl-t">blocked</span></li>
           </ol>
         </aside>
       </div>
 
-      <p class="frame-caption"><span>fig. 1</span> 界面示意：真实数据来自同一份事件流，预览与截图无关</p>
+      <p class="frame-caption"><span>fig. 1</span> Interactive preview backed by the exact same event-stream contract used by Web, Desktop, and Mobile</p>
     </div>
   </section>
 
-  <!-- ══ 三条主张 ═════════════════════════════════════ -->
+  <!-- ══ Three Pillars ════════════════════════════════ -->
   <section class="section" id="why">
     <header class="section-head">
-      <p class="kicker">为什么</p>
-      <h2>三个必须先回答的问题</h2>
-      <p class="sub">可信度不来自「听起来对」，来自可追踪的执行痕迹。</p>
+      <p class="kicker">Philosophy</p>
+      <h2>Three questions answered at runtime</h2>
+      <p class="sub">Trust comes from inspectable invariants, not confident prose.</p>
     </header>
     <div class="grid grid-3">
       <article class="card spot reveal">
         <p class="fig">fig. 2.1</p>
-        <h3>它到底改了什么</h3>
-        <p>每次调用、每个文件、每条验证都落成事件，最终汇成 diff 与检查清单。</p>
-        <p class="card-foot">事件 → 存储 → 重放，同一份数据喂给界面和审计</p>
+        <h3>What actually changed?</h3>
+        <p>Every tool call, file write, and test exit code lands as an immutable event compiled into diffs and completion bundles.</p>
+        <p class="card-foot">Events → SQLite WAL → Cursor Replay for UI &amp; audits</p>
       </article>
       <article class="card spot reveal">
         <p class="fig">fig. 2.2</p>
-        <h3>自动执行有多危险</h3>
-        <p>四档权限按<b>可逆性</b>分级：写入能回滚，命令不能，两者策略不同。</p>
-        <p class="card-foot">路径校验穿透符号链接，越界在解析阶段就失败</p>
+        <h3>How safe is automation?</h3>
+        <p>Four permission tiers split by <b>reversibility</b>, backed by Seatbelt/bubblewrap sandboxes and non-bypassable command redlines.</p>
+        <p class="card-foot">Symlink-aware path validation fails escapes before I/O</p>
       </article>
       <article class="card spot reveal">
         <p class="fig">fig. 2.3</p>
-        <h3>能不能换模型与扩展</h3>
-        <p>核心不依赖 Spring，换模型只需实现一个接口；加工具不用改循环。</p>
-        <p class="card-foot">Tool / PermissionGate / ModelClient 都是可替换契约</p>
+        <h3>Is it vendor-locked?</h3>
+        <p><code>pilot-core</code> has zero Spring dependency. Swap between OpenAI, Anthropic, or keyless Ollama/vLLM seamlessly.</p>
+        <p class="card-foot">Tool / PermissionGate / ModelClient are replaceable contracts</p>
       </article>
     </div>
   </section>
 
-  <!-- ══ 九大机制 ═════════════════════════════════════ -->
+  <!-- ══ Nine Mechanisms ══════════════════════════════ -->
   <section class="section" id="mechanics">
     <header class="section-head">
-      <p class="kicker">架构</p>
-      <h2>九组核心机制，各管一件事</h2>
-      <p class="sub">按机制而非 Maven 模块划分：同一机制通常横跨 <code>pilot-core</code>（契约与执行）、<code>pilot-server</code>（装配与持久化）与多端界面。</p>
+      <p class="kicker">Architecture</p>
+      <h2>Nine core subsystems</h2>
+      <p class="sub">Clean separation across <code>pilot-core</code> (contracts &amp; loop), <code>pilot-server</code> (persistence &amp; orchestration), and multi-surface UIs.</p>
     </header>
 
     <div class="mech-group reveal">
-      <p class="group-label"><span>01—04</span>执行内核</p>
+      <p class="group-label"><span>01—04</span>Execution Kernel</p>
       <div class="grid grid-4">
         <article class="card mech spot">
           <span class="num">01</span>
-          <h3>会话与事件流</h3>
-          <p>状态先落成不可变事件再广播，断线按游标重放补齐。</p>
+          <h3>Event-Sourced Sessions</h3>
+          <p>Persist immutable envelopes before SSE broadcast; reconnects replay exact monotonic cursors.</p>
           <p class="refs"><code>EventEnvelope</code><code>SessionService</code></p>
         </article>
         <article class="card mech spot">
           <span class="num">02</span>
-          <h3>Agent 循环</h3>
-          <p>步进式循环，每步复查取消与纠正；收尾前先过计划与收尾门。</p>
+          <h3>Stepwise Agent Loop</h3>
+          <p>Pre-flight localization, mid-run steering, and completion/lint gates before sign-off.</p>
           <p class="refs"><code>AgentLoop</code><code>CompletionGate</code></p>
         </article>
         <article class="card mech spot">
           <span class="num">03</span>
-          <h3>上下文与记忆</h3>
-          <p>四层滞回收缩（80%/86%/90%/96%）护住前缀缓存；外置长期记忆草稿经人工审阅发布。</p>
+          <h3>Context &amp; Memory</h3>
+          <p>4-tier hysteresis (80%/86%/90%/96%) protects Prompt Caching; draft-reviewed external memory.</p>
           <p class="refs"><code>ContextBudget</code><code>MemoryStore</code></p>
         </article>
         <article class="card mech spot">
           <span class="num">04</span>
-          <h3>提示词与规则</h3>
-          <p>正文全在资源文件，支持 <code>AGENTS.md</code> 与 <code>.pilot/rules</code> Glob 规则，变量缺失即报错。</p>
+          <h3>Prompts &amp; Glob Rules</h3>
+          <p>Resource-backed templates with fail-fast variables, <code>AGENTS.md</code>, and <code>.pilot/rules</code>.</p>
           <p class="refs"><code>PromptLibrary</code><code>ProjectRuleLoader</code></p>
         </article>
       </div>
     </div>
 
     <div class="mech-group reveal">
-      <p class="group-label"><span>05—07</span>边界、浏览器与协作</p>
+      <p class="group-label"><span>05—07</span>Boundaries, Browser &amp; Verification</p>
       <div class="grid grid-3">
         <article class="card mech spot">
           <span class="num">05</span>
-          <h3>工具与浏览器子代理</h3>
-          <p>按可用性动态声明；内置独立浏览器子代理，支持同源 iframe 穿透、Take Control 蓝框与交互式录像回放。</p>
+          <h3>Isolated Browser Subagent</h3>
+          <p>Playwright subagent with iframe/Shadow DOM traversal, live Take Control stop lock, and <code>.replay.json</code> recordings.</p>
           <p class="refs"><code>ToolExecutor</code><code>BrowserSubagentTool</code></p>
         </article>
         <article class="card mech spot">
           <span class="num">06</span>
-          <h3>权限、红线与沙箱</h3>
-          <p>四档热切换 + <code>plan</code> 只读模式；AUTO 强制高危命令红线，macOS/Linux 默认启用命令文件系统沙箱。</p>
+          <h3>Sandboxes &amp; Hard Redlines</h3>
+          <p>4 live tiers + read-only <code>plan</code> mode; Seatbelt/bubblewrap isolation and SHA-256 MCP tool pinning.</p>
           <p class="refs"><code>CommandRiskGuard</code><code>OsSandbox</code></p>
         </article>
         <article class="card mech spot">
           <span class="num">07</span>
-          <h3>多智能体与完成凭证</h3>
-          <p>DAG 子任务产出 diff 沙箱提案；任务验证证据与浏览器宿主机证据统一收进可导出完成凭证。</p>
+          <h3>Completion Bundles &amp; DAG</h3>
+          <p>Fingerprint-bound verification ledger, <code>pilot.policy.yaml</code> gates, and portable handoff capsules.</p>
           <p class="refs"><code>TaskGraph</code><code>CompletionBundleService</code></p>
         </article>
       </div>
     </div>
 
     <div class="mech-group reveal">
-      <p class="group-label"><span>08—09</span>状态、多协议与观测</p>
+      <p class="group-label"><span>08—09</span>Recovery, Multi-Protocol &amp; Diagnostics</p>
       <div class="grid grid-2">
         <article class="card mech spot">
           <span class="num">08</span>
-          <h3>快照与回退</h3>
-          <p>写前备份、双指纹链检测外部修改；冲突就拒绝恢复，不静默覆盖。三种范围：只撤代码、只撤对话、一起撤。</p>
-          <p class="card-foot">符号链接、硬链接与目录占位一律拒绝恢复；文件改动审批附带 Diff 预览</p>
-          <p class="refs"><code>RunSnapshotService</code><code>CheckpointController</code></p>
+          <h3>Checkpoints &amp; Crash Recovery</h3>
+          <p>Pre-write snapshots with conflict detection (never silently overwrites); <code>SIGKILL</code> run takeover with zero replayed tool side effects.</p>
+          <p class="card-foot">Verified 8/8 assertions in deterministic crash &amp; SSE recovery smoke</p>
+          <p class="refs"><code>RunSnapshotService</code><code>InterruptedRunRecovery</code></p>
         </article>
         <article class="card mech spot">
           <span class="num">09</span>
-          <h3>多协议模型与脱敏诊断</h3>
-          <p>支持 OpenAI Chat Completions / Responses 与 Anthropic Messages 原生 SSE 流式、Prompt Caching 与用量计价；支持一键导出脱敏诊断包。</p>
-          <p class="card-foot">SecretScrubber 全链路脱敏，POSIX 下数据库与落盘日志默认收紧为 0600</p>
+          <h3>Multi-Protocol &amp; Redaction</h3>
+          <p>OpenAI Chat/Responses, Anthropic Messages, and keyless local servers with automatic backup preset failover and sanitized diagnostic export.</p>
+          <p class="card-foot">SecretScrubber redacts keys end-to-end; POSIX DB &amp; dumps default to 0600</p>
           <p class="refs"><code>ModelClient</code><code>SecretScrubber</code><code>DiagnosticsExportService</code></p>
         </article>
       </div>
     </div>
   </section>
 
-  <!-- ══ 代码证据 ═════════════════════════════════════ -->
+  <!-- ══ Code Evidence ════════════════════════════════ -->
   <section class="section" id="evidence">
     <header class="section-head">
-      <p class="kicker">代码</p>
-      <h2>三处不好写的地方</h2>
-      <p class="sub">这里的取舍比功能列表更能说明项目现在处在什么水平。代码摘自当前仓库，不是示意。</p>
+      <p class="kicker">Code</p>
+      <h2>Three hard engineering details</h2>
+      <p class="sub">Real excerpts from the repository—not pseudo-code.</p>
     </header>
 
-    <div class="code-tabs" role="tablist" aria-label="代码示例">
+    <div class="code-tabs" role="tablist" aria-label="Code excerpts">
       <button role="tab" id="ctab-ctx" aria-selected="true" aria-controls="cpanel-ctx" data-panel="cpanel-ctx" class="chip-tab active">
-        上下文四层
+        4-Tier Context Budget
       </button>
       <button role="tab" id="ctab-path" aria-selected="false" aria-controls="cpanel-path" data-panel="cpanel-path" class="chip-tab" tabindex="-1">
-        路径穿透符号链接
+        Symlink Escape Guard
       </button>
       <button role="tab" id="ctab-approve" aria-selected="false" aria-controls="cpanel-approve" data-panel="cpanel-approve" class="chip-tab" tabindex="-1">
-        审批不轮询
+        Zero-Polling Approval
       </button>
     </div>
 
@@ -414,7 +414,7 @@
           <span class="code-line">:101</span>
         </div>
         <div class="code-split">
-          <pre><code><span class="c-cm">// 跨过预压线时先只读预演：本地清理压不回去就先保住热前缀做摘要</span>
+          <pre><code><span class="c-cm">// Dry-run local cleanup above pre-compact threshold; preserve hot cache prefix if compaction is needed</span>
 <span class="c-kw">boolean</span> compactFirst = !compactCircuitOpen &amp;&amp; !inBackoff(messages, overhead)
     &amp;&amp; usage(messages, charsLimit, tokensLimit, overhead) &gt;= PRE_COMPACT_RATIO
     &amp;&amp; !localCleanupSuffices(messages, tokensLimit, charsLimit, overhead, boundary);
@@ -422,8 +422,8 @@
     pruneAndTruncate(messages, tokensLimit, charsLimit, overhead, boundary);
 }</code></pre>
           <aside class="code-notes">
-            <p><b>双预算与滞回冷却。</b>token 预算对齐模型输入窗口，字符上限独立作内存护栏；80% 以下保持严格只追加，减少打穿 Prompt Cache。</p>
-            <p><b>先预演再改写。</b>单步大输出直接越过 90% 预压线时，若本地清理不足以压回，先把原热前缀交给摘要压缩，避免白丢缓存命中。</p>
+            <p><b>Dual budgets &amp; hysteresis.</b> Token limits track provider windows while char caps bound heap; history stays append-only under 80% to preserve Prompt Caching.</p>
+            <p><b>Dry-run before mutation.</b> Prevents destructive pruning right before summarization so warm prefixes survive.</p>
           </aside>
         </div>
       </div>
@@ -435,15 +435,15 @@
           <span class="code-line">:138</span>
         </div>
         <div class="code-split">
-          <pre><code><span class="c-cm">// 取最近现存祖先的真实路径（含悬空链接检查），再拼回未创建后缀</span>
+          <pre><code><span class="c-cm">// Resolve deepest existing ancestor via NOFOLLOW_LINKS + toRealPath, then re-attach pending suffix</span>
 Path existing = candidate;
 <span class="c-kw">while</span> (existing != <span class="c-kw">null</span> &amp;&amp; !Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) {
     existing = existing.getParent();
 }
 <span class="c-kw">return</span> existing.toRealPath().resolve(existing.relativize(candidate)).normalize();</code></pre>
           <aside class="code-notes">
-            <p><b>只做 startsWith 会被绕过。</b>工作区里一个 <code>link → /etc</code> 的符号链接，<code>link/passwd</code> 前缀检查是通的。</p>
-            <p><b>为什么要「现存祖先」加 NOFOLLOW。</b>既兼容新建文件和 Windows 8.3 短路径，也能拦住指向工作区外的悬空链接。</p>
+            <p><b>Naive <code>startsWith</code> fails.</b> A symlink <code>link → /etc</code> inside the workspace bypasses lexical checks.</p>
+            <p><b>Deepest existing ancestor.</b> Handles brand-new file creation, Windows 8.3 short paths, and dangling external symlinks cleanly.</p>
           </aside>
         </div>
       </div>
@@ -464,72 +464,100 @@ Path existing = candidate;
     });
 <span class="c-kw">return</span> future;</code></pre>
           <aside class="code-notes">
-            <p><b>超时默认拒绝。</b><code>completeOnTimeout(false, …)</code> 把安全侧写进并发原语：默认 300 秒无人处理也不会变成放行。</p>
-            <p><b>跨端推送不轮询。</b>线程停在 Future 上，用户从 Web、桌面悬浮窗或 Android 点击即唤醒，拒绝时可回传具体原因。</p>
+            <p><b>Fail-closed timeouts.</b> <code>completeOnTimeout(false, …)</code> guarantees unattended prompts default to rejection after 300s.</p>
+            <p><b>Cross-surface wakeups.</b> Web, Electron popouts, or Android approvals complete the future immediately with optional rejection reasons.</p>
           </aside>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ══ 权限 ═════════════════════════════════════════ -->
-  <section class="section" id="permissions">
+  <!-- ══ Benchmarks ═══════════════════════════════════ -->
+  <section class="section" id="benchmarks">
     <header class="section-head">
-      <p class="kicker">安全</p>
-      <h2>四档权限，按可逆性分级</h2>
-      <p class="sub">不是按「危险程度」一刀切：文件改动有快照可回滚，命令的副作用没有等价物。</p>
+      <p class="kicker">Benchmarks</p>
+      <h2>Multi-SWE-bench Interleaved A/B Results</h2>
+      <p class="sub">Official <code>Multi-SWE-bench-flash</code> 40-task split (20 Java + 20 TypeScript, 40/40 golden verified), ephemeral anti-cheat Docker containers, identical model (<code>gpt-6.1-sol</code>), 0/104 violations.</p>
     </header>
     <div class="table-wrap reveal">
       <table class="perm">
         <thead>
-          <tr><th>档位</th><th>读工具</th><th>写文件</th><th>执行命令</th><th>适用场景</th></tr>
+          <tr><th>Metric</th><th>Before <code>v0-0caa2257</code></th><th>After <code>v1-9b862d35</code></th><th>Delta</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Official <code>pass@1</code></td><td>50.0% (20/40)</td><td class="yes">60.0% (24/40)</td><td class="yes">+10.0 pp</td></tr>
+          <tr><td>Strict <code>COMPLETED &amp; Pass</code></td><td>45.0% (18/40)</td><td class="yes">57.5% (23/40)</td><td class="yes">+12.5 pp</td></tr>
+          <tr><td>Java Subset (20 tasks)</td><td>50.0% (10/20)</td><td class="yes">75.0% (15/20)</td><td class="yes">+25.0 pp (5W / 0L)</td></tr>
+          <tr><td>First-Edit / Avg Requests</td><td>9.87 / 29.0 reqs</td><td class="yes">5.85 / 23.1 reqs</td><td class="yes">-40.7% / -20.3%</td></tr>
+          <tr><td>Repeat Consistency (12 tasks × <code>k=3</code>)</td><td>—</td><td class="yes">avg@3 55.6% · pass^3 50.0%</td><td class="yes">11/12 zero-variance</td></tr>
+          <tr><td>Crash &amp; SSE Recovery Smoke</td><td>—</td><td class="yes">8 / 8 passed</td><td class="yes">Zero replayed side effects</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/><path d="M12 8v5M12 16h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      Controlled fixed-model paired comparison measuring harness delta (40-task McNemar p=0.289; Java 20-task p=0.0625). Full scripts, sanitized JSONs, and per-task matrix in <a href="https://github.com/zzl-qz/Pilot/blob/master/docs-public/benchmarks.md" rel="noopener">Benchmarks Documentation ↗</a>.
+    </p>
+  </section>
+
+  <!-- ══ Permissions ══════════════════════════════════ -->
+  <section class="section" id="permissions">
+    <header class="section-head">
+      <p class="kicker">Security</p>
+      <h2>Four permission tiers by reversibility</h2>
+      <p class="sub">File writes can be rolled back via snapshots; shell command side effects cannot.</p>
+    </header>
+    <div class="table-wrap reveal">
+      <table class="perm">
+        <thead>
+          <tr><th>Mode</th><th>Read</th><th>Write</th><th>Command</th><th>Best For</th></tr>
         </thead>
         <tbody>
           <tr>
             <td><code>READ_ONLY</code></td>
-            <td class="yes" data-label="读">放行</td><td class="no" data-label="写">拒绝</td><td class="no" data-label="命令">拒绝</td>
-            <td>只读分析（也可通过 <code>plan</code> 模式或 <code>/review</code> 触发）</td>
+            <td class="yes" data-label="Read">Allow</td><td class="no" data-label="Write">Deny</td><td class="no" data-label="Command">Deny</td>
+            <td>Code reading &amp; architecture analysis (also via <code>plan</code> or <code>/review</code>)</td>
           </tr>
           <tr>
             <td><code>ASK</code></td>
-            <td class="yes" data-label="读">放行</td><td class="ask" data-label="写">逐次审批</td><td class="ask" data-label="命令">逐次审批</td>
-            <td>初次试用或重要仓库，每步看 Diff 确认</td>
+            <td class="yes" data-label="Read">Allow</td><td class="ask" data-label="Write">Approve</td><td class="ask" data-label="Command">Approve</td>
+            <td>First trials or sensitive repos—inspect every diff &amp; command</td>
           </tr>
           <tr>
             <td><code>AUTO_EDIT</code></td>
-            <td class="yes" data-label="读">放行</td><td class="yes" data-label="写">直接执行</td><td class="ask" data-label="命令">逐次审批</td>
-            <td>信任编辑与本机浏览器交互，仍看住命令</td>
+            <td class="yes" data-label="Read">Allow</td><td class="yes" data-label="Write">Allow</td><td class="ask" data-label="Command">Approve</td>
+            <td>Trusted edits &amp; local browser checks while gating shell commands</td>
           </tr>
           <tr>
-            <td><code>AUTO</code><span class="tag">默认</span></td>
-            <td class="yes" data-label="读">放行</td><td class="yes" data-label="写">直接执行</td><td class="yes" data-label="命令">常规放行（高危红线拦截/确认）</td>
-            <td>日常开发（仍强制拦删根/家目录、强推受保护分支与凭证外发）</td>
+            <td><code>AUTO</code><span class="tag">Default</span></td>
+            <td class="yes" data-label="Read">Allow</td><td class="yes" data-label="Write">Allow</td><td class="yes" data-label="Command">Allow (redlines enforced)</td>
+            <td>Daily workflows (still blocks root/home deletion, force-pushes &amp; key leaks)</td>
           </tr>
         </tbody>
       </table>
     </div>
     <p class="note">
       <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/><path d="M12 8v5M12 16h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-      macOS（Seatbelt）与 Linux（bubblewrap）对主会话命令默认启用文件系统沙箱，但本地沙箱与权限策略仍不等同于多租户虚拟机隔离。首次试用请先切换到 <code>ASK</code> / <code>READ_ONLY</code> 并在可丢弃工作区验证。
+      macOS (Seatbelt) and Linux (bubblewrap) enable OS filesystem sandboxing for main-session commands by default, but local sandboxes are not multi-tenant VM isolation. Try <code>ASK</code> or <code>READ_ONLY</code> in a disposable repo first.
     </p>
   </section>
 
-  <!-- ══ 上手 ═════════════════════════════════════════ -->
+  <!-- ══ Quick Start ══════════════════════════════════ -->
   <section class="section" id="start">
     <header class="section-head">
-      <p class="kicker">上手</p>
-      <h2>三步，跑在你自己机器上</h2>
-      <p class="sub">首次启动会自动在私有缓存内准备 JDK 25、Node 22 与桌面依赖，构建并验证通过后才启动服务；失败不会拿旧包顶上。</p>
+      <p class="kicker">Quick Start</p>
+      <h2>Running locally in three steps</h2>
+      <p class="sub">First launch provisions JDK 25, Node 22, and desktop dependencies into a private cache and verifies the build before starting.</p>
     </header>
 
     <ol class="steps">
       <li class="step reveal">
         <span class="step-num">1</span>
         <div class="step-body">
-          <h3>克隆仓库</h3>
+          <h3>Clone the repository</h3>
           <div class="mini-code">
             <code>git clone https://github.com/zzl-qz/Pilot.git</code>
-            <button class="copy icon-only" data-copy="git clone https://github.com/zzl-qz/Pilot.git" aria-label="复制克隆命令">
+            <button class="copy icon-only" data-copy="git clone https://github.com/zzl-qz/Pilot.git" aria-label="Copy clone command">
               <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M15 6H6a2 2 0 0 0-2 2v9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
             </button>
           </div>
@@ -538,74 +566,74 @@ Path existing = candidate;
       <li class="step reveal">
         <span class="step-num">2</span>
         <div class="step-body">
-          <h3>启动服务</h3>
-          <div class="os-tabs" role="tablist" aria-label="操作系统">
-            <button role="tab" id="os-win" aria-selected="true" aria-controls="os-panel-win" data-panel="os-panel-win" class="os-tab active">Windows</button>
-            <button role="tab" id="os-nix" aria-selected="false" aria-controls="os-panel-nix" data-panel="os-panel-nix" class="os-tab" tabindex="-1">macOS / Linux</button>
+          <h3>Start Pilot</h3>
+          <div class="os-tabs" role="tablist" aria-label="Operating system">
+            <button role="tab" id="os-nix" aria-selected="true" aria-controls="os-panel-nix" data-panel="os-panel-nix" class="os-tab active">macOS / Linux</button>
+            <button role="tab" id="os-win" aria-selected="false" aria-controls="os-panel-win" data-panel="os-panel-win" class="os-tab" tabindex="-1">Windows</button>
           </div>
-          <div id="os-panel-win" role="tabpanel" aria-labelledby="os-win" class="mini-code">
-            <code>.\start.cmd</code>
-            <button class="copy icon-only" data-copy=".\\start.cmd" aria-label="复制启动命令">
-              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M15 6H6a2 2 0 0 0-2 2v9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
-            </button>
-          </div>
-          <div id="os-panel-nix" role="tabpanel" aria-labelledby="os-nix" class="mini-code" hidden>
+          <div id="os-panel-nix" role="tabpanel" aria-labelledby="os-nix" class="mini-code">
             <code>bash start.sh</code>
-            <button class="copy icon-only" data-copy="bash start.sh" aria-label="复制启动命令">
+            <button class="copy icon-only" data-copy="bash start.sh" aria-label="Copy launch command">
               <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M15 6H6a2 2 0 0 0-2 2v9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
             </button>
           </div>
-          <p class="step-hint">默认监听 <code>http://localhost:9999</code>（同步启动 Electron 桌面壳），默认权限为 <code>AUTO</code>，初次试用请先切到 <code>ASK</code> 或 <code>READ_ONLY</code>。</p>
+          <div id="os-panel-win" role="tabpanel" aria-labelledby="os-win" class="mini-code" hidden>
+            <code>.\start.cmd</code>
+            <button class="copy icon-only" data-copy=".\\start.cmd" aria-label="Copy launch command">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M15 6H6a2 2 0 0 0-2 2v9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+          <p class="step-hint">Serves <code>http://localhost:9999</code> (and opens Electron desktop when available). Switch from <code>AUTO</code> to <code>ASK</code> or <code>READ_ONLY</code> for your first run.</p>
         </div>
       </li>
       <li class="step reveal">
         <span class="step-num">3</span>
         <div class="step-body">
-          <h3>接上真实模型</h3>
+          <h3>Connect a model</h3>
           <div class="mini-code block">
-            <pre><code><span class="c-cm"># 支持 OpenAI Chat Completions / Responses 及 Anthropic Messages</span>
-PILOT_MODEL_API_KEY=你的密钥
+            <pre><code><span class="c-cm"># OpenAI Chat / Responses, Anthropic Messages, or keyless Ollama/vLLM</span>
+PILOT_MODEL_API_KEY=your-api-key
 PILOT_MODEL_ENDPOINT=https://api.openai.com/v1/chat/completions
 PILOT_MODEL_MODEL=gpt-4o-mini
-PILOT_WORKSPACE=/绝对/工作区路径</code></pre>
-            <button class="copy icon-only" data-copy="PILOT_MODEL_API_KEY=你的密钥&#10;PILOT_MODEL_ENDPOINT=https://api.openai.com/v1/chat/completions&#10;PILOT_MODEL_MODEL=gpt-4o-mini&#10;PILOT_WORKSPACE=/绝对/工作区路径" aria-label="复制配置">
+PILOT_WORKSPACE=/path/to/test-repo</code></pre>
+            <button class="copy icon-only" data-copy="PILOT_MODEL_API_KEY=your-api-key&#10;PILOT_MODEL_ENDPOINT=https://api.openai.com/v1/chat/completions&#10;PILOT_MODEL_MODEL=gpt-4o-mini&#10;PILOT_WORKSPACE=/path/to/test-repo" aria-label="Copy environment variables">
               <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M15 6H6a2 2 0 0 0-2 2v9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
             </button>
           </div>
-          <p class="step-hint">无密钥时可在模型设置切 Mock 模式体验界面流程。</p>
+          <p class="step-hint">No key yet? Use Mock mode in Model Settings to explore the workbench UI.</p>
         </div>
       </li>
     </ol>
   </section>
 
-  <!-- ══ 边界 ═════════════════════════════════════════ -->
+  <!-- ══ Known Limits ═════════════════════════════════ -->
   <section class="section" id="limits">
     <header class="section-head">
-      <p class="kicker">已知边界</p>
-      <h2>它现在还做不到什么</h2>
-      <p class="sub">如实记录，比含糊其辞更有用。</p>
+      <p class="kicker">Known Boundaries</p>
+      <h2>What Pilot does not promise</h2>
+      <p class="sub">Explicit limits make verification verdicts trustworthy.</p>
     </header>
     <div class="grid grid-2 limits">
-      <article class="limit reveal"><h3>不是虚拟机级沙箱</h3><p>macOS/Linux 默认启用文件系统沙箱，Windows 需独立配置受限运行器；跨机器与不可信代码仍建议容器或独立隔离环境。</p></article>
-      <article class="limit reveal"><h3>token 预算含估算</h3><p>响应会记录服务端真实 usage 与费用，但发包前预算控制采用字符/token 估算，可能略早于真实 tokenizer 触发压缩。</p></article>
-      <article class="limit reveal"><h3>摘要不可逆</h3><p>被折叠的对话细节只剩两段式交接摘要，续跑时关键源码可能需要按需复读。</p></article>
-      <article class="limit reveal"><h3>命令副作用不可回退</h3><p>检查点只覆盖写文件工具记录的路径，<code>sed -i</code> 或外部构建产物不在自动回退范围。</p></article>
-      <article class="limit reveal"><h3>多智能体不自动合并</h3><p>冲突与结论分歧一律交人裁决，不绕过审阅静默覆盖工作区。</p></article>
-      <article class="limit reveal"><h3>单机与共享令牌</h3><p>面向个人单机使用，没有多租户账号或集群调度；远程访问使用单共享令牌，不建议直接暴露公网。</p></article>
+      <article class="limit reveal"><h3>Not VM isolation</h3><p>Seatbelt/bubblewrap constrain local writes, and Windows requires an optional restricted runner; untrusted code still belongs in a container or VM.</p></article>
+      <article class="limit reveal"><h3>Pre-send token estimation</h3><p>Provider usage is recorded verbatim on responses, while pre-flight budgets use conservative estimators that may compact slightly early.</p></article>
+      <article class="limit reveal"><h3>Lossy compaction</h3><p>Folded turns retain two-stage handoff summaries; key source regions may be re-read on demand.</p></article>
+      <article class="limit reveal"><h3>Command side effects</h3><p>Checkpoints cover Pilot file tools only—arbitrary shell side effects cannot be rolled back automatically.</p></article>
+      <article class="limit reveal"><h3>No silent conflict merges</h3><p>Divergent multi-agent proposals or manual edits always pause for human resolution.</p></article>
+      <article class="limit reveal"><h3>Single-machine &amp; shared token</h3><p>Built for individual local workflows; remote mode uses a single bearer token and should never be exposed raw to the public internet.</p></article>
     </div>
   </section>
 
-  <!-- ══ 收尾 CTA ═════════════════════════════════════ -->
+  <!-- ══ Closing CTA ══════════════════════════════════ -->
   <section class="closing">
     <div class="closing-inner">
-      <h2>先在自己的仓库里<br><span class="grad">试一件小事</span></h2>
-      <p class="sub">从 <code>plan</code> 模式或 <code>ASK</code> 档位开始，让它先读懂代码、列出改动 Diff；确认符合预期，再放手执行。</p>
+      <h2>Try one real task inside<br><span class="grad">your own repository</span></h2>
+      <p class="sub">Start in <code>plan</code> mode or <code>ASK</code> tier, inspect the diff and verification bundle, then scale up at your own pace.</p>
       <div class="cta">
         <a class="btn btn-primary" href="https://github.com/zzl-qz/Pilot" rel="noopener">
-          打开仓库
+          View on GitHub
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </a>
-        <a class="btn btn-ghost" href="#start">回到上手</a>
+        <a class="btn btn-ghost" href="#start">Back to Quick Start</a>
       </div>
     </div>
   </section>
@@ -621,35 +649,35 @@ PILOT_WORKSPACE=/绝对/工作区路径</code></pre>
         </span>
         Pilot
       </a>
-      <p class="footer-note">用 Java 25 构建的本机任务执行 Agent（开发预览）。适合受监督的本机开发与自动化验收，不建议用于无人值守生产操作。</p>
+      <p class="footer-note">Local-first verifiable coding agent built on Java 25 (development preview). Designed for supervised local engineering—not unattended production autonomy.</p>
     </div>
-    <nav class="footer-nav" aria-label="页脚导航">
+    <nav class="footer-nav" aria-label="Footer navigation">
       <div>
-        <p class="footer-head">产品</p>
-        <a href="#demo">界面</a>
-        <a href="#mechanics">机制</a>
-        <a href="#permissions">权限</a>
-        <a href="#limits">已知边界</a>
+        <p class="footer-head">Product</p>
+        <a href="#demo">Workbench</a>
+        <a href="#mechanics">Architecture</a>
+        <a href="#benchmarks">Benchmarks</a>
+        <a href="#permissions">Security</a>
       </div>
       <div>
-        <p class="footer-head">开始</p>
-        <a href="#start">安装</a>
-        <a href="#start">模型配置</a>
-        <a href="https://github.com/zzl-qz/Pilot" rel="noopener">源码 <span class="ext">↗</span></a>
+        <p class="footer-head">Start</p>
+        <a href="#start">Install</a>
+        <a href="#limits">Boundaries</a>
+        <a href="https://github.com/zzl-qz/Pilot" rel="noopener">Source <span class="ext">↗</span></a>
       </div>
       <div>
-        <p class="footer-head">关于</p>
+        <p class="footer-head">Docs</p>
         <a href="https://github.com/zzl-qz/Pilot/blob/master/README.md" rel="noopener">README <span class="ext">↗</span></a>
-        <a href="https://github.com/zzl-qz/Pilot/blob/master/docs-public/README.md" rel="noopener">公开文档 <span class="ext">↗</span></a>
-        <a href="https://github.com/zzl-qz/Pilot/issues" rel="noopener">反馈 <span class="ext">↗</span></a>
+        <a href="https://github.com/zzl-qz/Pilot/blob/master/docs-public/README.md" rel="noopener">Documentation <span class="ext">↗</span></a>
+        <a href="zh-CN/index.html">简体中文</a>
       </div>
     </nav>
   </div>
   <div class="footer-bar">
     <span>© 2026 Pilot</span>
     <span class="footer-facts">
-      <span>代码与数据默认留在本机</span>
-      <span>无遥测</span>
+      <span>Data stays local by default</span>
+      <span>Zero telemetry</span>
       <span>Apache-2.0</span>
     </span>
   </div>

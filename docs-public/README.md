@@ -1,40 +1,41 @@
-# Pilot 文档
+# Pilot Documentation
 
-按问题查阅即可，不需要一次读完整个仓库。
+[English](README.md) | [简体中文](zh-CN/README.md)
 
-## 使用 Pilot
+Browse by topic—you do not need to read the entire repository to get started.
 
-| 想了解 | 文档 |
+## Using Pilot
+
+| Topic | Document |
 | --- | --- |
-| 首次启动、选择工作区、配置模型 | [首次启动指南](getting-started.md) |
-| 工作台流程、浏览器自动化、任务控制、成果与常用配置 | [功能与配置参考](user-guide.md) |
-| 权限、高危命令红线、浏览器隐私、模型数据流与远程访问 | [安全与隐私](security.md) |
-| MCP 启动命令信任与工具定义钉住 | [MCP 信任模型](design-mcp-trust.md) |
-| 我们不做什么：用户范围、不承诺项与不覆盖项 | [范围与边界](scope.md) |
-| 插件如何声明依赖、为什么升级不会打掉整个生态 | [插件契约](plugin-contracts.md) |
-| 与验证类工具的差异，以及证据在运行时里的位置 | [与验证类工具的差异](verification-approach.md) |
-| 完成凭证、验证策略即代码与任务交接 | [完成凭证与交接](completion-capsule.md) |
-| 桌面端与 Electron 验收 | [桌面端指南](../pilot-desktop/README.md) |
-| 基于 `jlink` 最小 JRE 的三平台自包含发行包 | [自包含发行包构建指南](../pilot-desktop/RELEASE_PACKAGING.md) |
-| Android 客户端与移动连接 | [Android 指南](../pilot-mobile/README.md) |
-| 手机连电脑的延迟怎么测、三组数字怎么比 | [手机延迟测量](mobile-latency-measurement.md) |
-| 手机审批端到端（含断网重连）怎么演示 | [手机审批演示](mobile-approval-demo.md) |
+| First-time setup, choosing a workspace, and configuring models | [Getting Started](getting-started.md) |
+| Workbench workflows, browser subagent, schedules, backups, and env vars | [User & Configuration Guide](user-guide.md) |
+| System architecture, agent loop, SSE cursor replay, and sandbox layers | [Architecture](architecture.md) |
+| Reproducible Multi-SWE-bench A/B results, stability, and crash recovery | [Benchmarks & Verification](benchmarks.md) |
+| Permission modes, high-risk guards, OS sandboxes, browser privacy, and remote access | [Security & Privacy](security.md) |
+| MCP startup command hashing and tool definition pinning | [MCP Trust Model](design-mcp-trust.md) |
+| Explicit non-goals, target audience, and design boundaries | [Scope & Boundaries](scope.md) |
+| Contract-based plugin compatibility (skills & hooks) | [Plugin Contracts](plugin-contracts.md) |
+| Why runtime-native verification differs from external check wrappers | [Verification Approach](verification-approach.md) |
+| Exportable completion bundles, `pilot.policy.yaml`, and task capsules | [Completion Bundles & Handoff](completion-capsule.md) |
+| Electron desktop host & self-contained `jlink` packaging | [Desktop Guide](../pilot-desktop/README.md) · [Release Packaging](../pilot-desktop/RELEASE_PACKAGING.md) |
+| Android companion app, mobile approval demo, and P2P/relay latency | [Android Guide](../pilot-mobile/README.md) · [Approval Demo](mobile-approval-demo.md) · [Latency Measurement](mobile-latency-measurement.md) |
 
-## 系统与开发
+## Engineering & Contributing
 
-| 文档 | 内容 |
+| Document | Purpose |
 | --- | --- |
-| [项目技术导览](../PROJECT_TECHNICAL_GUIDE.md) | 模块边界、任务数据流与源码阅读路线 |
-| [产品方向与发展路线](../PRODUCT_DIRECTION.md) | 产品目标、阶段安排和当前门槛 |
-| [通用任务工作流](../GENERAL_AGENT_WORKFLOW.md) | 通用任务、远程工作台和结果交付 |
-| [源码环境自动准备](../SOURCE_ENVIRONMENT.md) | Java、Node 与运行时准备方式 |
-| [贡献指南](../CONTRIBUTING.md) | 缺陷报告、开发验证和跨平台要求 |
-| [安全报告政策](../SECURITY.md) | 私下报告安全问题的方式 |
+| [PROJECT_TECHNICAL_GUIDE.md](../PROJECT_TECHNICAL_GUIDE.md) | Detailed subsystem walkthrough & source-reading roadmap (Chinese) |
+| [PRODUCT_DIRECTION.md](../PRODUCT_DIRECTION.md) | Product goals, phases, and release gates |
+| [GENERAL_AGENT_WORKFLOW.md](../GENERAL_AGENT_WORKFLOW.md) | General task workflow, remote workbench, and deliverables |
+| [SOURCE_ENVIRONMENT.md](../SOURCE_ENVIRONMENT.md) | Automatic JDK 25 / Node.js 22 runtime provisioning |
+| [CONTRIBUTING.md](../CONTRIBUTING.md) | Bug reports, verification checklist, and cross-platform rules |
+| [SECURITY.md](../SECURITY.md) | Private vulnerability reporting policy |
 
-## 评估记录
+## Evaluation Artifacts
 
-仓库的 `evaluation/` 保存自动化评测规格和阶段性验证结果。它们对应特定提交与测试环境，不应外推为所有平台或真实模型的能力承诺。查看时请核对报告日期、提交号和明确列出的覆盖范围。
+`evaluation/` stores automated evaluation harnesses and dated verification records (including the reproducible [Multi-SWE-bench suite](../evaluation/multi-swe-bench/README.md)). Every record applies to a specific commit, model, and environment; always check dates, commit SHAs, and documented boundaries before generalizing.
 
-## 文档约定
+## Documentation Conventions
 
-运行和测试命令以仓库脚本、[CI 工作流](../.github/workflows/ci.yml)和对应操作系统的验证结果为准。界面截图使用 Playwright 测试场景中的模拟数据；不代表真实模型会话。
+Build and test commands follow the repository scripts and [CI workflow](../.github/workflows/ci.yml). UI screenshots in the README are generated from Playwright regression scenarios using mock API fixtures and do not represent live model runs.

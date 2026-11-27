@@ -1,60 +1,58 @@
-# 安全与隐私
+# Security & Privacy
 
-> 最后更新：2026-11-24
+[English](security.md) | [简体中文](zh-CN/security.md)
 
-Pilot 会读取工作区内容、向模型端点发送请求，并可能在本机执行文件修改、命令和受控浏览器操作。它适合由用户监督的本机开发与评估；不要把它当作多租户虚拟机沙箱、备份系统或公网多用户服务。
+> Last updated: 2026-11-27
 
-## 使用前的建议
+Pilot reads your selected workspace, sends prompts and context to your configured model endpoint, and can modify files, run shell commands, and drive a controlled browser locally. It is built for **supervised local development and verification**—not as a multi-tenant VM sandbox, backup replacement, or public multi-user service.
 
-1. 先在可丢弃的测试仓库和独立数据目录里试用。
-2. 第一次执行任务前，把默认权限从 `AUTO` 切换为 `ASK` 或 `READ_ONLY`（或在输入栏切换到只读分析模式 `plan`）。
-3. 查看每次审批的目标、路径、改动 Diff 预览和命令；不确定时拒绝并可附原因说明。
-4. 将 API 密钥保存在当前 shell 环境或本机忽略文件中，不要放进工作区。
-5. 在发送任务前，确认工作区与提交给模型的内容不含不应外传的数据。
+## Recommended First-Run Habits
 
-## 工具权限和本机执行
+1. Start in a disposable repository with an isolated data directory.
+2. Switch permission mode from `AUTO` to `ASK` or `READ_ONLY` (or toggle read-only `plan` mode) before your first run.
+3. Inspect the target path, inline Diff preview, and command text on every approval card; reject with a reason whenever uncertain.
+4. Keep API keys in your shell environment or local git-ignored files—never inside workspace files.
+5. Verify your workspace does not contain secrets or regulated data that must not leave your machine before calling external model endpoints.
 
-| 模式 | 行为 |
+## Tool Permissions & Local Execution
+
+| Mode | Behavior |
 | --- | --- |
-| `AUTO` | 工作区内的常规写入和命令直接执行；但仍执行**不可绕过的高危命令硬红线**，以及发布包、全局安装、强推/删除受保护分支、敏感凭证外发与工具标明高风险动作的强制确认。 |
-| `AUTO_EDIT` | 文件写入与本机浏览器基础交互可直接运行；命令与外网高风险操作仍需审批。 |
-| `ASK` | 只读工具可直接运行；文件写入、交互操作和命令需要逐项批准。 |
-| `READ_ONLY` | 只读工具可运行；写入、交互和命令被拒绝。 |
+| `AUTO` (default) | Routine workspace edits and commands run automatically, **subject to non-bypassable hard redlines** and mandatory confirmation for package publishing, global installs, force-pushing/deleting protected branches, credential exfiltration, and high-risk tool actions. |
+| `AUTO_EDIT` | File edits and local loopback browser interactions run automatically; shell commands and external high-risk actions still require approval. |
+| `ASK` | Read-only tools run automatically; file writes, interactive actions, and shell commands require per-action approval. |
+| `READ_ONLY` | Only read-only tools run; writes, interactive actions, and commands are rejected. |
 
-此外，消息级 `plan` 分析模式和 `/review` 只读审查模式会在工具装配层直接剥离全部写入与副作用工具（含延迟工具），并强制 `READ_ONLY` 权限门。
+Additionally, message-level **`plan` mode** and **`/review`** strip all write and side-effect tools (including deferred tools) at tool-assembly time and enforce a `READ_ONLY` permission gate.
 
-- **高危命令硬红线与二次确认守卫（`CommandRiskGuard`）**：即使处于 `AUTO` 模式或通用 allow 规则下，仍会跨平台阻断删除根目录、家目录、系统盘、工作区根目录及工作区外路径（包含经 `sh -c`/`bash -c`/`cmd /c`/`powershell -Command` 包装的命令）；对强推或远端删除受保护分支（如 `main`/`master`/`dev`/`develop`/`prod`/`release/*`）及单段/管道串联敏感凭证外发（`.env`/`.ssh`/私钥/密钥变量上传）强制要求二次确认。
-- **操作系统级命令文件系统沙箱（`OsSandbox`）**：主会话 `run_command` 在 macOS 上默认使用 Seatbelt、在 Linux 上默认使用 bubblewrap（默认拒绝写入，仅开放当前工作区、项目关联目录与常见构建缓存目录，并锁定 `.git/config`、`hooks`、`info` 为只读；设置 `PILOT_EXECUTION_COMMAND_NETWORK=false` 可同时关掉命令出网）。Windows 支持接入独立受限令牌运行器，未配置运行器或找不到 `sandbox-exec`/`bwrap` 时会在宿主进程执行并明确标注未隔离；配置了运行器但探测失败时拒绝启动。容器隔离另覆盖特定校验命令且不静默降级。这些机制仍不等同于多租户虚拟机隔离。
-- **路径与快照边界**：文件工具经 `PathValidator` 解析真实祖先路径防符号链接越界；文件编辑审批卡附带改动 Diff 预览。检查点只覆盖写文件工具记录的改动，命令或其他进程产生的副作用可能无法回退，请用 Git 和独立备份保护重要数据。
+- **Hard Command Redlines & Mandatory Confirmation (`CommandRiskGuard`)**: Even under `AUTO` or broad allow rules, Pilot blocks deleting `/`, home directories, system drives, the workspace root, or paths outside the workspace (including nested `sh -c` / `bash -c` / `cmd /c` / `powershell -Command` wrappers), and enforces confirmation on force-pushing/deleting protected branches (`main`, `master`, `dev`, `develop`, `prod`, `release/*`) and credential exfiltration (`.env`, `.ssh`, private keys, or secret env vars via single commands or pipes).
+- **OS-Level Filesystem Sandbox (`OsSandbox`)**: Main-session `run_command` runs inside **macOS Seatbelt** or **Linux bubblewrap** by default (default-deny writes except the active workspace, linked project directories, and standard build caches; `.git/config`, `hooks`, and `info` locked read-only; disable command network access with `PILOT_EXECUTION_COMMAND_NETWORK=false`). Windows supports an optional restricted-token runner; when a sandbox tool is unavailable or unconfigured, execution falls back to the host process with explicit unsandboxed labeling (if a configured runner fails probing, startup fails closed). Local OS sandboxes are still **not** equivalent to multi-tenant VM isolation.
+- **Path & Checkpoint Boundaries**: File tools validate real ancestor paths via `PathValidator` (`NOFOLLOW_LINKS` + `toRealPath()`) to defeat symlink escapes. Edit approval cards display inline diffs. Checkpoints only cover writes performed through Pilot's file tools—side effects from shell commands or external processes cannot be automatically rolled back. Use Git and independent backups for critical work.
 
-## 浏览器隐私与安全边界
+## Browser Privacy & Security Boundaries
 
-- **源站与端口隔离**：内置浏览器默认仅操作本机回环地址，并对 `localhost`/`127.0.0.1`/`[::1]` 按端口精确隔离，阻止同机跨端口和未授权跨源重定向并记录 `blockedOrigins`。外网访问受 `PILOT_BROWSER_ALLOW_HOSTS` / `PILOT_BROWSER_DENY_HOSTS`（`deny` 优先）约束；接入外部 Chrome CDP 端点时，未配置放行清单则一律不碰。
-- **敏感页遮挡与支付硬拦截**：登录/MFA 与支付页面对模型屏蔽页面文本、DOM 快照与元素详情，并在截图与过程录像（`.replay.json`）中整页遮挡或跳过敏感帧；支付或结账页的自动化交互与脚本在工具层硬拦截并引导通过 `handoff` 交由用户亲自完成。
-- **子代理工具隔离与 Take Control 防误操作**：独立浏览器子代理 `browser_agent` 仅暴露禁用 `evaluate` 的 `browser` 工具，与工作区文件和 Shell 隔离；自动操控期间注入可信 Stop 按钮并支持毫秒级抢占中止。
-- **上传与下载审查**：上传限于工作区白名单、最多 10 个文件、单文件 ≤ 25 MiB、总量 ≤ 50 MiB，审批摘要高亮 `.env`/私钥等敏感文件名；下载在事件与落盘两段检查 39 种危险扩展名、危险 MIME、`MZ`/`ELF`/`Mach-O`/`#!`/`.lnk` 可执行魔数及体积上限（默认 50 MiB，`PILOT_BROWSER_MAX_DOWNLOAD_BYTES` 可配），阻断即取消并删除。控制台、网络、桌面日志与 URL fragment 统一脱敏。
+- **Origin & Port Isolation**: Built-in browser defaults to loopback addresses with strict per-port isolation across `localhost`, `127.0.0.1`, and `[::1]`, blocking cross-port and unauthorized cross-origin redirects while recording `blockedOrigins`. External hosts are governed by `PILOT_BROWSER_ALLOW_HOSTS` / `PILOT_BROWSER_DENY_HOSTS` (`deny` takes precedence); external Chrome CDP endpoints are untouched unless an explicit allowlist is configured.
+- **Sensitive Page Masking & Payment Hard Blocks**: Login/MFA and payment/checkout pages suppress DOM text, snapshots, and element metadata from the model and redact/skip frames in screenshots and `.replay.json` recordings. Automated interaction and scripts on payment/checkout pages are hard-blocked at the tool layer and routed to user `handoff`.
+- **Subagent Isolation & Take Control**: `browser_agent` exposes only the `browser` tool with `evaluate` disabled and zero workspace file/shell access. During automated control, a trusted **Stop** control preempts `batch`/`wait` in milliseconds and locks further automation until explicitly resumed.
+- **Upload & Download Inspection**: Uploads are restricted to workspace allowlists (≤ 10 files, ≤ 25 MiB per file, ≤ 50 MiB total), highlighting sensitive names such as `.env` or private keys in approvals. Downloads undergo two-stage inspection against 39 dangerous extensions, dangerous MIME types, executable magic headers (`MZ`, `ELF`, `Mach-O`, `#!`, `.lnk`), and size caps (default 50 MiB via `PILOT_BROWSER_MAX_DOWNLOAD_BYTES`), cancelling and deleting blocked files. Console logs, network traces, desktop logs, and URL fragments are uniformly redacted.
 
-## 模型服务与工作区数据
+## Model Endpoints & Workspace Data
 
-真实模型请求会发送完成任务所需的提示词、用户输入、相关工作区内容以及工具结果到你配置的模型端点（支持 OpenAI Chat Completions / Responses 与 Anthropic Messages）。端点可能由第三方运营；其保留、训练和处理策略由对应服务商决定。Pilot 不会因为工作区在本机，就让模型调用自动保持本地。
+Live model runs send prompts, user instructions, relevant workspace snippets, and tool outputs to your configured endpoint (OpenAI Chat Completions / Responses or Anthropic Messages). Third-party endpoints apply their own retention and training policies; running Pilot locally does **not** make remote API calls local. For strictly offline processing, configure a local model server (e.g., Ollama, llama.cpp, vLLM) and avoid external endpoints.
 
-发送前应检查任务涉及的文件，不要让密钥、个人信息、客户资料或专有数据进入提示词和工具结果。需要离线或严格本地处理时，不要配置外部模型端点，并确认应用实际使用的模型运行方式。
+## Local Storage, Redaction & Retention
 
-## 本机存储、脱敏和保留
+Runtime data defaults to `.pilot/` under the repository root (SQLite database, attachments, snapshots, deliverables, browser evidence/replays, command logs, access audits, and traces), configurable via `PILOT_DATA_DIR`.
 
-默认数据目录是仓库根目录下的 `.pilot/`，可能包含 SQLite 会话数据库、附件、文件快照、成果、浏览器证据与录像、命令日志、访问审计记录和 trace。可以通过 `PILOT_DATA_DIR` 指向独立目录。
+- **Unified Redaction & SSRF Guards**: Shared `SecretScrubber` masks Bearer/Basic headers, common provider key prefixes (`sk-`, `ghp_`, `AKIA`, `AIza`, `xox`, `glpat`, `hf_`), PEM private keys, and embedded URL credentials across model/search errors, command outputs, diagnostic exports, and request dumps. Settings endpoints never return plaintext keys. `web_fetch` re-validates every hop (up to 5 redirects) against loopback, private RFC1918, link-local, CGNAT, and IPv6 ULA ranges. On POSIX hosts, `.pilot/pilot.db` and request dumps default to `0600`.
+- **Retention**: Events, snapshots, and traces are kept indefinitely by default. Setting a positive `PILOT_RETENTION_DAYS` purges aged records (not cryptographic erasure; sessions themselves remain).
 
-- **密钥与落盘脱敏**：共享 `SecretScrubber` 覆盖 Bearer/Basic、主流服务商前缀（`sk-`/`ghp_`/`AKIA`/`AIza`/`xox`/`glpat`/`hf_`）、PEM 私钥块与 URL 内嵌口令，统一应用于模型与搜索错误摘要、命令输出、诊断导出与请求诊断落盘；`ModelSettings`/`ModelProperties` 及 `WebSearchSettings`/`WebSearchProperties` 均不输出明文密钥（只返回掩码）。`web_fetch` 跟随公网重定向（上限 5 跳）时会在每一跳发请求前重新校验公网地址并阻断本机、私网、链路本地、CGNAT 与 IPv6 ULA 目标。在 POSIX 文件系统上，`.pilot/pilot.db` 与请求诊断落盘文件默认收紧为 `0600`（仅当前用户可读写），非 POSIX 平台安全降级跳过。需要分享排障信息时，请使用「设置 → 诊断」导出标记 `sanitized=true` 的脱敏诊断包。
-- **数据保留**：事件、快照和 trace 默认不自动清理。配置正数的 `PILOT_RETENTION_DAYS` 后，服务按保留期限清理相应旧记录；这不等同于安全擦除，也不会删除会话本身。`.pilot/` 被 Git 忽略并不意味着可以公开上传或任意共享。
+## Remote Access
 
-## 远程访问
+Default `PILOT_SECURITY_MODE=local` binds strictly to loopback. Enabling `token` mode grants access to any client presenting the shared token—there is no per-user, role, or per-session authorization.
 
-默认 `PILOT_SECURITY_MODE=local`，只允许本机回环访问。启用 `token` 模式会允许持有共享访问令牌的客户端访问；当前没有用户、角色或会话级隔离。令牌不是面向公网的身份系统。
+Never expose Pilot directly to the public internet. If remote access is required, place Pilot behind TLS, a maintained authenticating reverse proxy, firewall rules, and exact allowed origins. Avoid leaking tokenized URLs in browser history or proxy logs (SSE clients may pass tokens via query parameters due to header limits). For optional Android pairing boundaries, see [Android & Mobile Bridge](../pilot-mobile/README.md).
 
-不要直接把 Pilot 端口开放到互联网。确需远程访问时，应先配置 TLS、受维护的认证代理、防火墙和精确的允许来源，并限制到可信网络与必要用户。不要把带令牌的 URL、浏览器历史或代理日志公开；SSE 客户端对认证请求头有限制，因此令牌可能以查询参数形式传递。
+## Reporting Vulnerabilities
 
-手机连接是可选功能，不代表服务默认开放公网。公共发现或中继的可用性受网络条件影响，也不替代访问控制。连接边界见 [Android 与移动连接](../pilot-mobile/README.md)。
-
-## 报告安全问题
-
-漏洞报告方式见 [SECURITY.md](../SECURITY.md)。目前仓库没有公布专用安全邮箱或单独的响应承诺。请不要在公开 Issue、截图或日志中粘贴访问令牌、API 密钥、个人数据或可直接利用的漏洞细节。若 GitHub 仓库启用了 Private vulnerability reporting，请优先使用该私密入口；若没有，请先通过维护者公开资料联系维护者，请求一个私密报告渠道，再发送复现细节。
+See [SECURITY.md](../SECURITY.md) for private disclosure instructions. Do not post API keys, tokens, personal data, or exploitable details in public issues, logs, or screenshots.

@@ -1,0 +1,23 @@
+{
+  "sourceDataset": "flash-java-ts-40-verified.jsonl",
+  "seed": 42,
+  "totalTasks": 12,
+  "byLanguage": {
+    "java": 6,
+    "typescript": 6
+  },
+  "instanceIds": [
+    "fasterxml__jackson-databind-4159",
+    "fasterxml__jackson-databind-4360",
+    "fasterxml__jackson-databind-4615",
+    "google__gson-1093",
+    "google__gson-1391",
+    "google__gson-1555",
+    "darkreader__darkreader-6747",
+    "mui__material-ui-23778",
+    "vuejs__core-11491",
+    "vuejs__core-11761",
+    "vuejs__core-11854",
+    "vuejs__core-11899"
+  ]
+}

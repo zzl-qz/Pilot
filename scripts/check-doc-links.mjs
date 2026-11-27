@@ -6,8 +6,8 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const roots = ['README.md', 'AGENTS.md', 'CONTRIBUTING.md', 'PROJECT_TECHNICAL_GUIDE.md'];
-const dirs = ['docs-public'];
+const roots = ['README.md', 'README.zh-CN.md', 'AGENTS.md', 'CONTRIBUTING.md', 'PROJECT_TECHNICAL_GUIDE.md'];
+const dirs = ['docs-public', 'evaluation/multi-swe-bench'];
 const files = [...roots];
 for (const dir of dirs) {
   const walk = (path) => {

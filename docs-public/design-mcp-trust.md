@@ -1,51 +1,36 @@
-# MCP 信任模型
+# MCP Trust Model
 
-这份说明描述 Pilot 如何决定一次 MCP 启动或调用是否需要用户批准。它对应 `McpTrustStore`、
-`McpTrustPolicy` 和审批卡/设置页的交互；修改相关逻辑时应同步更新本文。
+[English](design-mcp-trust.md) | [简体中文](zh-CN/design-mcp-trust.md)
 
-## 信任的对象
+This document specifies how Pilot decides whether launching or invoking an MCP server requires explicit user approval (`McpTrustStore`, `McpTrustPolicy`, and Settings/Approval UI).
 
-信任的是**服务器当前这条启动命令**（`command + args + env`），不是服务器自报的
-`readOnlyHint`，也不是服务器名字。MCP 规范明确 annotations 可以由服务器任意声明，不能作为
-安全边界。
+## What Is Trusted
 
-服务端计算 `configHash = SHA-256(规范化后的 command/args/env)`。用户批准后，把哈希连同
-工作区路径、服务器名写入 `mcp-trust.json`；命令任一项变化都会让旧记录变成 `STALE`，
-下一次启动重新进入审批。
+Pilot trusts **the exact normalized startup configuration** (`command + args + env` for `stdio`, or transport + URL + headers for Streamable HTTP/SSE)—never a server's self-declared `readOnlyHint` or display name. The MCP specification explicitly notes that server annotations are untrusted hints, not security boundaries.
 
-## 工具钉住
+The server computes `configHash = SHA-256(normalized configuration)`. Upon user approval, `configHash`, workspace path, and server name are stored in `mcp-trust.json`. Any modification transitions the record to `STALE`, forcing re-approval before the next launch.
 
-服务器第一次被信任并启动后，把服务器当时声明的每个工具定义
-（`name + description + inputSchema + annotations`）算成 `toolHash` 钉进同一条记录。
-之后：
+## Tool Definition Pinning (Anti-Rug-Pull)
 
-- 工具声明只读且哈希未变：调用免审批；
-- 用户点过「始终允许此工具」且哈希未变：调用免审批；
-- 工具定义漂移、出现新工具、服务器改名或配置变化：回到逐次审批；
-- 服务器返回的 `readOnlyHint` 只有在已钉住的信任记录里才参与判断。
+Once a trusted server starts and exposes its tools, Pilot hashes every tool definition (`name + description + inputSchema + annotations`) into a `toolHash` pinned to that trust record:
 
-`mcp-trust.json` 缺失、损坏或格式版本不识别时一律按「全部未信任」处理（fail-closed），
-删除配置时同时撤销信任；该文件进入数据备份范围。
+- **Read-only tool with unchanged hash**: Runs without re-prompting.
+- **Explicitly "Always allow" tool with unchanged hash**: Runs without re-prompting.
+- **Definition drift, new tool, rename, or config change**: Immediately reverts to per-call approval.
+- `readOnlyHint` is only consulted for pinned tools inside a valid trust record.
 
-## 审批与状态
+Missing, corrupted, or unrecognized `mcp-trust.json` files **fail closed** (all servers treated as untrusted). Deleting a server configuration automatically revokes trust; `mcp-trust.json` is included in backups.
 
-- `UNTRUSTED`：没有记录，首次启动必须批准。
-- `TRUSTED_UNPINNED`：已批准命令但还没观测过工具，下一次启动后钉住。
-- `TRUSTED`：命令与工具都匹配记录。
-- `STALE`：有记录但当前命令与批准时不同，需要重新批准。
+## Trust States & Anti-TOCTOU Approval
 
-「批准并信任」必须带上审批卡上展示的 `configHash`（工具级动作还要 `toolHash`）；服务端
-校验当前配置/观测与卡片一致才落库，防止展示后工作区 `.mcp.json` 被改写造成 TOCTOU。
-设置页的「信任此服务器」只作用于当前列表里的命令，同样显示并提交当前 `configHash`。
+- `UNTRUSTED` — No record; initial launch requires approval.
+- `TRUSTED_UNPINNED` — Config approved, awaiting initial tool observation to pin `toolHash`.
+- `TRUSTED` — Both config hash and observed tool definitions match the pinned record.
+- `STALE` — Configuration changed since approval; requires re-approval.
 
-## 只读档位
+Approving and trusting a server submits the exact `configHash` (and `toolHash` for tool-level actions) displayed on the approval card. The server rejects persistence if `.mcp.json` or observed definitions mutated in between, preventing TOCTOU attacks.
 
-`READ_ONLY` 下普通命令一律拒绝；MCP 的**已信任**服务器仍允许启动，因为这条命令本身已在
-更早的审批中被用户明确批准。未信任服务器在 `READ_ONLY` 下仍然拒绝启动。只读判定只影响
-Pilot 的权限层，不提供操作系统级隔离。
+## `READ_ONLY` Mode & Config Import
 
-## 配置导入
-
-设置 → MCP 的粘贴导入只接受 stdio 的 `command/args/env/type` 白名单；`pilotPermissions`
-、`url`、`disabled` 等本地授权或远程字段会被拒绝，整批不写入。用户级配置损坏或超过
-1 MiB 时写接口拒绝覆盖，避免把可修复的配置整个冲掉。
+- Under `READ_ONLY`, ordinary shell commands are blocked; **already-trusted** MCP servers may still launch because their command was previously approved, whereas untrusted servers remain blocked.
+- Settings → MCP JSON paste import enforces a strict stdio whitelist (`command`, `args`, `env`, `type`), rejecting local privilege fields (`pilotPermissions`, `url`, `disabled`) atomically. Corrupted or > 1 MiB user config files refuse blind overwrites.

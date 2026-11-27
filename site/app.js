@@ -120,6 +120,7 @@
   });
 
   /* ── 5. 复制 ───────────────────────────────────────── */
+  var isEn = (document.documentElement.lang || "").toLowerCase().indexOf("en") === 0;
   var copiedSvg = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 13 4 4L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   function legacyCopy(text) {
@@ -141,17 +142,17 @@
     var original = button.innerHTML;
     button.classList.add("done");
     button.innerHTML = copiedSvg;
-    button.setAttribute("aria-label", "已复制");
-    button.title = "已复制：" + text.split("\n")[0];
+    button.setAttribute("aria-label", isEn ? "Copied" : "已复制");
+    button.title = (isEn ? "Copied: " : "已复制：") + text.split("\n")[0];
     var status = statusFor(button);
     if (status) {
-      status.textContent = "已复制到剪贴板。";
+      status.textContent = isEn ? "Copied to clipboard." : "已复制到剪贴板。";
       status.hidden = false;
     }
     setTimeout(function () {
       button.classList.remove("done");
       button.innerHTML = original;
-      button.setAttribute("aria-label", button.dataset.label || "复制");
+      button.setAttribute("aria-label", button.dataset.label || (isEn ? "Copy" : "复制"));
     }, 1600);
   }
 
@@ -196,12 +197,14 @@
   function markFailed(button, text) {
     var original = button.innerHTML;
     button.classList.add("failed");
-    button.setAttribute("aria-label", "复制失败，请手动选择命令复制");
-    button.title = "复制失败：请手动选择命令后复制";
+    button.setAttribute("aria-label", isEn ? "Copy failed; select command manually" : "复制失败，请手动选择命令复制");
+    button.title = isEn ? "Copy failed: select command manually" : "复制失败：请手动选择命令后复制";
     var status = statusFor(button);
     if (status) {
       status.hidden = false;
-      status.textContent = "复制失败：浏览器拒绝了剪贴板访问。请在下方选中命令，按 Ctrl+C（macOS 为 Command+C）复制。";
+      status.textContent = isEn
+        ? "Copy failed: clipboard access was denied. Select the command below and press Ctrl+C (Command+C on macOS)."
+        : "复制失败：浏览器拒绝了剪贴板访问。请在下方选中命令，按 Ctrl+C（macOS 为 Command+C）复制。";
     }
     var container = containerFor(button);
     var parent = container && container.parentElement;

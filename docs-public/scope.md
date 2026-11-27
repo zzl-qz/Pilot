@@ -1,57 +1,42 @@
-# 范围与边界
+# Scope & Boundaries
 
-> 最后更新：2026-11-24
+[English](scope.md) | [简体中文](zh-CN/scope.md)
 
-这份文档集中回答一个问题：**Pilot 不做什么。**
+> Last updated: 2026-11-27
 
-产品文档里散落的「当前边界」容易让人只看到能力清单，而能力清单会诱导读者期待更多。
-下面每一条都对应代码或验收记录里的具体位置，不是免责声明，而是设计取舍。
+This document answers one question directly: **what Pilot intentionally does NOT do.** Every boundary below reflects an architectural trade-off grounded in the codebase rather than generic boilerplate.
 
-## 面向谁
+## Target Audience
 
-**代码只有他一个人看的人**：独立开发者、在校做项目的人、转行者、接单的外包开发者。
+Pilot is built for **solo builders, students, indie developers, and independent engineers** who want an agent that keeps an auditable ledger of every change and check rather than asking them to blindly trust "Done!".
 
-划界的标准是**会不会自己验证 AI 的产出**：
+Pilot intentionally excludes:
 
-- 会验证、也有时间验证的人，用现成的商业代理工具已经足够，Pilot 不试图替代它；
-- 不会验证、或者没时间验证的人，需要一个替他留账、并且允许他随时查账的系统——这是 Pilot 唯一要服务的人。
-
-因此 Pilot 主动排除两类用户：
-
-| 不面向 | 原因 |
+| Out of Scope | Rationale |
 | --- | --- |
-| 企业团队 | 团队有代码评审与采购流程兜底，「谁来验证」这件事已经有制度答案；Pilot 不解决协作、权限分层与审计导出 |
-| 完全没有编程经验的人 | 没有代码库就没有「验证产物」这件事；Pilot 的主要使用起点仍是源码克隆或自包含预览包加本机工作区，不是面向零基础的托管 SaaS |
+| Enterprise teams | Teams already have PR review workflows, RBAC, and procurement compliance; Pilot does not build multi-user collaboration, RBAC, or enterprise audit pipelines. |
+| Non-technical zero-code users | Verification requires a real workspace and artifacts; Pilot starts from local repositories and workspaces rather than a hosted zero-setup SaaS. |
 
-## 不承诺
+## Explicit Non-Guarantees
 
-| 不做的事 | 依据 |
+| Non-Guarantee | Grounding |
 | --- | --- |
-| **不比商业代理更聪明** | 模型能力来自用户配置的端点。Pilot 做的是把「完成」变成可核对的事实，不是提升生成质量 |
-| **不是多租户虚拟机级沙箱** | macOS（Seatbelt）与 Linux（bubblewrap）默认对 `run_command` 启用文件系统沙箱（`OsSandbox`），容器隔离覆盖特定校验命令；但沙箱工具缺失或关闭时仍在宿主进程执行，且 `AUTO` 硬红线不能替代独立虚拟机或账号隔离 |
-| **Windows 原生沙箱尚未完成全量实机验证** | `OsSandbox` 已定义独立受限令牌运行器协议（含 `scripts/build-windows-sandbox.ps1`），未配置运行器时回退宿主进程并明确标注未隔离；Windows 实机全量验收尚未完成 |
-| **Office 排版不等价于 Microsoft Office** | `docs-public/user-guide.md` 的「文件与成果」：内置通用预览支持结构化解析与渲染，但复杂排版、宏、原地覆盖不在保证范围 |
-| **不做团队协作、多租户、企业权限体系** | `PRODUCT_DIRECTION.md` 的「明确暂缓」 |
-| **不把公网暴露作为可用形态** | 远程访问使用单个共享令牌，没有用户、角色或会话级隔离（`docs-public/security.md`） |
-| **不在无人审核时执行对外或不可逆动作** | `PRODUCT_DIRECTION.md` 的风险分级 R3；浏览器支付页交互与高危命令红线均强制拦截或确认 |
+| **Not smarter than your underlying model** | Reasoning quality comes from your configured model endpoint. Pilot's value is harness reliability, safety boundaries, and turning "done" into verifiable facts. |
+| **Not a multi-tenant VM sandbox** | macOS (Seatbelt) and Linux (bubblewrap) enable filesystem sandboxing for `run_command` by default, and hard redlines apply under `AUTO`, but local sandboxes do not replace VMs or dedicated OS accounts. |
+| **Windows native sandbox pending full physical verification** | `OsSandbox` defines a restricted-token Windows runner protocol (`scripts/build-windows-sandbox.ps1`), falling back transparently to the host process when unconfigured; full physical Windows validation is still in progress. |
+| **Office generation ≠ Microsoft Office layout parity** | Built-in preview & `office` generation handle structured DOCX/XLSX/PPTX/PDF creation and inspection, not complex macro/VBA or pixel-identical Office layouts. |
+| **No multi-tenant collaboration or public SaaS hosting** | Remote mode uses a single shared token without user/role/session isolation ([Security & Privacy](security.md)). |
+| **No unsupervised irreversible external actions** | Payment pages and high-risk command redlines always block or require explicit human confirmation. |
 
-## 不覆盖
+## Explicit Non-Coverage
 
-- **验证证据只覆盖它实际记录过的文件**：写文件工具之外的改动（`run_command` 内部、其他进程、用户手改）不会自动进入证据；这类情况下结论会如实显示为未验证或已过期，而不是假装覆盖。
-- **命令任务的重放**：历史证据保存的是结果摘要，不是可重放的命令参数。因此「重新验证」是让会话重新跑一次，而不是重放上次的命令。
-- **跨机器一致性**：租约与调度状态依赖本地 SQLite，没有跨机器协调层。
+- **Verification evidence only covers tracked artifacts**: Edits made outside Pilot's file tools (inside `run_command`, external editors, or manual tweaks) are never silently claimed as verified; prior evidence transitions to `STALE` or unverified.
+- **No blind replay of shell commands**: Evidence stores summaries and exit codes rather than blindly re-executing arbitrary past commands; re-verification runs a fresh session turn.
+- **Single-machine state**: Leases and schedules rely on local SQLite with no cross-machine cluster coordinator.
 
-## 为什么主动划界
+## Related Documents
 
-以上限制多数可以靠更多工程解决，但把范围说清楚本身是产品的一部分：
-
-1. 用户需要知道自己在依赖什么。把「没有沙箱」写成小字免责和写成范围声明，后果完全不同。
-2. 边界让验证结论可信。一个声称什么都能做的系统，说「已验证」时也不可信。
-3. 划界是对目标用户的承诺：不试图讨好所有人，才可能把「让你能查账」这件事做透。
-
-## 相关文档
-
-- [安全与隐私](security.md)：权限模式、数据去向、存储与远程访问的具体行为
-- [功能与配置参考](user-guide.md)：当前可用能力与配置项
-- [产品方向](../PRODUCT_DIRECTION.md)：阶段目标与暂缓事项
-- [与验证类工具的差异](verification-approach.md)：同为「让完成可核对」，区别在哪一层
+- [Security & Privacy](security.md)
+- [User & Configuration Guide](user-guide.md)
+- [Verification Approach](verification-approach.md)
+- [Benchmarks & Verification](benchmarks.md)
