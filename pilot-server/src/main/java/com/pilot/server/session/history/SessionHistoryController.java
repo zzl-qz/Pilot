@@ -89,6 +89,9 @@ public class SessionHistoryController {
         if (around != null && around < 1) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "around 必须大于等于 1");
         }
+        if (around != null && around == Long.MAX_VALUE) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "around 超出有效范围");
+        }
         int capped = Math.max(1, Math.min(limit, 500));
         long revision = sessions.historyRevision(id);
         List<EventEnvelope> page;

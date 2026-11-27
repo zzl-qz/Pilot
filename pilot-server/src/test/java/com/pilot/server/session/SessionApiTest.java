@@ -548,6 +548,8 @@ class SessionApiTest {
         // 非法参数与互斥游标应返回 400
         mvc.perform(get("/api/sessions/{id}/history", sessionId).param("around", "0"))
             .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/sessions/{id}/history", sessionId).param("around", Long.toString(Long.MAX_VALUE)))
+            .andExpect(status().isBadRequest());
         mvc.perform(get("/api/sessions/{id}/history", sessionId).param("around", "5").param("before", "8"))
             .andExpect(status().isBadRequest());
         mvc.perform(get("/api/sessions/{id}/history", sessionId).param("around", "5").param("after", "3"))
