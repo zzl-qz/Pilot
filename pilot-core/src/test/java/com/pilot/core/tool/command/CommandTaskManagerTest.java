@@ -121,6 +121,27 @@ class CommandTaskManagerTest {
     }
 
     @Test
+    void prunesExitedShortLivedDescendantsWhileParentStaysAlive() throws Exception {
+        Path childRelease = workspace.resolve("child.release");
+        Path burstDone = workspace.resolve("burst.done");
+        Path parentRelease = workspace.resolve("burst.release");
+        try (CommandTaskManager manager = manager()) {
+            CommandTaskManager.Task task = manager.start("session_a", "burst",
+                process("burst", childRelease.toString(), burstDone.toString(), parentRelease.toString()), true,
+                15_000);
+            // 先确认 3 个存活子进程确实都已被纳入追踪，避免子进程在首次轮询前就退出导致“空测”
+            waitUntil(() -> manager.trackedDescendantCount(task.taskId()) >= 3);
+            Files.createFile(childRelease);
+            waitUntil(() -> Files.exists(burstDone));
+            // 父进程继续存活期间，supervise 轮询应将全部已退出的短生命周期子进程从 descendants 回收至 0
+            waitUntil(() -> manager.trackedDescendantCount(task.taskId()) == 0);
+            assertEquals("RUNNING", manager.get("session_a", task.taskId()).status());
+            Files.createFile(parentRelease);
+            assertEquals("COMPLETED", awaitDone(manager, "session_a", task.taskId()).status());
+        }
+    }
+
+    @Test
     void trackedDescendantRemainsOwnedAfterParentExits() throws Exception {
         try (CommandTaskManager manager = manager()) {
             Path childPidFile = workspace.resolve("orphan.pid");
@@ -436,6 +457,19 @@ class CommandTaskManagerTest {
                         child.waitFor();
                     }
                 }
+                case "burst" -> {
+                    List<Process> children = new ArrayList<>();
+                    for (int i = 0; i < 3; i++) {
+                        children.add(new ProcessBuilder(javaBinary(), "-cp", System.getProperty("java.class.path"),
+                            Child.class.getName(), "wait", args[1]).start());
+                    }
+                    for (Process child : children) {
+                        child.waitFor();
+                    }
+                    Files.writeString(Path.of(args[2]), "burst-done");
+                    untilFile(args[3]);
+                }
+                case "wait" -> untilFile(args[1]);
                 case "noisy" -> {
                     String output = "x".repeat(256);
                     while (true) {

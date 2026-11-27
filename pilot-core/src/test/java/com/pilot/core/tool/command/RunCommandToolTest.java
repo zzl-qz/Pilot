@@ -231,6 +231,42 @@ class RunCommandToolTest {
     }
 
     @Test
+    void fallsBackToSystemMvnWhenJarWrapperIsMissingWrapperJar() throws Exception {
+        boolean win = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+        Path wrapper = workspace.resolve(win ? "mvnw.cmd" : "mvnw");
+        Files.writeString(wrapper, win ? "@echo off\r\nrem MavenWrapperMain maven-wrapper.jar\r\n"
+            : "#!/bin/sh\nexec java -cp .mvn/wrapper/maven-wrapper.jar org.apache.maven.wrapper.MavenWrapperMain \"$@\"\n");
+        Path systemBin = Files.createDirectory(workspace.resolve("sys-bin"));
+        Path systemMvn = Files.writeString(systemBin.resolve(win ? "mvn.cmd" : "mvn"),
+            win ? "@echo system-mvn\r\n" : "#!/bin/sh\necho system-mvn\n");
+        if (!win) {
+            systemMvn.toFile().setExecutable(true);
+        }
+
+        RunCommandTool tool = tool();
+        // 1. 缺失 maven-wrapper.jar 且 PATH 有系统 mvn：mvn 不应被改写成会崩溃的 mvnw
+        List<String> resolvedMvn = tool.withWrapper(List.of("mvn", "test"), systemBin.toString());
+        assertTrue(resolvedMvn.stream().anyMatch(part -> part.endsWith(systemMvn.getFileName().toString())),
+            resolvedMvn.toString());
+        assertFalse(resolvedMvn.stream().anyMatch(part -> part.contains("mvnw")), resolvedMvn.toString());
+
+        // 2. 用户显式调用 mvnw 时仍尊重用户指定的 wrapper
+        List<String> explicitWrapper = tool.withWrapper(List.of("mvnw", "test"), systemBin.toString());
+        assertTrue(explicitWrapper.stream().anyMatch(part -> part.contains("mvnw")), explicitWrapper.toString());
+
+        // 3. 补齐 maven-wrapper.jar 后，mvn 恢复优先使用工作区 wrapper
+        Files.createDirectories(workspace.resolve(".mvn/wrapper"));
+        Files.writeString(workspace.resolve(".mvn/wrapper/maven-wrapper.jar"), "jar");
+        List<String> withJar = tool.withWrapper(List.of("mvn", "test"), systemBin.toString());
+        assertTrue(withJar.stream().anyMatch(part -> part.contains("mvnw")), withJar.toString());
+
+        // 4. PATH 无系统 mvn 时，即便缺少 jar 也仍保留 wrapper 路径让其按原行为处理
+        Files.delete(workspace.resolve(".mvn/wrapper/maven-wrapper.jar"));
+        List<String> noSystemMvn = tool.withWrapper(List.of("mvn", "test"), "");
+        assertTrue(noSystemMvn.stream().anyMatch(part -> part.contains("mvnw")), noSystemMvn.toString());
+    }
+
+    @Test
     void runsWhitelistedCommandInsideWorkspace() {
         RunCommandTool tool = tool();
 

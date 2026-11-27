@@ -412,6 +412,36 @@ class LintGateTest {
         assertEquals(LintGate.LintAssessment.Kind.CLEAN, assessment.kind(), assessment.prompt());
     }
 
+    @Test
+    void doesNotAppendFilesPlaceholderToCompoundPackageJsonLintScripts() throws Exception {
+        Files.createDirectories(root.resolve("src"));
+        Files.writeString(root.resolve("src/app.ts"), "export const ok = 1;\n");
+        Files.writeString(root.resolve("package.json"), "{\"scripts\":{\"lint\":\"eslint src/ && tsc --noEmit\"}}");
+
+        ProjectLint lint = ProjectLint.discover(root);
+        assertEquals("eslint src/ && tsc --noEmit", lint.command());
+
+        AtomicInteger calls = new AtomicInteger();
+        LintGate gate = new LintGate(true, (workspace, command, timeout) -> {
+            calls.incrementAndGet();
+            return new LintRunner.LintResult(0, "", false, true);
+        });
+        // 复合脚本不含 {files}，写文件后不扫描整仓，留到收尾 assess 再统一运行
+        assertEquals("", gate.feedbackAfterEdit(root, List.of("src/app.ts")));
+        assertEquals(0, calls.get());
+        assertEquals(LintGate.LintAssessment.Kind.CLEAN, gate.assess(root, List.of("src/app.ts")).kind());
+        assertEquals(1, calls.get());
+
+        // 真实子进程端到端验证：若错误向复合脚本末尾拼了 {files}，第二段 node 收到额外路径参数会直接 exit 1
+        Files.writeString(root.resolve("check-no-args.js"), "if (process.argv.length > 2) process.exit(1);\n");
+        Files.writeString(root.resolve("package.json"),
+            "{\"scripts\":{\"lint\":\"node check-no-args.js && node check-no-args.js\"}}");
+        LintGate realGate = LintGate.enabled();
+        assertEquals("", realGate.feedbackAfterEdit(root, List.of("src/app.ts")));
+        LintGate.LintAssessment realAssess = realGate.assess(root, List.of("src/app.ts"));
+        assertEquals(LintGate.LintAssessment.Kind.CLEAN, realAssess.kind(), realAssess.prompt());
+    }
+
     private void writeSample() throws Exception {
         Files.createDirectories(root.resolve("src"));
         Files.writeString(root.resolve("package.json"), "{\"scripts\":{\"lint\":\"node lint.js\"}}");

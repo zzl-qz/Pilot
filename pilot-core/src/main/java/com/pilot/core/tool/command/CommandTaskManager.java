@@ -807,18 +807,22 @@ public final class CommandTaskManager implements AutoCloseable {
         }
 
         private void remember(ProcessHandle handle) {
-            if (process != null && handle.pid() != process.pid()) {
-                descendants.putIfAbsent(handle.pid(),
-                    new OwnedProcess(handle, handle.info().startInstant().orElse(null)));
+            if (process == null || handle.pid() == process.pid() || descendants.containsKey(handle.pid())
+                || !isProcessRunning(handle)) {
+                return;
             }
+            descendants.putIfAbsent(handle.pid(), new OwnedProcess(handle, handle.info().startInstant().orElse(null)));
         }
 
         private void discover() {
             process.descendants().forEach(this::remember);
-            for (OwnedProcess child : descendants.values()) {
-                if (child.alive()) {
-                    child.handle.descendants().forEach(this::remember);
+            for (var iterator = descendants.entrySet().iterator(); iterator.hasNext();) {
+                OwnedProcess child = iterator.next().getValue();
+                if (!child.alive()) {
+                    iterator.remove();
+                    continue;
                 }
+                child.handle.descendants().forEach(this::remember);
             }
         }
 
@@ -832,6 +836,12 @@ public final class CommandTaskManager implements AutoCloseable {
             return isProcessRunning(handle)
                 && (start == null || handle.info().startInstant().map(start::equals).orElse(false));
         }
+    }
+
+    /** 测试辅助：返回当前活跃任务仍追踪的存活子进程数量。 */
+    int trackedDescendantCount(String taskId) {
+        Entry entry = entries.get(taskId);
+        return entry == null ? 0 : entry.descendants.size();
     }
 
     /** Linux 容器的 PID 1 可能暂未回收孤儿；僵尸进程已退出，不能让任务一直停在 STOPPING。 */

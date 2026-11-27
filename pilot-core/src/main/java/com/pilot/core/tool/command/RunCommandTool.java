@@ -1146,14 +1146,27 @@ public final class RunCommandTool implements Tool, ProducesCheck {
 
     /** 优先使用工作区里的构建 wrapper；否则在 PATH 上解析真实可执行文件（Windows 上是 .cmd）。 */
     private List<String> withWrapper(List<String> tokens) {
+        return withWrapper(tokens, System.getenv("PATH"));
+    }
+
+    List<String> withWrapper(List<String> tokens, String pathEnv) {
         String head = tokens.get(0).toLowerCase(Locale.ROOT);
         List<String> command = new ArrayList<>();
         Path wrapper = null;
-        // mvnw/gradlew 本身也映射到工作区 wrapper：直接按名字查 PATH 是找不到的
+        // mvnw/gradlew 本身也映射到工作区 wrapper；若调用的是 mvn/gradle 且本地 wrapper 缺失配套 jar、
+        // 同时系统 PATH 上已有可用的 mvn/gradle，则保留系统命令避免离线环境因 ClassNotFoundException 崩溃。
         if ("mvn".equals(head) || "mvnw".equals(head)) {
             wrapper = CommandRuntimeEnvironment.findWrapper(paths.root(), "mvnw", WINDOWS);
+            if ("mvn".equals(head) && CommandRuntimeEnvironment.isWrapperMissingJar(paths.root(), wrapper, "mvnw")
+                && CommandRuntimeEnvironment.resolveOnPath("mvn", pathEnv, WINDOWS) != null) {
+                wrapper = null;
+            }
         } else if ("gradle".equals(head) || "gradlew".equals(head)) {
             wrapper = CommandRuntimeEnvironment.findWrapper(paths.root(), "gradlew", WINDOWS);
+            if ("gradle".equals(head) && CommandRuntimeEnvironment.isWrapperMissingJar(paths.root(), wrapper, "gradlew")
+                && CommandRuntimeEnvironment.resolveOnPath("gradle", pathEnv, WINDOWS) != null) {
+                wrapper = null;
+            }
         }
         if (wrapper != null) {
             // Git 检出或打包可能丢失执行位；只为已识别的构建 wrapper 加解释器，绝不执行 shell -c。
@@ -1163,7 +1176,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             }
             command.add(wrapper.toAbsolutePath().toString());
         } else {
-            Path resolved = CommandRuntimeEnvironment.resolveOnPath(tokens.get(0), System.getenv("PATH"), WINDOWS);
+            Path resolved = CommandRuntimeEnvironment.resolveOnPath(tokens.get(0), pathEnv, WINDOWS);
             command.add(resolved == null ? tokens.get(0) : resolved.toAbsolutePath().toString());
         }
         command.addAll(tokens.subList(1, tokens.size()));

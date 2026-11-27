@@ -107,8 +107,15 @@ public record ProjectLint(Status status, String command, String source, int time
         if (script.isBlank()) {
             return found;
         }
-        String command = script.contains("{files}") ? script : script + " {files}";
+        // 复合 shell 脚本（如 eslint && tsc --noEmit）不可盲目在末尾追加 {files}，否则会破坏最后一段命令语义；
+        // 保持原样不带 {files}，写文件后跳过整仓扫描，留到收尾统一验证。
+        String command = script.contains("{files}") || hasShellOperator(script) ? script : script + " {files}";
         return new ProjectLint(Status.READY, command, found.source(), found.timeoutSeconds());
+    }
+
+    private static boolean hasShellOperator(String script) {
+        return script.contains("&&") || script.contains("||") || script.contains(";") || script.contains("|")
+            || script.contains("\n") || script.contains("\r");
     }
 
     /** 规则文件和脚本正文的快照。运行中这些内容变了，就视为把检查改掉。 */
