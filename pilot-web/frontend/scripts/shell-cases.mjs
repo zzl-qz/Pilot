@@ -64,14 +64,13 @@ export async function checkShell(page, name, output) {
   await rail.getByRole('button', { name: '更多功能', exact: true }).click();
   await rail.getByRole('menuitem', { name: /命令面板/ }).click();
   await page.locator('.modal').waitFor(); await page.keyboard.press('Escape');
-  // Windows/Linux Ctrl 和 macOS Meta 共用行为；输入法组合键不能触发。
-  for (const modifier of ['Control', 'Meta']) {
-    await page.keyboard.press(`${modifier}+b`);
-    assert.equal(await page.locator('#sidebar-toggle').getAttribute('aria-expanded'), 'true');
-    await page.keyboard.press(`${modifier}+b`);
-    assert.equal(await page.locator('#sidebar-toggle').getAttribute('aria-expanded'), 'false');
-  }
-  await page.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', ctrlKey: true, isComposing: true, bubbles: true })));
+  // 按当前平台测试主快捷键修饰键（macOS 用 Meta，Windows/Linux 用 Control）；输入法组合键与非本平台修饰键不能触发。
+  const primaryModifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+  await page.keyboard.press(`${primaryModifier}+b`);
+  assert.equal(await page.locator('#sidebar-toggle').getAttribute('aria-expanded'), 'true');
+  await page.keyboard.press(`${primaryModifier}+b`);
+  assert.equal(await page.locator('#sidebar-toggle').getAttribute('aria-expanded'), 'false');
+  await page.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', ctrlKey: true, metaKey: true, isComposing: true, bubbles: true })));
   assert.equal(await page.locator('#sidebar-toggle').getAttribute('aria-expanded'), 'false');
   await page.locator('#sidebar-toggle').click();
   // 分隔条在新的三列布局中仍然跟随侧栏，宽度能够保存。

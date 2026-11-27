@@ -269,6 +269,7 @@ function ShortcutsModal() {
       items: [
         ['新建任务', shortcut('N')],
         ['命令面板 / 会话跳转', shortcut('K')],
+        ['搜索历史消息与书签', shortcut('Shift+F')],
         ['展开 / 收起左侧栏', shortcut('B')],
         ['展开 / 收起右侧审阅面板', shortcut('J')],
         ['打开设置', shortcut(',')],

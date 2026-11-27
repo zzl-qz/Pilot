@@ -6,6 +6,7 @@ import { StatusDot } from "@astryxdesign/core/StatusDot";
 import { useStore } from "../../store.js";
 import { api } from "../../api.js";
 import { writeClipboard } from "../../lib/clipboard.js";
+import { isCommandActive, stripAnsi } from "../../lib/command-tasks.js";
 import { Icon } from "../Icon.jsx";
 import { MarkdownBody } from "../MarkdownBody.jsx";
 import {
@@ -486,6 +487,7 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
   const [open, setOpen] = useState(autoReveal);
   const [detail, setDetail] = useState<{ key: string; state: 'loading' | 'error' | 'ready'; body?: string }>();
   const [copied, setCopied] = useState(false);
+  const [bodyFilter, setBodyFilter] = useState('');
   const [imagePreviewFailed, setImagePreviewFailed] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
   const userToggled = useRef(false);
@@ -498,7 +500,7 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
   const historyRevision = useStore(state => state.historyRevision);
   const detailKey = JSON.stringify([sessionId, sessionEpoch, historyRevision, sequence, tool.callId]);
   const currentDetail = detail?.key === detailKey ? detail : undefined;
-  const detailBody = (sequence == null ? tool.body : currentDetail?.body || '').trim();
+  const detailBody = (sequence == null ? (tool.body || '') : (currentDetail?.body || '')).trim();
   const loadDetail = async () => {
     if (sequence == null || currentDetail?.state === 'ready' || currentDetail?.state === 'loading') return;
     setDetail({ key: detailKey, state: 'loading' });
@@ -541,11 +543,24 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
     ? `${display.fullTarget}${display.lineRange ? ` ${display.lineRange}` : ''}`
     : `${toolLabel(tool.name)} · ${status.split('：')[0]}`;
 
-  /* 正文按内容换渲染：网页结果走 markdown，带 unified diff 头的逐行着色，其余保持原样纯文本。 */
+  /* 正文按内容换渲染：网页结果走 markdown，大文本支持行内快速过滤，unified diff 逐行着色。 */
+  const bodyLines = useMemo(() => (body ? body.split('\n') : []), [body]);
+  const filterableBody = !isWebResult && bodyLines.length > 20;
+  const trimmedFilter = bodyFilter.trim().toLowerCase();
+  const filteredLines = useMemo(() => (
+    filterableBody && trimmedFilter
+      ? bodyLines.filter((line) => line.toLowerCase().includes(trimmedFilter))
+      : bodyLines
+  ), [bodyLines, filterableBody, trimmedFilter]);
+
   const renderBody = () => {
     if (isWebResult) return <div className="tool-web-result"><MarkdownBody text={body} /></div>;
-    if (!hasUnifiedDiff) return <pre tabIndex={0}>{body}</pre>;
-    return <pre className="tool-output-diff" tabIndex={0}>{body.split('\n').map((line, index) => {
+    const shownLines = trimmedFilter ? filteredLines : bodyLines;
+    if (trimmedFilter && shownLines.length === 0) {
+      return <p className="tool-output-note" role="status">没有包含「{bodyFilter.trim()}」的输出行。</p>;
+    }
+    if (!hasUnifiedDiff) return <pre tabIndex={0}>{trimmedFilter ? shownLines.join('\n') : body}</pre>;
+    return <pre className="tool-output-diff" tabIndex={0}>{shownLines.map((line, index) => {
       const kind = diffLineKind(line);
       return <span key={index} className={kind ? `is-${kind}` : undefined}>{line || '\u200b'}{'\n'}</span>;
     })}</pre>;
@@ -629,6 +644,23 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
           {body && <>
           <div className="tool-body-bar">
             <span className="tool-body-target" title={detailLabel}>{detailLabel}</span>
+            {filterableBody && (
+              <div className="tool-body-filter">
+                <input
+                  type="search"
+                  className="tool-body-filter-input"
+                  value={bodyFilter}
+                  aria-label="筛选操作输出行"
+                  placeholder={`筛选 ${bodyLines.length} 行输出…`}
+                  onChange={(event) => setBodyFilter(event.target.value)}
+                />
+                {trimmedFilter && (
+                  <span className="tool-body-filter-count" aria-live="polite">
+                    {filteredLines.length}/{bodyLines.length}
+                  </span>
+                )}
+              </div>
+            )}
             <div className="tool-body-actions">
               {display.filePath && (
                 <button
@@ -670,26 +702,64 @@ const ToolRow = memo(function ToolRow({ tool }: { tool: ToolView }) {
         </div>
       )}
       {running && tool.name === 'ask_user' && <p className="tool-output-note" role="status">请在下方选择卡片中回答</p>}
-      {running && tool.name === 'run_command' && seconds >= 10 && (
-        <SlowCommandHint seconds={seconds} />
+      {running && tool.name === 'run_command' && seconds >= 3 && (
+        <LiveCommandTail seconds={seconds} />
       )}
     </div>
   );
 });
 
-function SlowCommandHint({ seconds }: { seconds: number }) {
+function LiveCommandTail({ seconds }: { seconds: number }) {
   const commandLog = useStore((state) => state.commandLog);
-  const lastLine = (commandLog?.text || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean).at(-1) || '';
+  const commandLogTaskId = useStore((state) => state.commandLogTaskId);
+  const runningTask = useStore((state) => (state.commandTasks || []).find((task) => isCommandActive(task)));
+  const runningTaskId = runningTask?.taskId || runningTask?.id || null;
+
+  useEffect(() => {
+    if (!runningTask || !runningTaskId) return undefined;
+    const pull = () => {
+      const state = useStore.getState();
+      const fresh = (state.commandTasks || []).find((task) => (task.taskId || task.id) === runningTaskId);
+      if (fresh && isCommandActive(fresh)) void state.loadCommandLog(fresh);
+    };
+    pull();
+    const timer = setInterval(pull, 2000);
+    return () => clearInterval(timer);
+  }, [runningTaskId]);
+
+  const tailLines = useMemo(() => {
+    if (!runningTaskId || (commandLogTaskId && commandLogTaskId !== runningTaskId)) return [];
+    const raw = stripAnsi(commandLog?.text || '').split(/\r?\n/).filter((line) => line.trim().length > 0);
+    return raw.slice(-6);
+  }, [commandLog?.text, commandLogTaskId, runningTaskId]);
+
+  if (!runningTaskId && seconds < 10) return null;
   return (
-    <div className="tool-slow-hint" role="status">
-      <span>命令已运行 {formatClock(seconds)}{lastLine ? ` · 最新输出：${lastLine.slice(0, 96)}` : ''}</span>
-      <button
-        type="button"
-        className="tool-body-action"
-        onClick={() => useStore.getState().setUi({ inspectorOpen: true, inspectorTab: 'commands' })}
-      >
-        查看命令日志
-      </button>
+    <div className="tool-live-tail" role="status">
+      <div className="tool-live-tail-head">
+        <span>命令已运行 {formatClock(seconds)}</span>
+        <div className="tool-body-actions">
+          {runningTask && (
+            <button
+              type="button"
+              className="tool-body-action"
+              onClick={() => void useStore.getState().stopCommand(runningTask)}
+            >
+              停止命令
+            </button>
+          )}
+          <button
+            type="button"
+            className="tool-body-action"
+            onClick={() => useStore.getState().setUi({ inspectorOpen: true, inspectorTab: 'commands' })}
+          >
+            完整日志
+          </button>
+        </div>
+      </div>
+      {tailLines.length > 0 && (
+        <pre className="tool-live-tail-log">{tailLines.join('\n')}</pre>
+      )}
     </div>
   );
 }

@@ -124,7 +124,7 @@ async function run(page, name) {
   await page.evaluate(() => { Storage.prototype.setItem = realSet; document.querySelector('#input-flow').dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })); });
   assert.equal(await page.evaluate(() => store.getState().reloadWorkbench()), false);
   await page.getByText(/请先完成输入法中的文字/).waitFor();
-  assert.equal(await input.evaluate(el => !el.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', ctrlKey: true, isComposing: true, bubbles: true, cancelable: true }))), true, '合成输入期间也阻止浏览器默认重新载入');
+  assert.equal(await input.evaluate((el, isMac) => !el.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', metaKey: isMac, ctrlKey: !isMac, isComposing: true, bubbles: true, cancelable: true })), mod === 'Meta'), true, '合成输入期间也阻止浏览器默认重新载入');
   await page.evaluate(() => document.querySelector('#input-flow').dispatchEvent(new CompositionEvent('compositionend', { bubbles: true })));
 
   revision = 3; await page.evaluate(() => window.dispatchEvent(new Event('online')));

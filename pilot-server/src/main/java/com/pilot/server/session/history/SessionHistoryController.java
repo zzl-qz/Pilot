@@ -45,7 +45,8 @@ import lombok.RequiredArgsConstructor;
 @RequestMapping("/api/sessions")
 @RequiredArgsConstructor
 public class SessionHistoryController {
-    private static final int MAX_TURN_ALIGN_EXTRA = 60;
+    private static final int MAX_TURN_ALIGN_EXTRA = 120;
+    private static final int MAX_MIN_TURNS_EVENTS = 320;
     private static final int MAX_EMBEDDED_RUN_CHANGES = 20;
     private static final Set<String> TURN_BOUNDARY_TYPES = Set.of("run.started", "user.message");
     private static final Set<String> RUN_END_TYPES =
@@ -78,6 +79,7 @@ public class SessionHistoryController {
         @RequestParam(name = "around", required = false) Long around,
         @RequestParam(name = "compactTools", defaultValue = "false") boolean compactTools,
         @RequestParam(name = "alignTurns", defaultValue = "false") boolean alignTurns,
+        @RequestParam(name = "minTurns", defaultValue = "0") int minTurns,
         @RequestParam(name = "includeRunChanges", defaultValue = "false") boolean includeRunChanges) {
         SessionLookup.require(sessions, id);
         int cursorParams = (before != null ? 1 : 0) + (after != null ? 1 : 0) + (around != null ? 1 : 0);
@@ -121,6 +123,9 @@ public class SessionHistoryController {
             page = sessions.eventsPageAfter(id, after, capped);
         } else {
             page = sessions.eventsPage(id, before, capped);
+            if (minTurns > 0 && !page.isEmpty()) {
+                page = expandToMinTurns(id, page, Math.min(minTurns, 20), capped);
+            }
         }
         if (alignTurns && after == null && !page.isEmpty() && page.getFirst().sequence() > 1
             && !TURN_BOUNDARY_TYPES.contains(page.getFirst().type())) {
@@ -151,6 +156,38 @@ public class SessionHistoryController {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "会话历史已变化，请重新加载");
         }
         return new HistoryResponse(responseEvents, hasMore, hasNewer, total, revision, runChanges);
+    }
+
+    private List<EventEnvelope> expandToMinTurns(String sessionId, List<EventEnvelope> initial, int targetTurns,
+        int chunkLimit) {
+        List<EventEnvelope> current = initial;
+        int boundaries = countTurnBoundaries(current);
+        int maxEvents = Math.max(current.size(), MAX_MIN_TURNS_EVENTS);
+        while (boundaries < targetTurns && !current.isEmpty() && current.getFirst().sequence() > 1
+            && current.size() < maxEvents) {
+            int remaining = maxEvents - current.size();
+            int fetch = Math.min(chunkLimit, remaining);
+            List<EventEnvelope> older = sessions.eventsPage(sessionId, current.getFirst().sequence(), fetch);
+            if (older.isEmpty()) {
+                break;
+            }
+            List<EventEnvelope> merged = new ArrayList<>(older.size() + current.size());
+            merged.addAll(older);
+            merged.addAll(current);
+            current = merged;
+            boundaries += countTurnBoundaries(older);
+        }
+        return current;
+    }
+
+    private int countTurnBoundaries(List<EventEnvelope> events) {
+        int count = 0;
+        for (EventEnvelope event : events) {
+            if (TURN_BOUNDARY_TYPES.contains(event.type())) {
+                count++;
+            }
+        }
+        return count;
     }
 
     private List<EventEnvelope> alignToTurnStart(String sessionId, List<EventEnvelope> page) {

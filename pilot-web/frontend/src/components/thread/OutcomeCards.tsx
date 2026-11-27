@@ -373,7 +373,7 @@ export function ResultCard({ row, duplicate, hasPrecedingReply = false, isLastRe
   if (hideStatus) return <>{filesCard}{nextSteps}</>;
   return (
     <>
-      <article className={`turn-card is-${row.tone}${compact ? ' is-compact' : ''}${row.continued ? ' is-continued' : ''}`}>
+      <article className={`turn-card is-${row.tone}${compact ? ' is-compact' : ''}${row.continued ? ' is-continued' : ''}`} data-row-key={row.key}>
         <div className="turn-card-head">
           <span className="turn-card-title">{row.title}</span>
           {row.continued && <span className="turn-resolved">已继续执行</span>}

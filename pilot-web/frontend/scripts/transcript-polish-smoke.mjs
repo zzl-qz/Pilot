@@ -32,6 +32,8 @@ window.EventSource = class MockEventSource {
 document.documentElement.dataset.theme = 'dark';
 window.store = useStore;
 window.api = api;
+window.initialThread = initialThread;
+window.applyEvent = applyEvent;
 window.metrics = { aroundCalls: 0, searchCalls: 0, runChangesCalls: 0 };
 
 for (const name of Object.keys(api)) if (typeof api[name] === 'function') api[name] = async () => ({});
@@ -381,8 +383,276 @@ async function verify(page, name) {
   assert.equal(cachedImmediate.loadingDuringSwitch, false, '命中快照回切不得展示骨架态');
   assert.equal(cachedImmediate.textImmediately, '已回到最新对话流。');
 
+  // 6. 验证：DSH 运行态流式输出期间自动无缝加载更早历史（0 手动按钮 + 并发底部流式增长下锚点元素零抖动 <= 1.5px）
+  await page.evaluate(() => {
+    const baseTs = 1760000200000;
+    const recentEvents = [];
+    let seq = 41;
+    for (let t = 5; t <= 10; t++) {
+      const rid = 'run_dsh_' + t;
+      recentEvents.push({ sequence: seq++, type: 'run.started', runId: rid, timestamp: new Date(baseTs + t * 4000).toISOString(), payload: { input: `第 ${t} 轮：检查自动历史预拉与运行期零抖动。` } });
+      recentEvents.push({ sequence: seq++, type: 'assistant.delta', runId: rid, timestamp: new Date(baseTs + t * 4000 + 200).toISOString(), payload: { text: `第 ${t} 轮回复正文：这是足够高的多行内容，用于在 1440x900 视口中撑开清晰的历史锚点位置。\n\n- 段落 A：校验元素级锚点补偿不受底部流式追加干扰。\n- 段落 B：校验哨兵预加载不出现手动「加载更早消息」按钮。` } });
+      recentEvents.push({ sequence: seq++, type: 'run.completed', runId: rid, timestamp: new Date(baseTs + t * 4000 + 600).toISOString(), payload: { summary: 'ok', changedFiles: [] } });
+    }
+    // 当前正在运行的新一轮（底部持续流式追加）
+    recentEvents.push({ sequence: seq++, type: 'run.started', runId: 'run_dsh_live', timestamp: new Date(baseTs + 50000).toISOString(), payload: { input: '正在流式运行中的第 11 轮任务' } });
+    recentEvents.push({ sequence: seq++, type: 'assistant.delta', runId: 'run_dsh_live', timestamp: new Date(baseTs + 50100).toISOString(), payload: { text: '实时输出启动中…\n' } });
+
+    const olderEvents = [];
+    let oseq = 1;
+    for (let t = 1; t <= 4; t++) {
+      const rid = 'run_dsh_' + t;
+      olderEvents.push({ sequence: oseq++, type: 'run.started', runId: rid, timestamp: new Date(baseTs + t * 1000).toISOString(), payload: { input: `更早的第 ${t} 轮提问` } });
+      olderEvents.push({ sequence: oseq++, type: 'assistant.delta', runId: rid, timestamp: new Date(baseTs + t * 1000 + 200).toISOString(), payload: { text: `更早的第 ${t} 轮历史内容。\n\n多行历史段落用于制造大幅高度前置插入，验证视口完全锁定不跳动。` } });
+      olderEvents.push({ sequence: oseq++, type: 'run.completed', runId: rid, timestamp: new Date(baseTs + t * 1000 + 500).toISOString(), payload: { summary: 'ok', changedFiles: [] } });
+    }
+
+    window.metrics.earlierCalls = 0;
+    window.metrics.lastMinTurns = 0;
+    window.__earlierGate = null;
+    api.history = async (_id, params = {}) => {
+      if (params.before != null) {
+        window.metrics.earlierCalls++;
+        window.metrics.lastMinTurns = params.minTurns || 0;
+        await new Promise(resolve => { window.__earlierGate = resolve; });
+        return { events: olderEvents, hasMore: false, hasNewer: false, total: 100, historyRevision: 3, runChanges: {} };
+      }
+      return { events: recentEvents, hasMore: true, hasNewer: false, total: 100, historyRevision: 3, runChanges: {} };
+    };
+
+    store.setState(draft => {
+      draft.sessionId = 'ses-live';
+      draft.running = true;
+      draft.runId = 'run_dsh_live';
+      draft.thread = window.initialThread();
+      for (const ev of recentEvents) window.applyEvent(draft, ev, { live: false });
+      draft.running = true;
+      Object.assign(draft.thread.history, { hasMore: true, hasNewer: false, loading: false, error: false, forwardError: false });
+    });
+  });
+
+  await page.waitForFunction(() => document.querySelectorAll('[data-row-key]').length >= 8);
+  assert.equal(await page.locator('button:has-text("加载更早消息")').count(), 0, 'DSH 模式下不得出现手动「加载更早消息」按钮');
+
+  // 将视口先滚到底再滚到顶部哨兵触发区（模拟用户运行期间上翻回看历史），同时底部持续流式追加文本
+  await page.evaluate(() => {
+    const thread = document.querySelector('.conversation-thread > .thread');
+    thread.scrollTop = thread.scrollHeight;
+    thread.dispatchEvent(new Event('scroll'));
+  });
+  await page.waitForTimeout(80);
+  await page.evaluate(() => {
+    let liveSeq = 70;
+    window.__liveTimer = setInterval(() => {
+      dispatchEventIntoStore({
+        sequence: liveSeq++,
+        type: 'assistant.delta',
+        runId: 'run_dsh_live',
+        timestamp: new Date().toISOString(),
+        payload: { text: '\n\n正在底部并发流式输出的增量段落 #' + liveSeq + '，用于验证前置历史插入免疫底部高度增长。' }
+      }, true);
+    }, 35);
+    const thread = document.querySelector('.conversation-thread > .thread');
+    thread.scrollTop = 260;
+    thread.dispatchEvent(new Event('scroll'));
+  });
+  await page.waitForFunction(() => typeof window.__earlierGate === 'function', null, { timeout: 4000 });
+
+  // 在前置页落地前记录当前视口内可见的 [data-row-key] 锚点元素屏幕纵坐标
+  const anchorBefore = await page.evaluate(() => {
+    const thread = document.querySelector('.conversation-thread > .thread');
+    const top = thread.getBoundingClientRect().top;
+    const rows = [...thread.querySelectorAll('[data-row-key]')];
+    const target = rows.find(el => el.getBoundingClientRect().bottom > top + 24 && el.getBoundingClientRect().top < top + 500) || rows[0];
+    return { key: target.dataset.rowKey, top: target.getBoundingClientRect().top };
+  });
+  await page.evaluate(() => window.__earlierGate?.());
+  await page.waitForFunction(() => document.body.innerText.includes('更早的第 1 轮历史内容'), null, { timeout: 4000 });
+  await page.waitForTimeout(90);
+
+  const dshCheck = await page.evaluate(key => {
+    clearInterval(window.__liveTimer);
+    const el = document.querySelector(`[data-row-key="${CSS.escape(key)}"]`);
+    return {
+      afterTop: el ? el.getBoundingClientRect().top : NaN,
+      earlierCalls: window.metrics.earlierCalls,
+      lastMinTurns: window.metrics.lastMinTurns,
+      manualButtonCount: [...document.querySelectorAll('button')].filter(b => b.textContent?.includes('加载更早消息')).length
+    };
+  }, anchorBefore.key);
+  const driftPx = Math.abs(dshCheck.afterTop - anchorBefore.top);
+  assert.ok(dshCheck.earlierCalls >= 1, '上翻进入哨兵预加载区应自动触发历史加载');
+  assert.equal(dshCheck.lastMinTurns, 3, '历史分页请求应携带 minTurns=3');
+  assert.equal(dshCheck.manualButtonCount, 0, '加载前后均不应要求手动点击「加载更早消息」');
+  assert.ok(driftPx <= 1.5, `并发底部流式增长期间前置历史加载锚点漂移必须 <= 1.5px，实测 ${driftPx.toFixed(2)}px`);
+
+  // 7. 验证：全局快捷键 Cmd/Ctrl + Shift + F 唤起搜索 + 角色筛选（提问/回复）+ 命中高亮 .is-navigation-target
+  const modKey = process.platform === 'darwin' ? 'Meta' : 'Control';
+  await page.evaluate(() => {
+    window.metrics.searchParams = [];
+    store.setState(draft => { draft.running = false; });
+    store.getState().setUi({ searchOpen: false });
+    api.searchMessages = async params => {
+      window.metrics.searchParams.push(params);
+      return {
+        items: [{ sessionId: 'ses-live', title: '流式渲染零抖动与历史直达验证', sequence: 41, anchor: 41, role: params.role || 'assistant', text: '第 5 轮锚点搜索命中验证。', bookmarked: false }],
+        hasMore: false,
+        nextOffset: 1
+      };
+    };
+  });
+  await page.locator('.conversation-thread > .thread').click();
+  await page.keyboard.press(`${modKey}+Shift+F`);
+  await page.locator('#message-search-query').waitFor({ state: 'visible', timeout: 3000 });
+  await page.locator('#message-search-query').fill('锚点');
+  await page.locator('.search-hit-mark').waitFor({ state: 'visible', timeout: 3000 });
+  await page.locator('.message-search-roles button:has-text("回复")').click();
+  await page.waitForFunction(() => window.metrics.searchParams.some(p => p.role === 'assistant'));
+  await page.locator('.message-search-roles button:has-text("提问")').click();
+  await page.waitForFunction(() => window.metrics.searchParams.some(p => p.role === 'user'));
+  if (name === 'chromium') {
+    await page.screenshot({ path: join(output, 'search-role-filter-dark-1440.png'), animations: 'disabled' });
+  }
+  await page.locator('.search-hit').first().click();
+  await page.locator('.is-navigation-target').first().waitFor({ state: 'visible', timeout: 3000 });
+
+  // 8. 验证：Diff 词级高亮 + Unified/Split 分栏切换持久化 + Hunk 按块撤销 + 直接发送修改 + 命令实时尾流与输出过滤
+  await page.evaluate(() => {
+    window.metrics.discardHunkCalls = [];
+    window.metrics.submittedInputs = [];
+    window.metrics.stoppedTasks = [];
+    const sampleDiff = [
+      'diff --git a/src/app.ts b/src/app.ts',
+      'index 1234567..89abcde 100644',
+      '--- a/src/app.ts',
+      '+++ b/src/app.ts',
+      '@@ -1,4 +1,4 @@',
+      ' export function createConfig() {',
+      '-  const retryLimit = 2;',
+      '+  const retryLimit = 5;',
+      '   return { retryLimit };',
+      ' }',
+      '@@ -18,4 +18,4 @@',
+      ' export function formatTitle(name: string) {',
+      '-  return "Draft: " + name;',
+      '+  return "Prod: " + name;',
+      ' }'
+    ].join('\n');
+    const report = {
+      workspace: '/workspace/pilot',
+      gitRepository: true,
+      files: [{ status: 'M', path: 'src/app.ts', added: 2, removed: 2 }],
+      diff: sampleDiff,
+      truncated: false,
+      error: null
+    };
+    api.diff = async () => report;
+    api.discardHunk = async (id, path, hunkPatch) => {
+      window.metrics.discardHunkCalls.push({ id, path, hunkPatch });
+      return { ok: true, error: null };
+    };
+    api.stopCommand = async (id, taskId) => {
+      window.metrics.stoppedTasks.push({ id, taskId });
+      return { taskId, status: 'stopped' };
+    };
+    api.commandLog = async () => ({
+      text: '\x1b[32mPASS\x1b[0m suite 1\ncompiling module...\nrunning 42 tests\nfinished step 3\n',
+      offset: 0,
+      nextOffset: 64
+    });
+    const origSubmit = store.getState().submitInput;
+    store.setState(draft => {
+      draft.changeReport = report;
+      draft.changesState = 'ready';
+      draft.submitInput = async text => {
+        window.metrics.submittedInputs.push(text);
+        return true;
+      };
+      draft.loadCommandLog = async () => {};
+      // 顺带往最后一条 Turn 注入一个运行中的 run_command 与一个超 20 行输出的完成工具
+      draft.running = true;
+      draft.commandTasks = [{ taskId: 'cmd-live-1', status: 'running', command: 'npm test' }];
+      draft.commandLogTaskId = 'cmd-live-1';
+      draft.commandLog = { text: '\x1b[32mPASS\x1b[0m suite 1\ncompiling module...\nrunning 42 tests\nfinished step 3\n', offset: 0, nextOffset: 64 };
+      const longLines = Array.from({ length: 28 }, (_, i) => i === 12 ? 'MATCH_TARGET_ERROR line 13' : `normal output line ${i + 1}`).join('\n');
+      const liveTurn = draft.thread.rows.findLast(r => r.type === 'turn');
+      if (liveTurn) {
+        liveTurn.tools = [
+          { callId: 'call-long-1', name: 'read_file', args: 'path=src/app.ts', status: 'ok', meta: '18ms', body: longLines, startedAt: Date.now() - 8000, finishedAt: Date.now() - 7500, agentId: null },
+          { callId: 'call-cmd-1', name: 'run_command', args: 'command=npm test', status: 'run', meta: '', body: '', startedAt: Date.now() - 6000, agentId: null }
+        ];
+      }
+      void origSubmit;
+    });
+    store.getState().setUi({ inspectorOpen: true, inspectorTab: 'changes', changeView: 'src/app.ts' });
+  });
+
+  await page.locator('#change-diff .diff-word-add').first().waitFor({ state: 'visible', timeout: 3000 });
+  assert.ok(await page.locator('#change-diff .diff-word-del').count() >= 2, '删行应渲染词级高亮 <mark class="diff-word-del">');
+  assert.ok(await page.locator('#change-diff .diff-word-add').count() >= 2, '增行应渲染词级高亮 <mark class="diff-word-add">');
+
+  // 切换到分栏 Diff 并验证持久化 + 截图验收
+  await page.locator('.diff-mode-switch button:has-text("分栏")').click();
+  await page.locator('.diff-split-table .diff-split-row').first().waitFor({ state: 'visible' });
+  assert.equal(await page.evaluate(() => localStorage.getItem('pilot.diffMode')), 'split', '分栏偏好应持久化到 localStorage');
+
+  if (name === 'chromium') {
+    await page.evaluate(() => store.getState().setUi({ reviewExpanded: true }));
+    await page.waitForTimeout(80);
+    await page.screenshot({ path: join(output, 'diff-split-dark-1440.png'), animations: 'disabled' });
+    await page.evaluate(() => store.getState().setTheme('light'));
+    await page.waitForTimeout(60);
+    await page.screenshot({ path: join(output, 'diff-split-light-1440.png'), animations: 'disabled' });
+    await page.evaluate(() => { store.getState().setTheme('dark'); store.getState().setUi({ reviewExpanded: false }); });
+    await page.waitForTimeout(60);
+  }
+
+  // 选中一行并测试「直接发送修改」
+  await page.locator('.diff-split-cell.is-add button.n').first().click();
+  await page.locator('.review-feedback textarea').fill('请把重试上限改成 3 次');
+  await page.locator('.review-feedback button:has-text("直接发送修改")').click();
+  const sentFeedback = await page.evaluate(() => window.metrics.submittedInputs);
+  assert.equal(sentFeedback.length, 1);
+  assert.ok(sentFeedback[0].includes('src/app.ts') && sentFeedback[0].includes('请把重试上限改成 3 次'), '直接发送修改应携带代码引用与批注');
+
+  // 点击第 2 个 hunk 的「撤销此块」
+  await page.locator('.diff-hunk-undo').nth(1).click();
+  await page.waitForFunction(() => window.metrics.discardHunkCalls.length === 1);
+  const hunkCall = await page.evaluate(() => window.metrics.discardHunkCalls[0]);
+  assert.equal(hunkCall.path, 'src/app.ts');
+  assert.ok(hunkCall.hunkPatch.startsWith('@@ -18,4 +18,4 @@'), '按块撤销应只提交第 2 个 hunk');
+  assert.equal(hunkCall.hunkPatch.includes('retryLimit'), false, '第 2 个 hunk 补丁不应混入第 1 个 hunk');
+
+  // 验证 LiveCommandTail（ANSI 剥离 + 停止命令）与超 20 行工具输出行内过滤
+  await page.evaluate(() => store.getState().setUi({ inspectorOpen: false }));
+  const lastToolGroup = page.locator('.tool-group').last();
+  await lastToolGroup.locator('.tool-group-head').click();
+  await lastToolGroup.locator('.tool-live-tail-log').waitFor({ state: 'visible', timeout: 3000 });
+  const liveTailText = await lastToolGroup.locator('.tool-live-tail-log').textContent();
+  assert.ok(liveTailText.includes('PASS suite 1') && !liveTailText.includes('\x1b['), '实时命令尾流应展示最新日志并剥离 ANSI 码');
+  await lastToolGroup.locator('.tool-live-tail button:has-text("停止命令")').click();
+  await page.waitForFunction(() => window.metrics.stoppedTasks.length === 1);
+  assert.equal(await page.evaluate(() => window.metrics.stoppedTasks[0].taskId), 'cmd-live-1');
+
+  await lastToolGroup.locator('.tool-row .conversation-tool-line').first().click();
+  await lastToolGroup.locator('.tool-body-filter-input').waitFor({ state: 'visible' });
+  await lastToolGroup.locator('.tool-body-filter-input').fill('MATCH_TARGET_ERROR');
+  assert.equal(await lastToolGroup.locator('.tool-body-filter-count').textContent(), '1/28', '输出行内过滤应精确统计 1/28');
+  assert.equal(await lastToolGroup.locator('.tool-body pre').textContent(), 'MATCH_TARGET_ERROR line 13');
+
+  if (name === 'chromium') {
+    await page.evaluate(() => {
+      const thread = document.querySelector('.conversation-thread > .thread');
+      if (thread) thread.scrollTop = thread.scrollHeight;
+      const list = document.querySelector('.tool-group:last-of-type .tool-group-list');
+      if (list) list.scrollTop = list.scrollHeight;
+    });
+    await page.waitForTimeout(80);
+    await page.screenshot({ path: join(output, 'tool-live-tail-dark-1440.png'), animations: 'disabled' });
+  }
+
   assert.deepEqual(errors, []);
-  console.log(`${name}: PASS 过程保位(0塌陷)、流式代码块原地修补(0重建/0scrollLeft归零)、0px视口跳动、即时搜索<mark>+1跳around+回到最新、冷切骨架+0ms缓存回切`);
+  console.log(`${name}: PASS 过程保位(0塌陷)、流式代码块原地修补(0重建/0scrollLeft归零)、0px视口跳动、DSH并发流式自动加载历史(锚点漂移${driftPx.toFixed(2)}px/0手动按钮)、Cmd/Ctrl+Shift+F+角色筛选+锚点高亮、词级/分栏Diff+按块撤销+直接发送修改、实时命令尾流+输出过滤`);
 }
 
 try {

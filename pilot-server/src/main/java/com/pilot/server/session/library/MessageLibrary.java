@@ -154,7 +154,16 @@ public class MessageLibrary {
     }
 
     public Page search(String query, String session, boolean saved, int offset) {
+        return search(query, session, saved, offset, null, null);
+    }
+
+    public Page search(String query, String session, boolean saved, int offset, String role, String projectId) {
         String term = query == null ? "" : query.strip();
+        String roleFilter = role == null ? "" : role.strip().toLowerCase(Locale.ROOT);
+        if (!roleFilter.isEmpty() && !Set.of("user", "assistant").contains(roleFilter)) {
+            throw new IllegalArgumentException("无效的角色筛选：" + role);
+        }
+        String projectFilter = projectId == null ? "" : projectId.strip();
         if (term.length() > 200 || offset < 0 || offset > 100000) {
             throw new IllegalArgumentException("搜索条件过长或页码无效");
         }
@@ -171,6 +180,9 @@ public class MessageLibrary {
                 if (s.isSide() || (session != null && !session.isBlank() && !session.equals(s.id()))) {
                     continue;
                 }
+                if (!projectFilter.isEmpty() && !projectFilter.equals(s.projectId())) {
+                    continue;
+                }
                 var bookmarks = bookmarks(s.id()).stream().map(Bookmark::sequence).collect(Collectors.toSet());
                 long anchor = 0;
                 for (var e : sessions.events(s.id())) {
@@ -180,12 +192,16 @@ public class MessageLibrary {
                     if (!Set.of("run.started", "run.steered", "assistant.delta").contains(e.type())) {
                         continue;
                     }
+                    String hitRole = e.type().equals("assistant.delta") ? "assistant" : "user";
+                    if (!roleFilter.isEmpty() && !roleFilter.equals(hitRole)) {
+                        continue;
+                    }
                     String content = text(e);
                     boolean marked = bookmarks.contains(e.sequence());
                     if ((!saved || marked)
                         && content.toLowerCase(Locale.ROOT).contains(term.toLowerCase(Locale.ROOT))) {
-                        all.add(new Hit(s.id(), s.title(), e.sequence(), anchor == 0 ? e.sequence() : anchor,
-                            e.type().equals("assistant.delta") ? "assistant" : "user", snippet(content, term), marked));
+                        all.add(new Hit(s.id(), s.title(), e.sequence(), anchor == 0 ? e.sequence() : anchor, hitRole,
+                            snippet(content, term), marked));
                     }
                 }
             }
@@ -198,12 +214,15 @@ public class MessageLibrary {
             // MATCH 仅处理转义后的字面短语，避免用户的引号、星号或布尔词变成查询语法。
             boolean fts = term.codePointCount(0, term.length()) >= 3;
             String createdAt = SqliteStore.normalizedInstantSql("e.created_at");
+            String roleSql = roleFilter.equals("assistant") ? "AND e.type='assistant.delta' "
+                : roleFilter.equals("user") ? "AND e.type IN ('run.started','run.steered') " : "";
             String sql = "SELECT m.session_id,m.sequence,m.text,s.title,e.type,b.sequence AS saved, "
                 + "COALESCE((SELECT MAX(u.sequence) FROM events u WHERE u.session_id=m.session_id AND u.sequence<=m.sequence AND u.type IN ('run.started','run.steered')),m.sequence) AS anchor "
                 + "FROM message_search m JOIN sessions s ON s.id=m.session_id JOIN events e ON e.session_id=m.session_id AND e.sequence=m.sequence LEFT JOIN message_bookmarks b ON b.session_id=m.session_id AND b.sequence=m.sequence "
                 + "WHERE (s.parent_session_id IS NULL OR s.parent_session_id='') "
                 + (fts ? "AND message_search MATCH ? " : "AND instr(lower(m.text),lower(?))>0 ")
                 + ((session != null && !session.isBlank()) ? "AND m.session_id=? " : "")
+                + (!projectFilter.isEmpty() ? "AND s.project_id=? " : "") + roleSql
                 + (saved ? "AND b.sequence IS NOT NULL " : "") + "ORDER BY " + createdAt
                 + " DESC,m.session_id,m.sequence DESC LIMIT 51 OFFSET ?";
             rows = store.query(sql, q -> {
@@ -211,6 +230,9 @@ public class MessageLibrary {
                 q.setString(i++, fts ? '"' + term.replace("\"", "\"\"") + '"' : term);
                 if (session != null && !session.isBlank()) {
                     q.setString(i++, session);
+                }
+                if (!projectFilter.isEmpty()) {
+                    q.setString(i++, projectFilter);
                 }
                 q.setInt(i, offset);
             }, r -> new Hit(r.getString("session_id"), r.getString("title"), r.getLong("sequence"), r.getLong("anchor"),

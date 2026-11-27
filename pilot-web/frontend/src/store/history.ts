@@ -109,7 +109,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
       laterInflight = null;
       try {
         const data = requireData(await api.history(sessionId, {
-          limit: thread.history.pageSize, compactTools: true, alignTurns: true, includeRunChanges: true
+          limit: thread.history.pageSize, compactTools: true, alignTurns: true, minTurns: 3, includeRunChanges: true
         }));
         if (get().sessionId !== sessionId || historyGeneration !== generation) {
           return false;
@@ -232,7 +232,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
         return earlierInflight.promise;
       }
       const promise = api.history(sessionId, {
-        limit: thread.history.pageSize, before, compactTools: true, alignTurns: true, includeRunChanges: true
+        limit: thread.history.pageSize, before, compactTools: true, alignTurns: true, minTurns: 3, includeRunChanges: true
       })
         .then((result) => {
           const data = requireData(result);
@@ -303,7 +303,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
       });
       try {
         const data = requireData(await api.history(sessionId, {
-          limit: thread.history.pageSize, before, compactTools: true, alignTurns: true, includeRunChanges: true
+          limit: thread.history.pageSize, before, compactTools: true, alignTurns: true, minTurns: 3, includeRunChanges: true
         }));
         if (!currentHistoryPage(sessionId, generation, data.historyRevision)) {
           return false;

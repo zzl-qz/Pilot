@@ -26,8 +26,9 @@ public class MessageLibraryController {
 
     @GetMapping("/search")
     public Object search(@RequestParam(defaultValue = "") String q, @RequestParam(required = false) String sessionId,
-        @RequestParam(defaultValue = "false") boolean saved, @RequestParam(defaultValue = "0") int offset) {
-        return library.search(q, sessionId, saved, offset);
+        @RequestParam(defaultValue = "false") boolean saved, @RequestParam(defaultValue = "0") int offset,
+        @RequestParam(required = false) String role, @RequestParam(required = false) String projectId) {
+        return library.search(q, sessionId, saved, offset, role, projectId);
     }
 
     @GetMapping("/{session}/bookmarks")

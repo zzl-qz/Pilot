@@ -123,12 +123,12 @@ async function run(page, name, { screenshots = true } = {}) {
   const after=await page.locator('.thread').evaluate(el=>el.scrollTop);
   assert.ok(Math.abs(after-reading)<3,'向上阅读不被新增内容拉回底部: '+reading+' → '+after);
   await assertLatestPosition(page, name + '-1280');
+  // DSH 式全自动无感翻页：上滑靠近顶部时自动加载所有更早历史，无需手动点击按钮，也不弹出手动按钮打扰。
   await page.mouse.wheel(0,-100000);
-  await page.waitForFunction(()=>document.querySelector('.thread').scrollTop<5);
-  const earlier=page.getByRole('button',{name:'加载更早消息',exact:true});
-  await earlier.waitFor();
   await page.waitForFunction(()=>store.getState().thread.rows.some(row=>row.text==='之前的第一个问题'));
+  assert.equal(await page.getByRole('button',{name:'加载更早消息',exact:true}).count(),0,'正常自动加载时不渲染手动加载按钮');
   assert.ok(await page.evaluate(()=>historyCalls.filter(before=>before!==null).length>=1),'接近顶部时自动请求更早历史');
+  await page.locator('.thread').evaluate(el=>{el.scrollTop=0;});
   assert.ok(await page.getByText('之前的第一个问题',{exact:true}).isVisible());
   if (screenshots) await page.screenshot({path:join(output,name+'-earlier.png'),animations:'disabled'});
   await page.getByRole('button',{name:'回到底部',exact:true}).click();

@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import org.springframework.stereotype.Component;
@@ -42,6 +43,7 @@ public class ChangeService {
     private static final long TIMEOUT_SECONDS = 15;
     /** 单个 git 命令最多收集这么多字节；超出部分读掉但不保留，避免堆被打爆。 */
     private static final int MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
+    private static final Pattern HUNK_HEADER = Pattern.compile("^@@ -\\d+(?:,\\d+)? \\+\\d+(?:,\\d+)? @@.*$");
 
     /**
      * 工作区里的一个改动文件。
@@ -501,6 +503,63 @@ public class ChangeService {
         }
         return result.exitCode() == 0 ? new GitOperationResult(true, null)
             : new GitOperationResult(false, firstUsefulError(result.output(), "放弃文件改动失败"));
+    }
+
+    /** 仅反向撤销单个已跟踪文件中的指定 Hunk 块，保留同文件其他未暂存改动。 */
+    public GitOperationResult discardHunk(Path workspace, String rawPath, String rawHunkPatch) {
+        Path root = workspace.toAbsolutePath().normalize();
+        if (!hasGitMetadata(root)) {
+            return new GitOperationResult(false, "当前工作区不是 Git 仓库");
+        }
+        String path = safeRelative(rawPath);
+        if (path == null || path.indexOf('\n') >= 0 || path.indexOf('\r') >= 0) {
+            return new GitOperationResult(false, "路径不在工作区内，已拒绝");
+        }
+        if (rawHunkPatch == null || rawHunkPatch.isBlank() || rawHunkPatch.length() > 512 * 1024) {
+            return new GitOperationResult(false, "差异块内容无效");
+        }
+        String normalizedHunk = rawHunkPatch.replace("\r\n", "\n").replace('\r', '\n');
+        String[] hunkLines = normalizedHunk.split("\n", -1);
+        int effectiveLen = hunkLines.length;
+        while (effectiveLen > 1 && hunkLines[effectiveLen - 1].isEmpty()) {
+            effectiveLen--;
+        }
+        if (effectiveLen < 2 || !HUNK_HEADER.matcher(hunkLines[0]).matches()) {
+            return new GitOperationResult(false, "仅支持标准的单个差异块撤销");
+        }
+        for (int i = 1; i < effectiveLen; i++) {
+            String line = hunkLines[i];
+            if (line.isEmpty()) {
+                continue;
+            }
+            char prefix = line.charAt(0);
+            if (prefix != ' ' && prefix != '+' && prefix != '-' && prefix != '\\') {
+                return new GitOperationResult(false, "差异块包含非法文件头或多块内容，已拒绝");
+            }
+        }
+        StringBuilder cleanHunk = new StringBuilder(normalizedHunk.length() + 1);
+        for (int i = 0; i < effectiveLen; i++) {
+            cleanHunk.append(hunkLines[i]).append('\n');
+        }
+        String code = statuses(root).codes().get(path);
+        if (code == null) {
+            return new GitOperationResult(false, "该文件没有未提交改动");
+        }
+        if ("U".equals(code)) {
+            return new GitOperationResult(false, "文件处于合并冲突状态，请先手动解决冲突");
+        }
+        if ("??".equals(code)) {
+            return new GitOperationResult(false, "未跟踪的新文件不支持按块撤销");
+        }
+        boolean needsQuote = path.contains(" ") || path.contains("\t") || path.contains("\"") || path.contains("\\");
+        String escaped = path.replace("\\", "\\\\").replace("\"", "\\\"");
+        String aPath = needsQuote ? "\"a/" + escaped + "\"" : "a/" + path;
+        String bPath = needsQuote ? "\"b/" + escaped + "\"" : "b/" + path;
+        String patch = "diff --git " + aPath + " " + bPath + "\n--- " + aPath + "\n+++ " + bPath + "\n" + cleanHunk;
+        CommandResult result =
+            runWithStdin(root, List.of("git", "apply", "--reverse", "--recount", "--whitespace=nowarn", "-"), patch);
+        return result.exitCode() == 0 ? new GitOperationResult(true, null)
+            : new GitOperationResult(false, firstUsefulError(result.output(), "撤销此改动块失败"));
     }
 
     /** git 输出可能有很多行，界面上的失败原因只留第一行有用信息。 */

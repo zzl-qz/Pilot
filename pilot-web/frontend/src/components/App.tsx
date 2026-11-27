@@ -286,7 +286,12 @@ function Workbench() {
       }
       if (isModalBlockingShortcuts()) return;
       const mod = isShortcutModifier(event);
-      const refreshKey = event.key === 'F5' || (mod && event.key.toLowerCase() === 'r');
+      const refreshMod = isShortcutModifier({
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        getModifierState: event.getModifierState?.bind(event)
+      });
+      const refreshKey = event.key === 'F5' || (refreshMod && event.key.toLowerCase() === 'r');
       if (!event.altKey && !event.getModifierState?.('AltGraph') && refreshKey) {
         event.preventDefault();
         if (event.isComposing || event.keyCode === 229) return;
@@ -299,6 +304,11 @@ function Workbench() {
       if (isSideChatShortcut(event) && mod) {
         event.preventDefault();
         useStore.getState().toggleSideChatPane();
+        return;
+      }
+      if (mod && event.shiftKey && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        useStore.getState().setUi({ searchOpen: !useStore.getState().ui.searchOpen });
         return;
       }
       if (mod && event.key.toLowerCase() === 'k') {

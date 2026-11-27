@@ -54,8 +54,10 @@ function MessageSearchDialog() {
   const nextPageButton = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const [session] = useState(() => useStore.getState().sessionId);
+  const [projectId] = useState(() => useStore.getState().currentProjectId);
   const [query, setQuery] = useState('');
-  const [scope, setScope] = useState<'all' | 'current'>('all');
+  const [scope, setScope] = useState<'all' | 'project' | 'current'>('all');
+  const [role, setRole] = useState<'' | 'user' | 'assistant'>('');
   const [onlySaved, setOnlySaved] = useState(false);
   const [savedAnchors, setSavedAnchors] = useState(() => new Set<string>());
   const [page, setPage] = useState(emptyPage);
@@ -72,7 +74,7 @@ function MessageSearchDialog() {
   const term = query.trim();
   const tooLong = term.length > 200;
   const busy = loading || Boolean(action);
-  const filterKey = `${scope}|${onlySaved ? '1' : '0'}|${term}`;
+  const filterKey = `${scope}|${role}|${onlySaved ? '1' : '0'}|${term}`;
   // 旧书签同步改为后台静默执行，不再阻塞搜索输入与提交
   const canSearch = !busy && !tooLong && (Boolean(term) || onlySaved);
 
@@ -115,7 +117,7 @@ function MessageSearchDialog() {
   }
 
   const executeSearch = useCallback(async (params: {
-    term: string; scope: 'all' | 'current'; onlySaved: boolean; more?: boolean; offset?: number;
+    term: string; scope: 'all' | 'project' | 'current'; role: '' | 'user' | 'assistant'; onlySaved: boolean; more?: boolean; offset?: number;
   }) => {
     clearTimeout(debounceTimer.current);
     if (params.term.length > 200 || (!params.term && !params.onlySaved)) return;
@@ -129,6 +131,8 @@ function MessageSearchDialog() {
       const data = await api.searchMessages({
         q: params.term,
         sessionId: params.scope === 'current' ? session || '' : '',
+        ...(params.scope === 'project' && projectId ? { projectId } : {}),
+        ...(params.role ? { role: params.role } : {}),
         saved: params.onlySaved,
         offset: more ? (params.offset ?? 0) : 0,
       });
@@ -136,7 +140,7 @@ function MessageSearchDialog() {
       if (!alive.current || token !== revision.current) return;
       const restore = more && !data.hasMore && document.activeElement === nextPageButton.current;
       setPage(current => ({ ...data, items: more ? [...current.items, ...data.items] : data.items }));
-      setAppliedFilterKey(`${params.scope}|${params.onlySaved ? '1' : '0'}|${params.term}`);
+      setAppliedFilterKey(`${params.scope}|${params.role}|${params.onlySaved ? '1' : '0'}|${params.term}`);
       if (!more) setActiveIndex(0);
       if (restore) requestAnimationFrame(() => {
         if (alive.current && token === revision.current && document.activeElement === document.body) {
@@ -148,11 +152,11 @@ function MessageSearchDialog() {
     } finally {
       if (alive.current && token === revision.current) setLoading(false);
     }
-  }, [session]);
+  }, [session, projectId]);
 
   function search(more = false) {
     if (!canSearch) return;
-    void executeSearch({ term, scope, onlySaved, more, offset: page.nextOffset });
+    void executeSearch({ term, scope, role, onlySaved, more, offset: page.nextOffset });
   }
 
   function changeFilters(update: () => void) {
@@ -176,10 +180,10 @@ function MessageSearchDialog() {
     }
     debounceTimer.current = setTimeout(() => {
       if (!alive.current || composing.current) return;
-      void executeSearch({ term, scope, onlySaved, more: false, offset: 0 });
+      void executeSearch({ term, scope, role, onlySaved, more: false, offset: 0 });
     }, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(debounceTimer.current);
-  }, [term, scope, onlySaved, tooLong, action, appliedFilterKey, filterKey, executeSearch]);
+  }, [term, scope, role, onlySaved, tooLong, action, appliedFilterKey, filterKey, executeSearch]);
 
   useEffect(() => {
     const activeEl = listRef.current?.querySelector<HTMLElement>(`[data-hit-index="${activeIndex}"]`);
@@ -285,10 +289,28 @@ function MessageSearchDialog() {
           <div className="message-search-filters">
             <label htmlFor="message-search-scope">范围</label>
             <select id="message-search-scope" value={scope} disabled={Boolean(action)}
-              onChange={event => changeFilters(() => setScope(event.target.value === 'current' ? 'current' : 'all'))}>
+              onChange={event => changeFilters(() => {
+                const value = event.target.value;
+                setScope(value === 'current' ? 'current' : value === 'project' ? 'project' : 'all');
+              })}>
               <option value="all">所有主对话</option>
+              {projectId && <option value="project">当前项目</option>}
               {session && <option value="current">当前对话</option>}
             </select>
+            <div className="message-search-roles" role="group" aria-label="按发言角色筛选">
+              {([['', '全部'], ['user', '提问'], ['assistant', '回复']] as const).map(([value, label]) => (
+                <button
+                  key={label}
+                  type="button"
+                  className={`message-search-role-btn${role === value ? ' is-active' : ''}`}
+                  aria-pressed={role === value}
+                  disabled={Boolean(action)}
+                  onClick={() => changeFilters(() => setRole(value))}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             <CheckboxInput label="仅书签" value={onlySaved} size="sm" className="message-search-bookmarks-only" isReadOnly={Boolean(action)}
               onChange={value => changeFilters(() => setOnlySaved(value))} />
             <Button label="搜索" type="submit" variant="primary" isDisabled={!canSearch} />

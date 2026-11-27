@@ -59,116 +59,286 @@ export function Thread() {
     resize: 'instant'
   });
 
-  /* 更早历史在两屏范围内预取，靠近顶部且滚动停稳后再插入。 */
+  /*
+   * DSH / Codex 式全自动零抖动历史加载：
+   * 1. 元素级锚点锁定（而非脆弱的 scrollHeight 差值）：前插前锁定视口内首条可见消息行 [data-row-key]
+   *    相对容器顶部的偏移，临时关闭 overflow-anchor 避免浏览器双倍补偿，在 useLayoutEffect 绘制前同步精确回正
+   *    el.scrollTop += (newOffset - prevOffset)。即使底部 Agent 正在实时流式吐字、或跨页合并保留首行 key、
+   *    或顶到 scrollTop === 0，均能保持 0.0px 视口漂移。
+   * 2. 顶部固定高度哨兵 + IntersectionObserver (rootMargin: 760px)：在到达顶部前就自动预取并无缝插入，
+   *    不再因 100ms 防抖在连续触控板惯性滚动中被不断打断，也不因单页全是不可见事件而停滞逼迫手动点击。
+   */
+  const topSentinelRef = useRef<HTMLDivElement>(null);
   const lastScrollTop = useRef(0);
-  const earlierArmed = useRef(false);
-  const earlierTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const lastScrollHeight = useRef(0);
+  const lastViewportRef = useRef({ width: 0, height: 0 });
   const earlierPending = useRef(false);
   const pointerHeld = useRef(false);
   const navigationUntil = useRef(0);
-  /*
-   * 点击加载更早消息后前插内容时，部分内核会暂时抑制原生 overflow-anchor。
-   * 在插入前后记录 scrollHeight 与 scrollTop，若浏览器未自动补偿锚点，则在 useLayoutEffect
-   * 绘制前同步补齐高度差，做到前插既不撞顶卡顿，也不发生肉眼可见跳动。
-   */
-  const prependAnchorRef = useRef<{ scrollHeight: number; scrollTop: number; firstKey: string | null; count: number }>({
-    scrollHeight: 0, scrollTop: 0, firstKey: null, count: 0
+  const continueFrameRef = useRef<number | undefined>(undefined);
+  const idlePrefetchRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const navigationResumeRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const prependAnchorRef = useRef<{
+    active: boolean;
+    key: string | null;
+    offsetTop: number;
+    scrollHeight: number;
+    scrollTop: number;
+    firstKey: string | null;
+    firstSeq: number | null;
+    count: number;
+  }>({
+    active: false, key: null, offsetTop: 0, scrollHeight: 0, scrollTop: 0, firstKey: null, firstSeq: null, count: 0
   });
 
+  const firstWindowSeq = useStore((state) => state.thread.windowEvents[0]?.sequence ?? null);
+
   const capturePrependAnchor = useCallback((el: HTMLElement) => {
+    const containerTop = el.getBoundingClientRect().top;
+    let anchorKey: string | null = null;
+    let anchorOffsetTop = 0;
+    const nodes = el.querySelectorAll<HTMLElement>('[data-row-key]');
+    for (const node of nodes) {
+      const rect = node.getBoundingClientRect();
+      if (rect.bottom > containerTop + 1) {
+        anchorKey = node.dataset.rowKey || null;
+        anchorOffsetTop = rect.top - containerTop;
+        break;
+      }
+    }
+    const state = useStore.getState();
     prependAnchorRef.current = {
+      active: true,
+      key: anchorKey,
+      offsetTop: anchorOffsetTop,
       scrollHeight: el.scrollHeight,
       scrollTop: el.scrollTop,
-      firstKey: rows[0]?.key ?? null,
-      count: rows.length
+      firstKey: state.thread.rows[0]?.key ?? null,
+      firstSeq: state.thread.windowEvents[0]?.sequence ?? null,
+      count: state.thread.rows.length
     };
-  }, [rows]);
+    el.style.overflowAnchor = 'none';
+  }, []);
+
+  const isAtBottomRef = useRef(isAtBottom);
+  isAtBottomRef.current = isAtBottom;
+  const hasEvents = eventCount > 0;
+
+  const detachStickToBottom = useCallback(() => {
+    isAtBottomRef.current = false;
+    stopScroll();
+  }, [stopScroll]);
+
+  const triggerEarlierAuto = useCallback(() => {
+    const el = scrollRef.current;
+    const state = useStore.getState();
+    if (!el || pointerHeld.current) return;
+    const navRemaining = navigationUntil.current - performance.now();
+    if (navRemaining > 0) {
+      // 导航静音窗结束后再自动复检一次，避免跳转落点本身位于顶部预加载区或紧接着上翻时被永久吞掉。
+      clearTimeout(navigationResumeRef.current);
+      navigationResumeRef.current = setTimeout(() => {
+        navigationResumeRef.current = undefined;
+        triggerEarlierAuto();
+      }, Math.ceil(navRemaining) + 16);
+      return;
+    }
+    if (earlierPending.current || !state.thread.history.hasMore || state.thread.history.loading || state.thread.history.error) return;
+    const scrollable = el.scrollHeight - el.clientHeight;
+    const toBottom = scrollable - el.scrollTop;
+    // 长内容贴底，或首屏刚挂载尚未由 useStickToBottom 贴底（scrollTop === 0 && lastScrollTop === 0 && isAtBottom）时，
+    // 绝不打断贴底；用户一旦上离底部（toBottom >= 8），即使 React 的 isAtBottom 晚一帧更新也立即接管自动加载。
+    if (scrollable >= 8 && (toBottom < 8 || (isAtBottomRef.current && el.scrollTop === 0 && lastScrollTop.current === 0))) return;
+    const triggerZone = Math.max(760, historyPrefetchDistance(el.clientHeight) * 0.6);
+    if (scrollable >= 8 && el.scrollTop > triggerZone) return;
+    earlierPending.current = true;
+    if (scrollable >= 8) detachStickToBottom();
+    capturePrependAnchor(el);
+    void requestEarlierHistory().finally(() => {
+      if (earlierPending.current) {
+        setTimeout(() => {
+          earlierPending.current = false;
+          if (scrollRef.current) scrollRef.current.style.overflowAnchor = '';
+        }, 0);
+      }
+    });
+  }, [capturePrependAnchor, detachStickToBottom, requestEarlierHistory, scrollRef]);
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
     const prev = prependAnchorRef.current;
     const currentFirstKey = rows[0]?.key ?? null;
-    const prepended = prev.count > 0 && rows.length > prev.count && currentFirstKey !== prev.firstKey;
+    const seqMovedEarlier = prev.firstSeq != null && firstWindowSeq != null && firstWindowSeq < prev.firstSeq;
+    const keyPrepended = prev.count > 0 && currentFirstKey !== prev.firstKey && rows.length >= prev.count;
+    const prepended = prev.active && (seqMovedEarlier || keyPrepended);
+
     if (el && prepended) {
-      if (!isAtBottom && prev.scrollHeight > 0) {
-        const deltaHeight = el.scrollHeight - prev.scrollHeight;
-        const browserDeltaTop = el.scrollTop - prev.scrollTop;
-        if (deltaHeight > 0 && Math.abs(browserDeltaTop - deltaHeight) > 16) {
-          el.scrollTop = prev.scrollTop + deltaHeight;
-          lastScrollTop.current = el.scrollTop;
+      const wasAtBottom = prev.scrollHeight - el.clientHeight - prev.scrollTop < 8;
+      if (!wasAtBottom) {
+        const containerTop = el.getBoundingClientRect().top;
+        let compensated = false;
+        if (prev.key) {
+          const escaped = typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+            ? CSS.escape(prev.key) : prev.key.replace(/"/g, '\\"');
+          const target = el.querySelector<HTMLElement>(`[data-row-key="${escaped}"]`);
+          if (target) {
+            const newOffsetTop = target.getBoundingClientRect().top - containerTop;
+            const drift = newOffsetTop - prev.offsetTop;
+            if (Math.abs(drift) > 0.5) {
+              el.scrollTop += drift;
+              lastScrollTop.current = el.scrollTop;
+              lastScrollHeight.current = el.scrollHeight;
+            }
+            compensated = true;
+          }
+        }
+        if (!compensated && prev.scrollHeight > 0) {
+          const deltaHeight = el.scrollHeight - prev.scrollHeight;
+          if (deltaHeight > 0) {
+            el.scrollTop = prev.scrollTop + deltaHeight;
+            lastScrollTop.current = el.scrollTop;
+            lastScrollHeight.current = el.scrollHeight;
+          }
         }
       }
+      el.style.overflowAnchor = '';
       earlierPending.current = false;
-      prependAnchorRef.current = { scrollHeight: el.scrollHeight, scrollTop: el.scrollTop, firstKey: currentFirstKey, count: rows.length };
-    } else if (!prev.count || currentFirstKey !== prev.firstKey) {
-      prependAnchorRef.current = { scrollHeight: 0, scrollTop: 0, firstKey: currentFirstKey, count: rows.length };
+      prependAnchorRef.current = {
+        active: false, key: null, offsetTop: 0, scrollHeight: el.scrollHeight, scrollTop: el.scrollTop,
+        firstKey: currentFirstKey, firstSeq: firstWindowSeq, count: rows.length
+      };
+      // 若前插后仍位于顶部自动加载区（例如 Home 直达顶部或刚跨过全是工具/心跳事件的稀疏页），下一帧自动衔接下一页。
+      const latestHistory = useStore.getState().thread.history;
+      const scrollable = el.scrollHeight - el.clientHeight;
+      if (latestHistory.hasMore && !latestHistory.loading && !latestHistory.error && !pointerHeld.current
+          && (scrollable < 8 || el.scrollTop <= Math.max(760, historyPrefetchDistance(el.clientHeight) * 0.6))) {
+        if (continueFrameRef.current != null) cancelAnimationFrame(continueFrameRef.current);
+        continueFrameRef.current = requestAnimationFrame(() => {
+          continueFrameRef.current = undefined;
+          triggerEarlierAuto();
+        });
+      }
+    } else if (!prev.active) {
+      prependAnchorRef.current = {
+        active: false, key: null, offsetTop: 0, scrollHeight: 0, scrollTop: 0,
+        firstKey: currentFirstKey, firstSeq: firstWindowSeq, count: rows.length
+      };
     }
-  }, [rows, isAtBottom, scrollRef]);
+  }, [rows, eventCount, firstWindowSeq, scrollRef, triggerEarlierAuto]);
 
   const beforeNavigation = useCallback(() => {
-    clearTimeout(earlierTimer.current);
+    if (continueFrameRef.current != null) cancelAnimationFrame(continueFrameRef.current);
+    continueFrameRef.current = undefined;
+    clearTimeout(navigationResumeRef.current);
+    navigationResumeRef.current = undefined;
     navigationUntil.current = performance.now() + 250;
   }, []);
 
-  const scheduleEarlier = useCallback(() => {
-    clearTimeout(earlierTimer.current);
-    earlierTimer.current = setTimeout(() => {
-      const el = scrollRef.current;
-      if (!el || pointerHeld.current || performance.now() < navigationUntil.current) return;
-      if (el.scrollHeight - el.clientHeight - el.scrollTop < 8) return;
-      if (el.scrollTop > Math.max(64, historyPrefetchDistance(el.clientHeight) * 0.35)) return;
-      if (earlierPending.current || !useStore.getState().thread.history.hasMore) return;
-      earlierPending.current = true;
-      capturePrependAnchor(el);
-      void requestEarlierHistory().finally(() => {
-        if (earlierPending.current) setTimeout(() => { earlierPending.current = false; }, 0);
-      });
-    }, 100);
-  }, [capturePrependAnchor, requestEarlierHistory, scrollRef]);
+  useEffect(() => () => {
+    if (continueFrameRef.current != null) cancelAnimationFrame(continueFrameRef.current);
+    clearTimeout(idlePrefetchRef.current);
+    clearTimeout(navigationResumeRef.current);
+  }, []);
 
-  useEffect(() => () => clearTimeout(earlierTimer.current), []);
+  /* 进入带历史的会话后静默空闲预取前一页进内存，首次上滑 0ms 无感直插；依赖 hasEvents/firstWindowSeq，避免流式吐字频繁清零定时器。 */
+  useEffect(() => {
+    clearTimeout(idlePrefetchRef.current);
+    if (!history.hasMore || history.loading || history.error || !hasEvents) return;
+    idlePrefetchRef.current = setTimeout(() => {
+      const state = useStore.getState();
+      if (state.thread.history.hasMore && !state.thread.history.loading && !state.thread.history.error) {
+        void state.prefetchEarlier();
+      }
+    }, 180);
+    return () => clearTimeout(idlePrefetchRef.current);
+  }, [history.hasMore, history.loading, history.error, hasEvents, firstWindowSeq]);
+
+  const scheduleEarlierFrame = useCallback(() => {
+    if (continueFrameRef.current != null) return;
+    continueFrameRef.current = requestAnimationFrame(() => {
+      continueFrameRef.current = undefined;
+      triggerEarlierAuto();
+    });
+  }, [triggerEarlierAuto]);
+
+  /* 当用户刚脱离贴底且已位于顶部预加载区时兜底触发一次，避免 IntersectionObserver 只在边界穿越瞬间触发一次而漏掉。 */
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (isAtBottom || !el || !history.hasMore || history.loading || history.error) return;
+    const triggerZone = Math.max(760, historyPrefetchDistance(el.clientHeight) * 0.6);
+    if (el.scrollTop <= triggerZone) {
+      scheduleEarlierFrame();
+    }
+  }, [isAtBottom, history.hasMore, history.loading, history.error, scrollRef, scheduleEarlierFrame]);
+
+  /* 顶部哨兵 IntersectionObserver：距顶 760px 即在下一帧自动接管加载，不阻塞滚动合成线程，也不因连续滚动反复清零防抖。 */
+  useEffect(() => {
+    const rootEl = scrollRef.current;
+    const sentinelEl = topSentinelRef.current;
+    if (!rootEl || !sentinelEl || !history.hasMore || typeof IntersectionObserver !== 'function') return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          scheduleEarlierFrame();
+        }
+      },
+      { root: rootEl, rootMargin: '760px 0px 0px 0px', threshold: 0 }
+    );
+    observer.observe(sentinelEl);
+    return () => observer.disconnect();
+  }, [history.hasMore, scrollRef, scheduleEarlierFrame]);
 
   const handleScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const el = event.currentTarget;
     if (event.target !== el) return;
     const threshold = historyPrefetchDistance(el.clientHeight);
     const toTop = el.scrollTop;
-    const toBottom = Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight);
-    const goingDown = toTop > lastScrollTop.current;
+    const height = el.scrollHeight;
+    const vw = el.clientWidth;
+    const vh = el.clientHeight;
+    const toBottom = Math.max(0, height - toTop - vh);
+    const prevTop = lastScrollTop.current;
+    const prevHeight = lastScrollHeight.current;
+    const sameViewport = lastViewportRef.current.width === vw && lastViewportRef.current.height === vh;
+    const goingUp = prevTop > 0 && toTop < prevTop - 2;
+    const goingDown = toTop > prevTop;
     lastScrollTop.current = toTop;
+    lastScrollHeight.current = height;
+    lastViewportRef.current = { width: vw, height: vh };
+    // 流式输出期间 ResizeObserver 会令 use-stick-to-bottom 吞掉部分上滑滚动事件；
+    // 仅在视口尺寸未变且内容未收缩（排除窗口/侧栏缩放导致的重排）时视作用户主动上滑并立刻解绑贴底。
+    if (sameViewport && goingUp && height >= prevHeight - 2 && toBottom > 24 && isAtBottomRef.current) {
+      detachStickToBottom();
+    }
     if (earlierPending.current) capturePrependAnchor(el);
     if (performance.now() < navigationUntil.current) return;
-    if (toTop > threshold) earlierArmed.current = false;
     if (toTop <= threshold && toBottom >= 8 && history.hasMore && !history.loading && !history.error) {
-      if (!earlierArmed.current) {
-        earlierArmed.current = true;
-        void useStore.getState().prefetchEarlier().then(ready => {
-          const current = scrollRef.current;
-          if (!current || current.scrollTop > threshold || pointerHeld.current) return;
-          // 预取失败时走可见的加载/错误状态，避免静默停在顶部。
-          if (ready || useStore.getState().thread.history.hasMore) scheduleEarlier();
-        });
+      void useStore.getState().prefetchEarlier();
+      if (toTop <= Math.max(760, threshold * 0.6)) {
+        scheduleEarlierFrame();
       }
-      if (toTop <= Math.max(64, threshold * 0.35)) scheduleEarlier();
     }
     if (goingDown && toBottom <= threshold) {
       void requestLaterHistory();
     }
-  }, [capturePrependAnchor, history.error, history.hasMore, history.loading, requestLaterHistory, scheduleEarlier, scrollRef]);
+  }, [capturePrependAnchor, detachStickToBottom, history.error, history.hasMore, history.loading, requestLaterHistory, scheduleEarlierFrame]);
 
   const handlePointerDown = useCallback(() => {
     pointerHeld.current = true;
-    clearTimeout(earlierTimer.current);
+    if (continueFrameRef.current != null) cancelAnimationFrame(continueFrameRef.current);
+    continueFrameRef.current = undefined;
   }, []);
   const handlePointerRelease = useCallback(() => {
     pointerHeld.current = false;
     const el = scrollRef.current;
-    if (el && el.scrollTop <= historyPrefetchDistance(el.clientHeight)) scheduleEarlier();
-  }, [scheduleEarlier, scrollRef]);
+    if (el && el.scrollTop <= Math.max(760, historyPrefetchDistance(el.clientHeight) * 0.6)) {
+      scheduleEarlierFrame();
+    }
+  }, [scrollRef, scheduleEarlierFrame]);
 
   const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
-    if (event.deltaY < 0 && event.currentTarget.scrollTop <= 2) scheduleEarlier();
-  }, [scheduleEarlier]);
+    if (event.deltaY < 0 && event.currentTarget.scrollTop <= 12) scheduleEarlierFrame();
+  }, [scheduleEarlierFrame]);
 
   const loadEarlierManually = useCallback(() => {
     stopScroll();
@@ -176,7 +346,12 @@ export function Thread() {
     if (el) capturePrependAnchor(el);
     earlierPending.current = true;
     void requestEarlierHistory({ force: true }).finally(() => {
-      if (earlierPending.current) setTimeout(() => { earlierPending.current = false; }, 0);
+      if (earlierPending.current) {
+        setTimeout(() => {
+          earlierPending.current = false;
+          if (scrollRef.current) scrollRef.current.style.overflowAnchor = '';
+        }, 0);
+      }
     });
   }, [capturePrependAnchor, requestEarlierHistory, scrollRef, stopScroll]);
 
@@ -196,12 +371,10 @@ export function Thread() {
       return;
     }
     if (el.scrollHeight - el.clientHeight < 8) {
-      // 等当前分页 Promise 的 finally 清理完成；同步调用会复用刚结束的请求，
-      // 没有新增可见行的那一页就不会再有变化来唤醒下一次加载。
-      const timer = setTimeout(() => requestEarlierHistory(), 0);
+      const timer = setTimeout(() => triggerEarlierAuto(), 0);
       return () => clearTimeout(timer);
     }
-  }, [rows.length, eventCount, history.hasMore, history.loading, history.error, requestEarlierHistory, scrollRef]);
+  }, [rows.length, eventCount, history.hasMore, history.loading, history.error, scrollRef, triggerEarlierAuto]);
 
   /* 发送消息 / 切换会话后主动贴底：此刻用户要看的是刚发出的内容。 */
   const lastSignal = useRef(bottomSignal);
@@ -237,11 +410,13 @@ export function Thread() {
         onPointerDownCapture={handlePointerDown} onScroll={handleScroll} onWheel={handleWheel}>
         <div className="thread-column" ref={contentRef}>
           {history.hasMore && (
-            <RetryRow
-              label={history.error ? '加载更早失败，点击重试' : history.loading ? '正在加载更早消息…' : '加载更早消息'}
-              disabled={history.loading}
-              onClick={loadEarlierManually}
-            />
+            <div ref={topSentinelRef} className="history-sentinel" role="status" aria-live="polite">
+              {history.error ? (
+                <RetryRow label="加载更早失败，点击重试" onClick={loadEarlierManually} />
+              ) : history.loading ? (
+                <span className="history-sentinel-status">正在加载更早消息…</span>
+              ) : null}
+            </div>
           )}
           {display.rows.map((row, index) => (
             <RowView
@@ -483,7 +658,7 @@ const Turn = memo(function Turn({ row, isLast }: { row: TurnRow; isLast: boolean
   const replyAt = row.stats?.finishedAt || row.stats?.startedAt;
   const replyTime = formatTime(replyAt);
   return (
-    <div className={`turn-shell${row.reply.live || (isLast && activeRunning) ? ' is-live' : ''}`} data-run={row.runIds?.join(',') || undefined}>
+    <div className={`turn-shell${row.reply.live || (isLast && activeRunning) ? ' is-live' : ''}`} data-row-key={row.key} data-run={row.runIds?.join(',') || undefined}>
       {commentaries.length > 0 && (
         <div className="turn-commentaries">
           {commentaries.map((note, idx) => (
@@ -688,7 +863,7 @@ function CompactionGroupCard({ row }: { row: CompactionGroupRow }) {
   const totalMessages = row.items.reduce((sum, item) => sum + (item.coveredMessages || 0), 0);
   const [open, setOpen] = useState(false);
   return (
-    <details className="ctx-card is-divider" open={open} onClick={event => { if (isSummaryClick(event)) setOpen(!open); }}>
+    <details className="ctx-card is-divider" data-row-key={row.key} open={open} onClick={event => { if (isSummaryClick(event)) setOpen(!open); }}>
       <summary className="ctx-head">
         <span className="ctx-line" aria-hidden="true" />
         <span className="ctx-pill">

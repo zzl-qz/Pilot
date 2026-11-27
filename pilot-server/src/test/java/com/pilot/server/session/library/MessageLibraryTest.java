@@ -130,4 +130,33 @@ class MessageLibraryTest {
         var reopened = new MessageLibrary(new SqliteStore(root.resolve("library.db")), sessions);
         assertEquals(List.of(2L, 3L), reopened.bookmarks(id).stream().map(MessageLibrary.Bookmark::sequence).toList());
     }
+
+    @Test
+    void filtersByRoleAndProjectInSqliteSearchAndRejectsInvalidRole() {
+        String p1Session = sessions.createSession("项目一会话", null, "proj-1").id();
+        String p2Session = sessions.createSession("项目二会话", null, "proj-2").id();
+        sessions.publish(p1Session, "r1", new RunStarted("排查零抖动方案"));
+        sessions.publish(p1Session, "r1", new AssistantDelta("零抖动方案已经完成验证"));
+        sessions.publish(p2Session, "r2", new RunStarted("零抖动方案跨项目对照"));
+
+        var userOnly = library.search("零抖动", null, false, 0, "user", null);
+        assertEquals(2, userOnly.items().size());
+        assertTrue(userOnly.items().stream().allMatch(hit -> "user".equals(hit.role())));
+
+        var assistantOnly = library.search("零抖动", null, false, 0, "assistant", null);
+        assertEquals(1, assistantOnly.items().size());
+        assertEquals("assistant", assistantOnly.items().getFirst().role());
+        assertEquals(p1Session, assistantOnly.items().getFirst().sessionId());
+
+        var projectTwo = library.search("零抖动", null, false, 0, null, "proj-2");
+        assertEquals(1, projectTwo.items().size());
+        assertEquals(p2Session, projectTwo.items().getFirst().sessionId());
+
+        // 短词走 instr 路径同样遵守角色与项目筛选
+        var shortFiltered = library.search("零抖", null, false, 0, "assistant", "proj-1");
+        assertEquals(1, shortFiltered.items().size());
+        assertTrue(library.search("零抖", null, false, 0, "assistant", "proj-2").items().isEmpty());
+
+        assertThrows(IllegalArgumentException.class, () -> library.search("零抖动", null, false, 0, "system", null));
+    }
 }

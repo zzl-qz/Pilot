@@ -140,7 +140,14 @@ export const api = {
   templates: () => apiJson<ApiResults['templates']>('/api/automation/templates'),
   saveTemplate: (body: { id?: string | null; version: number; name: string; task: ScheduleDraft }) => apiJson<ApiResults['saveTemplate']>('/api/automation/templates', jsonBody('POST', body)),
   deleteTemplate: (id: string, version: number) => apiJson<ApiResults['deleteTemplate']>(`/api/automation/templates/${encodeURIComponent(id)}?version=${version}`, { method: 'DELETE' }),
-  searchMessages: ({ q = '', sessionId = '', saved = false, offset = 0 }: { q?: string; sessionId?: string; saved?: boolean; offset?: number }) => apiJson<ApiResults['searchMessages']>('/api/library/search?' + new URLSearchParams({ q, sessionId, saved: String(saved), offset: String(offset) })),
+  searchMessages: ({ q = '', sessionId = '', saved = false, offset = 0, role = '', projectId = '' }: {
+    q?: string; sessionId?: string; saved?: boolean; offset?: number; role?: '' | 'user' | 'assistant'; projectId?: string;
+  }) => {
+    const params = new URLSearchParams({ q, sessionId, saved: String(saved), offset: String(offset) });
+    if (role) params.set('role', role);
+    if (projectId) params.set('projectId', projectId);
+    return apiJson<ApiResults['searchMessages']>('/api/library/search?' + params);
+  },
   bookmarks: (session: string) => apiJson<ApiResults['bookmarks']>(`/api/library/${encodeURIComponent(session)}/bookmarks`),
   saveBookmark: (session: string, sequence: number) => apiJson<ApiResults['saveBookmark']>(`/api/library/${encodeURIComponent(session)}/bookmarks/${sequence}`, { method: 'PUT' }),
   deleteBookmark: (session: string, sequence: number) => apiJson<ApiResults['deleteBookmark']>(`/api/library/${encodeURIComponent(session)}/bookmarks/${sequence}`, { method: 'DELETE' }),
@@ -192,9 +199,9 @@ export const api = {
   ),
   answerQuestion: (id: string, callId: string, choice: string) => apiJson<ApiResults['answerQuestion']>(`/api/sessions/${encodeURIComponent(id)}/questions/${encodeURIComponent(callId)}`, jsonBody('POST', { choice })),
   pendingInteractions: () => apiJson<ApiResults['pendingInteractions']>('/api/interactions/pending'),
-  history: (id: string, { limit, before, after, around, compactTools, alignTurns, includeRunChanges }: {
+  history: (id: string, { limit, before, after, around, compactTools, alignTurns, minTurns, includeRunChanges }: {
     limit?: number; before?: number; after?: number; around?: number;
-    compactTools?: boolean; alignTurns?: boolean; includeRunChanges?: boolean;
+    compactTools?: boolean; alignTurns?: boolean; minTurns?: number; includeRunChanges?: boolean;
   } = {}) => {
     const params = new URLSearchParams();
     if (limit) params.set('limit', String(limit));
@@ -203,6 +210,7 @@ export const api = {
     if (around != null) params.set('around', String(around));
     if (compactTools) params.set('compactTools', 'true');
     if (alignTurns) params.set('alignTurns', 'true');
+    if (minTurns && minTurns > 0) params.set('minTurns', String(minTurns));
     if (includeRunChanges) params.set('includeRunChanges', 'true');
     return apiJson<ApiResults['history']>(`/api/sessions/${encodeURIComponent(id)}/history?${params}`);
   },
@@ -239,6 +247,7 @@ export const api = {
   gitStashPush: (id: string, message: string) => apiJson<ApiResults['gitOperation']>(`/api/sessions/${encodeURIComponent(id)}/git/stash/push`, jsonBody('POST', { message })),
   gitStashPop: (id: string, reference: string) => apiJson<ApiResults['gitOperation']>(`/api/sessions/${encodeURIComponent(id)}/git/stash/pop`, jsonBody('POST', { reference })),
   discardUnstaged: (id: string, path: string) => apiJson<ApiResults['gitOperation']>(`/api/sessions/${encodeURIComponent(id)}/diff/discard-unstaged`, jsonBody('POST', { path })),
+  discardHunk: (id: string, path: string, hunkPatch: string) => apiJson<ApiResults['gitOperation']>(`/api/sessions/${encodeURIComponent(id)}/diff/discard-hunk`, jsonBody('POST', { path, hunkPatch })),
   gitDraftMessage: (id: string, body: { paths: string[]; all?: boolean }) =>
     apiJson<ApiResults['gitDraftMessage']>(`/api/sessions/${encodeURIComponent(id)}/git/commit-message`, jsonBody('POST', body)),
   gitCommit: (id: string, body: { paths: string[]; all?: boolean; message: string }) =>

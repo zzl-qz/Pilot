@@ -1180,7 +1180,7 @@ function DesktopBrowserPanel({ desktopBridge, toolsMenuOpen }: { desktopBridge: 
         '#model-menu, #perm-menu, #context-menu, #notes-menu, [role="menu"], [role="dialog"], dialog[open], [aria-modal="true"], .gutter.is-dragging'
       )).some((node) => {
         const el = node as HTMLElement;
-        if (el.hasAttribute('hidden') || el.getAttribute('aria-hidden') === 'true') return false;
+        if (el.hasAttribute('hidden') || el.getAttribute('aria-hidden') === 'true' || el.closest('details:not([open])')) return false;
         const box = el.getBoundingClientRect();
         return box.width > 0 && box.height > 0;
       });

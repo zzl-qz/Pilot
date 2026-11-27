@@ -54,6 +54,29 @@
   color: var(--ink);
   font: inherit;
 }
+.message-search-roles {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--ui-field);
+}
+.message-search-role-btn {
+  border: 0;
+  border-radius: 5px;
+  padding: 3px 9px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: 500 12px/1.4 var(--sans);
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+.message-search-role-btn:hover { color: var(--ink); }
+.message-search-role-btn.is-active {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
 .message-search-filters > button { margin-inline-start: auto; }
 .message-search-results { margin-block-start: 18px; }
 .message-search-results-head {

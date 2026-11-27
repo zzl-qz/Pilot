@@ -93,6 +93,13 @@ public class ChangeController {
         return changes.discardUnstaged(workspace(id), request == null ? null : request.path());
     }
 
+    @PostMapping("/diff/discard-hunk")
+    public ChangeService.GitOperationResult discardHunk(@PathVariable String id,
+        @RequestBody(required = false) HunkRequest request) {
+        return changes.discardHunk(workspace(id), request == null ? null : request.path(),
+            request == null ? null : request.hunkPatch());
+    }
+
     @GetMapping("/git/branches")
     public ChangeService.GitBranchReport branches(@PathVariable String id) {
         return changes.branches(workspace(id));
@@ -142,6 +149,9 @@ public class ChangeController {
     }
 
     public record PathRequest(String path) {
+    }
+
+    public record HunkRequest(String path, String hunkPatch) {
     }
 
     public record BranchRequest(String branch) {

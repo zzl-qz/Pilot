@@ -9,6 +9,8 @@ import { api } from '../../api.js';
 import { ReviewActions } from '../ReviewActions.jsx';
 import { hasDiffTruncation, normalizePath, parseDiff } from '../../lib/diff.js';
 import { sortChangeFiles, splitPath, statusKind, sumChangeLines } from '../../lib/changes.js';
+import { buildSplitDiffRows, buildWordDiffMap, extractHunkPatch, type WordSegment } from '../../lib/word-diff.js';
+import { safeLocalStorage } from '../../lib/safe-storage.js';
 
 /* ---------- 变更面板 ---------- */
 
@@ -738,8 +740,38 @@ function DiffView({ report, scoped, path, change, prevPath, nextPath, index, tot
 
   const file = summaryFile || patch?.file || null;
   const truncated = summaryTruncated || Boolean(patch?.truncated);
-  const displayableLines = (file?.lines || []).filter(line => line.kind !== 'meta');
-  const lines = displayableLines.slice(0, DIFF_LINE_LIMIT);
+  const displayableLines = useMemo(() => (file?.lines || []).filter(line => line.kind !== 'meta'), [file]);
+  const lines = useMemo(() => displayableLines.slice(0, DIFF_LINE_LIMIT), [displayableLines]);
+  const wordDiffMap = useMemo(() => buildWordDiffMap(lines), [lines]);
+  const [diffMode, setDiffMode] = useState<'unified' | 'split'>(() => (safeLocalStorage().getItem('pilot.diffMode') === 'split' ? 'split' : 'unified'));
+  const [discardingHunk, setDiscardingHunk] = useState<number | null>(null);
+  const splitRows = useMemo(() => (diffMode === 'split' ? buildSplitDiffRows(lines) : []), [diffMode, lines]);
+  const canDiscardHunk = Boolean(canUndo && !scoped && !untracked && sessionId && !truncated);
+  const handleDiscardHunk = async (hunkIndex: number) => {
+    if (!sessionId || !file || discardingHunk != null) return;
+    const targetHunk = displayableLines[hunkIndex];
+    const rawIndex = targetHunk ? file.lines.indexOf(targetHunk) : -1;
+    const hunkPatch = rawIndex >= 0 ? extractHunkPatch(file.lines, rawIndex) : null;
+    if (!hunkPatch) return;
+    setDiscardingHunk(hunkIndex);
+    try {
+      const result = await api.discardHunk(sessionId, path, hunkPatch);
+      if (result?.ok) {
+        useStore.getState().showNotice('已撤销该改动块');
+        await useStore.getState().loadChanges();
+      } else {
+        useStore.getState().showNotice(result?.error || '撤销此改动块失败');
+      }
+    } catch (error) {
+      useStore.getState().showNotice('撤销此改动块失败：' + errorInfo(error).message);
+    } finally {
+      setDiscardingHunk(null);
+    }
+  };
+  const toggleDiffMode = (next: 'unified' | 'split') => {
+    setDiffMode(next);
+    safeLocalStorage().setItem('pilot.diffMode', next);
+  };
   useEffect(() => { setSelection(null); setFeedback(''); }, [path, report]);
   const selected = selection ? lines.slice(Math.min(selection.anchor, selection.end), Math.max(selection.anchor, selection.end) + 1) : [];
   const addFeedback = () => {
@@ -750,6 +782,20 @@ function DiffView({ report, scoped, path, change, prevPath, nextPath, index, tot
     state.setUi({ reviewExpanded: false });
     setSelection(null); setFeedback('');
     requestAnimationFrame(() => state.composerApi?.focus());
+  };
+  const sendFeedbackNow = () => {
+    const state = useStore.getState();
+    const quote = reviewQuote(path, selected, feedback);
+    if (!quote) return;
+    state.setUi({ reviewExpanded: false });
+    setSelection(null); setFeedback('');
+    void state.submitInput(quote);
+  };
+  const renderCodeWithWords = (lineText: string, lineIndex: number, kind: string) => {
+    const segments: WordSegment[] | undefined = wordDiffMap.get(lineIndex);
+    if (!segments) return lineText;
+    const cls = kind === 'del' ? 'diff-word-del' : 'diff-word-add';
+    return segments.map((seg, idx) => (seg.changed ? <mark key={idx} className={cls}>{seg.text}</mark> : <span key={idx}>{seg.text}</span>));
   };
   const close = () => useStore.getState().setUi({ changeView: '' });
   const select = (target: string | null) => {
@@ -767,6 +813,12 @@ function DiffView({ report, scoped, path, change, prevPath, nextPath, index, tot
         <span className="change-view-path" title={path}>{path}</span>
         {viewStat ?? (untracked ? <span className="change-view-tag">未跟踪</span> : null)}
         {total > 0 && index > 0 && <span className="change-view-index">{index} / {total}</span>}
+        {file && (
+          <div className="diff-mode-switch" role="group" aria-label="差异展示模式">
+            <button type="button" className={diffMode === 'unified' ? 'is-active' : ''} aria-pressed={diffMode === 'unified'} onClick={() => toggleDiffMode('unified')}>统一</button>
+            <button type="button" className={diffMode === 'split' ? 'is-active' : ''} aria-pressed={diffMode === 'split'} onClick={() => toggleDiffMode('split')}>分栏</button>
+          </div>
+        )}
         <button
           type="button"
           className="icon-btn diff-nav"
@@ -804,9 +856,10 @@ function DiffView({ report, scoped, path, change, prevPath, nextPath, index, tot
       {selection && <div className="review-feedback" onKeyDown={event => { if (!event.nativeEvent?.isComposing && event.keyCode !== 229 && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setSelection(null); } }}>
         <label>对选中代码的意见<textarea aria-label="审阅意见" value={feedback} onChange={event => setFeedback(event.target.value)} placeholder="描述需要调整的地方" rows={2} /></label>
         <button type="button" className="btn" onClick={addFeedback}>引用到输入框</button>
+        <button type="button" className="btn btn-primary" onClick={sendFeedbackNow}>直接发送修改</button>
         <button type="button" className="btn" onClick={() => { setSelection(null); setFeedback(''); }}>取消选择</button>
       </div>}
-      <div id="change-diff" className="change-diff">
+      <div id="change-diff" className={`change-diff${diffMode === 'split' ? ' is-split' : ''}`}>
         {change?.note && <p className="diff-empty">{change.note}</p>}
         {truncated && <p className="diff-truncated" role="status">
           {summaryTruncated && !scoped
@@ -817,18 +870,85 @@ function DiffView({ report, scoped, path, change, prevPath, nextPath, index, tot
           ? (
             <>
               {/* index/---/+++ 这些补丁元信息对读代码没帮助，Codex 也不展示 */}
-              {lines.map((line, index) => (
-                <div key={index} className={`diff-line is-${line.kind}${selection && index >= Math.min(selection.anchor, selection.end) && index <= Math.max(selection.anchor, selection.end) ? ' is-selected' : ''}`}>
-                  {line.kind === 'hunk' ? <span className="n" /> : <button type="button"
-                    className={`n${line.kind === 'del' ? ' is-old' : ''}`}
-                    aria-label={`选择${line.kind === 'del' ? '原文件' : '现文件'}第 ${line.kind === 'del' ? line.old : line.next} 行`}
-                    aria-pressed={Boolean(selection && index >= Math.min(selection.anchor, selection.end) && index <= Math.max(selection.anchor, selection.end))}
-                    onClick={event => setSelection(current => ({ anchor: event.shiftKey && current ? current.anchor : index, end: index }))}>
-                    {line.kind === 'del' ? line.old : line.next}
-                  </button>}
-                  <code>{line.text}</code>
+              {diffMode === 'split' ? (
+                <div className="diff-split-table" role="region" aria-label="左右分栏差异">
+                  {splitRows.map((row, rowIdx) => {
+                    if (row.kind === 'hunk') {
+                      return (
+                        <div key={rowIdx} className="diff-line is-hunk diff-split-hunk">
+                          <span className="n" />
+                          <code>{row.text}</code>
+                          {canDiscardHunk && (
+                            <button
+                              type="button"
+                              className="diff-hunk-undo"
+                              disabled={busy || discardingHunk != null}
+                              onClick={() => { void handleDiscardHunk(row.index); }}
+                            >
+                              {discardingHunk === row.index ? '撤销中…' : '撤销此块'}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    }
+                    const leftSelected = row.leftIndex != null && Boolean(selection && row.leftIndex >= Math.min(selection.anchor, selection.end) && row.leftIndex <= Math.max(selection.anchor, selection.end));
+                    const rightSelected = row.rightIndex != null && Boolean(selection && row.rightIndex >= Math.min(selection.anchor, selection.end) && row.rightIndex <= Math.max(selection.anchor, selection.end));
+                    return (
+                      <div key={rowIdx} className="diff-split-row">
+                        <div className={`diff-line diff-split-cell ${row.left ? `is-${row.left.kind}` : 'is-empty'}${leftSelected ? ' is-selected' : ''}`}>
+                          {row.left && row.leftIndex != null ? (
+                            <>
+                              <button type="button" className="n is-old"
+                                aria-label={`选择原文件第 ${row.left.old} 行`}
+                                aria-pressed={leftSelected}
+                                onClick={event => setSelection(current => ({ anchor: event.shiftKey && current ? current.anchor : row.leftIndex!, end: row.leftIndex! }))}>
+                                {row.left.old}
+                              </button>
+                              <code>{renderCodeWithWords(row.left.text, row.leftIndex, row.left.kind)}</code>
+                            </>
+                          ) : <><span className="n" /><code /></>}
+                        </div>
+                        <div className={`diff-line diff-split-cell ${row.right ? `is-${row.right.kind}` : 'is-empty'}${rightSelected ? ' is-selected' : ''}`}>
+                          {row.right && row.rightIndex != null ? (
+                            <>
+                              <button type="button" className="n"
+                                aria-label={`选择现文件第 ${row.right.next} 行`}
+                                aria-pressed={rightSelected}
+                                onClick={event => setSelection(current => ({ anchor: event.shiftKey && current ? current.anchor : row.rightIndex!, end: row.rightIndex! }))}>
+                                {row.right.next}
+                              </button>
+                              <code>{renderCodeWithWords(row.right.text, row.rightIndex, row.right.kind)}</code>
+                            </>
+                          ) : <><span className="n" /><code /></>}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              ))}
+              ) : (
+                lines.map((line, index) => (
+                  <div key={index} className={`diff-line is-${line.kind}${selection && index >= Math.min(selection.anchor, selection.end) && index <= Math.max(selection.anchor, selection.end) ? ' is-selected' : ''}`}>
+                    {line.kind === 'hunk' ? <span className="n" /> : <button type="button"
+                      className={`n${line.kind === 'del' ? ' is-old' : ''}`}
+                      aria-label={`选择${line.kind === 'del' ? '原文件' : '现文件'}第 ${line.kind === 'del' ? line.old : line.next} 行`}
+                      aria-pressed={Boolean(selection && index >= Math.min(selection.anchor, selection.end) && index <= Math.max(selection.anchor, selection.end))}
+                      onClick={event => setSelection(current => ({ anchor: event.shiftKey && current ? current.anchor : index, end: index }))}>
+                      {line.kind === 'del' ? line.old : line.next}
+                    </button>}
+                    <code>{renderCodeWithWords(line.text, index, line.kind)}</code>
+                    {line.kind === 'hunk' && canDiscardHunk && (
+                      <button
+                        type="button"
+                        className="diff-hunk-undo"
+                        disabled={busy || discardingHunk != null}
+                        onClick={() => { void handleDiscardHunk(index); }}
+                      >
+                        {discardingHunk === index ? '撤销中…' : '撤销此块'}
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
               {/* 生成出来的大文件动辄上万行，全铺出来会卡住滚动；先给一个明确的截断提示 */}
               {displayableLines.length > DIFF_LINE_LIMIT && (
                 <p className="diff-truncated">

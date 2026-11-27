@@ -586,6 +586,65 @@ class SessionApiTest {
             .andExpect(jsonPath("$.runChanges").doesNotExist());
     }
 
+    /** minTurns 会越过单轮里的高密度增量事件，保证单次上拉能返回可读的完整历史轮次。 */
+    @Test
+    void historyMinTurnsExpandsAcrossDenseEvents() throws Exception {
+        String sessionId = createSession();
+        for (int turn = 1; turn <= 6; turn++) {
+            String runId = "run_dense_" + turn;
+            sessions.publish(sessionId, runId, new RunStarted("第 " + turn + " 轮问题"));
+            int deltas = turn == 6 ? 26 : 5;
+            for (int d = 0; d < deltas; d++) {
+                sessions.publish(sessionId, runId, new AssistantDelta("t" + turn + "-" + d + " "));
+            }
+            sessions.publish(sessionId, runId, new RunCompleted("第 " + turn + " 轮完成", List.of(), List.of()));
+        }
+
+        // 不设 minTurns 时 limit=15 仅拿到最后一轮尾部（alignTurns 回溯后也仅含第 6 轮）
+        String withoutMinTurns =
+            mvc.perform(get("/api/sessions/{id}/history", sessionId).param("limit", "15").param("alignTurns", "true"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long turnsWithout = json.readTree(withoutMinTurns).get("events").valueStream()
+            .filter(node -> "run.started".equals(node.get("type").asText())).count();
+        assertEquals(1, turnsWithout);
+
+        // minTurns=3 自动向更早事件扩展，单次请求即可拿到至少 3 个完整轮次，并保留更早轮次待续拉（hasMore=true）
+        String withMinTurns = mvc
+            .perform(get("/api/sessions/{id}/history", sessionId).param("limit", "15").param("alignTurns", "true")
+                .param("minTurns", "3"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.hasMore").value(true)).andReturn().getResponse()
+            .getContentAsString();
+        var eventsNode = json.readTree(withMinTurns).get("events");
+        long turnsWith =
+            eventsNode.valueStream().filter(node -> "run.started".equals(node.get("type").asText())).count();
+        assertTrue(turnsWith >= 3, "minTurns=3 应至少返回 3 轮，实际 " + turnsWith);
+        assertEquals("run.started", eventsNode.get(0).get("type").asText());
+    }
+
+    /** 历史检索支持按角色与项目过滤，并在非法角色参数时返回 400。 */
+    @Test
+    void librarySearchFiltersByRoleAndProject() throws Exception {
+        String p1 = "prj_search_a_" + UUID.randomUUID();
+        String p2 = "prj_search_b_" + UUID.randomUUID();
+        String s1 = sessions.createSession("项目甲", null, p1).id();
+        String s2 = sessions.createSession("项目乙", null, p2).id();
+        String token = "dshAnchorFilter" + UUID.randomUUID().toString().substring(0, 6);
+        sessions.publish(s1, "r1", new RunStarted("提问 " + token));
+        sessions.publish(s1, "r1", new AssistantDelta("回复 " + token));
+        sessions.publish(s2, "r2", new RunStarted("跨项目提问 " + token));
+
+        mvc.perform(get("/api/library/search").param("q", token).param("role", "assistant")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.items.length()").value(1)).andExpect(jsonPath("$.items[0].role").value("assistant"))
+            .andExpect(jsonPath("$.items[0].sessionId").value(s1));
+
+        mvc.perform(get("/api/library/search").param("q", token).param("role", "user").param("projectId", p2))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(1))
+            .andExpect(jsonPath("$.items[0].role").value("user")).andExpect(jsonPath("$.items[0].sessionId").value(s2));
+
+        mvc.perform(get("/api/library/search").param("q", token).param("role", "invalid"))
+            .andExpect(status().isBadRequest());
+    }
+
     /** 同一项目下不允许出现第二条空白对话；要求确认后可以「归档旧的再新建」。 */
     @Test
     void allowsOnlyOneBlankConversationPerProject() throws Exception {

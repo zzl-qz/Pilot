@@ -36,7 +36,7 @@ export function UserMessage({ row }: { row: UserRow }) {
   );
   if (canPeek && !open) {
     return (
-      <article className="msg msg-user" tabIndex={-1} data-nav-key={row.key} data-sequence={row.sequence ?? undefined}>
+      <article className="msg msg-user" tabIndex={-1} data-row-key={row.key} data-nav-key={row.key} data-sequence={row.sequence ?? undefined}>
         <button type="button" className="msg-peek" aria-expanded="false" title="展开这条消息" onClick={() => setOpen(true)}>
           <span className="msg-peek-grip" aria-hidden="true">
             <svg viewBox="0 0 16 16"><path d="M3 6.5h10M3 9.5h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
@@ -49,7 +49,7 @@ export function UserMessage({ row }: { row: UserRow }) {
   }
   return (
     <>
-    <article className="msg msg-user" tabIndex={-1} data-nav-key={row.key} data-sequence={row.sequence ?? undefined}>
+    <article className="msg msg-user" tabIndex={-1} data-row-key={row.key} data-nav-key={row.key} data-sequence={row.sequence ?? undefined}>
       <div className="bubble">
         {(parts.body || files.length > 0) && <div className="bubble-flow">{renderMessageBody(parts.body, files, setPreviewFile)}</div>}
         {images.length > 0 && (

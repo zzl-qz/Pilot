@@ -490,6 +490,61 @@ class ChangeServiceTest {
         assertTrue(Files.exists(workspace.resolve("a.txt")), "非 git 工作区不能删用户文件");
     }
 
+    @Test
+    void discardHunkRevertsOnlySelectedHunkAndRejectsInvalidPatches() throws IOException {
+        assumeTrue(git("--version"), "需要本机可用的 git");
+        git("init", "-q");
+        git("config", "core.autocrlf", "false");
+
+        Path file = workspace.resolve("spaced file.sql");
+        List<String> base = new ArrayList<>();
+        base.add("-- original header comment");
+        for (int i = 2; i <= 18; i++) {
+            base.add("line " + i);
+        }
+        base.add("footer line");
+        Files.writeString(file, String.join("\n", base) + "\n");
+        git("add", ".");
+        commit();
+
+        List<String> modified = new ArrayList<>(base);
+        modified.set(0, "-- updated header comment");
+        modified.set(18, "footer UPDATED");
+        Files.writeString(file, String.join("\n", modified) + "\n");
+
+        // 从真实 git diff 中拆出两个 hunk，先单独撤销第 2 个 hunk
+        ChangeService.FilePatch fullPatch = changes.fileDiff(workspace, "spaced file.sql");
+        String diff = fullPatch.diff();
+        int firstAt = diff.indexOf("@@ ");
+        int secondAt = diff.indexOf("\n@@ ", firstAt + 1);
+        assertTrue(firstAt >= 0 && secondAt > firstAt, "应包含两个独立 hunk: " + diff);
+        String firstHunk = diff.substring(firstAt, secondAt + 1);
+        String secondHunk = diff.substring(secondAt + 1);
+
+        ChangeService.GitOperationResult discardSecond = changes.discardHunk(workspace, "spaced file.sql", secondHunk);
+        assertTrue(discardSecond.ok(), "按块撤销第 2 块应成功: " + discardSecond.error());
+        String afterSecond = Files.readString(file);
+        assertTrue(afterSecond.contains("-- updated header comment"), "第 1 块改动必须保留");
+        assertTrue(afterSecond.contains("footer line"), "第 2 块改动必须已回退");
+        assertFalse(afterSecond.contains("footer UPDATED"));
+
+        // 再撤销第 1 个包含 `-- ` 删除行的 hunk（在 diff 中以 `--- ` 开头，不应误报非法文件头）
+        ChangeService.GitOperationResult discardFirst = changes.discardHunk(workspace, "spaced file.sql", firstHunk);
+        assertTrue(discardFirst.ok(), "含 `-- ` 注释行的差异块撤销应成功: " + discardFirst.error());
+        assertEquals(String.join("\n", base) + "\n", Files.readString(file));
+
+        // 边界与安全校验：越界路径、注入 diff 头、多 hunk 拼接、未跟踪文件均必须拒绝
+        Files.writeString(file, String.join("\n", modified) + "\n");
+        Files.writeString(workspace.resolve("untracked.txt"), "new\n");
+        assertFalse(changes.discardHunk(workspace, "../escape.txt", secondHunk).ok());
+        assertFalse(changes.discardHunk(workspace, "untracked.txt", secondHunk).ok());
+        assertFalse(changes
+            .discardHunk(workspace, "spaced file.sql", secondHunk + "diff --git a/other b/other\n@@ -1 +1 @@\n-a\n+b\n")
+            .ok());
+        assertFalse(changes.discardHunk(workspace, "spaced file.sql", firstHunk + secondHunk).ok());
+        assertFalse(changes.discardHunk(workspace, "spaced file.sql", "not-a-hunk\n-a\n+b\n").ok());
+    }
+
     private static ChangeService.FileChange sessionFile(ChangeService.ChangeReport report, String path) {
         return report.files().stream().filter(file -> file.path().equals(path)).findFirst()
             .orElseThrow(() -> new AssertionError("缺少文件: " + path));
