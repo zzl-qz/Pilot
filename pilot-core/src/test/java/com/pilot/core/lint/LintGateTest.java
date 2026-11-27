@@ -4,9 +4,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
@@ -368,6 +372,44 @@ class LintGateTest {
         LintGate gate = LintGate.enabled();
         assertEquals("",
             gate.feedbackAfterEdit(root, List.of("pilot-web/src/main/resources/static/assets/index-C56B2kUi.js")));
+    }
+
+    @Test
+    void prependsWorkspaceNodeModulesBinToPathCaseInsensitivelyWithoutDuplication() throws Exception {
+        Path localBin = root.resolve("node_modules").resolve(".bin");
+        Files.createDirectories(localBin);
+        String expectedBin = localBin.toAbsolutePath().normalize().toString();
+
+        Map<String, String> winEnv = new LinkedHashMap<>();
+        winEnv.put("Path", "/usr/bin");
+        ProcessLintRunner.prependLocalNodeBin(winEnv, root);
+        assertEquals(expectedBin + File.pathSeparator + "/usr/bin", winEnv.get("Path"));
+        assertFalse(winEnv.containsKey("PATH"), "Windows 下应复用既有 Path 键而非新增重复 PATH");
+
+        // 幂等：重复调用不重复拼入同一目录
+        ProcessLintRunner.prependLocalNodeBin(winEnv, root);
+        assertEquals(expectedBin + File.pathSeparator + "/usr/bin", winEnv.get("Path"));
+    }
+
+    @Test
+    void runsFrozenPackageJsonLintBinaryFromLocalNodeModulesBin() throws Exception {
+        Path localBin = root.resolve("node_modules").resolve(".bin");
+        Files.createDirectories(localBin);
+        Files.createDirectories(root.resolve("src"));
+        Files.writeString(root.resolve("src/app.ts"), "export const ok = 1;\n");
+        Files.writeString(root.resolve("package.json"), "{\"scripts\":{\"lint\":\"fake-local-linter --quiet\"}}");
+
+        boolean isWin = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+        if (isWin) {
+            Files.writeString(localBin.resolve("fake-local-linter.cmd"), "@echo off\r\nexit /b 0\r\n");
+        } else {
+            Path stub = localBin.resolve("fake-local-linter");
+            Files.writeString(stub, "#!/bin/sh\nexit 0\n");
+            stub.toFile().setExecutable(true);
+        }
+
+        LintGate.LintAssessment assessment = LintGate.enabled().assess(root, List.of("src/app.ts"));
+        assertEquals(LintGate.LintAssessment.Kind.CLEAN, assessment.kind(), assessment.prompt());
     }
 
     private void writeSample() throws Exception {

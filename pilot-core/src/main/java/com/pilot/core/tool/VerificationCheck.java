@@ -26,8 +26,10 @@ public final class VerificationCheck {
     }
 
     private static final Pattern SUMMARY = Pattern.compile("^(.*) → exit (-?\\d+)\\z", Pattern.DOTALL);
+    private static final Pattern ENV_ASSIGNMENT = Pattern.compile("^[a-z_][a-z0-9_]*=.*$");
+    private static final Set<String> ENV_WRAPPERS = Set.of("env", "cross-env");
     private static final Set<String> TEST_RUNNERS =
-        Set.of("jest", "vitest", "playwright", "cypress", "pytest", "unittest");
+        Set.of("jest", "vitest", "mocha", "ava", "jasmine", "playwright", "cypress", "pytest", "unittest");
     private static final Set<String> ANALYZERS =
         Set.of("tsc", "eslint", "mypy", "pyright", "ruff", "checkstyle", "detekt");
     private static final Set<String> SCRIPT_TESTS =
@@ -69,6 +71,7 @@ public final class VerificationCheck {
     }
 
     private static Kind classifyTokens(List<String> tokens) {
+        tokens = stripEnvPrefix(tokens);
         if (tokens.isEmpty()) {
             return Kind.OTHER;
         }
@@ -111,6 +114,9 @@ public final class VerificationCheck {
         if ("javac".equals(executable) || "rustc".equals(executable) || "tsc".equals(executable)) {
             return args.isEmpty() ? Kind.OTHER : Kind.BUILD;
         }
+        if (TEST_RUNNERS.contains(executable) || ANALYZERS.contains(executable) || "prettier".equals(executable)) {
+            return classifyRunner(tokens);
+        }
         if ("java".equals(executable)) {
             return args.stream().anyMatch(token -> token.contains("junit")) ? Kind.TEST : Kind.OTHER;
         }
@@ -131,6 +137,25 @@ public final class VerificationCheck {
             return Kind.FORMAT_CHECK;
         }
         return Kind.OTHER;
+    }
+
+    /**
+     * Unwraps leading {@code KEY=VALUE} assignments and bare {@code env} / {@code cross-env}
+     * prefixes (never allowing flags such as {@code env -S}) so commands like
+     * {@code env NODE_ENV=test ./node_modules/.bin/mocha ...} classify cleanly.
+     */
+    private static List<String> stripEnvPrefix(List<String> tokens) {
+        int index = 0;
+        if (index < tokens.size() && ENV_WRAPPERS.contains(bare(tokens.get(index)))) {
+            if (index + 1 >= tokens.size() || tokens.get(index + 1).startsWith("-")) {
+                return List.of();
+            }
+            index++;
+        }
+        while (index < tokens.size() && ENV_ASSIGNMENT.matcher(tokens.get(index)).matches()) {
+            index++;
+        }
+        return tokens.subList(index, tokens.size());
     }
 
     /**
@@ -375,8 +400,10 @@ public final class VerificationCheck {
         String value = executable.replace('\\', '/');
         int slash = value.lastIndexOf('/');
         value = slash >= 0 ? value.substring(slash + 1) : value;
-        if (Set.of("mvnw.cmd", "gradlew.bat").contains(value)) {
-            return value.substring(0, value.lastIndexOf('.'));
+        for (String ext : List.of(".cmd", ".bat", ".exe")) {
+            if (value.endsWith(ext) && value.length() > ext.length()) {
+                return value.substring(0, value.length() - ext.length());
+            }
         }
         return value;
     }

@@ -1,10 +1,13 @@
 package com.pilot.core.lint;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.InputStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import com.pilot.core.exec.ProcessSupport;
@@ -29,8 +32,10 @@ public final class ProcessLintRunner implements LintRunner {
         }
         Process process;
         try {
-            process =
-                new ProcessBuilder(shell(command)).directory(workspace.toFile()).redirectErrorStream(true).start();
+            ProcessBuilder builder =
+                new ProcessBuilder(shell(command)).directory(workspace.toFile()).redirectErrorStream(true);
+            prependLocalNodeBin(builder.environment(), workspace);
+            process = builder.start();
         } catch (Exception e) {
             return LintResult.failedToStart(e.getMessage() == null ? "无法启动 lint" : e.getMessage());
         }
@@ -60,6 +65,40 @@ public final class ProcessLintRunner implements LintRunner {
             return List.of("cmd.exe", "/d", "/s", "/c", command);
         }
         return List.of("sh", "-c", command);
+    }
+
+    /**
+     * {@link ProjectLint#freeze} 展开 {@code package.json} 的 lint 脚本正文以防中途篡改；
+     * 展开后不再经过 npm/pnpm 包装器，因此需把仓库本地 {@code node_modules/.bin} 前置到 {@code PATH}，
+     * 跨平台兼容 Windows（{@code Path} + {@code ;}）与 POSIX（{@code PATH} + {@code :}）。
+     */
+    static void prependLocalNodeBin(Map<String, String> env, Path workspace) {
+        if (env == null || workspace == null) {
+            return;
+        }
+        Path localBin = workspace.resolve("node_modules").resolve(".bin").toAbsolutePath().normalize();
+        if (!Files.isDirectory(localBin)) {
+            return;
+        }
+        String pathKey = "PATH";
+        for (String key : env.keySet()) {
+            if ("PATH".equalsIgnoreCase(key)) {
+                pathKey = key;
+                break;
+            }
+        }
+        String binDir = localBin.toString();
+        String existing = env.get(pathKey);
+        if (existing == null || existing.isBlank()) {
+            env.put(pathKey, binDir);
+            return;
+        }
+        for (String entry : existing.split(java.util.regex.Pattern.quote(File.pathSeparator))) {
+            if (binDir.equals(entry)) {
+                return;
+            }
+        }
+        env.put(pathKey, binDir + File.pathSeparator + existing);
     }
 
     /**

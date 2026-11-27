@@ -83,4 +83,25 @@ class VerificationCheckTest {
         assertEquals(VerificationCheck.Kind.OTHER, VerificationCheck.classifyCommand("npm --prefix test"));
         assertEquals(VerificationCheck.Kind.OTHER, VerificationCheck.classifyCommand("npm --unknown project test"));
     }
+
+    @Test
+    void recognizesEnvPrefixedAndDirectLocalTestRunnersAcrossPlatforms() {
+        assertEquals(VerificationCheck.Kind.TEST, VerificationCheck.passingKind(
+            "env NODE_ENV=test ./node_modules/.bin/mocha --exit packages/material-ui/src/Select/Select.test.js → exit 0"));
+        assertEquals(VerificationCheck.Kind.TEST, VerificationCheck.passingKind(
+            "cross-env BABEL_ENV=test yarn test:unit packages/material-ui/src/Select/Select.test.js → exit 0"));
+        assertEquals(VerificationCheck.Kind.TEST,
+            VerificationCheck.classifyCommand("NODE_ENV=test ./node_modules/.bin/vitest run src/foo.spec.ts"));
+        assertEquals(VerificationCheck.Kind.TEST,
+            VerificationCheck.classifyCommand(".\\node_modules\\.bin\\mocha.cmd --exit test.js"));
+        assertEquals(VerificationCheck.Kind.STATIC_ANALYSIS,
+            VerificationCheck.classifyCommand(".\\node_modules\\.bin\\eslint.cmd src/app.ts"));
+        assertEquals(VerificationCheck.Kind.TEST, VerificationCheck.classifyCommand("pnpm exec mocha test.js"));
+
+        for (String rejected : List.of("env --version", "env -S mocha",
+            "env NODE_ENV=test ./node_modules/.bin/mocha --version", "NODE_ENV=test git status",
+            "cross-env NODE_ENV=test", "./node_modules/.bin/playwright install")) {
+            assertEquals(VerificationCheck.Kind.OTHER, VerificationCheck.classifyCommand(rejected), rejected);
+        }
+    }
 }
