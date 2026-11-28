@@ -19,9 +19,9 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import com.pilot.core.approval.ApprovalBroker;
@@ -29,19 +29,15 @@ import com.pilot.core.browser.BrowserBackend;
 import com.pilot.core.browser.BrowserCommand;
 import com.pilot.core.browser.BrowserEvidenceRecord;
 import com.pilot.core.browser.BrowserEvidenceRecorder;
+import com.pilot.core.browser.BrowserHandoffBroker;
 import com.pilot.core.browser.BrowserTool;
-import com.pilot.core.event.RunCompleted;
-import com.pilot.core.event.RunFailureCode;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.event.SubagentFinished;
 import com.pilot.core.event.SubagentStarted;
-import com.pilot.core.event.ToolStarted;
 import com.pilot.core.loop.AgentLoop;
-import com.pilot.core.loop.ExecutionPolicy;
 import com.pilot.core.message.Attachment;
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolNames;
-import com.pilot.core.model.MeteredModelClient;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.permission.PermissionGate;
 import com.pilot.core.prompt.PromptLibrary;
@@ -65,7 +61,6 @@ public final class BrowserSubagentTool extends PromptedTool {
     public static final int DEFAULT_MAX_SPAWNS_PER_RUN = 6;
     public static final int DEFAULT_MAX_CONCURRENT = 3;
     private static final int MAX_RETAINED_CONTEXTS = 6;
-    private static final int MAX_SUMMARY_CHARS = 6_000;
     private static final PromptLibrary PROMPTS = PromptLibrary.standard();
 
     public record Budget(int maxSteps, int maxSpawnsPerRun, int maxConcurrent) {
@@ -85,7 +80,7 @@ public final class BrowserSubagentTool extends PromptedTool {
     public record Dependencies(BrowserBackend backend, String sessionId, String runId, PathValidator paths,
         ModelClient client, PermissionGate permissionGate, ApprovalBroker approvals, AgentLoop.Config config,
         Consumer<SessionEvent> events, BooleanSupplier cancelled, SpawnAgentTool.UsageSink usageSink,
-        com.pilot.core.browser.BrowserHandoffBroker handoffs, BrowserEvidenceRecorder evidenceSink) {
+        BrowserHandoffBroker handoffs, BrowserEvidenceRecorder evidenceSink) {
     }
 
     private final BrowserBackend backend;
@@ -99,12 +94,12 @@ public final class BrowserSubagentTool extends PromptedTool {
     private final Consumer<SessionEvent> events;
     private final BooleanSupplier cancelled;
     private final SpawnAgentTool.UsageSink usageSink;
-    private final com.pilot.core.browser.BrowserHandoffBroker handoffs;
+    private final BrowserHandoffBroker handoffs;
     private final BrowserEvidenceRecorder evidenceSink;
     private final Budget budget;
     private final Semaphore parallelSlots;
     private Supplier<String> childRoute = () -> "";
-    private java.util.function.Function<String, ModelClient> routedModels = name -> null;
+    private Function<String, ModelClient> routedModels = name -> null;
     private final AtomicInteger runSpawns = new AtomicInteger();
     private final Map<String, SubagentContext> contexts = new LinkedHashMap<>();
     private final Deque<String> contextOrder = new ArrayDeque<>();
@@ -126,7 +121,7 @@ public final class BrowserSubagentTool extends PromptedTool {
         Consumer<SessionEvent> events = dependencies.events();
         BooleanSupplier cancelled = dependencies.cancelled();
         SpawnAgentTool.UsageSink usageSink = dependencies.usageSink();
-        com.pilot.core.browser.BrowserHandoffBroker handoffs = dependencies.handoffs();
+        BrowserHandoffBroker handoffs = dependencies.handoffs();
         BrowserEvidenceRecorder evidenceSink = dependencies.evidenceSink();
         this.backend = Objects.requireNonNull(backend, "backend must not be null");
         this.sessionId = sessionId == null || sessionId.isBlank() ? "default" : sessionId.strip();
@@ -145,8 +140,7 @@ public final class BrowserSubagentTool extends PromptedTool {
         this.parallelSlots = new Semaphore(this.budget.maxConcurrent());
     }
 
-    public BrowserSubagentTool withChildRoute(Supplier<String> route,
-        java.util.function.Function<String, ModelClient> models) {
+    public BrowserSubagentTool withChildRoute(Supplier<String> route, Function<String, ModelClient> models) {
         childRoute = route == null ? () -> "" : route;
         routedModels = models == null ? name -> null : models;
         return this;
@@ -210,7 +204,6 @@ public final class BrowserSubagentTool extends PromptedTool {
             }
         };
 
-        AtomicReference<RunCompleted> completion = new AtomicReference<>();
         boolean slotHeld = false;
         boolean recordingStarted = false;
         try {
@@ -218,17 +211,14 @@ public final class BrowserSubagentTool extends PromptedTool {
             slotHeld = true;
             recordingStarted = startProcessRecording(browserSessionId);
             ToolRegistry childTools = isolatedChildTools(browserSessionId, agentId, localRecorder);
-            AgentLoop.Config childConfig = subagentConfig(parentConfig, budget.maxSteps());
-            String route = childRoute.get();
-            ModelClient childClient = route == null || route.isBlank() ? client : routedModels.apply(route.strip());
-            if (childClient == null) {
-                throw new IllegalStateException("子代理模型 " + route.strip() + " 未能创建");
-            }
+            AgentLoop.Config childConfig = SubagentSupport.subagentConfig(parentConfig, budget.maxSteps(),
+                PROMPTS.get("subagent/browser").strip());
+            ModelClient childClient = SubagentSupport.resolveRoutedClient(client, childRoute.get(), routedModels);
             AgentLoop loop = new AgentLoop(boundedClient(childClient), childTools, permissionGate, approvals,
                 childConfig, cancelled::getAsBoolean);
             String prompt = buildPrompt(task, url, external, purpose, resumed != null);
-            AgentLoop.Result result =
-                loop.run(prompt, priorHistory, event -> forwardChildEvent(event, completion, agentId));
+            AgentLoop.Result result = loop.run(prompt, priorHistory,
+                event -> SubagentSupport.forwardChildEvent(events, event, agentId, null, true));
             return completeSubagent(result, invocation, captured, localRecorder, recordingStarted);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -265,10 +255,10 @@ public final class BrowserSubagentTool extends PromptedTool {
         }
         String hostFacts = buildHostFacts(agentId, browserSessionId, captured);
         List<Attachment> attachments = latestScreenshotAttachment(captured);
-        String closing = truncateSummary(result.finalText());
+        String closing = SubagentSupport.truncateSummary(result.finalText());
         if (result.failed()) {
             String code = result.failureCode() == null ? "UNKNOWN" : result.failureCode();
-            boolean authored = hasAuthoredConclusion(closing, code);
+            boolean authored = SubagentSupport.hasAuthoredConclusion(closing, code);
             String report = authored ? "[浏览器子代理阶段结算：" + code + "]\n\n" + closing + hostFacts
                 : "ERROR: 浏览器子代理未完成：" + code + hostFacts;
             events.accept(new SubagentFinished(agentId, report, false, code, authored));
@@ -285,11 +275,11 @@ public final class BrowserSubagentTool extends PromptedTool {
     }
 
     private Invocation invocation(Map<String, Object> args) {
-        String task = str(args == null ? null : args.get("task"));
+        String task = SubagentSupport.text(args == null ? null : args.get("task"));
         if (task.isBlank()) {
             return new Invocation(task, "", false, "", null, "", "", "", List.of(), "ERROR: task 不能为空");
         }
-        String resumeId = str(args == null ? null : args.get("resume_agent_id"));
+        String resumeId = SubagentSupport.text(args == null ? null : args.get("resume_agent_id"));
         SubagentContext resumed = null;
         if (!resumeId.isBlank()) {
             synchronized (contexts) {
@@ -305,12 +295,13 @@ public final class BrowserSubagentTool extends PromptedTool {
         }
         String agentId = resumed != null ? resumed.agentId() : "bagent_" + UUID.randomUUID().toString().substring(0, 8);
         String browserSessionId = resumed != null ? resumed.browserSessionId() : sessionId + "::browser::" + agentId;
-        String requestedLabel = str(args == null ? null : args.get("label"));
+        String requestedLabel = SubagentSupport.text(args == null ? null : args.get("label"));
         String label = !requestedLabel.isBlank() ? requestedLabel : resumed != null && !resumed.label().isBlank()
             ? resumed.label() : task.length() > 16 ? task.substring(0, 16) + "…" : task;
-        return new Invocation(task, str(args == null ? null : args.get("url")),
-            args != null && Boolean.TRUE.equals(args.get("external")), str(args == null ? null : args.get("purpose")),
-            resumed, agentId, browserSessionId, label, resumed == null ? List.of() : resumed.messages(), null);
+        return new Invocation(task, SubagentSupport.text(args == null ? null : args.get("url")),
+            args != null && Boolean.TRUE.equals(args.get("external")),
+            SubagentSupport.text(args == null ? null : args.get("purpose")), resumed, agentId, browserSessionId, label,
+            resumed == null ? List.of() : resumed.messages(), null);
     }
 
     private void registerChildSession(String browserSessionId, String agentId, String label) {
@@ -321,10 +312,9 @@ public final class BrowserSubagentTool extends PromptedTool {
 
     private ToolRegistry isolatedChildTools(String browserSessionId, String agentId, BrowserEvidenceRecorder recorder) {
         ToolRegistry registry = new ToolRegistry();
-        com.pilot.core.browser.BrowserTool browserTool =
-            new com.pilot.core.browser.BrowserTool(backend, browserSessionId, paths)
-                .withRunContext(sessionId, runId, agentId).withAllowEvaluate(false).withHandoffBroker(handoffs)
-                .withEvidenceRecorder(recorder);
+        BrowserTool browserTool =
+            new BrowserTool(backend, browserSessionId, paths).withRunContext(sessionId, runId, agentId)
+                .withAllowEvaluate(false).withHandoffBroker(handoffs).withEvidenceRecorder(recorder);
         registry.register(browserTool);
         registry.enable(List.of(ToolNames.BROWSER));
         return registry;
@@ -332,14 +322,8 @@ public final class BrowserSubagentTool extends PromptedTool {
 
     private ModelClient boundedClient(ModelClient delegate) {
         int maxRequests = budget.maxSteps() + 1;
-        AtomicInteger requests = new AtomicInteger();
-        return MeteredModelClient.observeUsage(delegate, () -> {
-            if (requests.incrementAndGet() > maxRequests) {
-                throw new ExecutionPolicy.Stop(RunFailureCode.MAX_STEPS,
-                    "浏览器子代理已达到模型请求上限 " + maxRequests + "，返回已核实证据。");
-            }
-            usageSink.beforeRequest();
-        }, usageSink::afterRequest);
+        return SubagentSupport.boundedClient(delegate, maxRequests, "浏览器子代理已达到模型请求上限 " + maxRequests + "，返回已核实证据。",
+            null, 0, "", usageSink);
     }
 
     private void rememberContext(String agentId, String browserSessionId, String label, AgentLoop.Result result) {
@@ -367,31 +351,6 @@ public final class BrowserSubagentTool extends PromptedTool {
             }
             backend.closeSession(evicted.browserSessionId());
         }
-    }
-
-    private void forwardChildEvent(SessionEvent event, AtomicReference<RunCompleted> completion, String agentId) {
-        if (event instanceof RunCompleted completed) {
-            completion.set(completed);
-            return;
-        }
-        if (event instanceof ToolStarted started) {
-            events.accept(started.forAgent(agentId));
-            return;
-        }
-        switch (event.type()) {
-            case TOOL_STARTED, TOOL_COMPLETED, APPROVAL_REQUIRED, APPROVAL_RESOLVED -> events.accept(event);
-            default -> {
-            }
-        }
-    }
-
-    private static AgentLoop.Config subagentConfig(AgentLoop.Config parent, int maxSteps) {
-        int steps = Math.min(Math.max(2, parent.maxSteps()), maxSteps);
-        String promptAddition = PROMPTS.get("subagent/browser").strip();
-        String systemPrompt = parent.systemPrompt() == null || parent.systemPrompt().isBlank() ? promptAddition
-            : parent.systemPrompt() + "\n\n" + promptAddition;
-        return new AgentLoop.Config(steps, parent.repeatRemindAt(), parent.repeatAbortAt(), systemPrompt, List::of, 0,
-            parent.contextLimit(), parent.completionChecks());
     }
 
     private static String buildPrompt(String task, String url, boolean external, String purpose, boolean resuming) {
@@ -478,13 +437,13 @@ public final class BrowserSubagentTool extends PromptedTool {
             Map<String, Object> meta = reply.metadata();
             String recPath = "";
             if (meta.get("recording") instanceof Map<?, ?> rec) {
-                recPath = str(rec.get("path"));
+                recPath = SubagentSupport.text(rec.get("path"));
             }
             if (!recPath.isBlank()) {
                 recorder.record(new BrowserEvidenceRecord("ev_" + UUID.randomUUID().toString().substring(0, 12),
-                    sessionId, browserSessionId, runId, agentId, Instant.now(), "record", "ok", str(meta.get("url")),
-                    str(meta.get("title")), reply.text(), "", "", "", "", 0L, List.of(),
-                    meta.get("consoleErrors") instanceof Number n ? n.intValue() : 0,
+                    sessionId, browserSessionId, runId, agentId, Instant.now(), "record", "ok",
+                    SubagentSupport.text(meta.get("url")), SubagentSupport.text(meta.get("title")), reply.text(), "",
+                    "", "", "", 0L, List.of(), meta.get("consoleErrors") instanceof Number n ? n.intValue() : 0,
                     meta.get("failedRequests") instanceof Number n ? n.intValue() : 0, "", recPath));
             }
         } catch (RuntimeException | IOException ignored) {
@@ -510,21 +469,5 @@ public final class BrowserSubagentTool extends PromptedTool {
 
     private static ToolResult resultWith(String text, List<Attachment> attachments) {
         return attachments.isEmpty() ? ToolResult.text(text) : ToolResult.withImages(text, attachments);
-    }
-
-    private static boolean hasAuthoredConclusion(String closing, String code) {
-        return !closing.isBlank() && !closing.startsWith("本轮未能完整结束（" + code + "）：");
-    }
-
-    private static String truncateSummary(String raw) {
-        String summary = raw == null ? "" : raw.strip();
-        if (summary.length() > MAX_SUMMARY_CHARS) {
-            return summary.substring(0, MAX_SUMMARY_CHARS) + "…";
-        }
-        return summary;
-    }
-
-    private static String str(Object value) {
-        return value == null ? "" : String.valueOf(value).strip();
     }
 }

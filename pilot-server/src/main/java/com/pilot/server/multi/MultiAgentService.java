@@ -26,29 +26,14 @@ import java.util.function.Function;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.approval.ApprovalBroker;
-import com.pilot.core.event.ApprovalRequired;
-import com.pilot.core.event.ApprovalResolved;
 import com.pilot.core.event.ArbitrationRequired;
-import com.pilot.core.event.AssistantDelta;
-import com.pilot.core.event.AssistantPreview;
-import com.pilot.core.event.AssistantReasoning;
-import com.pilot.core.event.ContextCompacted;
 import com.pilot.core.event.MultiAgentBudgetUpdated;
-import com.pilot.core.event.PlanUpdated;
-import com.pilot.core.event.RunCancelled;
-import com.pilot.core.event.RunCompleted;
-import com.pilot.core.event.RunContinued;
-import com.pilot.core.event.RunEnded;
-import com.pilot.core.event.RunFailed;
 import com.pilot.core.event.RunFailureCode;
-import com.pilot.core.event.RunRetrying;
-import com.pilot.core.event.RunUsageUpdated;
 import com.pilot.core.event.SandboxDiffReady;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.event.SubagentFinished;
 import com.pilot.core.event.SubagentStarted;
 import com.pilot.core.event.TaskUpdated;
-import com.pilot.core.event.ToolStarted;
 import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.loop.Cancellation;
 import com.pilot.core.loop.ContextCompactor;
@@ -623,9 +608,12 @@ public class MultiAgentService {
         // 子 Agent 的范围与父会话一致：项目附加目录也要开放，否则多目录项目里的子任务会看不见兄弟目录
         ToolRegistry tools =
             toolFactory.registryForScope(dispatch.workspace(), spec.scope(), sink, dispatch.extraRoots());
-        // 上下文预算与收尾门跟随主会话配置，避免子 Agent 用更小的窗口和额外的收尾门做不完任务
-        AgentLoop.Config config = new AgentLoop.Config(agent.maxSteps(), 3, 5, systemPrompt(spec, dispatch), List::of,
-            0, agent.contextMaxChars(), agent.completionChecksEnabled());
+        // 上下文预算与收尾门跟随主会话配置，避免子 Agent 用更小的窗口和额外的收尾门做不完任务；
+        // 显式配置 pilot.multi.max-steps 时再按配置收窄轮数上限。
+        int maxSteps =
+            properties.maxSteps() == null ? agent.maxSteps() : Math.min(agent.maxSteps(), properties.maxSteps());
+        AgentLoop.Config config = new AgentLoop.Config(maxSteps, 3, 5, systemPrompt(spec, dispatch), List::of, 0,
+            agent.contextMaxChars(), agent.completionChecksEnabled());
         // 每个子 Agent 单独一份 trace：出问题能按 agentId 回放它自己的工具调用链
         JsonlTraceRecorder trace = new JsonlTraceRecorder(
             dataDir.file("traces", dispatch.sessionId() + "-" + agentId + ".jsonl"), objectMapper);
@@ -634,13 +622,7 @@ public class MultiAgentService {
         ModelClient selected = dispatch.executionClient() == null
             ? new MeteredModelClient(modelClient, dispatch.sessionId() + ":subagent", "subagent", List.of(), report -> {
             }) : dispatch.executionClient();
-        if (dispatch.childModel() != null && !dispatch.childModel().isBlank()) {
-            ModelClient routed = dispatch.routedModels().apply(dispatch.childModel().strip());
-            if (routed == null) {
-                throw new IllegalStateException("子代理模型 " + dispatch.childModel().strip() + " 未能创建");
-            }
-            selected = routed;
-        }
+        selected = SubagentSupport.resolveRoutedClient(selected, dispatch.childModel(), dispatch.routedModels());
         UsageSink usage = dispatch.usageSinkOrNull();
         ModelClient metered = MeteredModelClient.observeUsage(selected, usage::beforeRequest, usage::afterRequest);
         ModelClient budgeted = usageMetering(metered, meter, budget);
@@ -817,28 +799,13 @@ public class MultiAgentService {
     }
 
     /**
-     * 子 Agent 的事件只放行工具与子代理事件。
+     * 子 Agent 的事件只按白名单放行工具与子代理事件。
      *
      * <p>模型增量、run.completed / run.failed 属于父会话语义，直接放行会把子 Agent 的文字混进父回答、
      * 甚至把整个会话标成失败。
      */
     private static Consumer<SessionEvent> subagentSink(Consumer<SessionEvent> sink, String agentId) {
-        return event -> {
-            if (event instanceof ToolStarted started) {
-                // 多个子 Agent 并行时必须带归属，前端才分得清哪条操作是谁发起的。
-                sink.accept(started.forAgent(agentId));
-                return;
-            }
-            if (event instanceof AssistantDelta || event instanceof AssistantPreview
-                || event instanceof AssistantReasoning || event instanceof ContextCompacted
-                || event instanceof PlanUpdated || event instanceof RunUsageUpdated || event instanceof RunCompleted
-                || event instanceof RunEnded || event instanceof RunFailed || event instanceof RunCancelled
-                || event instanceof RunContinued || event instanceof RunRetrying || event instanceof ApprovalRequired
-                || event instanceof ApprovalResolved) {
-                return;
-            }
-            sink.accept(event);
-        };
+        return event -> SubagentSupport.forwardChildEvent(sink, event, agentId, null, false);
     }
 
     private String systemPrompt(TaskSpec spec, Dispatch dispatch) {

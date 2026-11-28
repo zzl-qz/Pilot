@@ -1,13 +1,13 @@
 package com.pilot.server.agent;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -17,14 +17,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import com.pilot.core.exec.ProcessSupport;
 import com.pilot.core.tool.file.SearchTool;
 import com.pilot.core.util.Texts;
 import com.pilot.core.workspace.PathValidator;
@@ -348,9 +346,25 @@ final class PreFlightLocator {
         }
     }
 
+    private static final int MAX_PROCESS_OUTPUT_BYTES = 2 * 1024 * 1024;
+
+    private record PreparedAnchor(Anchor anchor, String lower, boolean hasSlash) {
+        static List<PreparedAnchor> prepare(List<Anchor> anchors) {
+            return anchors.stream().map(a -> {
+                String lower = a.text().toLowerCase(Locale.ROOT);
+                return new PreparedAnchor(a, lower, lower.contains("/"));
+            }).toList();
+        }
+    }
+
+    private record FileMatch(int score, List<String> reasons) {
+    }
+
     private void scanFileNames(ScanContext scan, List<Anchor> fileAnchors, List<Anchor> stemAnchors) {
+        List<PreparedAnchor> preparedFiles = PreparedAnchor.prepare(fileAnchors);
+        List<PreparedAnchor> preparedStems = PreparedAnchor.prepare(stemAnchors);
         if (allowRipgrep && Files.exists(scan.root().resolve(".git"))
-            && scanGitFileNames(scan, fileAnchors, stemAnchors)) {
+            && scanGitFileNames(scan, preparedFiles, preparedStems)) {
             return;
         }
         int[] visited = {0};
@@ -382,8 +396,14 @@ final class PreFlightLocator {
                     if (attrs.isSymbolicLink() || !scan.validator().allows(file)) {
                         return FileVisitResult.CONTINUE;
                     }
-                    matchFileCandidate(scan.validator().display(file), file.getFileName().toString(), fileAnchors,
-                        stemAnchors, scan.excluded(), scan.scores(), scan.reasons());
+                    String display = scan.validator().display(file);
+                    if (!isSensitivePath(display) && !scan.excluded().contains(display)) {
+                        FileMatch match =
+                            matchFileAnchors(display, file.getFileName().toString(), preparedFiles, preparedStems);
+                        if (match != null) {
+                            recordFileMatch(display, match, scan.scores(), scan.reasons());
+                        }
+                    }
                     return FileVisitResult.CONTINUE;
                 }
 
@@ -397,29 +417,19 @@ final class PreFlightLocator {
         }
     }
 
-    private boolean scanGitFileNames(ScanContext scan, List<Anchor> fileAnchors, List<Anchor> stemAnchors) {
+    private boolean scanGitFileNames(ScanContext scan, List<PreparedAnchor> fileAnchors,
+        List<PreparedAnchor> stemAnchors) {
         long remainingMs = Math.max(15L, TimeUnit.NANOSECONDS.toMillis(scan.deadline() - System.nanoTime()));
-        Process process = null;
+        ProcessBuilder builder = new ProcessBuilder("git", "ls-files", "--cached", "--others", "--exclude-standard")
+            .directory(scan.root().toFile());
+        builder.environment().put("GIT_OPTIONAL_LOCKS", "0");
         try {
-            ProcessBuilder builder = new ProcessBuilder("git", "ls-files", "--cached", "--others", "--exclude-standard")
-                .directory(scan.root().toFile()).redirectError(ProcessBuilder.Redirect.DISCARD);
-            builder.environment().put("GIT_OPTIONAL_LOCKS", "0");
-            process = builder.start();
-            Process running = process;
-            CompletableFuture<byte[]> output =
-                CompletableFuture.supplyAsync(() -> readLimited(running.getInputStream()));
-            if (!process.waitFor(remainingMs, TimeUnit.MILLISECONDS)) {
-                scan.timedOut()[0] = true;
-                process.destroyForcibly();
-                output.cancel(true);
+            ProcessSupport.CapturedOutput captured =
+                ProcessSupport.captureStdoutUtf8(builder, Duration.ofMillis(remainingMs), MAX_PROCESS_OUTPUT_BYTES);
+            if (captured.exitCode() != 0) {
                 return false;
             }
-            if (process.exitValue() != 0) {
-                return false;
-            }
-            byte[] bytes = output.get(Math.max(20L, Math.min(150L, remainingMs)), TimeUnit.MILLISECONDS);
-            String text = new String(bytes, StandardCharsets.UTF_8);
-            for (String rawLine : text.lines().toList()) {
+            for (String rawLine : captured.output().lines().toList()) {
                 String relative = stripLeadingDotSlash(rawLine.strip().replace('\\', '/'));
                 if (relative.isEmpty()) {
                     continue;
@@ -427,7 +437,8 @@ final class PreFlightLocator {
                 int slash = relative.lastIndexOf('/');
                 String fileName = slash >= 0 ? relative.substring(slash + 1) : relative;
                 // 先在纯内存完成文件名/类型定义名匹配，再对命中的极少数候选执行磁盘路径与权限校验，避免全仓上千次系统调用拖慢超时。
-                if (!matchesAnyFileOrStem(relative, fileName, fileAnchors, stemAnchors)) {
+                FileMatch match = matchFileAnchors(relative, fileName, fileAnchors, stemAnchors);
+                if (match == null) {
                     continue;
                 }
                 Path resolved;
@@ -440,125 +451,72 @@ final class PreFlightLocator {
                 } catch (RuntimeException invalid) {
                     continue;
                 }
-                matchFileCandidate(scan.validator().display(resolved), resolved.getFileName().toString(), fileAnchors,
-                    stemAnchors, scan.excluded(), scan.scores(), scan.reasons());
+                String display = scan.validator().display(resolved);
+                if (!isSensitivePath(display) && !scan.excluded().contains(display)) {
+                    recordFileMatch(display, match, scan.scores(), scan.reasons());
+                }
             }
             return true;
         } catch (IOException e) {
-            if (process != null) {
-                process.destroyForcibly();
-            }
             return false;
         } catch (InterruptedException e) {
-            if (process != null) {
-                process.destroyForcibly();
-            }
             Thread.currentThread().interrupt();
             return false;
-        } catch (ExecutionException | TimeoutException e) {
-            if (process != null) {
-                process.destroyForcibly();
-            }
+        } catch (TimeoutException e) {
             scan.timedOut()[0] = true;
             return false;
         }
     }
 
-    private static boolean matchesAnyFileOrStem(String display, String fileName, List<Anchor> fileAnchors,
-        List<Anchor> stemAnchors) {
+    private static FileMatch matchFileAnchors(String display, String fileName, List<PreparedAnchor> fileAnchors,
+        List<PreparedAnchor> stemAnchors) {
         String lowerDisplay = display.toLowerCase(Locale.ROOT);
         String lowerName = fileName.toLowerCase(Locale.ROOT);
         String lowerStem = fileStem(lowerName);
-        for (Anchor anchor : fileAnchors) {
-            String target = anchor.text().toLowerCase(Locale.ROOT);
-            if (target.contains("/") ? lowerDisplay.equals(target) || lowerDisplay.endsWith("/" + target)
-                : lowerName.equals(target)) {
-                return true;
+        int score = 0;
+        List<String> matchedReasons = null;
+        for (PreparedAnchor candidate : fileAnchors) {
+            boolean matched = candidate.hasSlash()
+                ? lowerDisplay.equals(candidate.lower()) || lowerDisplay.endsWith("/" + candidate.lower())
+                : lowerName.equals(candidate.lower());
+            if (matched) {
+                score += candidate.anchor().weight();
+                if (matchedReasons == null) {
+                    matchedReasons = new ArrayList<>(2);
+                }
+                matchedReasons.add("文件名匹配 " + candidate.anchor().text());
             }
         }
-        for (Anchor anchor : stemAnchors) {
-            if (lowerStem.equals(anchor.text().toLowerCase(Locale.ROOT))) {
-                return true;
+        for (PreparedAnchor candidate : stemAnchors) {
+            if (lowerStem.equals(candidate.lower())) {
+                score += 90;
+                if (matchedReasons == null) {
+                    matchedReasons = new ArrayList<>(2);
+                }
+                matchedReasons.add("定义文件匹配 " + candidate.anchor().text());
             }
         }
-        return false;
+        return matchedReasons == null ? null : new FileMatch(score, matchedReasons);
     }
 
-    private static void matchFileCandidate(String display, String fileName, List<Anchor> fileAnchors,
-        List<Anchor> stemAnchors, Set<String> excluded, Map<String, Integer> scores,
+    private static void recordFileMatch(String display, FileMatch match, Map<String, Integer> scores,
         Map<String, LinkedHashSet<String>> reasons) {
-        if (isSensitivePath(display) || excluded.contains(display)) {
-            return;
-        }
-        String lowerDisplay = display.toLowerCase(Locale.ROOT);
-        String lowerName = fileName.toLowerCase(Locale.ROOT);
-        String lowerStem = fileStem(lowerName);
-        for (Anchor anchor : fileAnchors) {
-            String target = anchor.text().toLowerCase(Locale.ROOT);
-            boolean matched = target.contains("/") ? lowerDisplay.equals(target) || lowerDisplay.endsWith("/" + target)
-                : lowerName.equals(target);
-            if (matched) {
-                scores.merge(display, anchor.weight(), Integer::sum);
-                reasons.computeIfAbsent(display, ignored -> new LinkedHashSet<>()).add("文件名匹配 " + anchor.text());
-            }
-        }
-        for (Anchor anchor : stemAnchors) {
-            if (lowerStem.equals(anchor.text().toLowerCase(Locale.ROOT))) {
-                scores.merge(display, 90, Integer::sum);
-                reasons.computeIfAbsent(display, ignored -> new LinkedHashSet<>()).add("定义文件匹配 " + anchor.text());
-            }
-        }
+        scores.merge(display, match.score(), Integer::sum);
+        reasons.computeIfAbsent(display, ignored -> new LinkedHashSet<>()).addAll(match.reasons());
     }
 
     /** 无 rg 时的 git 仓库高速回落：单进程 git grep -n -F -I，跨 Windows/macOS/Linux 自动跳过二进制与忽略目录。 */
     private Map<String, Map<String, Integer>> runGitGrepBatch(Path root, PathValidator validator, List<Anchor> anchors,
         long hardDeadline, boolean[] timedOut) {
-        long remainingMs = Math.max(15L, TimeUnit.NANOSECONDS.toMillis(hardDeadline - System.nanoTime()));
         ArrayList<String> command =
             new ArrayList<>(List.of("git", "--no-pager", "grep", "--no-color", "-n", "-F", "-I"));
         for (Anchor anchor : anchors) {
             command.add("-e");
             command.add(anchor.text());
         }
-        Process process = null;
-        try {
-            ProcessBuilder builder =
-                new ProcessBuilder(command).directory(root.toFile()).redirectError(ProcessBuilder.Redirect.DISCARD);
-            builder.environment().put("GIT_OPTIONAL_LOCKS", "0");
-            process = builder.start();
-            Process running = process;
-            CompletableFuture<byte[]> output =
-                CompletableFuture.supplyAsync(() -> readLimited(running.getInputStream()));
-            if (!process.waitFor(remainingMs, TimeUnit.MILLISECONDS)) {
-                timedOut[0] = true;
-                process.destroyForcibly();
-                output.cancel(true);
-                return Map.of();
-            }
-            byte[] bytes = output.get(Math.max(20L, Math.min(200L, remainingMs)), TimeUnit.MILLISECONDS);
-            int status = process.exitValue();
-            if (status > 1) {
-                return null;
-            }
-            return parseLineMatches(validator, anchors, new String(bytes, StandardCharsets.UTF_8));
-        } catch (IOException e) {
-            if (process != null) {
-                process.destroyForcibly();
-            }
-            return null;
-        } catch (InterruptedException e) {
-            if (process != null) {
-                process.destroyForcibly();
-            }
-            Thread.currentThread().interrupt();
-            return Map.of();
-        } catch (ExecutionException | TimeoutException e) {
-            if (process != null) {
-                process.destroyForcibly();
-            }
-            timedOut[0] = true;
-            return Map.of();
-        }
+        ProcessBuilder builder = new ProcessBuilder(command).directory(root.toFile());
+        builder.environment().put("GIT_OPTIONAL_LOCKS", "0");
+        return runLineSearchBatch(builder, validator, 15L, anchors, hardDeadline, timedOut);
     }
 
     private static Map<String, Map<String, Integer>> parseLineMatches(PathValidator validator, List<Anchor> anchors,
@@ -604,7 +562,6 @@ final class PreFlightLocator {
     /** 单进程调用 rg -F -e 批量检索全部内容锚点，避免 Windows 多次 CreateProcess 开销。 */
     private Map<String, Map<String, Integer>> runRipgrepBatch(Path root, PathValidator validator, List<Anchor> anchors,
         long hardDeadline, boolean[] timedOut) {
-        long remainingMs = Math.max(10L, TimeUnit.NANOSECONDS.toMillis(hardDeadline - System.nanoTime()));
         ArrayList<String> command = new ArrayList<>(List.of("rg", "--fixed-strings", "--line-number", "--no-heading",
             "--color", "never", "--no-messages", "--with-filename", "--max-count", "25"));
         for (String skipped : SearchTool.SKIPPED_DIRECTORIES) {
@@ -617,40 +574,26 @@ final class PreFlightLocator {
         }
         command.add("--");
         command.add(".");
-        Process process = null;
+        return runLineSearchBatch(new ProcessBuilder(command).directory(root.toFile()), validator, 10L, anchors,
+            hardDeadline, timedOut);
+    }
+
+    private static Map<String, Map<String, Integer>> runLineSearchBatch(ProcessBuilder builder, PathValidator validator,
+        long minBudgetMs, List<Anchor> anchors, long hardDeadline, boolean[] timedOut) {
+        long remainingMs = Math.max(minBudgetMs, TimeUnit.NANOSECONDS.toMillis(hardDeadline - System.nanoTime()));
         try {
-            process = new ProcessBuilder(command).directory(root.toFile())
-                .redirectError(ProcessBuilder.Redirect.DISCARD).start();
-            Process running = process;
-            CompletableFuture<byte[]> output =
-                CompletableFuture.supplyAsync(() -> readLimited(running.getInputStream()));
-            if (!process.waitFor(remainingMs, TimeUnit.MILLISECONDS)) {
-                timedOut[0] = true;
-                process.destroyForcibly();
-                output.cancel(true);
-                return Map.of();
-            }
-            byte[] bytes = output.get(Math.max(20L, Math.min(200L, remainingMs)), TimeUnit.MILLISECONDS);
-            int status = process.exitValue();
-            if (status > 1) {
+            ProcessSupport.CapturedOutput captured =
+                ProcessSupport.captureStdoutUtf8(builder, Duration.ofMillis(remainingMs), MAX_PROCESS_OUTPUT_BYTES);
+            if (captured.exitCode() > 1) {
                 return null;
             }
-            return parseLineMatches(validator, anchors, new String(bytes, StandardCharsets.UTF_8));
+            return parseLineMatches(validator, anchors, captured.output());
         } catch (IOException e) {
-            if (process != null) {
-                process.destroyForcibly();
-            }
             return null;
         } catch (InterruptedException e) {
-            if (process != null) {
-                process.destroyForcibly();
-            }
             Thread.currentThread().interrupt();
             return Map.of();
-        } catch (ExecutionException | TimeoutException e) {
-            if (process != null) {
-                process.destroyForcibly();
-            }
+        } catch (TimeoutException e) {
             timedOut[0] = true;
             return Map.of();
         }
@@ -770,14 +713,6 @@ final class PreFlightLocator {
             }
         }
         return line;
-    }
-
-    private static byte[] readLimited(InputStream input) {
-        try (input) {
-            return input.readNBytes(2 * 1024 * 1024);
-        } catch (IOException e) {
-            throw new CompletionException(e);
-        }
     }
 
     private static boolean isSensitivePath(String displayPath) {

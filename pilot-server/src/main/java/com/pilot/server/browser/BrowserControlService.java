@@ -11,6 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Predicate;
 
 import jakarta.annotation.PreDestroy;
 
@@ -75,8 +76,8 @@ public class BrowserControlService implements BrowserEventListener {
         this.runtime = runtime;
         this.mapper = mapper;
         this.enabled = enabled;
-        this.maxWidth = clamp(maxWidth, 320, 1920);
-        this.quality = clamp(quality, 20, 90);
+        this.maxWidth = Math.clamp(maxWidth, 320, 1920);
+        this.quality = Math.clamp(quality, 20, 90);
         // 事件监听注册在这里而不是 BrowserRuntime 构造时：避免两个 bean 的构造依赖成环。
         runtime.setEventListener(this);
     }
@@ -110,25 +111,14 @@ public class BrowserControlService implements BrowserEventListener {
     /** 镜像面板的轻量状态：前端据此决定是否显示浏览器 tab、能否连 SSE。 */
     public Map<String, Object> status(String sessionId) {
         Availability availability = runtime.availability();
-        String activeLane = activeLaneOf(sessionId);
-        List<BrowserHandoffBroker.PendingHandoff> pending = handoffs == null ? List.of() : handoffs.pending(sessionId);
-        List<BrowserRuntime.LaneInfo> lanes = runtime.activeLanes(sessionId);
         int evidenceCount =
             evidence == null ? 0 : evidence.list(sessionId, "", BrowserEvidenceService.MAX_RECORDS_PER_SESSION).size();
-        boolean controlled = runtime.agentControlled(activeLane)
-            || (!activeLane.equals(sessionId) && runtime.agentControlled(sessionId));
         Map<String, Object> status = new LinkedHashMap<>();
         status.put("enabled", enabled);
         status.put("capable", runtime.mirrorCapable());
         status.put("available", availability.available());
         status.put("reason", availability.reason());
-        status.put("paused", runtime.interactionsPaused(sessionId) || runtime.interactionsPaused(activeLane));
-        status.put("agentControlled", controlled);
-        status.put("controlStatus", currentControlStatus(sessionId, activeLane));
-        status.put("headless", runtime.headless());
-        status.put("activeLane", activeLane);
-        status.put("lanes", lanes);
-        status.put("handoffs", pending);
+        status.putAll(baseStateMap(sessionId, availability));
         status.put("evidenceCount", evidenceCount);
         return status;
     }
@@ -243,12 +233,7 @@ public class BrowserControlService implements BrowserEventListener {
             state.activeLane = target;
             state.frame = state.laneFrames.get(target);
             state.navigation = state.laneNavs.get(target);
-            if (!previous.equals(target) && state.capturing()) {
-                controls.execute(() -> {
-                    runtime.mirrorControl(previous, false, maxWidth, quality);
-                    runtime.mirrorControl(target, true, maxWidth, quality);
-                });
-            }
+            switchMirrorLane(state, previous, target);
             broadcast(state, "state", statePayload(sessionId));
             if (state.navigation != null) {
                 broadcast(state, "nav", state.navigation.toString());
@@ -265,22 +250,15 @@ public class BrowserControlService implements BrowserEventListener {
     }
 
     public Map<String, Object> resumeHandoff(String sessionId, String browserSessionId, String note) {
-        if (handoffs == null) {
-            setPaused(sessionId, false);
-            return Map.of("ok", true, "resolved", false, "handoffs", List.of());
-        }
-        String target = resolveTargetBrowserSession(sessionId, browserSessionId);
-        if (target == null) {
-            return Map.of("ok", false, "error", "目标浏览器通道不属于当前会话");
-        }
-        boolean resolved = handoffs.resume(target, note);
-        if (!resolved && target.equals(sessionId)) {
-            setPaused(sessionId, false);
-        }
-        return Map.of("ok", true, "resolved", resolved, "handoffs", handoffs.pending(sessionId));
+        return resolveHandoff(sessionId, browserSessionId, target -> handoffs.resume(target, note), true);
     }
 
     public Map<String, Object> cancelHandoff(String sessionId, String browserSessionId, String reason) {
+        return resolveHandoff(sessionId, browserSessionId, target -> handoffs.cancel(target, reason), false);
+    }
+
+    private Map<String, Object> resolveHandoff(String sessionId, String browserSessionId, Predicate<String> resolver,
+        boolean unpauseOnUnresolved) {
         if (handoffs == null) {
             setPaused(sessionId, false);
             return Map.of("ok", true, "resolved", false, "handoffs", List.of());
@@ -289,7 +267,10 @@ public class BrowserControlService implements BrowserEventListener {
         if (target == null) {
             return Map.of("ok", false, "error", "目标浏览器通道不属于当前会话");
         }
-        boolean resolved = handoffs.cancel(target, reason);
+        boolean resolved = resolver.test(target);
+        if (unpauseOnUnresolved && !resolved && target.equals(sessionId)) {
+            setPaused(sessionId, false);
+        }
         return Map.of("ok", true, "resolved", resolved, "handoffs", handoffs.pending(sessionId));
     }
 
@@ -321,7 +302,6 @@ public class BrowserControlService implements BrowserEventListener {
             return Map.of("ok", false, "error", "目标浏览器通道不属于当前会话");
         }
         Map<String, Object> command = new LinkedHashMap<>();
-        command.put("op", op);
         if (args != null) {
             command.putAll(args);
         }
@@ -557,12 +537,7 @@ public class BrowserControlService implements BrowserEventListener {
                     if (!target.equals(state.activeLane)) {
                         String previous = state.activeLane;
                         state.activeLane = target;
-                        if (state.capturing()) {
-                            controls.execute(() -> {
-                                runtime.mirrorControl(previous, false, maxWidth, quality);
-                                runtime.mirrorControl(target, true, maxWidth, quality);
-                            });
-                        }
+                        switchMirrorLane(state, previous, target);
                     }
                 }
             }
@@ -633,22 +608,36 @@ public class BrowserControlService implements BrowserEventListener {
         return mapper.writeValueAsString(body);
     }
 
-    private String statePayload(String sessionId) {
+    private void switchMirrorLane(State state, String previous, String target) {
+        if (!previous.equals(target) && state.capturing()) {
+            controls.execute(() -> {
+                runtime.mirrorControl(previous, false, maxWidth, quality);
+                runtime.mirrorControl(target, true, maxWidth, quality);
+            });
+        }
+    }
+
+    private Map<String, Object> baseStateMap(String sessionId, Availability availability) {
         String activeLane = activeLaneOf(sessionId);
         boolean controlled = runtime.agentControlled(activeLane)
             || (!activeLane.equals(sessionId) && runtime.agentControlled(sessionId));
         List<BrowserHandoffBroker.PendingHandoff> pending = handoffs == null ? List.of() : handoffs.pending(sessionId);
-        List<BrowserRuntime.LaneInfo> lanes = runtime.activeLanes(sessionId);
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("paused", runtime.interactionsPaused(sessionId) || runtime.interactionsPaused(activeLane));
+        map.put("agentControlled", controlled);
+        map.put("controlStatus", currentControlStatus(sessionId, activeLane));
+        map.put("available", availability.available());
+        map.put("headless", runtime.headless());
+        map.put("activeLane", activeLane);
+        map.put("lanes", runtime.activeLanes(sessionId));
+        map.put("handoffs", pending);
+        return map;
+    }
+
+    private String statePayload(String sessionId) {
         Map<String, Object> state = new LinkedHashMap<>();
         state.put("sessionId", sessionId);
-        state.put("paused", runtime.interactionsPaused(sessionId) || runtime.interactionsPaused(activeLane));
-        state.put("agentControlled", controlled);
-        state.put("controlStatus", currentControlStatus(sessionId, activeLane));
-        state.put("available", runtime.availability().available());
-        state.put("headless", runtime.headless());
-        state.put("activeLane", activeLane);
-        state.put("lanes", lanes);
-        state.put("handoffs", pending);
+        state.putAll(baseStateMap(sessionId, runtime.availability()));
         if (evidence != null) {
             state.put("evidenceCount",
                 evidence.list(sessionId, "", BrowserEvidenceService.MAX_RECORDS_PER_SESSION).size());
@@ -663,10 +652,6 @@ public class BrowserControlService implements BrowserEventListener {
         }
         String parentStatus = activeLane.equals(sessionId) ? "" : runtime.agentControlStatus(sessionId);
         return parentStatus == null ? "" : parentStatus;
-    }
-
-    private static int clamp(int value, int min, int max) {
-        return Math.max(min, Math.min(max, value));
     }
 
     /** 每个会话的镜像状态：最新一帧 + 订阅者表 + 子泳道缓存。 */

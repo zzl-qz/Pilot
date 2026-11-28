@@ -36,7 +36,7 @@ import com.pilot.core.coordination.WorkspaceEventDraft;
 import com.pilot.core.coordination.WorkspaceEventType;
 import com.pilot.core.project.ProjectRepository;
 import com.pilot.core.session.SessionRepository;
-import com.pilot.server.session.events.SessionEventTransport;
+import com.pilot.server.session.events.SseStreamTransport;
 
 /** 真实 Tomcat/Socket 验证工作区事件流：MockMvc 的输出流不支持 WriteListener。 */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -61,7 +61,7 @@ class WorkspaceCoordinationStreamControllerTest {
     @Autowired
     WorkspaceCoordinationEventBus events;
     @Autowired
-    SessionEventTransport transport;
+    SseStreamTransport transport;
     @Autowired
     ProjectRepository projects;
     @Autowired

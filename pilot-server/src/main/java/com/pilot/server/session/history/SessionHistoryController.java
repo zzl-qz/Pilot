@@ -15,7 +15,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,10 +28,11 @@ import org.springframework.web.server.ResponseStatusException;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.ToolCompleted;
+import com.pilot.core.session.EventStreamLimits;
 import com.pilot.core.session.EventSubscription;
 import com.pilot.core.session.SessionService;
 import com.pilot.server.session.events.AsyncEventStream;
-import com.pilot.server.session.events.SessionEventTransport;
+import com.pilot.server.session.events.SseStreamTransport;
 import com.pilot.server.session.lookup.SessionLookup;
 import com.pilot.server.workspace.ChangeService;
 import com.pilot.server.workspace.RunSnapshotService;
@@ -54,13 +54,9 @@ public class SessionHistoryController {
 
     private final SessionService sessions;
     private final ObjectMapper objectMapper;
-    private final SessionEventTransport eventTransport;
+    private final SseStreamTransport eventTransport;
+    private final EventStreamLimits eventLimits;
     private final ObjectProvider<RunSnapshotService> snapshotsProvider;
-
-    @Value("${pilot.events.queue-bytes:8388608}")
-    private long streamBytes = 8L * 1024 * 1024;
-    @Value("${pilot.events.send-timeout-ms:30000}")
-    private long streamTimeout = 30_000;
 
     /**
      * 历史事件分页：界面首屏只取尾部一页，避免长会话一次性回放上千条事件。
@@ -302,8 +298,8 @@ public class SessionHistoryController {
         var registered = new CompletableFuture<Void>();
         AtomicReference<AsyncEventStream> transport = new AtomicReference<>();
         Runnable finish = () -> finishStream(transport.get(), id, revision, subscription.get());
-        var stream = new AsyncEventStream(eventTransport, request, response, streamBytes,
-            Duration.ofMillis(streamTimeout), () -> {
+        var stream = new AsyncEventStream(eventTransport, request, response, eventLimits.queueBytes(),
+            Duration.ofMillis(eventLimits.sendMillis()), () -> {
                 var current = subscription.get();
                 if (current != null) {
                     current.close();

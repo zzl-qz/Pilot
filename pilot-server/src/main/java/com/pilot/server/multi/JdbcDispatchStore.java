@@ -1,12 +1,15 @@
 package com.pilot.server.multi;
 
+import java.sql.Statement;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.multi.TaskSpec;
@@ -157,23 +160,17 @@ public final class JdbcDispatchStore {
         SqliteStore resolved = store == null ? null : store.getIfAvailable();
         this.store = resolved;
         if (resolved != null) {
-            for (String ddl : SCHEMA) {
-                resolved.update(ddl, statement -> {
-                }, "初始化派发表失败");
-            }
-            // 老库补列：表已经存在时 CREATE TABLE IF NOT EXISTS 不会改动它
-            for (String[] column : ADDED_COLUMNS) {
-                addColumnIfMissing(resolved, column[0], column[1], column[2]);
-            }
-        }
-    }
-
-    private static void addColumnIfMissing(SqliteStore store, String table, String column, String definition) {
-        boolean present = store.query("PRAGMA table_info(" + table + ")", statement -> {
-        }, rows -> rows.getString("name"), "检查派发表结构失败").contains(column);
-        if (!present) {
-            store.update("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition, statement -> {
-            }, "补充派发表列失败");
+            resolved.inTransaction(connection -> {
+                try (Statement statement = connection.createStatement()) {
+                    for (String ddl : SCHEMA) {
+                        statement.execute(ddl);
+                    }
+                    // 老库补列：表已经存在时 CREATE TABLE IF NOT EXISTS 不会改动它
+                    for (String[] column : ADDED_COLUMNS) {
+                        SqliteStore.addColumnIfMissing(statement, column[0], column[1], column[2]);
+                    }
+                }
+            }, "初始化派发表失败");
         }
     }
 
@@ -203,34 +200,36 @@ public final class JdbcDispatchStore {
     }
 
     public void saveNodes(String dispatchId, List<TaskSpec> specs) {
-        if (!available() || specs == null) {
+        if (!available() || specs == null || specs.isEmpty()) {
             return;
         }
         String now = Instant.now().toString();
+        List<SqliteStore.Binder> binders = new ArrayList<>(specs.size());
+        for (TaskSpec spec : specs) {
+            binders.add(statement -> {
+                statement.setString(1, dispatchId);
+                statement.setString(2, spec.id());
+                statement.setString(3, spec.title());
+                statement.setString(4, spec.goal());
+                statement.setString(5, String.join(",", spec.dependsOn()));
+                statement.setInt(6, spec.scope() != null && spec.scope().writable() ? 1 : 0);
+                statement.setString(7, spec.risk() == null ? "" : spec.risk().wireName());
+                statement.setInt(8, spec.reviewers());
+                statement.setString(9, TaskStatus.PENDING.wireName());
+                statement.setString(10, "");
+                statement.setString(11, "");
+                statement.setString(12, now);
+            });
+        }
         store.inTransaction(connection -> {
-            for (TaskSpec spec : specs) {
-                store.exec(connection, """
-                    INSERT INTO task_nodes (dispatch_id, task_id, title, goal, depends_on, writable,
-                                            risk, reviewers, status, agent_id, detail, attempts, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
-                    ON CONFLICT(dispatch_id, task_id) DO UPDATE SET
-                        title = excluded.title, goal = excluded.goal, depends_on = excluded.depends_on,
-                        writable = excluded.writable, risk = excluded.risk, reviewers = excluded.reviewers
-                    """, statement -> {
-                    statement.setString(1, dispatchId);
-                    statement.setString(2, spec.id());
-                    statement.setString(3, spec.title());
-                    statement.setString(4, spec.goal());
-                    statement.setString(5, String.join(",", spec.dependsOn()));
-                    statement.setInt(6, spec.scope() != null && spec.scope().writable() ? 1 : 0);
-                    statement.setString(7, spec.risk() == null ? "" : spec.risk().wireName());
-                    statement.setInt(8, spec.reviewers());
-                    statement.setString(9, TaskStatus.PENDING.wireName());
-                    statement.setString(10, "");
-                    statement.setString(11, "");
-                    statement.setString(12, now);
-                });
-            }
+            store.batch(connection, """
+                INSERT INTO task_nodes (dispatch_id, task_id, title, goal, depends_on, writable,
+                                        risk, reviewers, status, agent_id, detail, attempts, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                ON CONFLICT(dispatch_id, task_id) DO UPDATE SET
+                    title = excluded.title, goal = excluded.goal, depends_on = excluded.depends_on,
+                    writable = excluded.writable, risk = excluded.risk, reviewers = excluded.reviewers
+                """, binders);
         }, "保存任务节点失败");
     }
 
@@ -263,9 +262,8 @@ public final class JdbcDispatchStore {
         if (!available()) {
             return Lease.NONE;
         }
-        int[] generation = {0};
         String attemptId = "att_" + UUID.randomUUID();
-        store.inTransaction(connection -> {
+        return store.inTransaction(connection -> {
             // 先取 SQLite 写锁并使旧执行者失效，再在同一事务内分配代次。
             store.exec(connection, """
                 UPDATE task_attempts SET status = 'interrupted', failure = '已被新尝试取代', finished_at = ?
@@ -276,6 +274,7 @@ public final class JdbcDispatchStore {
                 statement.setString(3, taskId);
                 statement.setString(4, lane);
             });
+            int generation;
             try (var statement = connection.prepareStatement(
                 "SELECT COALESCE(MAX(generation), 0) + 1 AS gen FROM task_attempts WHERE dispatch_id = ? AND task_id = ? AND lane = ?")) {
                 statement.setString(1, dispatchId);
@@ -283,7 +282,7 @@ public final class JdbcDispatchStore {
                 statement.setString(3, lane);
                 try (var rows = statement.executeQuery()) {
                     rows.next();
-                    generation[0] = rows.getInt("gen");
+                    generation = rows.getInt("gen");
                 }
             }
             store.exec(connection, """
@@ -296,12 +295,12 @@ public final class JdbcDispatchStore {
                 statement.setString(3, taskId);
                 statement.setString(4, agentId == null ? "" : agentId);
                 statement.setString(5, sandboxId == null ? "" : sandboxId);
-                statement.setInt(6, generation[0]);
+                statement.setInt(6, generation);
                 statement.setString(7, Instant.now().toString());
                 statement.setString(8, lane);
             });
+            return new Lease(attemptId, generation);
         }, "记录任务尝试失败");
-        return new Lease(attemptId, generation[0]);
     }
 
     /**
@@ -341,9 +340,8 @@ public final class JdbcDispatchStore {
         // 与沙箱恢复用同一份清单，ready、verifying 这些旧值不会只在一边被漏掉。
         String abandoned = TaskStatus.ABANDONED_AFTER_RESTART.stream().map(status -> "'" + status + "'")
             .collect(Collectors.joining(", "));
-        int[] count = {0};
-        store.inTransaction(connection -> {
-            count[0] = store.exec(connection, """
+        return store.inTransaction(connection -> {
+            int count = store.exec(connection, """
                 UPDATE task_attempts SET status = 'interrupted', failure = '进程重启，执行者已失效',
                         finished_at = ?
                 WHERE status = 'running' AND dispatch_id IN (
@@ -367,31 +365,27 @@ public final class JdbcDispatchStore {
                 statement.setString(1, now);
                 statement.setString(2, sessionId);
             });
+            return count;
         }, "收敛中断的派发失败");
-        return count[0];
     }
 
-    @org.springframework.context.event.EventListener(ApplicationReadyEvent.class)
+    @EventListener(ApplicationReadyEvent.class)
     public void recoverInterrupted() {
         if (!available()) {
             return;
         }
         for (String session : store.query("SELECT DISTINCT session_id FROM dispatches WHERE status = 'running'",
-            statement -> {
-            }, rows -> rows.getString("session_id"), "查询待收敛派发失败")) {
+            rows -> rows.getString("session_id"), "查询待收敛派发失败")) {
             interruptStale(session);
         }
     }
 
     public List<DispatchRow> dispatches(String sessionId) {
-        if (!available()) {
-            return List.of();
-        }
         String createdAt = SqliteStore.normalizedInstantSql("created_at");
-        return store.query("""
+        return queryByKey("""
             SELECT dispatch_id, session_id, run_id, workspace, status, created_at, updated_at
             FROM dispatches WHERE session_id = ? ORDER BY %s
-            """.formatted(createdAt), statement -> statement.setString(1, sessionId),
+            """.formatted(createdAt), sessionId,
             rows -> new DispatchRow(rows.getString("dispatch_id"), rows.getString("session_id"),
                 rows.getString("run_id"), rows.getString("workspace"), rows.getString("status"),
                 rows.getString("created_at"), rows.getString("updated_at")),
@@ -399,14 +393,11 @@ public final class JdbcDispatchStore {
     }
 
     public List<NodeRow> nodes(String dispatchId) {
-        if (!available()) {
-            return List.of();
-        }
-        return store.query("""
+        return queryByKey("""
             SELECT dispatch_id, task_id, title, goal, depends_on, writable, risk, reviewers, status,
                    agent_id, detail, attempts, updated_at
             FROM task_nodes WHERE dispatch_id = ? ORDER BY task_id
-            """, statement -> statement.setString(1, dispatchId),
+            """, dispatchId,
             rows -> new NodeRow(rows.getString("dispatch_id"), rows.getString("task_id"), rows.getString("title"),
                 rows.getString("goal"), rows.getString("depends_on"), rows.getInt("writable"), rows.getString("risk"),
                 rows.getInt("reviewers"), rows.getString("status"), rows.getString("agent_id"),
@@ -415,20 +406,23 @@ public final class JdbcDispatchStore {
     }
 
     public List<AttemptRow> attempts(String dispatchId) {
+        return queryByKey("""
+            SELECT attempt_id, dispatch_id, task_id, agent_id, sandbox_id, generation, status, failure,
+                   started_at, finished_at, input_tokens, output_tokens, requests, exact
+            FROM task_attempts WHERE dispatch_id = ? ORDER BY task_id, generation
+            """, dispatchId,
+            rows -> new AttemptRow(rows.getString("attempt_id"), rows.getString("dispatch_id"),
+                rows.getString("task_id"), rows.getString("agent_id"), rows.getString("sandbox_id"),
+                rows.getInt("generation"), rows.getString("status"), rows.getString("failure"),
+                rows.getString("started_at"), rows.getString("finished_at"), new Usage(rows.getLong("input_tokens"),
+                    rows.getLong("output_tokens"), rows.getLong("requests"), rows.getInt("exact") == 1)),
+            "查询任务尝试失败");
+    }
+
+    private <T> List<T> queryByKey(String sql, String key, SqliteStore.RowMapper<T> mapper, String failure) {
         if (!available()) {
             return List.of();
         }
-        return store
-            .query("""
-                SELECT attempt_id, dispatch_id, task_id, agent_id, sandbox_id, generation, status, failure,
-                       started_at, finished_at, input_tokens, output_tokens, requests, exact
-                FROM task_attempts WHERE dispatch_id = ? ORDER BY task_id, generation
-                """, statement -> statement.setString(1, dispatchId),
-                rows -> new AttemptRow(rows.getString("attempt_id"), rows.getString("dispatch_id"),
-                    rows.getString("task_id"), rows.getString("agent_id"), rows.getString("sandbox_id"),
-                    rows.getInt("generation"), rows.getString("status"), rows.getString("failure"),
-                    rows.getString("started_at"), rows.getString("finished_at"), new Usage(rows.getLong("input_tokens"),
-                        rows.getLong("output_tokens"), rows.getLong("requests"), rows.getInt("exact") == 1)),
-                "查询任务尝试失败");
+        return store.query(sql, statement -> statement.setString(1, key), mapper, failure);
     }
 }

@@ -199,19 +199,19 @@ public final class DispatchAgentsTool implements Tool {
     }
 
     private static TaskSpec toSpec(Map<?, ?> map, AgentProfileCatalog profiles) {
-        String id = text(map.get("id"));
-        String goal = text(map.get("goal"));
-        String title = text(map.get("title"));
+        String id = SubagentSupport.text(map.get("id"));
+        String goal = SubagentSupport.text(map.get("goal"));
+        String title = SubagentSupport.text(map.get("title"));
         List<String> dependsOn = strings(map.get("depends_on"));
         List<String> files = globs(strings(map.get("files")), "files");
         List<String> denyFiles = globs(strings(map.get("deny_files")), "deny_files");
         List<String> tools = strings(map.get("tools"));
         List<String> commands = strings(map.get("commands"));
         List<String> denyCommands = strings(map.get("deny_commands"));
-        RiskLevel risk = RiskLevel.of(text(map.get("risk")));
+        RiskLevel risk = RiskLevel.of(SubagentSupport.text(map.get("risk")));
         boolean writable = bool(map.get("writable"));
         int reviewers = number(map.get("reviewers"));
-        String agentName = text(map.get("agent"));
+        String agentName = SubagentSupport.text(map.get("agent"));
         AgentProfile profile = null;
         if (!agentName.isEmpty()) {
             profile = profiles.find(agentName).orElseThrow(() -> new IllegalArgumentException("引用的代理 " + agentName
@@ -247,26 +247,22 @@ public final class DispatchAgentsTool implements Tool {
         if (value instanceof Collection<?> collection) {
             List<String> result = new ArrayList<>();
             for (Object item : collection) {
-                String text = text(item);
+                String text = SubagentSupport.text(item);
                 if (!text.isEmpty()) {
                     result.add(text);
                 }
             }
             return result;
         }
-        String single = text(value);
+        String single = SubagentSupport.text(value);
         return single.isEmpty() ? List.of() : List.of(single);
-    }
-
-    private static String text(Object value) {
-        return value == null ? "" : String.valueOf(value).strip();
     }
 
     private static boolean bool(Object value) {
         if (value instanceof Boolean flag) {
             return flag;
         }
-        String text = text(value);
+        String text = SubagentSupport.text(value);
         return "true".equalsIgnoreCase(text) || "1".equals(text);
     }
 
@@ -275,7 +271,7 @@ public final class DispatchAgentsTool implements Tool {
             return number.intValue();
         }
         try {
-            return Integer.parseInt(text(value));
+            return Integer.parseInt(SubagentSupport.text(value));
         } catch (NumberFormatException e) {
             return 1;
         }

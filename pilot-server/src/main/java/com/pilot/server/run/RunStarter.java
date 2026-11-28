@@ -110,6 +110,14 @@ public interface RunStarter {
             QueueRequirements requirements, String mode) {
             this(content, attachments, imagePositions, requirements, mode, null);
         }
+
+        public QueuedMessage withContent(String text) {
+            return new QueuedMessage(text, attachments, imagePositions, requirements, mode, skill);
+        }
+
+        public QueuedMessage withRequirements(QueueRequirements value) {
+            return new QueuedMessage(content, attachments, imagePositions, value, mode, skill);
+        }
     }
 
     /** 带附件信息的排队清单，顺序与 queued 一致。 */

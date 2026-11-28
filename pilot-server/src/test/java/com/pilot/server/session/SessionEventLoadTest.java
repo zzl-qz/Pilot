@@ -32,7 +32,7 @@ import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.session.SessionRepository;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;
-import com.pilot.server.session.events.SessionEventTransport;
+import com.pilot.server.session.events.SseStreamTransport;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -48,7 +48,7 @@ class SessionEventLoadTest {
     @Autowired
     SessionRepository repository;
     @Autowired
-    SessionEventTransport eventTransport;
+    SseStreamTransport eventTransport;
 
     @DynamicPropertySource
     static void config(DynamicPropertyRegistry registry) {

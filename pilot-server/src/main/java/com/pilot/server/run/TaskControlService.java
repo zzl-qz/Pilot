@@ -2,10 +2,8 @@ package com.pilot.server.run;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -17,6 +15,7 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.event.RunOutcome;
+import com.pilot.core.util.FileTrees;
 import com.pilot.core.util.WireEnum;
 import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.workspace.HistoryFileChange;
@@ -174,6 +173,48 @@ public class TaskControlService {
         public boolean directFinished() {
             return ExecutionMode.DIRECT.is(mode) && ExecutionPhase.directFinished(phase);
         }
+
+        public Execution withMode(String mode, String reason, List<Criterion> criteria, List<String> unknowns) {
+            return new Execution(mode, reason, criteria, unknowns, requests, activeMillis, evidence, phase, gap,
+                idleReviews, progress, requestAllowance, timeAllowanceMillis, assessmentVersion, usage, changedPaths,
+                nextAction, expectedObservation, budgetSegments);
+        }
+
+        public Execution withPhase(String phase, String gap) {
+            return new Execution(mode, reason, criteria, unknowns, requests, activeMillis, evidence, phase, gap,
+                idleReviews, progress, requestAllowance, timeAllowanceMillis, assessmentVersion, usage, changedPaths,
+                nextAction, expectedObservation, budgetSegments);
+        }
+
+        public Execution withEvidence(List<Evidence> evidence) {
+            return new Execution(mode, reason, criteria, unknowns, requests, activeMillis, evidence, phase, gap,
+                idleReviews, progress, requestAllowance, timeAllowanceMillis, assessmentVersion, usage, changedPaths,
+                nextAction, expectedObservation, budgetSegments);
+        }
+
+        public Execution withReview(int idleReviews, String progress, String nextAction, String expectedObservation) {
+            return new Execution(mode, reason, criteria, unknowns, requests, activeMillis, evidence, phase, gap,
+                idleReviews, progress, requestAllowance, timeAllowanceMillis, assessmentVersion, usage, changedPaths,
+                nextAction, expectedObservation, budgetSegments);
+        }
+
+        public Execution withRequests(int requests) {
+            return new Execution(mode, reason, criteria, unknowns, requests, activeMillis, evidence, phase, gap,
+                idleReviews, progress, requestAllowance, timeAllowanceMillis, assessmentVersion, usage, changedPaths,
+                nextAction, expectedObservation, budgetSegments);
+        }
+
+        public Execution withUsage(long activeMillis, Usage usage) {
+            return new Execution(mode, reason, criteria, unknowns, requests, activeMillis, evidence, phase, gap,
+                idleReviews, progress, requestAllowance, timeAllowanceMillis, assessmentVersion, usage, changedPaths,
+                nextAction, expectedObservation, budgetSegments);
+        }
+
+        public Execution withTracking(int assessmentVersion, List<String> changedPaths) {
+            return new Execution(mode, reason, criteria, unknowns, requests, activeMillis, evidence, phase, gap,
+                idleReviews, progress, requestAllowance, timeAllowanceMillis, assessmentVersion, usage, changedPaths,
+                nextAction, expectedObservation, budgetSegments);
+        }
     }
 
     public record TaskContract(String taskId, String originalGoal, List<String> constraints,
@@ -288,12 +329,7 @@ public class TaskControlService {
             default -> ExecutionPhase.UNVERIFIED;
         };
         String gap = detail == null || detail.isBlank() ? outcome.name() : detail.strip();
-        execution(sessionId, task,
-            new Execution(current.mode(), current.reason(), current.criteria(), current.unknowns(), current.requests(),
-                current.activeMillis(), current.evidence(), phase.name(), gap, current.idleReviews(),
-                current.progress(), current.requestAllowance(), current.timeAllowanceMillis(),
-                current.assessmentVersion(), current.usage(), current.changedPaths(), current.nextAction(),
-                current.expectedObservation(), current.budgetSegments()));
+        execution(sessionId, task, current.withPhase(phase.name(), gap));
     }
 
     /** 模型运行完成和用户验收完成分别记录；未勾选的明确验收条件不会自动通过。 */
@@ -375,11 +411,8 @@ public class TaskControlService {
     }
 
     private static Execution invalidate(Execution old) {
-        return old == null ? null
-            : new Execution(ExecutionMode.DIRECT.name(), "任务要求已更新，按最新要求重新执行", List.of(), List.of(), old.requests(),
-                old.activeMillis(), List.of(), ExecutionPhase.EXECUTING.name(), "", 0, "", old.requestAllowance(),
-                old.timeAllowanceMillis(), old.assessmentVersion(), old.usage(), old.changedPaths(), "", "",
-                old.budgetSegments());
+        return old == null ? null : old.withMode(ExecutionMode.DIRECT.name(), "任务要求已更新，按最新要求重新执行", List.of(), List.of())
+            .withEvidence(List.of()).withPhase(ExecutionPhase.EXECUTING.name(), "").withReview(0, "", "", "");
     }
 
     public synchronized boolean executionForRequirements(String sessionId, TaskContract expected, Execution execution) {
@@ -578,18 +611,7 @@ public class TaskControlService {
 
     private void write(Path target, Object value) {
         try {
-            Files.createDirectories(target.getParent());
-            Path temporary = Files.createTempFile(target.getParent(), "task-", ".tmp");
-            try {
-                Files.writeString(temporary, mapper.writeValueAsString(value));
-                try {
-                    Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-                } catch (AtomicMoveNotSupportedException e) {
-                    Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
-                }
-            } finally {
-                Files.deleteIfExists(temporary);
-            }
+            FileTrees.writeAtomic(target, mapper.writeValueAsString(value));
         } catch (IOException e) {
             throw new UncheckedIOException("保存任务目标失败", e);
         }

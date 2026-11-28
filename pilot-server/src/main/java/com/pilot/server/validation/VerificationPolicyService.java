@@ -18,6 +18,8 @@ import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 import org.yaml.snakeyaml.error.YAMLException;
 
+import com.pilot.core.util.Texts;
+
 /**
  * 验证策略即代码：从工作区 {@code pilot.policy.yaml} 读取“哪些路径必须跑哪些检查”。
  *
@@ -139,7 +141,7 @@ public class VerificationPolicyService {
     }
 
     private static String normalizeCommand(String value) {
-        return value == null ? "" : value.replaceAll("\\s+", " ").strip();
+        return Texts.oneLine(value, Integer.MAX_VALUE);
     }
 
     private Path policyFile(Path workspace) {

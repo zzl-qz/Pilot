@@ -2,15 +2,10 @@ package com.pilot.server.multi;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -23,13 +18,13 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import com.pilot.core.coordination.ProjectCoordinationScope;
@@ -130,11 +125,15 @@ public class SandboxStore {
     private final WorkspaceApplyJournal applyJournal;
     private final Set<String> restoredSessions = ConcurrentHashMap.newKeySet();
 
+    private static final Set<String> RESERVED_FILES =
+        Set.of("tasks.json", "decisions.json", "arbitrations.json", "dependencies.json", "workspace.json");
+
     private record SandboxPayload(String sandboxId, String agentId, String taskId, String baseCommit,
         List<SandboxChange> changes, String workspace) {
-    }
-
-    private record TaskPayload(String taskId, String title, String agentId, String status, String detail, int files) {
+        static SandboxPayload of(DiffSandbox sandbox) {
+            return new SandboxPayload(sandbox.id(), sandbox.agentId(), sandbox.taskId(), sandbox.baseCommit(),
+                sandbox.changes(), sandbox.workspace() == null ? null : sandbox.workspace().toString());
+        }
     }
 
     /**
@@ -145,7 +144,12 @@ public class SandboxStore {
         String validationHash, String status, List<String> checks, String detail, long workspaceRevision) {
     }
 
-    @org.springframework.beans.factory.annotation.Autowired
+    @FunctionalInterface
+    private interface JsonReader<T> {
+        T read() throws Exception;
+    }
+
+    @Autowired
     public SandboxStore(ObjectMapper mapper, PilotDataDir dataDir) {
         this(mapper, dataDir, new WorkspaceApplyJournal(dataDir.file("apply-journal"), mapper));
     }
@@ -397,22 +401,15 @@ public class SandboxStore {
     }
 
     private void persistWorkspaceRevision(String sessionId) {
-        Path file = dataDir.file("multi", sanitize(sessionId), "workspace.json");
-        try {
-            Files.createDirectories(file.getParent());
-            atomicWrite(file,
-                mapper.writeValueAsString(Map.of("workspaceRevision", workspaceRevisions.getOrDefault(sessionId, 0L))));
-        } catch (IOException e) {
-            restoredSessions.remove(sessionId);
-            throw new UncheckedIOException("多 Agent 状态持久化失败", e);
-        }
+        writeSessionJson(sessionId, sessionDir(sessionId).resolve("workspace.json"),
+            Map.of("workspaceRevision", workspaceRevisions.getOrDefault(sessionId, 0L)));
     }
 
     private void restoreWorkspaceRevision(String sessionId, Path file) {
         if (!Files.isRegularFile(file)) {
             return;
         }
-        try {
+        long revision = readJson(file, () -> {
             Map<String, Object> payload =
                 mapper.readValue(Files.readString(file), new TypeReference<Map<String, Object>>() {});
             Object value = payload == null ? null : payload.get("workspaceRevision");
@@ -420,10 +417,9 @@ public class SandboxStore {
                 || number.doubleValue() != number.longValue()) {
                 throw new IllegalArgumentException("工作区版本无效");
             }
-            workspaceRevisions.put(sessionId, number.longValue());
-        } catch (Exception e) {
-            throw new IllegalStateException("多 Agent 状态损坏，拒绝继续操作: " + file.getFileName(), e);
-        }
+            return number.longValue();
+        });
+        workspaceRevisions.put(sessionId, revision);
     }
 
     public synchronized void add(String sessionId, DiffSandbox sandbox) {
@@ -439,15 +435,7 @@ public class SandboxStore {
     public synchronized void checkpoint(String sessionId, DiffSandbox sandbox) {
         restore(sessionId);
         Path file = sessionDir(sessionId).resolve("checkpoints").resolve(sanitize(sandbox.id()) + ".json");
-        try {
-            Files.createDirectories(file.getParent());
-            atomicWrite(file,
-                mapper.writeValueAsString(
-                    new SandboxPayload(sandbox.id(), sandbox.agentId(), sandbox.taskId(), sandbox.baseCommit(),
-                        sandbox.changes(), sandbox.workspace() == null ? null : sandbox.workspace().toString())));
-        } catch (IOException e) {
-            throw new UncheckedIOException("保存执行检查点失败", e);
-        }
+        writeJson(file, SandboxPayload.of(sandbox), "保存执行检查点失败");
     }
 
     public synchronized void discardCheckpoint(String sessionId, String sandboxId) {
@@ -617,13 +605,7 @@ public class SandboxStore {
             }
             return false;
         }
-        Path file = sessionDir(sessionId).resolve("decisions.json");
-        try {
-            Files.createDirectories(file.getParent());
-            atomicWrite(file, mapper.writeValueAsString(updated));
-        } catch (IOException e) {
-            throw new UncheckedIOException("保存仲裁决定失败", e);
-        }
+        writeJson(sessionDir(sessionId).resolve("decisions.json"), updated, "保存仲裁决定失败");
         decisions.put(sessionId, Map.copyOf(updated));
         return true;
     }
@@ -782,125 +764,59 @@ public class SandboxStore {
         if (sandbox == null) {
             return false;
         }
-        for (SandboxChange change : sandbox.changes()) {
-            if (change.status() == ChangeStatus.PENDING) {
-                replace(sandbox, change.withStatus(ChangeStatus.REJECTED));
-            }
-        }
-        persist(sessionId, sandbox);
+        transitionPending(sessionId, sandbox, ChangeStatus.REJECTED);
         return true;
     }
 
     /** 标记某沙箱已被接受（落盘成功后调用）。 */
     public synchronized void markAccepted(String sessionId, String sandboxId) {
-        find(sessionId, sandboxId).ifPresent(sandbox -> {
-            for (SandboxChange change : sandbox.changes()) {
-                if (change.status() == ChangeStatus.PENDING) {
-                    replace(sandbox, change.withStatus(ChangeStatus.ACCEPTED));
-                }
-            }
-            persist(sessionId, sandbox);
-        });
+        find(sessionId, sandboxId).ifPresent(sandbox -> transitionPending(sessionId, sandbox, ChangeStatus.ACCEPTED));
     }
 
-    private void replace(DiffSandbox sandbox, SandboxChange updated) {
+    private void transitionPending(String sessionId, DiffSandbox sandbox, ChangeStatus target) {
         synchronized (sandbox) {
-            List<SandboxChange> current = new ArrayList<>(sandbox.changes());
-            for (int i = 0; i < current.size(); i++) {
-                SandboxChange change = current.get(i);
-                if (change.path().equals(updated.path()) && change.status() == ChangeStatus.PENDING) {
-                    current.set(i, updated);
-                }
-            }
-            sandbox.replaceAll(current);
+            sandbox.replaceAll(sandbox.changes().stream()
+                .map(change -> change.status() == ChangeStatus.PENDING ? change.withStatus(target) : change).toList());
         }
+        persist(sessionId, sandbox);
     }
 
     private void persist(String sessionId, DiffSandbox sandbox) {
-        Path dir = sessionDir(sessionId);
-        try {
-            Files.createDirectories(dir);
-            Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("sandboxId", sandbox.id());
-            payload.put("agentId", sandbox.agentId());
-            payload.put("taskId", sandbox.taskId());
-            payload.put("baseCommit", sandbox.baseCommit());
-            payload.put("changes", sandbox.changes());
-            payload.put("workspace", sandbox.workspace() == null ? null : sandbox.workspace().toString());
-            atomicWrite(dir.resolve(sanitize(sandbox.id()) + ".json"), mapper.writeValueAsString(payload));
-        } catch (IOException e) {
-            restoredSessions.remove(sessionId);
-            throw new UncheckedIOException("多 Agent 状态持久化失败", e);
-        }
+        writeSessionJson(sessionId, sessionDir(sessionId).resolve(sanitize(sandbox.id()) + ".json"),
+            SandboxPayload.of(sandbox));
     }
 
     private void persistTasks(String sessionId, List<TaskView> views) {
-        Path file = dataDir.file("multi", sanitize(sessionId), "tasks.json");
-        try {
-            Files.createDirectories(file.getParent());
-            atomicWrite(file, mapper.writeValueAsString(views.stream().map(view -> new TaskPayload(view.taskId(),
-                view.title(), view.agentId(), view.status(), view.detail(), view.files())).toList()));
-        } catch (IOException e) {
-            restoredSessions.remove(sessionId);
-            throw new UncheckedIOException("多 Agent 状态持久化失败", e);
-        }
+        writeSessionJson(sessionId, sessionDir(sessionId).resolve("tasks.json"), views);
     }
 
     private void persistVerification(String sessionId, String sandboxId, ArtifactManifest manifest,
         VerificationGate.Report report) {
-        Path file = dataDir.file("multi", sanitize(sessionId), "verification-" + sanitize(sandboxId) + ".json");
-        try {
-            Files.createDirectories(file.getParent());
-            atomicWrite(file,
-                mapper.writeValueAsString(new VerificationPayload(manifest.candidateHash(),
-                    String.join(",", manifest.dependencyHashes()), manifest.environmentFingerprint(),
-                    validationHash(manifest.candidateHash(), manifest.environmentFingerprint(), report.checks()),
-                    report.status(), report.checks(), report.detail(), workspaceRevision(sessionId))));
-        } catch (IOException e) {
-            restoredSessions.remove(sessionId);
-            throw new UncheckedIOException("多 Agent 状态持久化失败", e);
-        }
+        writeSessionJson(sessionId, sessionDir(sessionId).resolve("verification-" + sanitize(sandboxId) + ".json"),
+            new VerificationPayload(manifest.candidateHash(), String.join(",", manifest.dependencyHashes()),
+                manifest.environmentFingerprint(),
+                validationHash(manifest.candidateHash(), manifest.environmentFingerprint(), report.checks()),
+                report.status(), report.checks(), report.detail(), workspaceRevision(sessionId)));
     }
 
     private void persistManifests(String sessionId, String sandboxId) {
-        Path file = dataDir.file("multi", sanitize(sessionId), "manifests-" + sanitize(sandboxId) + ".json");
-        try {
-            Files.createDirectories(file.getParent());
-            atomicWrite(file,
-                mapper.writeValueAsString(manifests.getOrDefault(sessionId + "/" + sandboxId, List.of())));
-        } catch (IOException e) {
-            restoredSessions.remove(sessionId);
-            throw new UncheckedIOException("多 Agent 状态持久化失败", e);
-        }
+        writeSessionJson(sessionId, sessionDir(sessionId).resolve("manifests-" + sanitize(sandboxId) + ".json"),
+            manifests.getOrDefault(sessionId + "/" + sandboxId, List.of()));
     }
 
     private void persistDependencies(String sessionId) {
-        Path file = dataDir.file("multi", sanitize(sessionId), "dependencies.json");
-        try {
-            Files.createDirectories(file.getParent());
-            Map<String, List<String>> payload = new LinkedHashMap<>();
-            String prefix = sessionId + "/";
-            dependencies.forEach((key, value) -> {
-                if (key.startsWith(prefix)) {
-                    payload.put(key.substring(prefix.length()), List.copyOf(value));
-                }
-            });
-            atomicWrite(file, mapper.writeValueAsString(payload));
-        } catch (IOException e) {
-            restoredSessions.remove(sessionId);
-            throw new UncheckedIOException("多 Agent 状态持久化失败", e);
-        }
+        Map<String, List<String>> payload = new LinkedHashMap<>();
+        String prefix = sessionId + "/";
+        dependencies.forEach((key, value) -> {
+            if (key.startsWith(prefix)) {
+                payload.put(key.substring(prefix.length()), List.copyOf(value));
+            }
+        });
+        writeSessionJson(sessionId, sessionDir(sessionId).resolve("dependencies.json"), payload);
     }
 
     private void persistArbitrations(String sessionId, List<Arbitration> updated) {
-        Path file = dataDir.file("multi", sanitize(sessionId), "arbitrations.json");
-        try {
-            Files.createDirectories(file.getParent());
-            atomicWrite(file, mapper.writeValueAsString(updated));
-        } catch (IOException e) {
-            restoredSessions.remove(sessionId);
-            throw new UncheckedIOException("多 Agent 状态持久化失败", e);
-        }
+        writeSessionJson(sessionId, sessionDir(sessionId).resolve("arbitrations.json"), updated);
     }
 
     private void restore(String sessionId) {
@@ -934,18 +850,18 @@ public class SandboxStore {
         if (!Files.isDirectory(dir)) {
             return;
         }
+        List<Path> entries;
         try (var files = Files.list(dir)) {
-            files.filter(file -> file.getFileName().toString().endsWith(".json"))
-                .filter(file -> !file.getFileName().toString().equals("tasks.json"))
-                .filter(file -> !file.getFileName().toString().equals("decisions.json"))
-                .filter(file -> !file.getFileName().toString().equals("arbitrations.json"))
-                .filter(file -> !file.getFileName().toString().equals("dependencies.json"))
-                .filter(file -> !file.getFileName().toString().equals("workspace.json"))
-                .filter(file -> !file.getFileName().toString().startsWith("verification-"))
-                .filter(file -> !file.getFileName().toString().startsWith("manifests-"))
-                .forEach(file -> restoreSandbox(sessionId, file));
+            entries = files.toList();
         } catch (IOException e) {
             throw new UncheckedIOException("读取多 Agent 沙箱状态失败", e);
+        }
+        for (Path file : entries) {
+            String name = file.getFileName().toString();
+            if (name.endsWith(".json") && !RESERVED_FILES.contains(name) && !name.startsWith("verification-")
+                && !name.startsWith("manifests-")) {
+                restoreSandbox(sessionId, file);
+            }
         }
         Path decisionsFile = dir.resolve("decisions.json");
         if (Files.isRegularFile(decisionsFile)) {
@@ -970,30 +886,24 @@ public class SandboxStore {
         restoreArbitrations(sessionId, dir.resolve("arbitrations.json"));
         restoreDependencies(sessionId, dir.resolve("dependencies.json"));
         restoreWorkspaceRevision(sessionId, dir.resolve("workspace.json"));
-        try (var files = Files.list(dir)) {
-            List<Path> entries = files.toList();
-            entries.stream().filter(file -> file.getFileName().toString().startsWith("manifests-"))
-                .forEach(file -> restoreManifests(sessionId, file));
-            entries.stream().filter(file -> file.getFileName().toString().startsWith("verification-"))
-                .forEach(file -> restoreVerification(sessionId, file));
-        } catch (IOException e) {
-            throw new UncheckedIOException("读取多 Agent 校验状态失败", e);
-        }
+        entries.stream().filter(file -> file.getFileName().toString().startsWith("manifests-"))
+            .forEach(file -> restoreManifests(sessionId, file));
+        entries.stream().filter(file -> file.getFileName().toString().startsWith("verification-"))
+            .forEach(file -> restoreVerification(sessionId, file));
     }
 
     private void restoreManifests(String sessionId, Path file) {
-        try {
-            ArtifactManifest[] payloads = mapper.readValue(Files.readString(file), ArtifactManifest[].class);
-            String name = file.getFileName().toString();
-            String sandboxId = name.substring("manifests-".length(), name.length() - ".json".length());
-            if (payloads == null) {
+        ArtifactManifest[] payloads = readJson(file, () -> {
+            ArtifactManifest[] parsed = mapper.readValue(Files.readString(file), ArtifactManifest[].class);
+            if (parsed == null) {
                 throw new IllegalArgumentException("产物清单为空值");
             }
-            if (payloads.length > 0) {
-                manifests.put(sessionId + "/" + sandboxId, new CopyOnWriteArrayList<>(List.of(payloads)));
-            }
-        } catch (Exception e) {
-            throw new IllegalStateException("多 Agent 状态损坏，拒绝继续操作: " + file.getFileName(), e);
+            return parsed;
+        });
+        String name = file.getFileName().toString();
+        String sandboxId = name.substring("manifests-".length(), name.length() - ".json".length());
+        if (payloads.length > 0) {
+            manifests.put(sessionId + "/" + sandboxId, new CopyOnWriteArrayList<>(List.of(payloads)));
         }
     }
 
@@ -1001,41 +911,37 @@ public class SandboxStore {
         if (!Files.isRegularFile(file)) {
             return;
         }
-        try {
-            Map<String, List<String>> payload =
+        Map<String, List<String>> payload = readJson(file, () -> {
+            Map<String, List<String>> parsed =
                 mapper.readValue(Files.readString(file), new TypeReference<Map<String, List<String>>>() {});
-            if (payload == null) {
+            if (parsed == null) {
                 throw new IllegalArgumentException("依赖关系为空值");
             }
-            payload.forEach((sandboxId, upstream) -> {
-                if (upstream != null && !upstream.isEmpty()) {
-                    dependencies.put(sessionId + "/" + sandboxId, new LinkedHashSet<>(upstream));
-                }
-            });
-        } catch (Exception e) {
-            throw new IllegalStateException("多 Agent 状态损坏，拒绝继续操作: " + file.getFileName(), e);
-        }
+            return parsed;
+        });
+        payload.forEach((sandboxId, upstream) -> {
+            if (upstream != null && !upstream.isEmpty()) {
+                dependencies.put(sessionId + "/" + sandboxId, new LinkedHashSet<>(upstream));
+            }
+        });
     }
 
     private void restoreSandbox(String sessionId, Path file) {
-        try {
+        DiffSandbox sandbox = readJson(file, () -> {
             SandboxPayload payload = mapper.readValue(Files.readString(file), SandboxPayload.class);
             if (payload == null || payload.sandboxId() == null || payload.changes() == null) {
                 throw new IllegalArgumentException("沙箱内容无效");
             }
             sanitize(payload.sandboxId());
             Path workspace = payload.workspace() == null ? null : Path.of(payload.workspace());
-            DiffSandbox sandbox = new DiffSandbox(payload.sandboxId(), payload.agentId(), payload.taskId(),
+            DiffSandbox box = new DiffSandbox(payload.sandboxId(), payload.agentId(), payload.taskId(),
                 payload.baseCommit(), workspace != null && Files.isDirectory(workspace) ? workspace : null);
-            if (payload.changes() != null) {
-                sandbox.replaceAll(payload.changes());
-            }
-            List<DiffSandbox> restored = sandboxes.computeIfAbsent(sessionId, key -> new CopyOnWriteArrayList<>());
-            if (restored.stream().noneMatch(existing -> existing.id().equals(sandbox.id()))) {
-                restored.add(sandbox);
-            }
-        } catch (Exception e) {
-            throw new IllegalStateException("多 Agent 状态损坏，拒绝继续操作: " + file.getFileName(), e);
+            box.replaceAll(payload.changes());
+            return box;
+        });
+        List<DiffSandbox> restored = sandboxes.computeIfAbsent(sessionId, key -> new CopyOnWriteArrayList<>());
+        if (restored.stream().noneMatch(existing -> existing.id().equals(sandbox.id()))) {
+            restored.add(sandbox);
         }
     }
 
@@ -1043,55 +949,50 @@ public class SandboxStore {
         if (!Files.isRegularFile(file)) {
             return;
         }
-        try {
-            TaskPayload[] payloads = mapper.readValue(Files.readString(file), TaskPayload[].class);
+        List<TaskView> views = readJson(file, () -> {
+            TaskView[] payloads = mapper.readValue(Files.readString(file), TaskView[].class);
             if (payloads == null) {
                 throw new IllegalArgumentException("任务列表为空值");
             }
-            List<TaskView> views = new ArrayList<>();
-            if (payloads != null) {
-                for (TaskPayload payload : payloads) {
-                    boolean abandoned = payload.status() != null
-                        && TaskStatus.ABANDONED_AFTER_RESTART.contains(payload.status().toLowerCase(Locale.ROOT));
-                    views.add(new TaskView(payload.taskId(), payload.title(), payload.agentId(),
-                        abandoned ? TaskStatus.CANCELLED.wireName() : payload.status(),
-                        abandoned ? "服务已重启，原执行者失效；保留产物，请重新派发任务" : payload.detail(), payload.files()));
-                }
+            List<TaskView> restored = new ArrayList<>(payloads.length);
+            for (TaskView payload : payloads) {
+                boolean abandoned = payload.status() != null
+                    && TaskStatus.ABANDONED_AFTER_RESTART.contains(payload.status().toLowerCase(Locale.ROOT));
+                restored.add(abandoned ? new TaskView(payload.taskId(), payload.title(), payload.agentId(),
+                    TaskStatus.CANCELLED.wireName(), "服务已重启，原执行者失效；保留产物，请重新派发任务", payload.files()) : payload);
             }
-            persistTasks(sessionId, views);
-            tasks.put(sessionId, List.copyOf(views));
-        } catch (Exception e) {
-            throw new IllegalStateException("多 Agent 状态损坏，拒绝继续操作: " + file.getFileName(), e);
-        }
+            return restored;
+        });
+        persistTasks(sessionId, views);
+        tasks.put(sessionId, List.copyOf(views));
     }
 
     private void restoreArbitrations(String sessionId, Path file) {
         if (!Files.isRegularFile(file)) {
             return;
         }
-        try {
-            Arbitration[] payloads = mapper.readValue(Files.readString(file), Arbitration[].class);
-            if (payloads == null) {
+        Arbitration[] payloads = readJson(file, () -> {
+            Arbitration[] parsed = mapper.readValue(Files.readString(file), Arbitration[].class);
+            if (parsed == null) {
                 throw new IllegalArgumentException("仲裁列表为空值");
             }
-            for (Arbitration item : payloads) {
+            for (Arbitration item : parsed) {
                 validateArbitration(item);
             }
-            arbitrations.put(sessionId, new CopyOnWriteArrayList<>(List.of(payloads)));
-        } catch (Exception e) {
-            throw new IllegalStateException("多 Agent 状态损坏，拒绝继续操作: " + file.getFileName(), e);
-        }
+            return parsed;
+        });
+        arbitrations.put(sessionId, new CopyOnWriteArrayList<>(List.of(payloads)));
     }
 
     private void restoreVerification(String sessionId, Path file) {
-        try {
+        readJson(file, () -> {
             VerificationPayload payload = mapper.readValue(Files.readString(file), VerificationPayload.class);
             String name = file.getFileName().toString();
             String sandboxId = name.substring("verification-".length(), name.length() - ".json".length());
             DiffSandbox sandbox = sandboxes.getOrDefault(sessionId, List.of()).stream()
                 .filter(box -> box.id().equals(sandboxId)).findFirst().orElse(null);
             if (sandbox == null) {
-                return;
+                return null;
             }
             String environment = payload.environmentFingerprint() == null || payload.environmentFingerprint().isBlank()
                 ? environmentFingerprint() : payload.environmentFingerprint();
@@ -1101,21 +1002,16 @@ public class SandboxStore {
                 verifications.put(sessionId + "/" + sandboxId,
                     new VerificationGate.Report(payload.status(), payload.checks(), payload.detail()));
             }
-        } catch (Exception e) {
-            throw new IllegalStateException("多 Agent 状态损坏，拒绝继续操作: " + file.getFileName(), e);
-        }
+            return null;
+        });
     }
 
     private VerificationPayload readVerification(String sessionId, String sandboxId) {
-        Path file = dataDir.file("multi", sanitize(sessionId), "verification-" + sanitize(sandboxId) + ".json");
+        Path file = sessionDir(sessionId).resolve("verification-" + sanitize(sandboxId) + ".json");
         if (!Files.isRegularFile(file)) {
             return null;
         }
-        try {
-            return mapper.readValue(Files.readString(file), VerificationPayload.class);
-        } catch (Exception e) {
-            throw new IllegalStateException("多 Agent 状态损坏，拒绝继续操作: " + file.getFileName(), e);
-        }
+        return readJson(file, () -> mapper.readValue(Files.readString(file), VerificationPayload.class));
     }
 
     private static String validationHash(String candidateHash, String environmentFingerprint, List<String> checks) {
@@ -1195,23 +1091,32 @@ public class SandboxStore {
         }
     }
 
-    private static void atomicWrite(Path file, String content) throws IOException {
-        Path temporary = file.resolveSibling(file.getFileName() + "." + UUID.randomUUID() + ".tmp");
+    private void writeSessionJson(String sessionId, Path file, Object payload) {
         try {
-            try (var channel = FileChannel.open(temporary, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)) {
-                var bytes = ByteBuffer.wrap(content.getBytes(StandardCharsets.UTF_8));
-                while (bytes.hasRemaining()) {
-                    channel.write(bytes);
-                }
-                channel.force(true);
-            }
-            try {
-                Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
-            }
-        } finally {
-            Files.deleteIfExists(temporary);
+            writeJson(file, payload);
+        } catch (IOException e) {
+            restoredSessions.remove(sessionId);
+            throw new UncheckedIOException("多 Agent 状态持久化失败", e);
+        }
+    }
+
+    private void writeJson(Path file, Object payload, String errorMessage) {
+        try {
+            writeJson(file, payload);
+        } catch (IOException e) {
+            throw new UncheckedIOException(errorMessage, e);
+        }
+    }
+
+    private void writeJson(Path file, Object payload) throws IOException {
+        FileTrees.writeAtomicSync(file, mapper.writeValueAsString(payload).getBytes(StandardCharsets.UTF_8));
+    }
+
+    private <T> T readJson(Path file, JsonReader<T> reader) {
+        try {
+            return reader.read();
+        } catch (Exception e) {
+            throw new IllegalStateException("多 Agent 状态损坏，拒绝继续操作: " + file.getFileName(), e);
         }
     }
 }

@@ -299,9 +299,9 @@ final class InvestigationTracker {
             return new Entry(false, ZeroKind.OVERLAP_READ);
         }
         List<ReadGuard.LineRange> existing = readRangesByFile.getOrDefault(path, List.of());
-        double overlap = overlapRatio(existing, start, end);
+        double overlap = ReadGuard.LineRange.overlapRatio(existing, start, end);
         readFiles.add(path);
-        readRangesByFile.put(path, merge(existing, new ReadGuard.LineRange(start, end)));
+        readRangesByFile.put(path, ReadGuard.LineRange.merge(existing, new ReadGuard.LineRange(start, end)));
         return overlap < OVERLAP_ZERO_GAIN_RATIO ? new Entry(true, null) : new Entry(false, ZeroKind.OVERLAP_READ);
     }
 
@@ -447,51 +447,5 @@ final class InvestigationTracker {
         String value = Objects.toString(check, "");
         int arrow = value.lastIndexOf(" → exit ");
         return (arrow < 0 ? value : value.substring(0, arrow)).strip();
-    }
-
-    private static double overlapRatio(List<ReadGuard.LineRange> ranges, int start, int end) {
-        if (ranges.isEmpty() || end < start) {
-            return 0.0;
-        }
-        int covered = 0;
-        for (ReadGuard.LineRange range : ranges) {
-            if (range.end() < start) {
-                continue;
-            }
-            if (range.start() > end) {
-                break;
-            }
-            int lo = Math.max(start, range.start());
-            int hi = Math.min(end, range.end());
-            if (hi >= lo) {
-                covered += hi - lo + 1;
-            }
-        }
-        return covered / (double)(end - start + 1);
-    }
-
-    private static List<ReadGuard.LineRange> merge(List<ReadGuard.LineRange> existing, ReadGuard.LineRange added) {
-        ArrayList<ReadGuard.LineRange> merged = new ArrayList<>(existing.size() + 1);
-        int start = added.start();
-        int end = added.end();
-        boolean inserted = false;
-        for (ReadGuard.LineRange range : existing) {
-            if (range.end() + 1 < start) {
-                merged.add(range);
-            } else if (end + 1 < range.start()) {
-                if (!inserted) {
-                    merged.add(new ReadGuard.LineRange(start, end));
-                    inserted = true;
-                }
-                merged.add(range);
-            } else {
-                start = Math.min(start, range.start());
-                end = Math.max(end, range.end());
-            }
-        }
-        if (!inserted) {
-            merged.add(new ReadGuard.LineRange(start, end));
-        }
-        return List.copyOf(merged);
     }
 }

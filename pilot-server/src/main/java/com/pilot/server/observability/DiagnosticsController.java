@@ -1,7 +1,6 @@
 package com.pilot.server.observability;
 
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
 import java.util.List;
 
 import org.springframework.http.CacheControl;
@@ -67,7 +66,8 @@ public class DiagnosticsController {
         Session session = requireSession(id);
         List<ValidationEvidence> recent = validations.recent(id);
         ValidationEvidence latest = recent.isEmpty() ? null : recent.getLast();
-        String current = latest == null ? "" : WorkspaceFingerprint.of(workspaceOf(session), latest.files());
+        String current =
+            latest == null ? "" : WorkspaceFingerprint.of(SessionLookup.workspaceOf(session), latest.files());
         ValidationLedger.Report report = validations.report(id, current);
         return new ValidationView(report, recent);
     }
@@ -84,11 +84,5 @@ public class DiagnosticsController {
 
     private Session requireSession(String id) {
         return SessionLookup.require(sessions, id);
-    }
-
-    private static Path workspaceOf(Session session) {
-        String configured = session.workspace();
-        return configured == null || configured.isBlank() ? Path.of(System.getProperty("user.dir", "."))
-            : Path.of(configured).toAbsolutePath().normalize();
     }
 }

@@ -20,6 +20,7 @@ import org.springframework.context.SmartLifecycle;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 
+import com.pilot.core.exec.ProcessSupport;
 import com.pilot.core.runtime.ExecutablePath;
 import com.pilot.core.runtime.bootstrap.RuntimeEnvironment;
 import com.pilot.core.util.HostOs;
@@ -839,17 +840,18 @@ public class LocalSearchRuntime implements SmartLifecycle {
             process = builder.start();
             process.getOutputStream().close();
             Process started = process;
-            outputTask = new java.util.concurrent.FutureTask<>(() -> readBounded(started.getInputStream(), 256 * 1024));
+            outputTask = new java.util.concurrent.FutureTask<>(
+                () -> ProcessSupport.readBoundedBytes(started.getInputStream(), 256 * 1024));
             Thread.startVirtualThread(outputTask);
             if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
-                terminateTree(process);
+                ProcessSupport.terminate(process);
                 log.warn("命令超时：{}", String.join(" ", command));
                 return -1;
             }
             byte[] output = outputTask.get(5, TimeUnit.SECONDS);
             int code = process.exitValue();
             if (code != 0) {
-                String text = com.pilot.core.exec.ProcessSupport.decode(output).strip();
+                String text = ProcessSupport.decode(output).strip();
                 if (text.length() > 1200) {
                     text = text.substring(text.length() - 1200);
                 }
@@ -863,31 +865,12 @@ public class LocalSearchRuntime implements SmartLifecycle {
             return -1;
         } finally {
             if (process != null && process.isAlive()) {
-                terminateTree(process);
+                ProcessSupport.terminate(process);
             }
             if (outputTask != null) {
                 outputTask.cancel(true);
             }
         }
-    }
-
-    private static byte[] readBounded(java.io.InputStream stream, int maxBytes) throws IOException {
-        try (stream) {
-            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-            byte[] buf = new byte[4096];
-            int n;
-            while ((n = stream.read(buf)) != -1) {
-                if (out.size() < maxBytes) {
-                    out.write(buf, 0, Math.min(n, maxBytes - out.size()));
-                }
-            }
-            return out.toByteArray();
-        }
-    }
-
-    private static void terminateTree(Process process) {
-        process.descendants().forEach(ProcessHandle::destroyForcibly);
-        process.destroyForcibly();
     }
 
     private void stopProcess() {

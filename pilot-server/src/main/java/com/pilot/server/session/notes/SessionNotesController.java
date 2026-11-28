@@ -5,7 +5,6 @@ import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -16,7 +15,6 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.pilot.core.session.SessionService;
-import com.pilot.server.api.ApiErrors;
 import com.pilot.server.session.lookup.SessionLookup;
 
 import lombok.RequiredArgsConstructor;
@@ -98,11 +96,6 @@ public class SessionNotesController {
         SessionNotes.Link link =
             new SessionNotes.Link(request == null || request.kind() == null ? "session" : request.kind(), session);
         return notes.promote(session, noteId, link);
-    }
-
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<?> bad(RuntimeException e) {
-        return ApiErrors.badRequest(e);
     }
 
     public record NoteRequest(String content, SourceRequest source) {

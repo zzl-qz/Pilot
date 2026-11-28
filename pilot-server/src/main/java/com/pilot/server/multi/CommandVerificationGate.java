@@ -29,6 +29,7 @@ import tools.jackson.databind.json.JsonMapper;
 @Component
 public class CommandVerificationGate implements VerificationGate {
     private static final int MAX_FAILURE_OUTPUT_CHARS = 4_000;
+    private static final JsonMapper JSON = JsonMapper.builder().build();
 
     private final MultiAgentProperties properties;
     private final ExecutionBackends.Selection execution;
@@ -155,7 +156,7 @@ public class CommandVerificationGate implements VerificationGate {
     }
 
     private VerificationPlan npmPlan(Path root) throws IOException {
-        var json = JsonMapper.builder().build().readTree(Files.readString(root.resolve("package.json")));
+        var json = JSON.readTree(Files.readString(root.resolve("package.json")));
         String manager = json.path("packageManager").asString("");
         if ((!manager.isEmpty() && !manager.startsWith("npm@")) || Files.exists(root.resolve("pnpm-lock.yaml"))
             || Files.exists(root.resolve("yarn.lock"))) {

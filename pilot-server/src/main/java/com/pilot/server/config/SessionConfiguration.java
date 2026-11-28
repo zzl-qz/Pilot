@@ -2,9 +2,11 @@ package com.pilot.server.config;
 
 import java.time.Clock;
 
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.env.Environment;
 
 import com.pilot.core.session.EventStreamLimits;
 import com.pilot.core.session.PreviewLimits;
@@ -12,6 +14,7 @@ import com.pilot.core.session.SessionRepository;
 import com.pilot.core.session.SessionService;
 
 @Configuration(proxyBeanMethods = false)
+@EnableConfigurationProperties(SessionConfiguration.EventStreamProperties.class)
 public class SessionConfiguration {
     @Bean
     SessionService sessionService(SessionRepository repository, EventStreamLimits eventLimits,
@@ -20,32 +23,31 @@ public class SessionConfiguration {
     }
 
     @Bean
-    EventStreamLimits eventStreamLimits(Environment environment) {
-        EventStreamLimits defaults = EventStreamLimits.defaults();
-        return new EventStreamLimits(limit(environment, "queue-items", int.class, defaults.queueItems()),
-            limit(environment, "queue-bytes", long.class, defaults.queueBytes()),
-            limit(environment, "total-bytes", long.class, defaults.totalBytes()),
-            limit(environment, "connections", int.class, defaults.subscribers()),
-            limit(environment, "session-connections", int.class, defaults.subscribersPerSession()),
-            limit(environment, "page-size", int.class, defaults.pageSize()),
-            limit(environment, "queue-wait-ms", long.class, defaults.queueWaitMillis()),
-            limit(environment, "send-timeout-ms", long.class, defaults.sendMillis()),
-            limit(environment, "replay-timeout-ms", long.class, defaults.replayMillis()),
-            limit(environment, "reference-bytes", long.class, defaults.referenceBytes()));
+    EventStreamLimits eventStreamLimits(EventStreamProperties properties) {
+        return properties.toEventStreamLimits();
     }
 
     @Bean
-    PreviewLimits previewLimits(Environment environment) {
-        PreviewLimits defaults = PreviewLimits.defaults();
-        return new PreviewLimits(limit(environment, "merge-ms", long.class, defaults.mergeMillis()),
-            limit(environment, "merge-bytes", int.class, defaults.mergeBytes()),
-            limit(environment, "preview-bytes", int.class, defaults.snapshotBytes()),
-            limit(environment, "total-preview-bytes", long.class, defaults.totalSnapshotBytes()),
-            limit(environment, "preview-sessions", int.class, defaults.sessions()));
+    PreviewLimits previewLimits(EventStreamProperties properties) {
+        return properties.toPreviewLimits();
     }
 
-    private static <T> T limit(Environment environment, String name, Class<T> type, T fallback) {
-        // 使用基本类型转换，让显式空值与原来的 @Value 参数一样报错。
-        return environment.getProperty("pilot.events." + name, type, fallback);
+    @ConfigurationProperties(prefix = "pilot.events")
+    public record EventStreamProperties(@DefaultValue("4096") int queueItems, @DefaultValue("8388608") long queueBytes,
+        @DefaultValue("134217728") long totalBytes, @DefaultValue("256") int connections,
+        @DefaultValue("32") int sessionConnections, @DefaultValue("256") int pageSize,
+        @DefaultValue("30000") long queueWaitMs, @DefaultValue("30000") long sendTimeoutMs,
+        @DefaultValue("300000") long replayTimeoutMs, @DefaultValue("262144") long referenceBytes,
+        @DefaultValue("50") long mergeMs, @DefaultValue("8192") int mergeBytes,
+        @DefaultValue("131072") int previewBytes, @DefaultValue("16777216") long totalPreviewBytes,
+        @DefaultValue("256") int previewSessions) {
+        EventStreamLimits toEventStreamLimits() {
+            return new EventStreamLimits(queueItems, queueBytes, totalBytes, connections, sessionConnections, pageSize,
+                queueWaitMs, sendTimeoutMs, replayTimeoutMs, referenceBytes);
+        }
+
+        PreviewLimits toPreviewLimits() {
+            return new PreviewLimits(mergeMs, mergeBytes, previewBytes, totalPreviewBytes, previewSessions);
+        }
     }
 }

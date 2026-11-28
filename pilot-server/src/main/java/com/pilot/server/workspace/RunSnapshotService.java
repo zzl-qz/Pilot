@@ -1,7 +1,7 @@
 package com.pilot.server.workspace;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -25,10 +26,12 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Stream;
 
 import org.springframework.stereotype.Component;
 
+import com.pilot.core.exec.ProcessSupport;
 import com.pilot.core.message.Message;
 import com.pilot.core.plan.PlanItem;
 import com.pilot.core.tool.SnapshotSink;
@@ -457,42 +460,24 @@ public class RunSnapshotService
         if (workspace == null || relativePaths == null || relativePaths.isEmpty() || !insideGitRepo(workspace)) {
             return Set.of();
         }
-        Process process = null;
+        ByteArrayOutputStream stdin = new ByteArrayOutputStream();
+        for (String path : relativePaths) {
+            stdin.writeBytes(path.getBytes(StandardCharsets.UTF_8));
+            stdin.write(0);
+        }
+        var builder = new ProcessBuilder("git", "check-ignore", "--stdin", "-z").directory(workspace.toFile());
         try {
-            process = new ProcessBuilder("git", "check-ignore", "--stdin", "-z").directory(workspace.toFile()).start();
-            Process started = process;
-            byte[][] stdout = new byte[1][];
-            Thread reader = Thread.ofVirtual().start(() -> {
-                try {
-                    stdout[0] = started.getInputStream().readAllBytes();
-                } catch (IOException ignored) {
-                    stdout[0] = new byte[0];
-                }
-            });
-            try (OutputStream out = started.getOutputStream()) {
-                for (String path : relativePaths) {
-                    out.write(path.getBytes(StandardCharsets.UTF_8));
-                    out.write(0);
-                }
-            }
-            if (!started.waitFor(GIT_IGNORE_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
-                started.destroyForcibly();
+            var captured = ProcessSupport.captureStdoutUtf8WithStdin(builder, stdin.toByteArray(),
+                Duration.ofMillis(GIT_IGNORE_TIMEOUT_MILLIS), 4 * 1024 * 1024);
+            if (captured.exitCode() != 0 || captured.output().isEmpty()) {
                 return Set.of();
             }
-            reader.join(GIT_IGNORE_TIMEOUT_MILLIS);
-            if (started.exitValue() != 0 || stdout[0] == null || stdout[0].length == 0) {
-                return Set.of();
-            }
-            return parseNullSeparatedPaths(stdout[0]);
-        } catch (IOException | InterruptedException | RuntimeException ignored) {
-            if (ignored instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
-            }
+            return parseNullSeparatedPaths(captured.output());
+        } catch (IOException | TimeoutException | RuntimeException ignored) {
             return Set.of();
-        } finally {
-            if (process != null && process.isAlive()) {
-                process.destroyForcibly();
-            }
+        } catch (InterruptedException ignored) {
+            Thread.currentThread().interrupt();
+            return Set.of();
         }
     }
 
@@ -506,19 +491,12 @@ public class RunSnapshotService
         return false;
     }
 
-    private static Set<String> parseNullSeparatedPaths(byte[] raw) {
+    private static Set<String> parseNullSeparatedPaths(String raw) {
         Set<String> ignored = new HashSet<>();
-        int start = 0;
-        for (int i = 0; i < raw.length; i++) {
-            if (raw[i] == 0) {
-                if (i > start) {
-                    ignored.add(new String(raw, start, i - start, StandardCharsets.UTF_8).replace('\\', '/'));
-                }
-                start = i + 1;
+        for (String token : raw.split("\0", -1)) {
+            if (!token.isEmpty()) {
+                ignored.add(token.replace('\\', '/'));
             }
-        }
-        if (start < raw.length) {
-            ignored.add(new String(raw, start, raw.length - start, StandardCharsets.UTF_8).replace('\\', '/'));
         }
         return ignored;
     }

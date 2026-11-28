@@ -1,31 +1,24 @@
 package com.pilot.server.session;
 
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Optional;
 
 import jakarta.servlet.http.HttpServletRequest;
 
-import org.springframework.core.io.FileSystemResource;
-import org.springframework.core.io.Resource;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -43,9 +36,6 @@ import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.session.SessionStatus;
 import com.pilot.core.skill.SkillProblem;
-import com.pilot.core.tool.office.DocumentRenderer;
-import com.pilot.server.api.ApiErrors;
-import com.pilot.server.attachment.AttachmentReferences;
 import com.pilot.server.attachment.AttachmentService;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.run.RunStarter;
@@ -54,8 +44,6 @@ import com.pilot.server.run.TaskControlService;
 import com.pilot.server.session.lookup.SessionLookup;
 import com.pilot.server.skill.SkillService;
 import com.pilot.server.workspace.WorkspaceService;
-
-import tools.jackson.databind.JsonNode;
 
 import lombok.RequiredArgsConstructor;
 
@@ -70,7 +58,6 @@ public class SessionController {
     private final AgentProperties agentProperties;
     private final PlanRepository plans;
     private final AttachmentService attachments;
-    private final AttachmentReferences attachmentReferences;
     private final ProjectRepository projects;
     private final SessionCleanupService cleanup;
     private final SkillService skills;
@@ -295,12 +282,6 @@ public class SessionController {
         return ResponseEntity.noContent().build();
     }
 
-    /** 清理失败时会话仍保留，返回 409 让客户端原样重试删除。 */
-    @ExceptionHandler(SessionCleanupService.CleanupException.class)
-    public ResponseEntity<?> cleanupFailed(SessionCleanupService.CleanupException failure) {
-        return ApiErrors.conflict(failure);
-    }
-
     /** 断线重连后校准界面：告诉前端该会话是否仍有运行在进行。 */
     @GetMapping("/{id}/runs/active")
     public ActiveRunResponse activeRun(@PathVariable String id) {
@@ -378,156 +359,6 @@ public class SessionController {
             runStarter.abandon(runId);
             throw e;
         }
-    }
-
-    /** 还没被当前运行消费的消息。空着表示没有在排队。 */
-    @GetMapping("/{id}/queue")
-    public QueueResponse queue(@PathVariable String id) {
-        requireSession(id);
-        return queueResponse(id);
-    }
-
-    private QueueResponse queueResponse(String id) {
-        List<RunStarter.QueuedMessage> messages = runStarter.queuedMessages(id);
-        return new QueueResponse(messages.stream().map(RunStarter.QueuedMessage::content).toList(),
-            messages.stream()
-                .map(message -> new QueueEntry(message.content(),
-                    attachments.displayAttachments(id, message.attachments()), message.imagePositions(),
-                    message.requirements() == null || message.requirements().empty() ? null
-                        : new QueueRequirementsView(message.requirements().constraints(),
-                            message.requirements().acceptance()),
-                    message.mode(), message.skill()))
-                .toList(),
-            RunStarter.queueRevision(messages), runStarter.queueHeld(id), runStarter.queueWaitingReason(id));
-    }
-
-    /** 暂停或恢复当前会话的消息队列；暂停不打断正在运行的一轮。 */
-    @PostMapping("/{id}/queue/hold")
-    public QueueResponse holdQueue(@PathVariable String id, @RequestBody(required = false) JsonNode body) {
-        requireSession(id);
-        boolean held = body != null && body.path("held").asBoolean(false);
-        runStarter.setQueueHeld(id, held);
-        return queueResponse(id);
-    }
-
-    /** 取回当前会话上传的附件；二进制文件用 attachment disposition 下载。 */
-    @GetMapping("/{id}/attachments/{file}")
-    public ResponseEntity<Resource> attachment(@PathVariable String id, @PathVariable String file,
-        @RequestParam(name = "name", required = false) String originalName) {
-        requireSession(id);
-        Path path;
-        try {
-            path = attachmentReferences.resolve(id, file);
-        } catch (IllegalArgumentException e) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "附件不存在");
-        }
-        String lower = file.toLowerCase(Locale.ROOT);
-        MediaType type = lower.endsWith(".png") ? MediaType.IMAGE_PNG
-            : lower.endsWith(".jpg") || lower.endsWith(".jpeg") ? MediaType.IMAGE_JPEG : lower.endsWith(".gif")
-                ? MediaType.IMAGE_GIF : lower.endsWith(".webp") ? MediaType.parseMediaType("image/webp") : null;
-        ResponseEntity.BodyBuilder response = ResponseEntity.ok().header("X-Content-Type-Options", "nosniff")
-            .header("Cache-Control", "private, max-age=86400");
-        if (type != null) {
-            return response.contentType(type).body(new FileSystemResource(path));
-        }
-        String downloadName = safeDownloadName(originalName, path.getFileName().toString());
-        return response.contentType(MediaType.APPLICATION_OCTET_STREAM)
-            .header(HttpHeaders.CONTENT_DISPOSITION,
-                ContentDisposition.attachment().filename(downloadName, StandardCharsets.UTF_8).build().toString())
-            .body(new FileSystemResource(path));
-    }
-
-    /** Office 附件的纯文本读回；不还原版式，也不执行附件中的 HTML/脚本。 */
-    @GetMapping("/{id}/attachments/{file}/preview-text")
-    public ResponseEntity<?> attachmentPreviewText(@PathVariable String id, @PathVariable String file) {
-        requireSession(id);
-        Path path;
-        try {
-            path = attachmentReferences.resolve(id, file);
-            if (!DocumentRenderer.isRenderable(path.getFileName().toString())) {
-                throw new IllegalArgumentException("不支持此附件的内容预览");
-            }
-            String text = DocumentRenderer.inspect(path);
-            if (text.length() > 250_000) {
-                text = text.substring(0, 250_000) + "\n…内容过长，已截断";
-            }
-            return ResponseEntity.ok(Map.of("text", text));
-        } catch (IllegalArgumentException e) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
-        } catch (IOException e) {
-            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "附件内容无法读取", e);
-        }
-    }
-
-    private static String safeDownloadName(String originalName, String storedName) {
-        String name = originalName == null || originalName.isBlank() ? storedName.replaceFirst("^[a-fA-F0-9-]{36}-", "")
-            : originalName;
-        String safe = name.replaceAll("[\\\\/\\r\\n\\p{Cntrl}]", "_").strip();
-        return safe.isBlank() ? "attachment" : safe;
-    }
-
-    /** 改队列里的某一句，下标从 0 开始。还没轮到的才能改。 */
-    @PutMapping("/{id}/queue/{index}")
-    public QueueResponse editQueued(@PathVariable String id, @PathVariable int index,
-        @RequestBody(required = false) QueueEditRequest request) {
-        requireSession(id);
-        if (request == null || request.content() == null || request.content().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "content must not be blank");
-        }
-        requireContentWithinLimit(request.content());
-        RunStarter.QueueRequirements requirements = request.constraints() == null && request.acceptance() == null ? null
-            : new RunStarter.QueueRequirements(request.constraints(), request.acceptance());
-        if (!runStarter.editQueued(id, index, request.content(), requirements, request.revision())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "队列已变化或消息不存在，请刷新后重试");
-        }
-        return queueResponse(id);
-    }
-
-    /** 往前排一位。整条消息（含图片）一起移动，所以不能靠前端互换两条的文字。 */
-    @PostMapping("/{id}/queue/{index}/up")
-    public QueueResponse moveQueuedUp(@PathVariable String id, @PathVariable int index) {
-        requireSession(id);
-        if (!runStarter.moveQueuedUp(id, index)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "这一句已经在最前面，或已经不在队列里");
-        }
-        return queueResponse(id);
-    }
-
-    /** 拖拽排序：把 index 这一句挪到 to 的位置，整条消息（含图片）一起移动。 */
-    @PostMapping("/{id}/queue/{index}/move")
-    public QueueResponse moveQueued(@PathVariable String id, @PathVariable int index, @RequestParam int to,
-        @RequestParam(required = false) String revision) {
-        requireSession(id);
-        if (!runStarter.moveQueued(id, index, to, revision)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "位置无效，或这一句已经不在队列里");
-        }
-        return queueResponse(id);
-    }
-
-    @DeleteMapping("/{id}/queue/{index}")
-    public QueueResponse removeQueued(@PathVariable String id, @PathVariable int index,
-        @RequestParam(required = false) String revision) {
-        requireSession(id);
-        if (!runStarter.removeQueued(id, index, revision)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "队列已变化或消息不存在，请刷新后重试");
-        }
-        return queueResponse(id);
-    }
-
-    @PostMapping("/{id}/queue/{index}/steer")
-    public QueueResponse steerQueued(@PathVariable String id, @PathVariable int index,
-        @RequestBody QueueSteerRequest request) {
-        requireSession(id);
-        if (request == null || request.runId() == null || request.revision() == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少运行或队列版本，请刷新后重试");
-        }
-        if (!runStarter.steerQueued(id, request.runId(), index, request.revision())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "任务或队列已变化，引导未发送，请查看最新队列");
-        }
-        return queueResponse(id);
-    }
-
-    public record QueueSteerRequest(String runId, String revision) {
     }
 
     /**
@@ -614,7 +445,7 @@ public class SessionController {
 
     private static final int MAX_MESSAGE_CONTENT_BYTES = 4 * 1024 * 1024;
 
-    private static void requireContentWithinLimit(String content) {
+    static void requireContentWithinLimit(String content) {
         if (content != null && content.getBytes(StandardCharsets.UTF_8).length > MAX_MESSAGE_CONTENT_BYTES) {
             throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "消息正文超过 4 MB 上限，请拆分发送或改用附件上传");
         }
@@ -626,7 +457,7 @@ public class SessionController {
     @PostMapping("/{id}/messages")
     public ResponseEntity<MessageResponse> sendMessage(@PathVariable String id, @RequestBody MessageRequest request,
         HttpServletRequest httpRequest) {
-        requireSession(id);
+        Session session = requireSession(id);
         boolean hasAttachments = request != null && request.attachments() != null && !request.attachments().isEmpty();
         if (request == null || ((request.content() == null || request.content().isBlank()) && !hasAttachments)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "content must not be blank");
@@ -636,7 +467,7 @@ public class SessionController {
         String mode = normalizeMode(request.mode());
         if (skill != null) {
             // 激活是启动期行为，排队消息无法携带；错误信息直接给出可行动的原因
-            var catalog = skills.catalogFor(workspaceOf(id));
+            var catalog = skills.catalogFor(session.workspace());
             if (catalog.find(skill).isEmpty()) {
                 String reason = catalog.invalid().stream().filter(problem -> problem.name().equals(skill))
                     .map(SkillProblem::reason).findFirst().orElse("未找到");
@@ -656,25 +487,35 @@ public class SessionController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         }
         if (activeRun != null) {
-            if (runStarter.followup(id, prepared.content(), prepared.attachments(), prepared.imagePositions(),
-                queuedRequirements, mode, skill)) {
-                sessions.touch(id);
-                return ResponseEntity.accepted().body(new MessageResponse(id, activeRun));
+            ResponseEntity<MessageResponse> queued =
+                tryFollowup(id, activeRun, prepared, queuedRequirements, mode, skill);
+            if (queued != null) {
+                return queued;
             }
         }
         // 检查与启动之间可能刚好起了一个 run：抢占失败就退化成追加输入
         String runId = runStarter.claimRun(id).orElse(null);
         if (runId == null) {
-            if (runStarter.followup(id, prepared.content(), prepared.attachments(), prepared.imagePositions(),
-                queuedRequirements, mode, skill)) {
-                sessions.touch(id);
-                return ResponseEntity.accepted().body(new MessageResponse(id, runStarter.activeRun(id).orElse(null)));
+            ResponseEntity<MessageResponse> queued = tryFollowup(id, null, prepared, queuedRequirements, mode, skill);
+            if (queued != null) {
+                return queued;
             }
             throw new ResponseStatusException(HttpStatus.CONFLICT, "该会话仍有运行在进行");
         }
         RunSubmissionService.start(sessions, runStarter, id, runId, prepared.content(), new RunStarter.StartOptions(
             prepared.attachments(), prepared.imagePositions(), request.task(), skill, mode));
         return ResponseEntity.ok().body(new MessageResponse(id, runId));
+    }
+
+    private ResponseEntity<MessageResponse> tryFollowup(String sessionId, String activeRun,
+        AttachmentService.Prepared prepared, RunStarter.QueueRequirements requirements, String mode, String skill) {
+        if (!runStarter.followup(sessionId, prepared.content(), prepared.attachments(), prepared.imagePositions(),
+            requirements, mode, skill)) {
+            return null;
+        }
+        sessions.touch(sessionId);
+        String runId = activeRun != null ? activeRun : runStarter.activeRun(sessionId).orElse(null);
+        return ResponseEntity.accepted().body(new MessageResponse(sessionId, runId));
     }
 
     private static String normalizeMode(String raw) {
@@ -686,10 +527,6 @@ public class SessionController {
             return normalized;
         }
         throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "不支持的执行模式: " + raw + "，可选: plan / act");
-    }
-
-    private String workspaceOf(String sessionId) {
-        return sessions.find(sessionId).map(Session::workspace).orElse(null);
     }
 
     @GetMapping(value = "/{id}/export", produces = "text/markdown;charset=UTF-8")
@@ -728,44 +565,6 @@ public class SessionController {
     }
 
     public record ResendRequest(Long sequence, String content) {
-    }
-
-    public record QueueEditRequest(String content, String revision, List<String> constraints, List<String> acceptance) {
-        public QueueEditRequest(String content, String revision) {
-            this(content, revision, null, null);
-        }
-    }
-
-    /**
-     * @param items   排队消息正文，顺序即执行顺序（保持旧契约）
-     * @param entries 同一批消息的结构化版本，额外带上图片附件和它们在正文里的位置
-     */
-    /**
-     * @param held          队列是否被手动暂停
-     * @param waitingReason 界面展示的等待原因（手动暂停 / 等待本轮结束 / 等待验收）
-     */
-    public record QueueResponse(List<String> items, List<QueueEntry> entries, String revision, boolean held,
-        String waitingReason) {
-        public QueueResponse(List<String> items, List<QueueEntry> entries, String revision) {
-            this(items, entries, revision, false, "");
-        }
-    }
-
-    public record QueueEntry(String content, List<AttachmentService.DisplayAttachment> attachments,
-        List<Integer> imagePositions, QueueRequirementsView requirements, String mode, String skill) {
-        public QueueEntry(String content, List<AttachmentService.DisplayAttachment> attachments,
-            List<Integer> imagePositions) {
-            this(content, attachments, imagePositions, null, "", "");
-        }
-
-        public QueueEntry(String content, List<AttachmentService.DisplayAttachment> attachments,
-            List<Integer> imagePositions, QueueRequirementsView requirements) {
-            this(content, attachments, imagePositions, requirements, "", "");
-        }
-    }
-
-    /** 排队消息自己的约束与验收；null 表示没有额外要求。 */
-    public record QueueRequirementsView(List<String> constraints, List<String> acceptance) {
     }
 
     public record MessageResponse(String sessionId, String runId) {

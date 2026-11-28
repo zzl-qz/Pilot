@@ -1,13 +1,9 @@
 package com.pilot.server.memory;
 
-import java.io.UncheckedIOException;
 import java.util.Map;
-import java.util.NoSuchElementException;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -18,7 +14,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.pilot.core.memory.MemoryStore;
-import com.pilot.server.api.ApiErrors;
 
 import lombok.RequiredArgsConstructor;
 
@@ -91,25 +86,5 @@ public class MemoryController {
         @RequestParam(name = "scope", defaultValue = "project") String scope) {
         memories.deleteEntry(workspace, scope, slug);
         return ResponseEntity.noContent().build();
-    }
-
-    @ExceptionHandler(NoSuchElementException.class)
-    public ResponseEntity<Map<String, String>> missing(NoSuchElementException e) {
-        return ApiErrors.message(HttpStatus.NOT_FOUND, e.getMessage());
-    }
-
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<Map<String, String>> invalid(IllegalArgumentException e) {
-        return ApiErrors.badRequest(e);
-    }
-
-    @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<Map<String, String>> conflict(IllegalStateException e) {
-        return ApiErrors.conflict(e);
-    }
-
-    @ExceptionHandler(UncheckedIOException.class)
-    public ResponseEntity<Map<String, String>> ioFailure(UncheckedIOException e) {
-        return ApiErrors.message(HttpStatus.SERVICE_UNAVAILABLE, e.getMessage());
     }
 }

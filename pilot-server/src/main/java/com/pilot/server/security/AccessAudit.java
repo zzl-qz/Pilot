@@ -11,6 +11,9 @@ import org.springframework.stereotype.Component;
 
 import com.pilot.server.store.PilotDataDir;
 
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -22,6 +25,12 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 @Slf4j
 public class AccessAudit {
+    private static final ObjectMapper JSON = JsonMapper.builder().build();
+
+    private record Entry(String at, String remote, String method, String path, int status, String reason,
+        boolean token) {
+    }
+
     private final Path file;
     private final boolean enabled;
 
@@ -34,11 +43,8 @@ public class AccessAudit {
         if (!enabled) {
             return;
         }
-        String line = String.format(
-            "{\"at\":\"%s\",\"remote\":\"%s\",\"method\":\"%s\",\"path\":\"%s\","
-                + "\"status\":%d,\"reason\":\"%s\",\"token\":%s}%n",
-            Instant.now(), escape(remote), escape(method), escape(path), status, escape(reason),
-            tokenPresent ? "true" : "false");
+        String line = JSON.writeValueAsString(new Entry(Instant.now().toString(), nonNull(remote), nonNull(method),
+            nonNull(path), status, nonNull(reason), tokenPresent)) + System.lineSeparator();
         try {
             Files.createDirectories(file.getParent());
             Files.writeString(file, line, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
@@ -51,7 +57,7 @@ public class AccessAudit {
         return file;
     }
 
-    private static String escape(String value) {
-        return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ");
+    private static String nonNull(String value) {
+        return value == null ? "" : value;
     }
 }

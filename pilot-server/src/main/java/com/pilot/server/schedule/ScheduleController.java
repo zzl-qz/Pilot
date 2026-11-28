@@ -1,20 +1,14 @@
 package com.pilot.server.schedule;
 
-import java.time.DateTimeException;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-
-import com.pilot.server.api.ApiErrors;
 
 import lombok.RequiredArgsConstructor;
 
@@ -56,15 +50,5 @@ public class ScheduleController {
             throw new IllegalArgumentException("缺少操作");
         }
         return schedules.control(id, body.action(), body.runAt());
-    }
-
-    @ExceptionHandler({IllegalArgumentException.class, DateTimeException.class})
-    public ResponseEntity<Map<String, String>> invalid(RuntimeException e) {
-        return ApiErrors.badRequest(e);
-    }
-
-    @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<Map<String, String>> conflict(IllegalStateException e) {
-        return ApiErrors.conflict(e);
     }
 }

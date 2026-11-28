@@ -2,6 +2,8 @@ package com.pilot.server.agent;
 
 import java.util.regex.Pattern;
 
+import com.pilot.core.util.Texts;
+
 /**
  * 排队消息里哪些会在本轮结束后自动发出去。
  * 范围外、没写对象的点击或命名、以及收尾时才提交，都不进入自动发送。
@@ -20,7 +22,7 @@ final class QueueLane {
     }
 
     static String lane(String content) {
-        String body = content == null ? "" : content.replaceAll("\\s+", " ").strip();
+        String body = Texts.oneLine(content, Integer.MAX_VALUE);
         if (body.isEmpty()) {
             return "send";
         }

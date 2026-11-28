@@ -1,9 +1,7 @@
 package com.pilot.server.workspace;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -17,7 +15,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -26,6 +23,7 @@ import org.springframework.stereotype.Component;
 
 import com.pilot.core.exec.ProcessSupport;
 import com.pilot.core.multi.UnifiedDiff;
+import com.pilot.core.util.Texts;
 
 /**
  * 变更审阅：读取工作区的 git 状态与 diff，供界面展示「这次到底改了什么」。
@@ -150,8 +148,7 @@ public class ChangeService {
             return new ChangeReport(root, false, List.of(), "", false, null);
         }
 
-        String status =
-            exec(workspace, List.of("git", "-c", "core.quotePath=false", "status", "--porcelain=v1", "-z", "-uall"));
+        StatusScan scan = statuses(workspace);
         // 相对 HEAD 取补丁，已暂存的改动才不会在工作区审阅面板里消失。
         boolean head = hasHead(workspace);
         ArrayList<String> diffCommand =
@@ -165,25 +162,15 @@ public class ChangeService {
         // 行数用 numstat，不从可能被截断的补丁正文里数，否则大改动会显示成 +0 −0
         Map<String, int[]> stats = numstat(workspace, head);
 
-        ArrayList<FileChange> files = new ArrayList<FileChange>();
+        ArrayList<FileChange> files = new ArrayList<>();
         boolean truncated = false;
-        String[] records = status.split("\0", -1);
-        for (int i = 0; i < records.length; i++) {
-            String record = records[i];
-            if (record.length() < 4) {
-                continue;
-            }
+        for (Map.Entry<String, String> entry : scan.codes().entrySet()) {
             if (files.size() >= MAX_FILES) {
                 truncated = true;
                 break;
             }
-            String rawCode = record.substring(0, 2);
-            String code = statusCode(rawCode.strip());
-            String path = record.substring(3);
-            if ((rawCode.indexOf('R') >= 0 || rawCode.indexOf('C') >= 0) && i + 1 < records.length) {
-                // git status -z 中重命名/复制记录格式为 "XY newPath\0oldPath\0"，跳过旧路径。
-                i++;
-            }
+            String path = entry.getKey();
+            String code = entry.getValue();
             int[] stat = stats.get(path);
             if (stat == null && countsAsWholeFile(code)) {
                 stat = new int[] {countTextLines(workspace.resolve(path)), 0};
@@ -250,32 +237,17 @@ public class ChangeService {
             }
             String status = statuses.get(path);
             String chunk = chunks.get(path);
-            if (chunk != null && isBinaryPatch(chunk)) {
-                // 二进制补丁只有一行「Binary files … differ」，没有可读内容
-                chunk = "";
-            }
-            int[] stat;
-            if (chunk != null) {
-                stat = UnifiedDiff.countChanges(chunk);
-            } else if ("??".equals(status) || (!head && "A".equals(status))) {
-                // 新增文件不在 git diff 里（或仓库还没有 HEAD 可比），按当前内容合成一份「全新增」的 diff
-                SyntheticDiff synthetic = untrackedDiff(root.resolve(path), path);
-                chunk = synthetic.text();
-                stat = new int[] {synthetic.added(), 0};
-                truncated = truncated || synthetic.truncated();
-            } else if (status == null) {
+            if (chunk == null && status == null) {
                 // 写过但内容又回到 HEAD 一致，或文件已被删除，不算本轮可见改动
                 continue;
-            } else {
-                // 纯重命名、二进制等没有文本补丁的场景：文件仍要列出来
-                chunk = "";
-                stat = new int[] {0, 0};
             }
-            String text = chunk;
-            addedTotal += stat[0];
-            removedTotal += stat[1];
-
-            files.add(new RunFileChange(path, status == null ? "M" : status, stat[0], stat[1], budget.limit(text)));
+            ResolvedPatch resolved =
+                resolveFilePatch(root, path, chunk, "??".equals(status) || (!head && "A".equals(status)));
+            truncated = truncated || resolved.truncated();
+            addedTotal += resolved.added();
+            removedTotal += resolved.removed();
+            files.add(new RunFileChange(path, status == null ? "M" : status, resolved.added(), resolved.removed(),
+                budget.limit(resolved.diff())));
         }
 
         return new RunChangeReport(runId, root.toString(), true, List.copyOf(files), addedTotal, removedTotal,
@@ -351,27 +323,30 @@ public class ChangeService {
         }
 
         String chunk = diffChunks(root, List.copyOf(wanted), head).get(relative);
-        if (chunk != null && isBinaryPatch(chunk)) {
-            chunk = "";
-        }
-        boolean truncated = false;
-        int[] stat;
-        if (chunk != null) {
-            stat = UnifiedDiff.countChanges(chunk);
-        } else if ("??".equals(status) || "A".equals(status) || (!head && status == null)) {
-            // 未跟踪/新增文件不在 git diff 里，按当前内容合成一份全新增补丁
-            SyntheticDiff synthetic = untrackedDiff(root.resolve(relative), relative);
-            chunk = synthetic.text();
-            stat = new int[] {synthetic.added(), 0};
-            truncated = synthetic.truncated();
-        } else {
-            chunk = "";
-            stat = new int[] {0, 0};
-        }
+        ResolvedPatch resolved = resolveFilePatch(root, relative, chunk,
+            "??".equals(status) || "A".equals(status) || (!head && status == null));
+        boolean truncated = resolved.truncated() || resolved.diff().length() > MAX_FILE_DIFF_CHARS;
+        String body = completeDiffLines(resolved.diff(), MAX_FILE_DIFF_CHARS);
+        return new FilePatch(relative, status == null ? "M" : status, resolved.added(), resolved.removed(), body,
+            truncated);
+    }
 
-        truncated = truncated || chunk.length() > MAX_FILE_DIFF_CHARS;
-        String body = completeDiffLines(chunk, MAX_FILE_DIFF_CHARS);
-        return new FilePatch(relative, status == null ? "M" : status, stat[0], stat[1], body, truncated);
+    private record ResolvedPatch(String diff, int added, int removed, boolean truncated) {
+    }
+
+    private static ResolvedPatch resolveFilePatch(Path root, String path, String chunk, boolean allowSynthetic) {
+        if (chunk != null) {
+            // 二进制补丁只有一行「Binary files … differ」，没有可读内容
+            String text = isBinaryPatch(chunk) ? "" : chunk;
+            int[] stat = UnifiedDiff.countChanges(text);
+            return new ResolvedPatch(text, stat[0], stat[1], false);
+        }
+        if (allowSynthetic) {
+            // 未跟踪/新增文件不在 git diff 里，按当前内容合成一份全新增补丁
+            SyntheticDiff synthetic = untrackedDiff(root.resolve(path), path);
+            return new ResolvedPatch(synthetic.text(), synthetic.added(), 0, synthetic.truncated());
+        }
+        return new ResolvedPatch("", 0, 0, false);
     }
 
     /** 截断时只保留完整的补丁行，避免半行源码被当成可引用的改动。 */
@@ -467,7 +442,7 @@ public class ChangeService {
             if (result.exitCode() == 0) {
                 restored.add(path);
             } else {
-                failed.add(new RestoreFailure(path, firstLine(result.output())));
+                failed.add(new RestoreFailure(path, firstUsefulError(result.output(), "git 撤销失败")));
             }
         }
         return new RestoreReport(List.copyOf(restored), List.copyOf(deleted), List.copyOf(failed), null);
@@ -562,19 +537,6 @@ public class ChangeService {
             : new GitOperationResult(false, firstUsefulError(result.output(), "撤销此改动块失败"));
     }
 
-    /** git 输出可能有很多行，界面上的失败原因只留第一行有用信息。 */
-    private static String firstLine(String output) {
-        if (output == null || output.isBlank()) {
-            return "git 撤销失败";
-        }
-        for (String line : output.lines().toList()) {
-            if (!line.isBlank() && !line.startsWith("warning: ")) {
-                return line.strip();
-            }
-        }
-        return "git 撤销失败";
-    }
-
     /** 把工具给的展示路径收敛成工作区内的相对路径；越界或绝对路径一律拒绝。 */
     private static String safeRelative(String raw) {
         if (raw == null) {
@@ -606,7 +568,8 @@ public class ChangeService {
      * 重命名就退化成「删除 + 新增」，状态和 diff 都对不上。
      */
     private static StatusScan statuses(Path root) {
-        String output = exec(root, List.of("git", "status", "--porcelain=v1", "-z", "-uall"));
+        String output =
+            exec(root, List.of("git", "-c", "core.quotePath=false", "status", "--porcelain=v1", "-z", "-uall"));
         Map<String, String> result = new LinkedHashMap<>();
         List<String> renameSources = new ArrayList<>();
         String[] tokens = output.split("\u0000", -1);
@@ -644,9 +607,6 @@ public class ChangeService {
         }
         if (raw.indexOf('D') >= 0) {
             return "D";
-        }
-        if (raw.indexOf('U') >= 0) {
-            return "U";
         }
         if (raw.indexOf('?') >= 0) {
             return "??";
@@ -814,13 +774,7 @@ public class ChangeService {
     /** 文本文件里出现 NUL 一律按二进制处理：不合成 diff，避免把乱码塞进对话区。 */
     private static boolean isBinary(Path path) {
         try (InputStream input = Files.newInputStream(path)) {
-            byte[] sample = input.readNBytes(8192);
-            for (byte value : sample) {
-                if (value == 0) {
-                    return true;
-                }
-            }
-            return false;
+            return Texts.isBinary(input.readNBytes(Texts.BINARY_SAMPLE_BYTES));
         } catch (IOException e) {
             return true;
         }
@@ -832,16 +786,17 @@ public class ChangeService {
 
     /** 新增文件：git diff 看不到它，按当前内容合成一份全「+」的补丁。 */
     private static SyntheticDiff untrackedDiff(Path absolute, String path) {
-        if (!Files.isRegularFile(absolute, LinkOption.NOFOLLOW_LINKS) || isBinary(absolute)) {
+        if (!Files.isRegularFile(absolute, LinkOption.NOFOLLOW_LINKS)) {
             return new SyntheticDiff("", 0, false);
         }
         String text;
         try {
             if (Files.size(absolute) > MAX_TEXT_PREVIEW_BYTES) {
-                return new SyntheticDiff(FILE_DIFF_TRUNCATED, 0, true);
+                return isBinary(absolute) ? new SyntheticDiff("", 0, false)
+                    : new SyntheticDiff(FILE_DIFF_TRUNCATED, 0, true);
             }
             byte[] bytes = Files.readAllBytes(absolute);
-            if (new String(bytes, StandardCharsets.ISO_8859_1).indexOf('\0') >= 0) {
+            if (Texts.isBinary(bytes)) {
                 return new SyntheticDiff("", 0, false);
             }
             text = new String(bytes, StandardCharsets.UTF_8);
@@ -1152,49 +1107,22 @@ public class ChangeService {
         if (output == null || output.isBlank()) {
             return fallback;
         }
-        List<String> lines = output.lines().map(String::strip).filter(l -> !l.isEmpty()).limit(4).toList();
+        List<String> lines =
+            output.lines().map(String::strip).filter(l -> !l.isEmpty() && !l.startsWith("warning: ")).limit(4).toList();
         return lines.isEmpty() ? fallback : String.join("；", lines);
     }
 
     private static CommandResult runWithStdin(Path workspace, List<String> command, String stdinText) {
-        Process process = null;
+        var builder = new ProcessBuilder(command).directory(workspace.toFile());
         try {
-            process = new ProcessBuilder(command).directory(workspace.toFile()).redirectErrorStream(true).start();
-            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-            InputStream stream = process.getInputStream();
-            Thread drainer = Thread.ofVirtual().start(() -> {
-                byte[] chunk = new byte[4096];
-                int remaining = MAX_OUTPUT_BYTES;
-                try {
-                    int n;
-                    while ((n = stream.read(chunk)) != -1) {
-                        if (remaining > 0) {
-                            int write = Math.min(n, remaining);
-                            buffer.write(chunk, 0, write);
-                            remaining -= write;
-                        }
-                    }
-                } catch (IOException ignored) {
-                    // 进程结束时流关闭
-                }
-            });
-            try (OutputStream out = process.getOutputStream()) {
-                out.write(stdinText.getBytes(StandardCharsets.UTF_8));
-                out.flush();
-            }
-            if (!process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                process.destroyForcibly();
-                drainer.join(1000);
-                return new CommandResult(-1, "Git 命令执行超时");
-            }
-            drainer.join(2000);
-            return new CommandResult(process.exitValue(), buffer.toString(StandardCharsets.UTF_8));
+            var result = ProcessSupport.captureUtf8WithStdin(builder, stdinText.getBytes(StandardCharsets.UTF_8),
+                Duration.ofSeconds(TIMEOUT_SECONDS), MAX_OUTPUT_BYTES);
+            return new CommandResult(result.exitCode(), result.output());
+        } catch (TimeoutException e) {
+            return new CommandResult(-1, "Git 命令执行超时");
         } catch (IOException e) {
             return new CommandResult(-1, e.getMessage() == null ? "无法启动 git" : e.getMessage());
         } catch (InterruptedException e) {
-            if (process != null) {
-                process.destroyForcibly();
-            }
             Thread.currentThread().interrupt();
             return new CommandResult(-1, "操作被中断");
         }

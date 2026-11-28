@@ -56,16 +56,15 @@ public final class JdbcProjectRepository implements ProjectRepository {
         String updatedAt = SqliteStore.normalizedInstantSql("updated_at");
         List<Project> heads =
             store.query("SELECT id, name, created_at, updated_at, base_commit, constraints FROM projects ORDER BY "
-                + updatedAt + " DESC", statement -> {
-                }, JdbcProjectRepository::mapHead, "读取项目列表失败");
+                + updatedAt + " DESC", JdbcProjectRepository::mapHead, "读取项目列表失败");
         if (heads.isEmpty()) {
             return List.of();
         }
         // 一次读完全部文件夹再分组，避免每个项目各查一次（N+1）
         Map<String, List<String>> folders = new HashMap<>();
-        for (Map.Entry<String, String> row : store
-            .query("SELECT project_id, path FROM project_folders ORDER BY project_id, position", statement -> {
-            }, rows -> Map.entry(rows.getString("project_id"), rows.getString("path")), "读取项目文件夹失败")) {
+        for (Map.Entry<String, String> row : store.query(
+            "SELECT project_id, path FROM project_folders ORDER BY project_id, position",
+            rows -> Map.entry(rows.getString("project_id"), rows.getString("path")), "读取项目文件夹失败")) {
             folders.computeIfAbsent(row.getKey(), key -> new ArrayList<>()).add(row.getValue());
         }
         return heads.stream()
@@ -86,17 +85,15 @@ public final class JdbcProjectRepository implements ProjectRepository {
     @Override
     public boolean updateFolders(String id, List<String> folders, Instant now) {
         Project project = new Project(id, "placeholder", folders, now, now);
-        boolean[] updated = {false};
-        store.inTransaction(connection -> {
+        return store.inTransaction(connection -> {
             store.exec(connection, "DELETE FROM project_folders WHERE project_id = ?",
                 statement -> statement.setString(1, id));
             store.batch(connection, INSERT_FOLDER, folderBinders(id, project.folders()));
-            updated[0] = store.exec(connection, "UPDATE projects SET updated_at = ? WHERE id = ?", statement -> {
+            return store.exec(connection, "UPDATE projects SET updated_at = ? WHERE id = ?", statement -> {
                 statement.setString(1, now.toString());
                 statement.setString(2, id);
             }) > 0;
         }, "更新项目文件夹失败: " + id);
-        return updated[0];
     }
 
     @Override
@@ -111,14 +108,12 @@ public final class JdbcProjectRepository implements ProjectRepository {
 
     @Override
     public boolean delete(String id) {
-        boolean[] removed = {false};
-        store.inTransaction(connection -> {
+        return store.inTransaction(connection -> {
             store.exec(connection, "DELETE FROM project_folders WHERE project_id = ?",
                 statement -> statement.setString(1, id));
-            removed[0] = store.exec(connection, "DELETE FROM projects WHERE id = ?",
+            return store.exec(connection, "DELETE FROM projects WHERE id = ?",
                 statement -> statement.setString(1, id)) > 0;
         }, "删除项目失败: " + id);
-        return removed[0];
     }
 
     /** 先建一个不带文件夹的项目头，再把文件夹一次填进去，避免每行查一次。 */

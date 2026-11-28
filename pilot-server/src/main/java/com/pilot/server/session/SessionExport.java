@@ -18,6 +18,7 @@ import com.pilot.core.event.ToolStarted;
 import com.pilot.core.message.Message;
 import com.pilot.core.session.Session;
 import com.pilot.core.util.SecretScrubber;
+import com.pilot.core.util.Texts;
 
 /**
  * 把一次会话整理成可以转发的 Markdown。复查的人不用打开 Pilot，也能看到失败、工具和对话。
@@ -173,11 +174,7 @@ public final class SessionExport {
     }
 
     private static String clip(String text) {
-        String value = text == null ? "" : text.replace("\r\n", "\n").replace('\r', '\n').replace('\n', ' ').strip();
-        if (value.length() <= RESULT_CHARS) {
-            return value;
-        }
-        return value.substring(0, RESULT_CHARS) + "…";
+        return Texts.oneLine(text, RESULT_CHARS);
     }
 
     private static String clipBlock(String text, int limit) {

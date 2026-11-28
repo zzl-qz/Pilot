@@ -4,11 +4,13 @@ import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
@@ -339,8 +341,7 @@ public class AgentRunService implements RunStarter {
             ArrayList<String> pending = new ArrayList<>(queuedMessages.load("steer:" + sessionId));
             pending.add(text.strip());
             queuedMessages.save("steer:" + sessionId, pending);
-            handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
-            handle.pendingQuestions.forEach(this::cancelQuestion);
+            releaseWaiters(handle, null);
             return true;
         }
     }
@@ -372,8 +373,7 @@ public class AgentRunService implements RunStarter {
             queue.clear();
             queue.addAll(remaining);
             taskControls.correct(sessionId, item.content().isBlank() ? "请参考补充的图片" : item.content());
-            handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
-            handle.pendingQuestions.forEach(this::cancelQuestion);
+            releaseWaiters(handle, null);
             return true;
         }
     }
@@ -415,11 +415,7 @@ public class AgentRunService implements RunStarter {
             handle.cancelled.set(true);
             // 暂停等待当前工具在安全边界自然结束以保留结果（不强行 interrupt 工作线程），
             // 但立即解除阻塞在审批、提问和浏览器人工接管上的等待。
-            handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
-            handle.pendingQuestions.forEach(this::cancelQuestion);
-            if (browserHandoffs != null) {
-                browserHandoffs.cancelBySession(handle.sessionId, "运行已暂停");
-            }
+            releaseWaiters(handle, "运行已暂停");
             return true;
         }
     }
@@ -455,7 +451,7 @@ public class AgentRunService implements RunStarter {
     private static List<ContextStatus.Segment> segments(List<Message> history) {
         Map<String, int[]> byRole = new java.util.LinkedHashMap<>();
         for (Message message : history) {
-            int[] totals = byRole.computeIfAbsent(message.role(), ignored -> new int[3]);
+            int[] totals = byRole.computeIfAbsent(message.role(), ignored -> new int[2]);
             totals[0] += 1;
             totals[1] += message.content() == null ? 0 : message.content().length();
         }
@@ -561,8 +557,8 @@ public class AgentRunService implements RunStarter {
             if (registry.activeRun(sessionId).isEmpty()) {
                 return false;
             }
-            queue.offer(QueuedMessageCodec.encode(new QueuedMessageCodec.Stored(content, attachments, imagePositions,
-                requirements, normalizedMode, normalizedSkill)));
+            queue.offer(QueuedMessageCodec.encode(new QueuedMessage(content, attachments, imagePositions, requirements,
+                normalizedMode, normalizedSkill)));
             persistQueue(sessionId, queue);
         }
         return true;
@@ -585,8 +581,7 @@ public class AgentRunService implements RunStarter {
     }
 
     private static List<QueuedMessage> queueEntries(Deque<String> queue) {
-        return queue.stream().map(QueuedMessageCodec::decode).map(item -> new QueuedMessage(item.content(),
-            item.attachments(), item.imagePositions(), item.requirements(), item.mode(), item.skill())).toList();
+        return queue.stream().map(QueuedMessageCodec::decode).toList();
     }
 
     @Override
@@ -602,8 +597,8 @@ public class AgentRunService implements RunStarter {
                 return false;
             }
             // 只改文字与要求，图片附件跟着这条消息走；requirements 为 null 表示保留原要求。
-            QueuedMessageCodec.Stored current = QueuedMessageCodec.decode(items.get(index));
-            QueuedMessageCodec.Stored next = current.withContent(text.strip());
+            QueuedMessage current = QueuedMessageCodec.decode(items.get(index));
+            QueuedMessage next = current.withContent(text.strip());
             if (requirements != null) {
                 next = next.withRequirements(requirements.empty() ? null : requirements);
             }
@@ -788,8 +783,7 @@ public class AgentRunService implements RunStarter {
                 });
             } catch (RuntimeException e) {
                 runs.remove(runId, handle);
-                handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
-                handle.pendingQuestions.forEach(this::cancelQuestion);
+                releaseWaiters(handle, null);
                 registry.unregister(runId);
                 if (leaseClaimed) {
                     runStates.finish(sessionId, runId, TaskControlStatus.FAILED.name());
@@ -833,8 +827,7 @@ public class AgentRunService implements RunStarter {
                 handle.accepting = false;
             }
             runs.remove(runId, handle);
-            handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
-            handle.pendingQuestions.forEach(this::cancelQuestion);
+            releaseWaiters(handle, null);
             if (!continued) {
                 try {
                     preparation.releaseBrowserControl(sessionId);
@@ -940,26 +933,26 @@ public class AgentRunService implements RunStarter {
             queuedMessages.setHeld(sessionId, held);
             if (!held) {
                 // 空闲且验收已满足时只启动队首一次；运行中则等它结束时由 drainQueue 接手
-                resumeHeldQueue(sessionId, queue);
+                drainQueueIfIdle(sessionId, queue, "恢复队列后启动队首失败，队列已保留：{}");
             }
             return true;
         }
     }
 
-    /** 恢复后的启动尝试：条件不满足就什么都不做，等运行结束或验收完成时的常规交接。 */
-    private void resumeHeldQueue(String sessionId, Deque<String> queue) {
+    /** 条件满足时在队列锁内尝试启动队首一次；不满足则静默等待常规交接。 */
+    private void drainQueueIfIdle(String sessionId, Deque<String> queue, String failureLog) {
         if (registry.activeRun(sessionId).isPresent()) {
             return;
         }
         TaskControlService.TaskContract task = taskControls.load(sessionId);
         if (task == null || !TaskControlStatus.COMPLETED.is(task.status())
-            || plans.load(sessionId).stream().anyMatch(com.pilot.core.plan.PlanItem::open)) {
+            || plans.load(sessionId).stream().anyMatch(PlanItem::open)) {
             return;
         }
         try {
             drainQueue(sessionId, queue);
         } catch (RuntimeException e) {
-            log.error("恢复队列后启动队首失败，队列已保留：{}", sessionId, e);
+            log.error(failureLog, sessionId, e);
         }
     }
 
@@ -1014,28 +1007,18 @@ public class AgentRunService implements RunStarter {
         if (queuedMessages.held(sessionId)) {
             return;
         }
-        int pick = -1;
-        int index = 0;
-        for (String candidate : queue) {
-            if (QueueLane.sendsAutomatically(QueuedMessageCodec.decode(candidate).content())) {
-                pick = index;
+        QueuedMessage next = null;
+        Iterator<String> iterator = queue.iterator();
+        while (iterator.hasNext()) {
+            QueuedMessage decoded = QueuedMessageCodec.decode(iterator.next());
+            if (QueueLane.sendsAutomatically(decoded.content())) {
+                next = decoded;
                 break;
             }
-            index++;
         }
-        if (pick < 0) {
+        if (next == null) {
             return;
         }
-        String raw = null;
-        int seen = 0;
-        for (String candidate : queue) {
-            if (seen == pick) {
-                raw = candidate;
-                break;
-            }
-            seen++;
-        }
-        QueuedMessageCodec.Stored next = QueuedMessageCodec.decode(raw);
         String runId = claimRun(sessionId).orElse(null);
         if (runId == null) {
             return;
@@ -1052,13 +1035,7 @@ public class AgentRunService implements RunStarter {
             publish(sessionId, runId, new RunFailed(RunFailureCode.QUEUE_START_FAILED, "排队消息启动失败，消息已保留", false));
             throw e;
         }
-        java.util.Iterator<String> remaining = queue.iterator();
-        for (int cursor = 0; cursor <= pick; cursor++) {
-            remaining.next();
-            if (cursor == pick) {
-                remaining.remove();
-            }
-        }
+        iterator.remove();
         persistQueue(sessionId, queue);
     }
 
@@ -1066,17 +1043,7 @@ public class AgentRunService implements RunStarter {
     public void requirementsUpdated(String sessionId) {
         Deque<String> queue = inbox(sessionId);
         synchronized (queue) {
-            TaskControlService.TaskContract task = taskControls.load(sessionId);
-            if (task == null || !TaskControlStatus.COMPLETED.is(task.status())
-                || registry.activeRun(sessionId).isPresent()
-                || plans.load(sessionId).stream().anyMatch(com.pilot.core.plan.PlanItem::open)) {
-                return;
-            }
-            try {
-                drainQueue(sessionId, queue);
-            } catch (RuntimeException e) {
-                log.error("验收后的排队消息启动失败，队列已保留：{}", sessionId, e);
-            }
+            drainQueueIfIdle(sessionId, queue, "验收后的排队消息启动失败，队列已保留：{}");
         }
     }
 
@@ -1129,24 +1096,9 @@ public class AgentRunService implements RunStarter {
         }
 
         autoContinueSignature.put(sessionId, signature);
-        String runId = "run_" + java.util.UUID.randomUUID();
-        publish(sessionId, runId, new RunStarted("（继续上一次未完成的任务）"));
         String reason = budgetLimited ? "预算分段继续第 " + attempt + "/" + cap + " 段"
             : goalOpen ? "目标尚未核验，同一会话继续第 " + attempt + " 轮" : "步数触顶，按未完成计划继续";
-        publish(sessionId, runId, new RunContinued(attempt, cap, reason));
-        try {
-            launch(sessionId, runId, null, List.of(), List.of(), true, null, false, null, handle.planMode);
-            return true;
-        } catch (RuntimeException e) {
-            taskControls.status(sessionId, TaskControlStatus.FAILED);
-            String detail = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            publish(sessionId, runId, new RunFailed(RunFailureCode.INTERNAL_ERROR, "自动续跑启动失败：" + detail, true));
-            registry.unregister(runId);
-            if (runStates != null) {
-                runStates.finish(sessionId, runId, TaskControlStatus.FAILED.name());
-            }
-            return false;
-        }
+        return startContinuationRun(sessionId, handle, attempt, cap, reason, "自动续跑启动失败：", null);
     }
 
     /** 断网或连接中断导致的可重试 MODEL_ERROR：短暂退避后自动基于已落盘记忆续跑，避免长任务因临时断网中止。 */
@@ -1165,18 +1117,30 @@ public class AgentRunService implements RunStarter {
             networkReconnectAttempts.remove(sessionId);
             return false;
         }
-        String runId = "run_" + java.util.UUID.randomUUID();
+        String reason = "检测到网络断开或服务端波动导致运行中断，进度已保存，正在自动重连续跑第 " + attempt + "/" + MAX_NETWORK_AUTO_RECONNECT + " 次";
+        return startContinuationRun(sessionId, handle, attempt, MAX_NETWORK_AUTO_RECONNECT, reason, "网络自动续跑启动失败：",
+            () -> networkReconnectAttempts.remove(sessionId));
+    }
+
+    private boolean startContinuationRun(String sessionId, RunHandle handle, int attempt, int cap, String reason,
+        String failurePrefix, Runnable onFailure) {
+        String runId = "run_" + UUID.randomUUID();
         try {
             publish(sessionId, runId, new RunStarted("（继续上一次未完成的任务）"));
-            publish(sessionId, runId, new RunContinued(attempt, MAX_NETWORK_AUTO_RECONNECT,
-                "检测到网络断开或服务端波动导致运行中断，进度已保存，正在自动重连续跑第 " + attempt + "/" + MAX_NETWORK_AUTO_RECONNECT + " 次"));
+            publish(sessionId, runId, new RunContinued(attempt, cap, reason));
             launch(sessionId, runId, null, List.of(), List.of(), true, null, false, null, handle.planMode);
             return true;
         } catch (RuntimeException e) {
-            networkReconnectAttempts.remove(sessionId);
+            if (onFailure != null) {
+                onFailure.run();
+            }
             taskControls.status(sessionId, TaskControlStatus.FAILED);
             String detail = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            publish(sessionId, runId, new RunFailed(RunFailureCode.INTERNAL_ERROR, "网络自动续跑启动失败：" + detail, true));
+            publish(sessionId, runId, new RunFailed(RunFailureCode.INTERNAL_ERROR, failurePrefix + detail, true));
+            registry.unregister(runId);
+            if (runStates != null) {
+                runStates.finish(sessionId, runId, TaskControlStatus.FAILED.name());
+            }
             return false;
         }
     }
@@ -1277,11 +1241,7 @@ public class AgentRunService implements RunStarter {
                 worker.interrupt();
             }
         }
-        handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
-        handle.pendingQuestions.forEach(this::cancelQuestion);
-        if (browserHandoffs != null) {
-            browserHandoffs.cancelBySession(handle.sessionId, "运行已取消");
-        }
+        releaseWaiters(handle, "运行已取消");
         log.info("Run {} cancel requested", runId);
         return true;
     }
@@ -1371,16 +1331,16 @@ public class AgentRunService implements RunStarter {
             (unattended || (!reviewActive && properties.goalModeEnabledValue())) ? new GoalExecutionPolicy(measuredMain,
                 objectMapper, taskControls, sessionId, toolFactory.resolve(workspace), cancelled, properties.maxSteps(),
                 properties.directMaxRequests(), properties.directMaxInputTokens(), properties.directMaxOutputTokens(),
-                properties.directMaxActiveMillis(), properties.directMaxInvestigationTools(),
-                properties.goalMaxInputTokens(), properties.goalMaxOutputTokens(), properties.goalMaxActiveMillis())
-                .withRestoredPaths(snapshots::restoredPaths) : null;
+                properties.directMaxActiveMillis(), properties.goalMaxInputTokens(), properties.goalMaxOutputTokens(),
+                properties.goalMaxActiveMillis()).withRestoredPaths(snapshots::restoredPaths) : null;
         ModelClient executionClient = goalPolicy == null ? measuredMain : goalPolicy.budgetedClient();
         SpawnAgentTool.UsageSink childUsage = childUsageSink(goalPolicy, runUsage, sessionId, runId);
         var profiles = preparation.profilesFor(workspace);
         ApprovalBroker sessionApprovals = ApprovalBroker.forSession(approvals, sessionId);
-        preparation.configureExecutionTools(prepared, goalPolicy, sessionId, runId, workspace, unattended,
-            executionTask, measuredChild, routedChild, runContext.sessionGate(), config, cancelled, childUsage,
-            profiles, sink, sessionApprovals, conversations, modelSettings, multiAgent, worktrees);
+        preparation.configureExecutionTools(
+            new AgentRunPreparation.ExecutionToolsContext(prepared, goalPolicy, sessionId, runId, workspace, unattended,
+                executionTask, measuredChild, routedChild, runContext.sessionGate(), config, cancelled, childUsage,
+                profiles, sink, sessionApprovals, conversations, modelSettings, multiAgent, worktrees));
         if (!reviewActive) {
             recordPrefixSnapshot(sessionId, prepared);
         }
@@ -1615,6 +1575,14 @@ public class AgentRunService implements RunStarter {
             publish(sessionId, runId, delivered);
             notifyInteractionHub(sessionId, runId, delivered);
         };
+    }
+
+    private void releaseWaiters(RunHandle handle, String browserCancelReason) {
+        handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
+        handle.pendingQuestions.forEach(this::cancelQuestion);
+        if (browserCancelReason != null && browserHandoffs != null) {
+            browserHandoffs.cancelBySession(handle.sessionId, browserCancelReason);
+        }
     }
 
     private void cancelQuestion(String callId) {
@@ -1955,8 +1923,7 @@ public class AgentRunService implements RunStarter {
         for (RunHandle handle : runs.values()) {
             handle.interruptedReason = "Pilot 服务正在重启或关闭，本轮已中断；进度已保存，恢复后可继续执行。";
             handle.cancelled.set(true);
-            handle.pendingApprovals.forEach(callId -> approvals.resolve(callId, false));
-            handle.pendingQuestions.forEach(this::cancelQuestion);
+            releaseWaiters(handle, null);
         }
         executor.shutdownNow();
     }

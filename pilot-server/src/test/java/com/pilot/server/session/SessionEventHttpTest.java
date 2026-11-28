@@ -32,7 +32,7 @@ import com.pilot.core.event.AssistantDelta;
 import com.pilot.core.event.AssistantPreview;
 import com.pilot.core.event.ToolCompleted;
 import com.pilot.core.session.SessionService;
-import com.pilot.server.session.events.SessionEventTransport;
+import com.pilot.server.session.events.SseStreamTransport;
 
 /** 真实 Tomcat/Socket 验证非阻塞发送，MockMvc 的输出流不支持 WriteListener。 */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -46,7 +46,7 @@ class SessionEventHttpTest {
     @Autowired
     SessionService sessions;
     @Autowired
-    SessionEventTransport eventTransport;
+    SseStreamTransport eventTransport;
     @Autowired
     ServletWebServerApplicationContext application;
 

@@ -1,7 +1,5 @@
 package com.pilot.server.mobile;
 
-import java.nio.file.Path;
-
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -9,6 +7,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.server.session.lookup.SessionLookup;
 import com.pilot.server.validation.ValidationSnapshot;
 import com.pilot.server.validation.ValidationStatusService;
 
@@ -34,7 +33,7 @@ public class MobileValidationController {
         if (session == null) {
             return new View("unverified", "no_evidence", "任务不存在", "", "", "");
         }
-        ValidationSnapshot snapshot = validations.snapshot(id, workspaceOf(session), null);
+        ValidationSnapshot snapshot = validations.snapshot(id, SessionLookup.workspaceOf(session), null);
         return new View(snapshot.status(), snapshot.code(), snapshot.reason(), snapshot.candidateHash(),
             snapshot.evidenceId(), snapshot.recordedAt().toString());
     }
@@ -45,11 +44,5 @@ public class MobileValidationController {
      */
     public record View(String status, String code, String reason, String candidateHash, String evidenceId,
         String recordedAt) {
-    }
-
-    private static Path workspaceOf(Session session) {
-        String configured = session.workspace();
-        return configured == null || configured.isBlank() ? Path.of(System.getProperty("user.dir", "."))
-            : Path.of(configured).toAbsolutePath().normalize();
     }
 }

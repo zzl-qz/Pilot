@@ -24,6 +24,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import com.pilot.core.memory.MemoryStore;
 import com.pilot.core.memory.MemoryType;
 import com.pilot.core.permission.PermissionMode;
+import com.pilot.server.api.GlobalApiExceptionHandler;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.workspace.WorkspaceService;
@@ -44,7 +45,8 @@ class MemoryControllerTest {
         AgentProperties properties =
             new AgentProperties(workspace.toString(), PermissionMode.AUTO, 20, null, null, 30, 1, null, null, null);
         MemoryService service = new MemoryService(dataDir, new WorkspaceService(), properties);
-        MockMvc mvc = MockMvcBuilders.standaloneSetup(new MemoryController(service)).build();
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(new MemoryController(service))
+            .setControllerAdvice(new GlobalApiExceptionHandler()).build();
         MemoryStore store = new MemoryStore(dataDir.file("memory"));
         return new Fixture(mvc, workspace, store);
     }

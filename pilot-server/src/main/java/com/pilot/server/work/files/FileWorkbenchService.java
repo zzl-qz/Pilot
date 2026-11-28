@@ -29,6 +29,7 @@ import org.springframework.stereotype.Service;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.office.DocumentRenderer;
 import com.pilot.core.tool.office.FilePreviews;
+import com.pilot.core.util.FileNames;
 import com.pilot.core.util.FileTrees;
 import com.pilot.core.util.Sha256;
 import com.pilot.core.workspace.PathValidator;
@@ -173,7 +174,7 @@ public class FileWorkbenchService {
             Desktop.getDesktop().open(file.toFile());
             return new OpenResult(true, "已在系统默认应用中打开 " + file.getFileName(), "");
         } catch (IOException | UnsupportedOperationException e) {
-            return new OpenResult(false, "系统没有为 " + extension(file) + " 关联可用的应用：" + e.getMessage(),
+            return new OpenResult(false, "系统没有为 " + FileNames.dotExtension(file) + " 关联可用的应用：" + e.getMessage(),
                 "请点「下载文件」保存到本机，再手动选择打开方式。");
         }
     }
@@ -201,9 +202,8 @@ public class FileWorkbenchService {
     }
 
     private Version snapshotFile(String sessionId, String id, Path file, String label, long next) throws IOException {
-        Path directory = dataDir.file("file-versions", sessionId, id);
-        Files.createDirectories(directory);
-        Path saved = directory.resolve("v" + next + extension(file));
+        Path saved = snapshotPath(sessionId, id, next, file);
+        Files.createDirectories(saved.getParent());
         // CREATE_NEW 同时保护磁盘上未登记的旧快照，任何冲突都明确失败。
         var output = Files.newOutputStream(saved, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
         boolean committed = false;
@@ -238,7 +238,7 @@ public class FileWorkbenchService {
     public Version revert(String sessionId, String id, long version) throws IOException {
         synchronized (versionLock(sessionId, id)) {
             Path file = resolve(sessionId, id);
-            Path saved = dataDir.file("file-versions", sessionId, id).resolve("v" + version + extension(file));
+            Path saved = snapshotPath(sessionId, id, version, file);
             List<Version> existing = versions(sessionId, id);
             if (!Files.isRegularFile(saved, LinkOption.NOFOLLOW_LINKS)
                 || existing.stream().noneMatch(item -> item.version() == version)) {
@@ -282,11 +282,18 @@ public class FileWorkbenchService {
         String key = key(sessionId, id, String.valueOf(version.version()));
         store.get(VERSION_KIND, key).ifPresent(row -> store.delete(VERSION_KIND, key, row.version()));
         try {
-            Files.deleteIfExists(
-                dataDir.file("file-versions", sessionId, id).resolve("v" + version.version() + extension(file)));
+            Files.deleteIfExists(snapshotPath(sessionId, id, version.version(), file));
         } catch (IOException ignored) {
             // 快照文件删不掉不影响索引一致性，下次回退会因 CREATE_NEW 冲突而明确失败
         }
+    }
+
+    /** 快照文件名保留原扩展名大小写，兼容大小写敏感文件系统（如 Linux）上已有历史快照。 */
+    private Path snapshotPath(String sessionId, String id, long version, Path file) {
+        String name = file == null || file.getFileName() == null ? "" : file.getFileName().toString();
+        int dot = name.lastIndexOf('.');
+        String suffix = dot < 0 ? "" : name.substring(dot);
+        return dataDir.file("file-versions", sessionId, id).resolve("v" + version + suffix);
     }
 
     private Object versionLock(String sessionId, String id) {
@@ -346,7 +353,7 @@ public class FileWorkbenchService {
             throw new IllegalArgumentException("请至少选择一个页面操作");
         }
         Path root = root(sessionId);
-        String name = stripExtension(source.getFileName().toString()) + "-页面操作-"
+        String name = FileNames.stem(source.getFileName().toString()) + "-页面操作-"
             + UUID.randomUUID().toString().substring(0, 8) + ".pdf";
         Path target = source.getParent().resolve(name).normalize();
         if (!target.startsWith(root)) {
@@ -401,19 +408,8 @@ public class FileWorkbenchService {
     }
 
     private static Optional<String> format(String relative) {
-        String extension = extension(Path.of(relative)).toLowerCase(Locale.ROOT);
+        String extension = FileNames.dotExtension(relative);
         return FORMATS.contains(extension) ? Optional.of(extension.substring(1)) : Optional.empty();
-    }
-
-    private static String extension(Path file) {
-        String name = file.getFileName().toString();
-        int dot = name.lastIndexOf('.');
-        return dot < 0 ? "" : name.substring(dot);
-    }
-
-    private static String stripExtension(String name) {
-        int dot = name.lastIndexOf('.');
-        return dot < 0 ? name : name.substring(0, dot);
     }
 
     private static boolean hidden(Path file) {

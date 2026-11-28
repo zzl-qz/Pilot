@@ -35,8 +35,9 @@ public final class JdbcConversationRepository implements ConversationRepository 
             "SELECT role, content, tool_calls, tool_call_id, attachments, image_positions, reasoning_content FROM conversation_messages "
                 + "WHERE session_id = ? ORDER BY seq",
             statement -> statement.setString(1, sessionId),
-            rows -> new Message(rows.getString(1), rows.getString(2), toolCalls(rows.getString(3)), rows.getString(4),
-                attachments(rows.getString(5)), imagePositions(rows.getString(6)), rows.getString(7)),
+            rows -> new Message(rows.getString(1), rows.getString(2), readList(rows.getString(3), TOOL_CALLS),
+                rows.getString(4), readList(rows.getString(5), ATTACHMENTS),
+                readList(rows.getString(6), IMAGE_POSITIONS), rows.getString(7)),
             "读取对话记忆失败: " + sessionId);
     }
 
@@ -80,24 +81,10 @@ public final class JdbcConversationRepository implements ConversationRepository 
             statement -> statement.setString(1, sessionId), "删除对话记忆失败: " + sessionId);
     }
 
-    private List<ToolCall> toolCalls(String json) {
+    private <T> List<T> readList(String json, TypeReference<List<T>> type) {
         if (json == null || json.isBlank()) {
             return List.of();
         }
-        return mapper.readValue(json, TOOL_CALLS);
-    }
-
-    private List<Attachment> attachments(String json) {
-        if (json == null || json.isBlank()) {
-            return List.of();
-        }
-        return mapper.readValue(json, ATTACHMENTS);
-    }
-
-    private List<Integer> imagePositions(String json) {
-        if (json == null || json.isBlank()) {
-            return List.of();
-        }
-        return mapper.readValue(json, IMAGE_POSITIONS);
+        return mapper.readValue(json, type);
     }
 }

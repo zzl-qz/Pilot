@@ -65,7 +65,7 @@ class GoalExecutionPolicyTest {
     GoalExecutionPolicy policy(ModelClient model, int budget, int directRequests, long directInput,
         int investigationTools) {
         return new GoalExecutionPolicy(model, JsonMapper.builder().build(), tasks, "s", root, () -> false, budget,
-            directRequests, directInput, 5_000, 60_000, investigationTools, 2_000_000, 250_000, 1_800_000);
+            directRequests, directInput, 5_000, 60_000, 2_000_000, 250_000, 1_800_000);
     }
 
     static ModelResponse decision(Map<String, Object> args) {

@@ -2,11 +2,8 @@ package com.pilot.server.coordination;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.List;
 
@@ -20,6 +17,7 @@ import com.pilot.core.coordination.CoordinationRequest;
 import com.pilot.core.coordination.CoordinationRequestStatus;
 import com.pilot.core.coordination.CoordinationSnapshot;
 import com.pilot.core.coordination.CoordinationSnapshotStore;
+import com.pilot.core.util.FileTrees;
 import com.pilot.server.store.PilotDataDir;
 
 import tools.jackson.core.type.TypeReference;
@@ -60,8 +58,7 @@ public class CoordinationStateStore implements CoordinationSnapshotStore {
     public void save(CoordinationSnapshot snapshot) {
         Path file = stateFile();
         try {
-            Files.createDirectories(file.getParent());
-            writeAtomically(file, mapper.writeValueAsString(StatePayload.of(snapshot)));
+            FileTrees.writeAtomic(file, mapper.writeValueAsString(StatePayload.of(snapshot)));
         } catch (IOException failure) {
             throw new UncheckedIOException("协调状态持久化失败", failure);
         }
@@ -69,16 +66,6 @@ public class CoordinationStateStore implements CoordinationSnapshotStore {
 
     private Path stateFile() {
         return dataDir.file("coordination", "state.json");
-    }
-
-    private static void writeAtomically(Path file, String body) throws IOException {
-        Path temp = Files.createTempFile(file.getParent(), "coordination", ".tmp");
-        Files.writeString(temp, body, StandardCharsets.UTF_8);
-        try {
-            Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException fallback) {
-            Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING);
-        }
     }
 
     /** 落盘格式：时间统一按 ISO-8601 字符串保存，读回时严格解析，坏数据直接报错。 */

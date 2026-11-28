@@ -11,12 +11,13 @@ import org.junit.jupiter.api.Test;
 
 import com.pilot.core.message.Attachment;
 import com.pilot.server.run.RunStarter.QueueRequirements;
+import com.pilot.server.run.RunStarter.QueuedMessage;
 
 /** 队列条目的存储兼容：旧纯文本、带附件、带约束/验收，以及旧 JSON 缺少新字段。 */
 class QueuedMessageCodecTest {
     @Test
     void plainTextStaysPlainTextForOldReaders() {
-        String encoded = QueuedMessageCodec.encode(new QueuedMessageCodec.Stored("普通消息", List.of(), List.of()));
+        String encoded = QueuedMessageCodec.encode(new QueuedMessage("普通消息", List.of(), List.of()));
         assertEquals("普通消息", encoded);
         assertEquals("普通消息", QueuedMessageCodec.decode(encoded).content());
     }
@@ -24,8 +25,7 @@ class QueuedMessageCodecTest {
     @Test
     void requirementsRoundTripAndSurviveWithoutAttachments() {
         var requirements = new QueueRequirements(List.of("别动 pom", "保留 API"), List.of("覆盖失败路径"));
-        String encoded =
-            QueuedMessageCodec.encode(new QueuedMessageCodec.Stored("补测试", List.of(), List.of(), requirements));
+        String encoded = QueuedMessageCodec.encode(new QueuedMessage("补测试", List.of(), List.of(), requirements));
         assertTrue(encoded.startsWith("\u0001pilot-queue-v1\u0001"));
         var decoded = QueuedMessageCodec.decode(encoded);
         assertEquals("补测试", decoded.content());
@@ -38,8 +38,8 @@ class QueuedMessageCodecTest {
     void attachmentsAndRequirementsRoundTripTogether() {
         var attachment = new Attachment("a.png", "image/png", "/tmp/a.png");
         var requirements = new QueueRequirements(List.of(), List.of("通过"));
-        var decoded = QueuedMessageCodec.decode(QueuedMessageCodec
-            .encode(new QueuedMessageCodec.Stored("看图", List.of(attachment), List.of(0), requirements)));
+        var decoded = QueuedMessageCodec
+            .decode(QueuedMessageCodec.encode(new QueuedMessage("看图", List.of(attachment), List.of(0), requirements)));
         assertEquals("看图", decoded.content());
         assertEquals(1, decoded.attachments().size());
         assertEquals(List.of(0), decoded.imagePositions());
@@ -64,8 +64,8 @@ class QueuedMessageCodecTest {
 
     @Test
     void skillRoundTripsInQueuedMessageAndLegacyJsonDecodesNullSkill() {
-        String encoded = QueuedMessageCodec
-            .encode(new QueuedMessageCodec.Stored("审阅本次改动", List.of(), List.of(), null, "plan", "code-review"));
+        String encoded =
+            QueuedMessageCodec.encode(new QueuedMessage("审阅本次改动", List.of(), List.of(), null, "plan", "code-review"));
         assertTrue(encoded.startsWith("\u0001pilot-queue-v1\u0001"));
         var decoded = QueuedMessageCodec.decode(encoded);
         assertEquals("审阅本次改动", decoded.content());

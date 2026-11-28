@@ -8,6 +8,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
@@ -61,8 +62,6 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
     private static final long DEFAULT_DIRECT_MAX_INPUT_TOKENS = 8_000_000L;
     private static final long DEFAULT_DIRECT_MAX_OUTPUT_TOKENS = 500_000L;
     private static final long DEFAULT_DIRECT_MAX_ACTIVE_MILLIS = 2 * 60 * 60_000L;
-    /** 仅保留作遥测/高位事故诊断，不再作为普通调查的业务硬门。 */
-    private static final int DEFAULT_DIRECT_MAX_INVESTIGATION_TOOLS = 512;
     private static final long DEFAULT_MAX_ACTIVE_MILLIS = 4 * 60 * 60_000L;
     private static final long DEFAULT_MAX_INPUT_TOKENS = 8_000_000L;
     private static final long DEFAULT_MAX_OUTPUT_TOKENS = 500_000L;
@@ -125,13 +124,13 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         BooleanSupplier cancelled, int requestBudget, long maxInputTokens, long maxOutputTokens, long maxActiveMillis) {
         this(model, mapper, tasks, session, root, cancelled, requestBudget, DEFAULT_DIRECT_MAX_REQUESTS,
             DEFAULT_DIRECT_MAX_INPUT_TOKENS, DEFAULT_DIRECT_MAX_OUTPUT_TOKENS, DEFAULT_DIRECT_MAX_ACTIVE_MILLIS,
-            DEFAULT_DIRECT_MAX_INVESTIGATION_TOOLS, maxInputTokens, maxOutputTokens, maxActiveMillis);
+            maxInputTokens, maxOutputTokens, maxActiveMillis);
     }
 
     GoalExecutionPolicy(ModelClient model, ObjectMapper mapper, TaskControlService tasks, String session, Path root,
         BooleanSupplier cancelled, int requestBudget, int directMaxRequests, long directMaxInputTokens,
-        long directMaxOutputTokens, long directMaxActiveMillis, int ignoredDirectMaxInvestigationTools,
-        long maxInputTokens, long maxOutputTokens, long maxActiveMillis) {
+        long directMaxOutputTokens, long directMaxActiveMillis, long maxInputTokens, long maxOutputTokens,
+        long maxActiveMillis) {
         this.model = Objects.requireNonNull(model);
         this.mapper = Objects.requireNonNull(mapper);
         this.tasks = Objects.requireNonNull(tasks);
@@ -207,14 +206,8 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         return task == null || task.execution() == null ? initial() : task.execution();
     }
 
-    private TaskControlService.Execution copy(TaskControlService.Execution state, String mode, ExecutionPhase phase,
-        String gap, List<TaskControlService.Evidence> evidence, int idle, String progress,
-        TaskControlService.Usage usage) {
-        return new TaskControlService.Execution(mode, state.reason(), state.criteria(), state.unknowns(),
-            state.requests(), state.activeMillis(), evidence, phase.name(), gap, idle, progress,
-            state.requestAllowance(), state.timeAllowanceMillis(), POLICY_VERSION,
-            usage == null ? state.usage() : usage, List.copyOf(changedPaths), state.nextAction(),
-            state.expectedObservation(), state.budgetSegments());
+    private TaskControlService.Execution stamp(TaskControlService.Execution state) {
+        return state.withTracking(POLICY_VERSION, List.copyOf(changedPaths));
     }
 
     @Override
@@ -299,10 +292,9 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         if (task.automation() != null && !ExecutionMode.GOAL.is(old.mode())) {
             var fresh = initial();
             tasks.execution(session, task,
-                new TaskControlService.Execution(ExecutionMode.GOAL.name(), fresh.reason(), fresh.criteria(), List.of(),
-                    old.requests(), old.activeMillis(), old.evidence(), ExecutionPhase.EXECUTING.name(), "", 0, "",
-                    old.requestAllowance(), old.timeAllowanceMillis(), POLICY_VERSION, old.usage(), old.changedPaths(),
-                    "", "", old.budgetSegments()));
+                old.withMode(ExecutionMode.GOAL.name(), fresh.reason(), fresh.criteria(), List.of())
+                    .withPhase(ExecutionPhase.EXECUTING.name(), "").withReview(0, "", "", "")
+                    .withTracking(POLICY_VERSION, old.changedPaths()));
             return;
         }
         if (old.assessmentVersionValue() >= POLICY_VERSION
@@ -314,13 +306,13 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
             old.assessmentVersionValue() < POLICY_VERSION && ExecutionPhase.NO_PROGRESS.is(old.phase());
         List<TaskControlService.Evidence> retained =
             old.evidence().stream().filter(GoalEvidence::keepEvidence).toList();
-        TaskControlService.Execution migrated = new TaskControlService.Execution(mode, "执行策略已升级：取消每次请求的独立预判",
-            old.criteria(), old.unknowns(), old.requests(), old.activeMillis(), retained,
-            (ExecutionPhase.VERIFIED.is(old.phase()) ? ExecutionPhase.VERIFIED : ExecutionPhase.EXECUTING).name(),
-            old.gap(), retryOldNoProgress ? 0 : old.idleReviews(), retryOldNoProgress ? "" : old.progress(),
-            old.requestAllowance(), old.timeAllowanceMillis(), POLICY_VERSION, old.usage(), List.copyOf(changedPaths),
-            retryOldNoProgress ? "" : old.nextAction(), retryOldNoProgress ? "" : old.expectedObservation(),
-            old.budgetSegments());
+        TaskControlService.Execution migrated = stamp(old
+            .withMode(mode, "执行策略已升级：取消每次请求的独立预判", old.criteria(), old.unknowns()).withEvidence(retained)
+            .withPhase(
+                (ExecutionPhase.VERIFIED.is(old.phase()) ? ExecutionPhase.VERIFIED : ExecutionPhase.EXECUTING).name(),
+                old.gap())
+            .withReview(retryOldNoProgress ? 0 : old.idleReviews(), retryOldNoProgress ? "" : old.progress(),
+                retryOldNoProgress ? "" : old.nextAction(), retryOldNoProgress ? "" : old.expectedObservation()));
         if (tasks.execution(session, task, migrated)) {
             updates.accept(migrated);
         }
@@ -387,12 +379,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         }
         TaskControlService.TaskContract task = task();
         TaskControlService.Execution state = state();
-        tasks.execution(session, task,
-            new TaskControlService.Execution(state.mode(), state.reason(), state.criteria(), state.unknowns(),
-                state.requests() + 1, state.activeMillis(), state.evidence(), state.phase(), state.gap(),
-                state.idleReviews(), state.progress(), state.requestAllowance(), state.timeAllowanceMillis(),
-                POLICY_VERSION, state.usage(), List.copyOf(changedPaths), state.nextAction(),
-                state.expectedObservation(), state.budgetSegments()));
+        tasks.execution(session, task, stamp(state.withRequests(state.requests() + 1)));
     }
 
     ModelClient budgetedClient() {
@@ -461,12 +448,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         TaskControlService.Usage next = new TaskControlService.Usage(old.inputTokens() + usage.inputTokens(),
             old.outputTokens() + usage.outputTokens(), old.reasoningTokens() + usage.reasoningTokens(),
             old.inputAllowance(), old.outputAllowance(), old.continuationRounds());
-        tasks.execution(session, task,
-            new TaskControlService.Execution(state.mode(), state.reason(), state.criteria(), state.unknowns(),
-                state.requests(), state.activeMillis() + elapsedMillis, state.evidence(), state.phase(), state.gap(),
-                state.idleReviews(), state.progress(), state.requestAllowance(), state.timeAllowanceMillis(),
-                POLICY_VERSION, next, List.copyOf(changedPaths), state.nextAction(), state.expectedObservation(),
-                state.budgetSegments()));
+        tasks.execution(session, task, stamp(state.withUsage(state.activeMillis() + elapsedMillis, next)));
     }
 
     @Override
@@ -547,10 +529,9 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                         List.of(new TaskControlService.Criterion(task.originalGoal(), "用与原始目标直接相关的实际证据核验", true));
                 }
                 TaskControlService.Execution promoted =
-                    new TaskControlService.Execution(ExecutionMode.GOAL.name(), reason, criteria, state.unknowns(),
-                        state.requests(), state.activeMillis(), state.evidence(), ExecutionPhase.EXECUTING.name(), "",
-                        0, meaningfulProgress(state.evidence()), state.requestAllowance(), state.timeAllowanceMillis(),
-                        POLICY_VERSION, state.usage(), List.copyOf(changedPaths), "", "", state.budgetSegments());
+                    stamp(state.withMode(ExecutionMode.GOAL.name(), reason, criteria, state.unknowns())
+                        .withPhase(ExecutionPhase.EXECUTING.name(), "")
+                        .withReview(0, meaningfulProgress(state.evidence()), "", ""));
                 if (!tasks.executionForRequirements(session, task, promoted)) {
                     return "ERROR: 用户要求已更新，请重新核对后再升级";
                 }
@@ -715,10 +696,14 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         }
         String endVersion = sourceVersion();
         boolean knownCommandLaunch = true;
+        Optional<TaskControlService.Evidence> launchedCommand = Optional.empty();
         if (ToolNames.COMMAND_STATUS.equals(call.name())) {
             String taskId = Objects.toString(call.args() == null ? null : call.args().get("taskId"), "");
-            String launched = launchedVersion(taskId);
-            path = command == null ? launchedWorkdir(taskId) : commandWorkdir(command.workdir());
+            launchedCommand = findLaunchedCommand(taskId);
+            String launched = launchedCommand.filter(e -> !EvidenceStatus.STALE.is(e.status()))
+                .map(TaskControlService.Evidence::startVersion).orElse("");
+            path = command == null ? launchedCommand.map(TaskControlService.Evidence::target).orElse("")
+                : commandWorkdir(command.workdir());
             knownCommandLaunch = !launched.isBlank();
             // 普通后台测试只能证明启动时版本；不能在测试运行期间编辑源码后，把旧测试误绑到新版本。
             // formatter/codegen 若确实改了受跟踪源码，command_status 会结构化返回 changedPaths，
@@ -747,7 +732,8 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
             if (!actualCommand.isBlank()) {
                 operation = "command:" + GoalEvidence.hash(path + "\n" + actualCommand);
             } else if (ToolNames.COMMAND_STATUS.equals(call.name())) {
-                String launchedOperation = launchedOperation(Objects.toString(call.args().get("taskId"), ""));
+                String launchedOperation = launchedCommand.map(TaskControlService.Evidence::operationKey)
+                    .filter(key -> key.startsWith("command:")).orElse("");
                 if (!launchedOperation.isBlank()) {
                     operation = launchedOperation;
                 }
@@ -783,33 +769,16 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
                 startVersion, System.currentTimeMillis(), operation + ":pending-check"));
         }
         evidence = GoalEvidence.trimEvidence(evidence);
-        tasks.execution(session, task, copy(state, state.mode(), ExecutionPhase.EXECUTING, state.gap(), evidence,
-            state.idleReviews(), state.progress(), state.usage()));
+        tasks.execution(session, task,
+            stamp(state.withPhase(ExecutionPhase.EXECUTING.name(), state.gap()).withEvidence(evidence)));
     }
 
-    private String launchedVersion(String taskId) {
+    private Optional<TaskControlService.Evidence> findLaunchedCommand(String taskId) {
         if (taskId == null || taskId.isBlank()) {
-            return "";
+            return Optional.empty();
         }
-        return state().evidence().stream().filter(e -> ToolNames.RUN_COMMAND.equals(e.tool()))
-            .filter(e -> !EvidenceStatus.STALE.is(e.status()) && taskId.equals(GoalEvidence.taskId(e)))
-            .map(TaskControlService.Evidence::startVersion).findFirst().orElse("");
-    }
-
-    private String launchedWorkdir(String taskId) {
-        if (taskId == null || taskId.isBlank()) {
-            return "";
-        }
-        return state().evidence().stream().filter(e -> ToolNames.RUN_COMMAND.equals(e.tool()))
-            .filter(e -> taskId.equals(GoalEvidence.taskId(e))).map(TaskControlService.Evidence::target).findFirst()
-            .orElse("");
-    }
-
-    private String launchedOperation(String id) {
         return state().evidence().stream()
-            .filter(e -> ToolNames.RUN_COMMAND.equals(e.tool()) && id.equals(GoalEvidence.taskId(e)))
-            .map(TaskControlService.Evidence::operationKey).filter(key -> key.startsWith("command:")).findFirst()
-            .orElse("");
+            .filter(e -> ToolNames.RUN_COMMAND.equals(e.tool()) && taskId.equals(GoalEvidence.taskId(e))).findFirst();
     }
 
     private com.pilot.core.tool.command.CommandTaskManager.Task commandMetadata(ToolCall call, String result) {
@@ -892,8 +861,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
             ? ExecutionPhase.CHECKS_STALE : checks.isEmpty() ? ExecutionPhase.UNVERIFIED : ExecutionPhase.CHECKS_PASSED;
         String detail = directVerificationDetail(phase, realFailed.isEmpty() ? sandboxBlocked : realFailed,
             sandboxBlocked, running, checks.isEmpty(), recoveredFailures);
-        var finished = copy(state, state.mode(), phase, detail, state.evidence(), state.idleReviews(), state.progress(),
-            state.usage());
+        var finished = stamp(state.withPhase(phase.name(), detail));
         if (!tasks.executionForRequirements(session, requirements, finished)) {
             return false;
         }
@@ -982,10 +950,9 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
         String phase = complete ? ExecutionPhase.VERIFIED.name()
             : ReviewDecision.stops(decision) ? decision : ExecutionPhase.EXECUTING.name();
         TaskControlService.Execution reviewed =
-            new TaskControlService.Execution(ExecutionMode.GOAL.name(), state.reason(), state.criteria(),
-                state.unknowns(), state.requests(), state.activeMillis(), state.evidence(), phase, gap, idle, progress,
-                state.requestAllowance(), state.timeAllowanceMillis(), POLICY_VERSION, usage, List.copyOf(changedPaths),
-                complete ? "" : nextAction, complete ? "" : expected, state.budgetSegments());
+            stamp(state.withMode(ExecutionMode.GOAL.name(), state.reason(), state.criteria(), state.unknowns())
+                .withPhase(phase, gap).withReview(idle, progress, complete ? "" : nextAction, complete ? "" : expected)
+                .withUsage(state.activeMillis(), usage));
         if (!tasks.executionForRequirements(session, requirements, reviewed)) {
             return "用户要求已变更，请重新核对目标。";
         }
@@ -1250,8 +1217,7 @@ final class GoalExecutionPolicy implements ExecutionPolicy {
 
     private void updatePhase(TaskControlService.Execution state, ExecutionPhase phase, String gap) {
         TaskControlService.TaskContract task = task();
-        TaskControlService.Execution next = copy(state, state.mode(), phase, gap, state.evidence(), state.idleReviews(),
-            state.progress(), state.usage());
+        TaskControlService.Execution next = stamp(state.withPhase(phase.name(), gap));
         if (tasks.execution(session, task, next)) {
             updates.accept(next);
         }

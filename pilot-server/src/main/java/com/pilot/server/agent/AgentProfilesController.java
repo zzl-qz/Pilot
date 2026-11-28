@@ -42,7 +42,7 @@ public class AgentProfilesController {
 
     @GetMapping
     public ProfilesResponse list(@RequestParam(name = "sessionId", required = false) String sessionId) {
-        String workspace = workspace(sessionId);
+        String workspace = SessionLookup.workspaceOrNull(sessions, sessionId);
         Path projectRoot = profiles.projectRootFor(workspace);
         Path userRoot = profiles.userRoot();
         boolean rootsOverlap = projectRoot.equals(userRoot);
@@ -145,13 +145,6 @@ public class AgentProfilesController {
             throw bad("代理名称无效");
         }
         return target;
-    }
-
-    private String workspace(String sessionId) {
-        if (sessionId == null || sessionId.isBlank()) {
-            return null;
-        }
-        return SessionLookup.require(sessions, sessionId).workspace();
     }
 
     private static void validateName(String name) {

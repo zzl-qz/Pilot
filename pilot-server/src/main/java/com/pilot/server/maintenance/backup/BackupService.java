@@ -220,16 +220,7 @@ public class BackupService {
                 storageHealth.markDegraded("database", e.getMessage());
             }
         }
-        Path backups = dataDir.file("backups");
-        List<Path> directories = new ArrayList<>();
-        if (Files.isDirectory(backups)) {
-            try (Stream<Path> list = Files.list(backups)) {
-                directories.addAll(list.filter(Files::isDirectory).filter(this::isComplete).toList());
-            } catch (IOException e) {
-                log.debug("读取备份目录失败", e);
-            }
-        }
-        directories.sort(Comparator.comparing(path -> path.getFileName().toString()));
+        List<Path> directories = listCompleteBackups();
         String last = directories.isEmpty() ? "" : directories.getLast().getFileName().toString();
         return new Status(dataDir.root().toString(), databaseBytes, directories.size(), last, storageHealth.snapshot(),
             includedDirectories(), directories.isEmpty() ? List.of() : workspaceStatus(directories.getLast()));
@@ -280,15 +271,21 @@ public class BackupService {
     }
 
     private Path latestCompleteBackup() {
+        List<Path> directories = listCompleteBackups();
+        return directories.isEmpty() ? null : directories.getLast();
+    }
+
+    private List<Path> listCompleteBackups() {
         Path backups = dataDir.file("backups");
         if (!Files.isDirectory(backups)) {
-            return null;
+            return List.of();
         }
         try (Stream<Path> list = Files.list(backups)) {
             return list.filter(Files::isDirectory).filter(this::isComplete)
-                .max(Comparator.comparing(path -> path.getFileName().toString())).orElse(null);
+                .sorted(Comparator.comparing(path -> path.getFileName().toString())).toList();
         } catch (IOException e) {
-            return null;
+            log.warn("读取备份目录失败", e);
+            return List.of();
         }
     }
 
@@ -371,24 +368,16 @@ public class BackupService {
 
     /** 删除早于 cutoff 的备份目录，避免备份把磁盘吃满。 */
     public synchronized int purgeOlderThan(Instant cutoff) {
-        Path backups = dataDir.file("backups");
-        if (!Files.isDirectory(backups)) {
-            return 0;
-        }
         int removed = 0;
-        try (Stream<Path> list = Files.list(backups)) {
-            for (Path directory : list.filter(Files::isDirectory).toList()) {
-                try {
-                    if (isComplete(directory) && Files.getLastModifiedTime(directory).toInstant().isBefore(cutoff)) {
-                        BackupManifest.deleteTree(directory);
-                        removed++;
-                    }
-                } catch (IOException e) {
-                    log.warn("清理备份 {} 失败", directory, e);
+        for (Path directory : listCompleteBackups()) {
+            try {
+                if (Files.getLastModifiedTime(directory).toInstant().isBefore(cutoff)) {
+                    BackupManifest.deleteTree(directory);
+                    removed++;
                 }
+            } catch (IOException e) {
+                log.warn("清理备份 {} 失败", directory, e);
             }
-        } catch (IOException e) {
-            log.warn("遍历备份目录失败", e);
         }
         return removed;
     }

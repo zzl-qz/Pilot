@@ -2,11 +2,9 @@ package com.pilot.server.validation;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -21,6 +19,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import com.pilot.core.util.FileTrees;
 import com.pilot.server.store.PilotDataDir;
 import com.pilot.server.store.SqliteStore;
 import com.pilot.server.store.StorageHealthService;
@@ -294,20 +293,8 @@ public class ValidationLedger {
     }
 
     private void persist(String sessionId, List<ValidationEvidence> entries) throws IOException {
-        Path file = file(sessionId);
-        Path temporary = Files.createTempFile(file.getParent(), "validation-", ".tmp");
-        try {
-            Files.writeString(temporary, mapper.writeValueAsString(new Stored(sessionId, entries)),
-                StandardCharsets.UTF_8, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING,
-                StandardOpenOption.SYNC);
-            try {
-                Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
-            }
-        } finally {
-            Files.deleteIfExists(temporary);
-        }
+        FileTrees.writeAtomicSync(file(sessionId),
+            mapper.writeValueAsString(new Stored(sessionId, entries)).getBytes(StandardCharsets.UTF_8));
     }
 
     private Path file(String sessionId) {

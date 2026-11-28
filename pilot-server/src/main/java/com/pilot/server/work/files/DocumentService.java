@@ -62,10 +62,12 @@ public class DocumentService {
     public record Download(Path file, String filename, String mediaType) {
     }
 
+    private static final ObjectMapper JSON = new ObjectMapper();
+
     private final AutomationStore store;
     private final PilotDataDir dataDir;
     private final WorkProductService products;
-    private final ObjectMapper json = new ObjectMapper();
+    private final ObjectMapper json = JSON;
 
     public List<Document> list(String sessionId) {
         return store.list(KIND).stream().map(this::parse).filter(doc -> doc.sessionId().equals(sessionId))
@@ -387,7 +389,7 @@ public class DocumentService {
         }
         JsonNode node;
         try {
-            node = new ObjectMapper().readTree(spec);
+            node = JSON.readTree(spec);
         } catch (RuntimeException e) {
             throw new IllegalArgumentException("spec 不是合法 JSON");
         }

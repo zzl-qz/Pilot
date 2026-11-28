@@ -28,6 +28,7 @@ import org.springframework.boot.web.server.context.WebServerInitializedEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
+import com.pilot.core.exec.ProcessSupport;
 import com.pilot.core.runtime.bootstrap.BootstrapPlatform;
 import com.pilot.core.runtime.bootstrap.MobileBridgeLayout;
 import com.pilot.core.util.HostOs;
@@ -405,19 +406,7 @@ public class MobileConnectionService {
         }
         supervisor.shutdownNow();
         if (child != null && child.isAlive()) {
-            child.descendants().forEach(ProcessHandle::destroy);
-            child.destroy();
-            try {
-                if (!child.waitFor(2, TimeUnit.SECONDS)) {
-                    child.descendants().forEach(ProcessHandle::destroyForcibly);
-                    child.destroyForcibly();
-                    child.waitFor(2, TimeUnit.SECONDS);
-                }
-            } catch (InterruptedException e) {
-                child.descendants().forEach(ProcessHandle::destroyForcibly);
-                child.destroyForcibly();
-                Thread.currentThread().interrupt();
-            }
+            ProcessSupport.terminateGracefully(child, Duration.ofSeconds(2));
         }
     }
 }

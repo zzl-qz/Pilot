@@ -6,7 +6,6 @@ import java.util.Map;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,9 +18,7 @@ import com.pilot.core.mcp.McpManager;
 import com.pilot.core.mcp.McpServerConfig;
 import com.pilot.core.mcp.McpToolInfo;
 import com.pilot.core.mcp.McpTrustStore;
-import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
-import com.pilot.server.api.ApiErrors;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.session.lookup.SessionLookup;
 
@@ -46,7 +43,7 @@ public class McpTrustController {
     /** 信任视图：审批卡与设置页签共享的状态判定。 */
     @GetMapping
     public List<TrustedServer> trust(@PathVariable String id) {
-        Path workspace = workspace(id);
+        Path workspace = SessionLookup.workspace(sessions, agentProperties, id);
         McpManager manager = mcpManager.getIfAvailable();
         if (manager == null || manager.trustStore() == null) {
             return List.of();
@@ -65,7 +62,7 @@ public class McpTrustController {
             || request.server().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "action 与 server 必填");
         }
-        Path workspace = workspace(id);
+        Path workspace = SessionLookup.workspace(sessions, agentProperties, id);
         String server = request.server().strip();
         switch (request.action()) {
             case "trust" -> {
@@ -117,20 +114,6 @@ public class McpTrustController {
         if (!provided.equals(current)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, what + "在你批准后已变化，请重新查看审批内容后再信任");
         }
-    }
-
-    /** 与 McpConfigController 一样把原因带进响应体，界面才看得到「哈希已变化」这类说明。 */
-    @org.springframework.web.bind.annotation.ExceptionHandler(ResponseStatusException.class)
-    public ResponseEntity<?> status(ResponseStatusException failure) {
-        return ApiErrors.message(failure.getStatusCode(), failure.getReason());
-    }
-
-    /** 与 {@link CapabilitiesController} 相同的 workspace 解析口径。 */
-    private Path workspace(String sessionId) {
-        Session session = SessionLookup.require(sessions, sessionId);
-        String workspace = session.workspace() == null || session.workspace().isBlank() ? agentProperties.workspace()
-            : session.workspace();
-        return Path.of(workspace);
     }
 
     private McpManager required() {

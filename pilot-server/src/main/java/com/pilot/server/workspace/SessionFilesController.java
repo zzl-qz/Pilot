@@ -33,6 +33,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.core.util.FileNames;
 import com.pilot.core.util.Texts;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.core.workspace.WorkspaceViolationException;
@@ -210,7 +211,7 @@ public class SessionFilesController {
         if (Files.size(file) > 5L * 1024 * 1024) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "图片超过 5 MB，无法预览");
         }
-        MediaType type = switch (extension(file)) {
+        MediaType type = switch (FileNames.extension(file)) {
             case "png" -> MediaType.IMAGE_PNG;
             case "jpg", "jpeg" -> MediaType.IMAGE_JPEG;
             case "gif" -> MediaType.IMAGE_GIF;
@@ -219,12 +220,6 @@ public class SessionFilesController {
         };
         return ResponseEntity.ok().contentType(type).header("X-Content-Type-Options", "nosniff")
             .body(Files.readAllBytes(file));
-    }
-
-    private static String extension(Path file) {
-        String name = file.getFileName().toString();
-        int dot = name.lastIndexOf('.');
-        return dot < 0 ? "" : name.substring(dot + 1).toLowerCase(Locale.ROOT);
     }
 
     static FileResponse fileWorkspace(Path workspace, String path) {

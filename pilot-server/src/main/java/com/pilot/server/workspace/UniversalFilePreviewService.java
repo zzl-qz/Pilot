@@ -1,7 +1,6 @@
 package com.pilot.server.workspace;
 
 import java.awt.Desktop;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URLEncoder;
@@ -50,6 +49,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.pilot.core.exec.ProcessSupport;
 import com.pilot.core.tool.office.OfficeSupport;
+import com.pilot.core.util.FileNames;
 import com.pilot.core.util.HostOs;
 import com.pilot.server.browser.BrowserRuntime;
 
@@ -80,7 +80,7 @@ public final class UniversalFilePreviewService {
     }
 
     public static PreviewMeta classify(Path file) {
-        String ext = extension(file);
+        String ext = FileNames.extension(file);
         return switch (ext) {
             case "png" -> new PreviewMeta("image", "image/png");
             case "jpg", "jpeg" -> new PreviewMeta("image", "image/jpeg");
@@ -200,7 +200,7 @@ public final class UniversalFilePreviewService {
         try {
             Process process = new ProcessBuilder(command).redirectOutput(ProcessBuilder.Redirect.DISCARD)
                 .redirectError(ProcessBuilder.Redirect.PIPE).start();
-            var stderrTask = new FutureTask<>(() -> readBounded(process.getErrorStream(), 2048));
+            var stderrTask = new FutureTask<>(() -> ProcessSupport.readBoundedBytes(process.getErrorStream(), 2048));
             Thread.startVirtualThread(stderrTask);
             if (process.waitFor(750, TimeUnit.MILLISECONDS) && process.exitValue() != 0) {
                 int code = process.exitValue();
@@ -221,20 +221,6 @@ public final class UniversalFilePreviewService {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return new OpenResult(false, "等待系统应用启动时被中断", "请点击「下载」保存到本机后打开。");
-        }
-    }
-
-    private static byte[] readBounded(InputStream stream, int maxBytes) throws IOException {
-        try (stream) {
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            byte[] buf = new byte[512];
-            int n;
-            while ((n = stream.read(buf)) != -1) {
-                if (out.size() < maxBytes) {
-                    out.write(buf, 0, Math.min(n, maxBytes - out.size()));
-                }
-            }
-            return out.toByteArray();
         }
     }
 
@@ -263,8 +249,8 @@ public final class UniversalFilePreviewService {
 
     private static boolean isDangerousOpenFile(Path file) {
         String name = file.getFileName().toString().replaceAll("[. ]+$", "");
-        int dot = name.lastIndexOf('.');
-        return dot >= 0 && DANGEROUS_OPEN_EXTENSIONS.contains(name.substring(dot + 1).toLowerCase(Locale.ROOT));
+        String ext = FileNames.extension(name);
+        return !ext.isEmpty() && DANGEROUS_OPEN_EXTENSIONS.contains(ext);
     }
 
     private static StructuredPreview parseDocx(Path file, long size) throws IOException {
@@ -475,16 +461,6 @@ public final class UniversalFilePreviewService {
         } catch (IOException e) {
             return MediaType.APPLICATION_OCTET_STREAM_VALUE;
         }
-    }
-
-    private static String extension(Path file) {
-        Path name = file.getFileName();
-        if (name == null) {
-            return "";
-        }
-        String text = name.toString();
-        int dot = text.lastIndexOf('.');
-        return dot < 0 ? "" : text.substring(dot + 1).toLowerCase(Locale.ROOT);
     }
 
     public record PreviewMeta(String kind, String mimeType) {

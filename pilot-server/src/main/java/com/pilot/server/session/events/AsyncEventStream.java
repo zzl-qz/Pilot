@@ -23,7 +23,7 @@ import lombok.extern.slf4j.Slf4j;
 public final class AsyncEventStream implements AutoCloseable {
     /** 这么久没有事件就发一次心跳，防止代理把空闲连接掐掉。 */
     private static final long HEARTBEAT_INTERVAL_NANOS = Duration.ofSeconds(20).toNanos();
-    private final SessionEventTransport transport;
+    private final SseStreamTransport transport;
     private final AsyncContext context;
     private final ServletOutputStream output;
     private final long byteLimit;
@@ -52,7 +52,7 @@ public final class AsyncEventStream implements AutoCloseable {
         }
     }
 
-    public AsyncEventStream(SessionEventTransport transport, HttpServletRequest request, HttpServletResponse response,
+    public AsyncEventStream(SseStreamTransport transport, HttpServletRequest request, HttpServletResponse response,
         long byteLimit, Duration timeout, Runnable onClosed, Runnable heartbeat) throws IOException {
         this.transport = transport;
         this.byteLimit = byteLimit;

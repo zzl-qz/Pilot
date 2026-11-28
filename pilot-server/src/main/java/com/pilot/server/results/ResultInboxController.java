@@ -1,15 +1,11 @@
 package com.pilot.server.results;
 
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-
-import com.pilot.server.api.ApiErrors;
 
 import lombok.RequiredArgsConstructor;
 
@@ -43,15 +39,5 @@ public class ResultInboxController {
     @GetMapping("/research/{sessionId}")
     public Object research(@PathVariable String sessionId) {
         return service.sessionResearch(sessionId);
-    }
-
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<?> invalid(IllegalArgumentException e) {
-        return ApiErrors.badRequest(e);
-    }
-
-    @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<?> conflict(IllegalStateException e) {
-        return ApiErrors.conflict(e);
     }
 }

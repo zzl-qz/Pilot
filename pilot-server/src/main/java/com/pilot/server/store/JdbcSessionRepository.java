@@ -9,9 +9,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import com.pilot.core.event.EventEnvelope;
 import com.pilot.core.event.SessionEvent;
+import com.pilot.core.session.EventTooLargeException;
 import com.pilot.core.session.NoSuchSessionException;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionRepository;
@@ -32,7 +34,7 @@ public final class JdbcSessionRepository implements SessionRepository {
     private final EventCodec codec;
 
     @Override
-    public <T> T transaction(String sessionId, java.util.function.Supplier<T> work) {
+    public <T> T transaction(String sessionId, Supplier<T> work) {
         return store.transaction(work);
     }
 
@@ -96,8 +98,8 @@ public final class JdbcSessionRepository implements SessionRepository {
 
     @Override
     public List<Session> list() {
-        return store.query("SELECT " + COLUMNS + " FROM sessions" + ACTIVITY_ORDER, statement -> {
-        }, JdbcSessionRepository::map, "读取会话列表失败");
+        return store.query("SELECT " + COLUMNS + " FROM sessions" + ACTIVITY_ORDER, JdbcSessionRepository::map,
+            "读取会话列表失败");
     }
 
     @Override
@@ -105,8 +107,7 @@ public final class JdbcSessionRepository implements SessionRepository {
         if (projectId == null) {
             // 未分组的历史会话：project_id 为空
             return store.query("SELECT " + COLUMNS + " FROM sessions WHERE project_id IS NULL" + ACTIVITY_ORDER,
-                statement -> {
-                }, JdbcSessionRepository::map, "读取未分组会话失败");
+                JdbcSessionRepository::map, "读取未分组会话失败");
         }
         return store.query("SELECT " + COLUMNS + " FROM sessions WHERE project_id = ?" + ACTIVITY_ORDER,
             statement -> statement.setString(1, projectId), JdbcSessionRepository::map, "读取项目会话失败: " + projectId);
@@ -167,14 +168,12 @@ public final class JdbcSessionRepository implements SessionRepository {
 
     @Override
     public boolean delete(String sessionId) {
-        boolean[] removed = {false};
-        store.inTransaction(connection -> {
+        return store.inTransaction(connection -> {
             store.exec(connection, "DELETE FROM events WHERE session_id = ?",
                 statement -> statement.setString(1, sessionId));
-            removed[0] = store.exec(connection, "DELETE FROM sessions WHERE id = ?",
+            return store.exec(connection, "DELETE FROM sessions WHERE id = ?",
                 statement -> statement.setString(1, sessionId)) > 0;
         }, "删除会话失败: " + sessionId);
-        return removed[0];
     }
 
     @Override
@@ -189,9 +188,10 @@ public final class JdbcSessionRepository implements SessionRepository {
 
     @Override
     public long eventCount(String sessionId) {
-        return store.query("SELECT COUNT(*) FROM events WHERE session_id = ?",
-            statement -> statement.setString(1, sessionId), rows -> rows.getLong(1), "统计事件失败: " + sessionId).stream()
-            .findFirst().orElse(0L);
+        return store
+            .queryOne("SELECT COUNT(*) FROM events WHERE session_id = ?",
+                statement -> statement.setString(1, sessionId), rows -> rows.getLong(1), "统计事件失败: " + sessionId)
+            .orElse(0L);
     }
 
     /**
@@ -202,50 +202,25 @@ public final class JdbcSessionRepository implements SessionRepository {
     public List<EventEnvelope> eventsPage(String sessionId, Long before, int limit) {
         String sql = "SELECT sequence, run_id, type, payload, created_at FROM events WHERE session_id = ?"
             + (before != null ? " AND sequence < ?" : "") + " ORDER BY sequence DESC LIMIT ?";
-        try (Connection connection = store.open(); PreparedStatement statement = connection.prepareStatement(sql)) {
+        return queryEvents(sql, statement -> {
             int index = 1;
             statement.setString(index++, sessionId);
             if (before != null) {
                 statement.setLong(index++, before);
             }
             statement.setInt(index, Math.max(1, limit));
-            ArrayList<EventEnvelope> page = new ArrayList<EventEnvelope>();
-            try (ResultSet rows = statement.executeQuery()) {
-                while (rows.next()) {
-                    EventEnvelope event = mapEvent(rows, sessionId);
-                    if (event != null) {
-                        page.add(event);
-                    }
-                }
-            }
-            Collections.reverse(page);
-            return List.copyOf(page);
-        } catch (SQLException e) {
-            throw new IllegalStateException("读取事件分页失败: " + sessionId, e);
-        }
+        }, sessionId, true, "读取事件分页失败: " + sessionId);
     }
 
     @Override
     public List<EventEnvelope> eventsPageAfter(String sessionId, long after, int limit) {
         String sql = "SELECT sequence, run_id, type, payload, created_at FROM events WHERE session_id = ?"
             + " AND sequence > ? ORDER BY sequence ASC LIMIT ?";
-        try (Connection connection = store.open(); PreparedStatement statement = connection.prepareStatement(sql)) {
+        return queryEvents(sql, statement -> {
             statement.setString(1, sessionId);
             statement.setLong(2, after);
             statement.setInt(3, Math.max(1, limit));
-            ArrayList<EventEnvelope> page = new ArrayList<EventEnvelope>();
-            try (ResultSet rows = statement.executeQuery()) {
-                while (rows.next()) {
-                    EventEnvelope event = mapEvent(rows, sessionId);
-                    if (event != null) {
-                        page.add(event);
-                    }
-                }
-            }
-            return List.copyOf(page);
-        } catch (SQLException e) {
-            throw new IllegalStateException("读取更新历史分页失败: " + sessionId, e);
-        }
+        }, sessionId, false, "读取更新历史分页失败: " + sessionId);
     }
 
     @Override
@@ -270,13 +245,16 @@ public final class JdbcSessionRepository implements SessionRepository {
                 while (rows.next()) {
                     long rowBytes = rows.getLong("bytes");
                     if (rowBytes > 8L * 1024 * 1024) {
-                        throw new com.pilot.core.session.EventTooLargeException();
+                        throw new EventTooLargeException();
                     }
                     bytes += rowBytes;
                     if (!page.isEmpty() && bytes > 1024 * 1024) {
                         break;
                     }
-                    page.add(mapEvent(rows, sessionId));
+                    EventEnvelope event = mapEvent(rows, sessionId);
+                    if (event != null) {
+                        page.add(event);
+                    }
                 }
             }
             return List.copyOf(page);
@@ -291,20 +269,10 @@ public final class JdbcSessionRepository implements SessionRepository {
         String createdAt = SqliteStore.normalizedInstantSql("created_at");
         String sql = "SELECT session_id, sequence, run_id, type, payload, created_at FROM events "
             + "WHERE type = ? AND " + createdAt + " >= ? ORDER BY " + createdAt + ", session_id, sequence";
-        try (Connection connection = store.open(); PreparedStatement statement = connection.prepareStatement(sql)) {
+        return queryEvents(sql, statement -> {
             statement.setString(1, type);
-            statement.setString(2,
-                new java.time.format.DateTimeFormatterBuilder().appendInstant(9).toFormatter().format(since));
-            ArrayList<EventEnvelope> result = new ArrayList<EventEnvelope>();
-            try (ResultSet rows = statement.executeQuery()) {
-                while (rows.next()) {
-                    result.add(mapEvent(rows, rows.getString("session_id")));
-                }
-            }
-            return List.copyOf(result);
-        } catch (SQLException e) {
-            throw new IllegalStateException("跨会话事件查询失败: " + type, e);
-        }
+            statement.setString(2, SqliteStore.canonicalInstant(since));
+        }, null, false, "跨会话事件查询失败: " + type);
     }
 
     @Override
@@ -394,22 +362,41 @@ public final class JdbcSessionRepository implements SessionRepository {
                     }
                 }
             }
-            try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            return queryEvents(connection, sql, statement -> {
                 statement.setString(1, sessionId);
                 statement.setLong(2, afterSequence);
-                try (ResultSet rows = statement.executeQuery()) {
-                    ArrayList<EventEnvelope> result = new ArrayList<EventEnvelope>();
-                    while (rows.next()) {
-                        EventEnvelope event = mapEvent(rows, sessionId);
-                        if (event != null) {
-                            result.add(event);
-                        }
-                    }
-                    return List.copyOf(result);
-                }
-            }
+            }, sessionId, false);
         } catch (SQLException e) {
             throw new IllegalStateException("读取事件失败: " + sessionId, e);
+        }
+    }
+
+    private List<EventEnvelope> queryEvents(String sql, SqliteStore.Binder binder, String sessionId, boolean reverse,
+        String failure) {
+        try (Connection connection = store.open()) {
+            return queryEvents(connection, sql, binder, sessionId, reverse);
+        } catch (SQLException e) {
+            throw new IllegalStateException(failure, e);
+        }
+    }
+
+    private List<EventEnvelope> queryEvents(Connection connection, String sql, SqliteStore.Binder binder,
+        String sessionId, boolean reverse) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            binder.bind(statement);
+            ArrayList<EventEnvelope> result = new ArrayList<>();
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    EventEnvelope event = mapEvent(rows, sessionId != null ? sessionId : rows.getString("session_id"));
+                    if (event != null) {
+                        result.add(event);
+                    }
+                }
+            }
+            if (reverse) {
+                Collections.reverse(result);
+            }
+            return List.copyOf(result);
         }
     }
 

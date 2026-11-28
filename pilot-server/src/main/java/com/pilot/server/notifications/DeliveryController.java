@@ -1,7 +1,6 @@
 package com.pilot.server.notifications;
 
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -9,8 +8,6 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-
-import com.pilot.server.api.ApiErrors;
 
 import lombok.RequiredArgsConstructor;
 
@@ -58,15 +55,5 @@ public class DeliveryController {
     @PostMapping("/{id}/retry")
     public void retry(@PathVariable String id, @RequestBody Retry input) {
         service.retry(id, input.version());
-    }
-
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<?> bad(RuntimeException e) {
-        return ApiErrors.badRequest(e);
-    }
-
-    @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<?> conflict(RuntimeException e) {
-        return ApiErrors.conflict(e);
     }
 }

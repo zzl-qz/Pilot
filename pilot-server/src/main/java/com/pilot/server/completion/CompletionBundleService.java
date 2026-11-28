@@ -113,7 +113,7 @@ public class CompletionBundleService {
     /** 生成当前会话的完成包；不重新执行命令，只汇总服务端已有记录。 */
     public CompletionBundle build(String sessionId) {
         Session session = SessionLookup.require(sessions, sessionId);
-        Path workspace = workspaceOf(session);
+        Path workspace = SessionLookup.workspaceOf(session);
         TaskControlService.TaskContract task = tasks.load(sessionId);
         List<ValidationEvidence> evidence = validations.recent(sessionId);
         ValidationEvidence latest = evidence.isEmpty() ? null : evidence.getLast();
@@ -139,7 +139,7 @@ public class CompletionBundleService {
     /** 只核对证据是否仍覆盖当前文件；不会自动重跑测试。 */
     public VerifyReport verify(String sessionId) {
         Session session = SessionLookup.require(sessions, sessionId);
-        Path workspace = workspaceOf(session);
+        Path workspace = SessionLookup.workspaceOf(session);
         List<ValidationEvidence> evidence = validations.recent(sessionId);
         ValidationEvidence latest = evidence.isEmpty() ? null : evidence.getLast();
         String current = latest == null ? "" : WorkspaceFingerprint.of(workspace, latest.files());
@@ -322,11 +322,5 @@ public class CompletionBundleService {
     private static String executionValue(TaskControlService.TaskContract task,
         Function<TaskControlService.Execution, String> getter) {
         return task == null || task.execution() == null ? "" : getter.apply(task.execution());
-    }
-
-    private static Path workspaceOf(Session session) {
-        String configured = session.workspace();
-        return configured == null || configured.isBlank() ? Path.of(System.getProperty("user.dir", "."))
-            : Path.of(configured).toAbsolutePath().normalize();
     }
 }

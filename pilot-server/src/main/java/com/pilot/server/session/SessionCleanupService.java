@@ -170,7 +170,7 @@ public class SessionCleanupService {
     }
 
     /** 删除未完成、但会话仍在，可用同一个 DELETE 请求重试。 */
-    public static final class CleanupException extends RuntimeException {
+    public static final class CleanupException extends IllegalStateException {
         private final String sessionId;
 
         public CleanupException(String sessionId, String message, Throwable cause) {

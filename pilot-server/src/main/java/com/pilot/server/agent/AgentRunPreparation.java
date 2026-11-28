@@ -283,13 +283,20 @@ public final class AgentRunPreparation {
             promptSources, systemPrompt, inheritedDeferred, planMode, browserModeActive);
     }
 
-    public void configureExecutionTools(PreparedRun prepared, GoalExecutionPolicy goalPolicy, String sessionId,
-        String runId, String workspace, boolean unattended, TaskControlService.TaskContract executionTask,
-        ModelClient measuredChild, Function<String, ModelClient> routedChild, PermissionGate sessionGate,
-        AgentLoop.Config config, BooleanSupplier cancelled, SpawnAgentTool.UsageSink childUsage,
-        AgentProfileCatalog profiles, Consumer<SessionEvent> sink, ApprovalBroker approvals,
-        ConversationRepository conversations, ModelSettings modelSettings, MultiAgentService multiAgent,
-        GitWorktrees worktrees) {
+    record ExecutionToolsContext(PreparedRun prepared, GoalExecutionPolicy goalPolicy, String sessionId, String runId,
+        String workspace, boolean unattended, TaskControlService.TaskContract executionTask, ModelClient measuredChild,
+        Function<String, ModelClient> routedChild, PermissionGate sessionGate, AgentLoop.Config config,
+        BooleanSupplier cancelled, SpawnAgentTool.UsageSink childUsage, AgentProfileCatalog profiles,
+        Consumer<SessionEvent> sink, ApprovalBroker approvals, ConversationRepository conversations,
+        ModelSettings modelSettings, MultiAgentService multiAgent, GitWorktrees worktrees) {
+    }
+
+    void configureExecutionTools(ExecutionToolsContext ctx) {
+        PreparedRun prepared = ctx.prepared();
+        GoalExecutionPolicy goalPolicy = ctx.goalPolicy();
+        String sessionId = ctx.sessionId();
+        String runId = ctx.runId();
+        String workspace = ctx.workspace();
         ToolRegistry tools = prepared.tools();
         Set<String> availableTools = prepared.availableTools();
         boolean reviewActive = prepared.review().active();
@@ -302,7 +309,7 @@ public final class AgentRunPreparation {
                 planMode || reviewActive || properties.permissionMode() == PermissionMode.READ_ONLY
                     || tools.availableTools().stream().noneMatch(t -> t instanceof WritesFiles);
             goalPolicy.withCommandLookup(id -> commandTasks.get(sessionId, id)).withReadOnlySession(readOnlySession);
-            goalPolicy.withAvailableTools(availableTools).withUpdates(state -> sink.accept(
+            goalPolicy.withAvailableTools(availableTools).withUpdates(state -> ctx.sink().accept(
                 new ExecutionUpdated(state.mode(), state.phase(), state.requests(), state.reason(), state.gap())));
             tools.register(goalPolicy.promotionTool());
             if (taskControls.load(sessionId).automation() != null && !planMode) {
@@ -310,55 +317,69 @@ public final class AgentRunPreparation {
             }
         }
         if (!reviewActive) {
-            SpawnAgentTool spawnAgent = new SpawnAgentTool(measuredChild, tools, sessionGate, approvals, config,
-                () -> conversations.load(sessionId), sink, cancelled, childUsage, profiles).withScopedTools(
-                    scope -> toolFactory.registryForScope(workspace, scope, SandboxSink.rejectAll(), extraRoots));
-            if (routedChild != null) {
-                spawnAgent.withChildRoute(() -> modelSettings.snapshot().childModel(), routedChild);
-            }
-            if (worktrees != null && !planMode) {
-                Path base = toolFactory.resolve(workspace);
-                spawnAgent.withCheckouts(base, new SubagentCheckouts(ignored -> {
-                    try {
-                        Created created = worktrees.create(base, "");
-                        Path checkout = Path.of(created.path());
-                        String diff = String.join("\n", worktrees.preview(checkout).files());
-                        return new Opened(checkout, diff, "");
-                    } catch (RuntimeException failure) {
-                        return new Opened(null, "", failure.getMessage() == null ? "无法创建独立检出" : failure.getMessage());
-                    }
-                }));
-                spawnAgent.withWorkspaceTools(path -> toolFactory.uncachedRegistryFor(path.toString(), extraRoots),
-                    path -> {
-                        Handoff handed = worktrees.handoff(path, null, runId);
-                        return handed.note();
-                    });
-            }
-            tools.register(spawnAgent);
-            if (!planMode && browserRuntime != null) {
-                BrowserSubagentTool browserTool =
-                    new BrowserSubagentTool(new BrowserSubagentTool.Dependencies(browserRuntime, sessionId, runId,
-                        new PathValidator(toolFactory.resolve(workspace), extraRoots), measuredChild, sessionGate,
-                        approvals, config, sink, cancelled, childUsage, browserHandoffs, browserEvidence));
-                if (routedChild != null) {
-                    browserTool.withChildRoute(() -> modelSettings.snapshot().childModel(), routedChild);
-                }
-                tools.register(browserTool);
-            }
-            if (multiProperties.enabled() && !planMode) {
-                DispatchAgentsTool dispatchTool = new DispatchAgentsTool(multiAgent, sessionId, runId, workspace, sink,
-                    cancelled, measuredChild, profiles, childUsage).withExtraRoots(extraRoots).withParentPermission(
-                        unattended && executionTask.automation().fullAccess() ? PermissionMode.AUTO : null);
-                if (routedChild != null) {
-                    dispatchTool.withChildRoute(() -> modelSettings.snapshot().childModel(), routedChild);
-                }
-                tools.register(dispatchTool);
-            }
+            registerSubagentTools(ctx, tools, extraRoots);
         }
         tools.enable(inheritedDeferred);
         if (prepared.browserMode() && !planMode && !reviewActive) {
             tools.enable(List.of(ToolNames.BROWSER, ToolNames.BROWSER_AGENT));
         }
+    }
+
+    private void registerSubagentTools(ExecutionToolsContext ctx, ToolRegistry tools, List<Path> extraRoots) {
+        String sessionId = ctx.sessionId();
+        String runId = ctx.runId();
+        String workspace = ctx.workspace();
+        boolean planMode = ctx.prepared().planMode();
+        SpawnAgentTool spawnAgent = new SpawnAgentTool(ctx.measuredChild(), tools, ctx.sessionGate(), ctx.approvals(),
+            ctx.config(), () -> ctx.conversations().load(sessionId), ctx.sink(), ctx.cancelled(), ctx.childUsage(),
+            ctx.profiles()).withScopedTools(
+                scope -> toolFactory.registryForScope(workspace, scope, SandboxSink.rejectAll(), extraRoots));
+        if (ctx.routedChild() != null) {
+            spawnAgent.withChildRoute(() -> ctx.modelSettings().snapshot().childModel(), ctx.routedChild());
+        }
+        if (ctx.worktrees() != null && !planMode) {
+            attachWorktreeCheckouts(ctx, spawnAgent, extraRoots);
+        }
+        tools.register(spawnAgent);
+        if (!planMode && browserRuntime != null) {
+            BrowserSubagentTool browserTool =
+                new BrowserSubagentTool(new BrowserSubagentTool.Dependencies(browserRuntime, sessionId, runId,
+                    new PathValidator(toolFactory.resolve(workspace), extraRoots), ctx.measuredChild(),
+                    ctx.sessionGate(), ctx.approvals(), ctx.config(), ctx.sink(), ctx.cancelled(), ctx.childUsage(),
+                    browserHandoffs, browserEvidence));
+            if (ctx.routedChild() != null) {
+                browserTool.withChildRoute(() -> ctx.modelSettings().snapshot().childModel(), ctx.routedChild());
+            }
+            tools.register(browserTool);
+        }
+        if (multiProperties.enabled() && !planMode) {
+            DispatchAgentsTool dispatchTool = new DispatchAgentsTool(ctx.multiAgent(), sessionId, runId, workspace,
+                ctx.sink(), ctx.cancelled(), ctx.measuredChild(), ctx.profiles(), ctx.childUsage())
+                .withExtraRoots(extraRoots).withParentPermission(
+                    ctx.unattended() && ctx.executionTask().automation().fullAccess() ? PermissionMode.AUTO : null);
+            if (ctx.routedChild() != null) {
+                dispatchTool.withChildRoute(() -> ctx.modelSettings().snapshot().childModel(), ctx.routedChild());
+            }
+            tools.register(dispatchTool);
+        }
+    }
+
+    private void attachWorktreeCheckouts(ExecutionToolsContext ctx, SpawnAgentTool spawnAgent, List<Path> extraRoots) {
+        Path base = toolFactory.resolve(ctx.workspace());
+        spawnAgent.withCheckouts(base, new SubagentCheckouts(ignored -> {
+            try {
+                Created created = ctx.worktrees().create(base, "");
+                Path checkout = Path.of(created.path());
+                String diff = String.join("\n", ctx.worktrees().preview(checkout).files());
+                return new Opened(checkout, diff, "");
+            } catch (RuntimeException failure) {
+                return new Opened(null, "", failure.getMessage() == null ? "无法创建独立检出" : failure.getMessage());
+            }
+        }));
+        spawnAgent.withWorkspaceTools(path -> toolFactory.uncachedRegistryFor(path.toString(), extraRoots), path -> {
+            Handoff handed = ctx.worktrees().handoff(path, null, ctx.runId());
+            return handed.note();
+        });
     }
 
     public String currentTaskContext(String sessionId) {

@@ -23,6 +23,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
+import com.pilot.core.exec.ProcessSupport;
 import com.pilot.core.util.HostOs;
 import com.pilot.server.browser.BrowserHome;
 import com.pilot.server.browser.BrowserRuntime;
@@ -134,20 +135,7 @@ public class DesktopWindowLauncher {
     @PreDestroy
     public void destroy() {
         for (Process process : launchedProcesses) {
-            process.descendants().forEach(ProcessHandle::destroy);
-            process.destroy();
-            try {
-                if (!process.waitFor(2, TimeUnit.SECONDS)) {
-                    process.descendants().forEach(ProcessHandle::destroyForcibly);
-                    process.destroyForcibly();
-                    process.waitFor(2, TimeUnit.SECONDS);
-                }
-            } catch (InterruptedException e) {
-                process.descendants().forEach(ProcessHandle::destroyForcibly);
-                process.destroyForcibly();
-                Thread.currentThread().interrupt();
-                return;
-            }
+            ProcessSupport.terminateGracefully(process, Duration.ofSeconds(2));
         }
         launchedProcesses.clear();
     }

@@ -1,5 +1,6 @@
 package com.pilot.server.store;
 
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Duration;
@@ -37,21 +38,7 @@ public final class JdbcRunCheckpointRepository implements RunCheckpointRepositor
                 status = excluded.status, owner = excluded.owner,
                 lease_expires_at = excluded.lease_expires_at,
                 heartbeat_at = excluded.heartbeat_at, updated_at = excluded.updated_at
-            """, statement -> {
-            statement.setString(1, checkpoint.runId());
-            statement.setString(2, checkpoint.sessionId());
-            statement.setString(3, checkpoint.phase());
-            statement.setInt(4, checkpoint.step());
-            statement.setString(5, checkpoint.lastToolCallId());
-            statement.setString(6, checkpoint.lastSuccessfulStep());
-            statement.setString(7, checkpoint.nextAction());
-            statement.setString(8, checkpoint.workspace());
-            statement.setString(9, checkpoint.status());
-            statement.setString(10, checkpoint.owner());
-            statement.setString(11, text(checkpoint.leaseExpiresAt()));
-            statement.setString(12, text(checkpoint.heartbeatAt()));
-            statement.setString(13, text(checkpoint.updatedAt()));
-        }, "保存运行检查点失败: " + checkpoint.runId());
+            """, statement -> bindCheckpointColumns(statement, checkpoint, true), "保存运行检查点失败: " + checkpoint.runId());
     }
 
     @Override
@@ -62,20 +49,9 @@ public final class JdbcRunCheckpointRepository implements RunCheckpointRepositor
                 INSERT OR IGNORE INTO run_checkpoints (run_id, session_id, phase, step, last_tool_call_id,
                     last_successful_step, next_action, workspace, status, owner, lease_expires_at,
                     heartbeat_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
-                """, statement -> {
-                statement.setString(1, checkpoint.runId());
-                statement.setString(2, checkpoint.sessionId());
-                statement.setString(3, checkpoint.phase());
-                statement.setInt(4, checkpoint.step());
-                statement.setString(5, checkpoint.lastToolCallId());
-                statement.setString(6, checkpoint.lastSuccessfulStep());
-                statement.setString(7, checkpoint.nextAction());
-                statement.setString(8, checkpoint.workspace());
-                statement.setString(9, checkpoint.status());
-                statement.setString(10, text(checkpoint.heartbeatAt()));
-                statement.setString(11, text(checkpoint.updatedAt()));
-            }, "创建运行检查点起点失败: " + checkpoint.runId());
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, statement -> bindCheckpointColumns(statement, checkpoint, false),
+                "创建运行检查点起点失败: " + checkpoint.runId());
             return claimLease(checkpoint.runId(), checkpoint.owner(), at, lease);
         });
     }
@@ -91,9 +67,10 @@ public final class JdbcRunCheckpointRepository implements RunCheckpointRepositor
         String updatedAt = SqliteStore.normalizedInstantSql("updated_at");
         return store.queryOne("""
             SELECT * FROM run_checkpoints WHERE session_id = ?
-              AND status IN ('RUNNING', 'INTERRUPTED', 'PAUSED')
+              AND status IN (%s)
             ORDER BY %s DESC LIMIT 1
-            """.formatted(updatedAt), statement -> statement.setString(1, sessionId), JdbcRunCheckpointRepository::map,
+            """.formatted(SqliteStore.ACTIVE_CHECKPOINT_STATUSES, updatedAt),
+            statement -> statement.setString(1, sessionId), JdbcRunCheckpointRepository::map,
             "读取会话检查点失败: " + sessionId);
     }
 
@@ -101,10 +78,10 @@ public final class JdbcRunCheckpointRepository implements RunCheckpointRepositor
     public List<RunCheckpoint> resumable() {
         String updatedAt = SqliteStore.normalizedInstantSql("updated_at");
         return store.query("""
-            SELECT * FROM run_checkpoints WHERE status IN ('RUNNING', 'INTERRUPTED', 'PAUSED')
+            SELECT * FROM run_checkpoints WHERE status IN (%s)
             ORDER BY %s ASC
-            """.formatted(updatedAt), statement -> {
-        }, JdbcRunCheckpointRepository::map, "读取可恢复检查点失败");
+            """.formatted(SqliteStore.ACTIVE_CHECKPOINT_STATUSES, updatedAt), JdbcRunCheckpointRepository::map,
+            "读取可恢复检查点失败");
     }
 
     @Override
@@ -162,6 +139,23 @@ public final class JdbcRunCheckpointRepository implements RunCheckpointRepositor
     public int deleteBySession(String sessionId) {
         return store.update("DELETE FROM run_checkpoints WHERE session_id = ?",
             statement -> statement.setString(1, sessionId), "删除会话检查点失败: " + sessionId);
+    }
+
+    private static void bindCheckpointColumns(PreparedStatement statement, RunCheckpoint checkpoint,
+        boolean includeLease) throws SQLException {
+        statement.setString(1, checkpoint.runId());
+        statement.setString(2, checkpoint.sessionId());
+        statement.setString(3, checkpoint.phase());
+        statement.setInt(4, checkpoint.step());
+        statement.setString(5, checkpoint.lastToolCallId());
+        statement.setString(6, checkpoint.lastSuccessfulStep());
+        statement.setString(7, checkpoint.nextAction());
+        statement.setString(8, checkpoint.workspace());
+        statement.setString(9, checkpoint.status());
+        statement.setString(10, includeLease ? checkpoint.owner() : null);
+        statement.setString(11, includeLease ? text(checkpoint.leaseExpiresAt()) : null);
+        statement.setString(12, text(checkpoint.heartbeatAt()));
+        statement.setString(13, text(checkpoint.updatedAt()));
     }
 
     private static RunCheckpoint map(ResultSet rows) throws SQLException {

@@ -21,10 +21,6 @@
             <artifactId>snakeyaml</artifactId>
         </dependency>
         <dependency>
-            <groupId>io.github.java-diff-utils</groupId>
-            <artifactId>java-diff-utils</artifactId>
-        </dependency>
-        <dependency>
             <groupId>org.apache.poi</groupId>
             <artifactId>poi-ooxml</artifactId>
         </dependency>
@@ -32,7 +28,7 @@
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
         </dependency>
-        <!-- server 直接编译 core 源码，@Slf4j 的注解处理器这里也要有。 -->
+        <!-- pilot-server 自身使用 @Slf4j / @RequiredArgsConstructor 等注解，编译期需要 Lombok 处理器。 -->
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>

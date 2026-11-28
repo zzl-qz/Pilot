@@ -4,7 +4,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -17,7 +16,6 @@ import org.springframework.web.bind.annotation.RestController;
 import com.pilot.core.mcp.McpManager;
 import com.pilot.core.mcp.McpServerConfig;
 import com.pilot.core.mcp.McpToolInfo;
-import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.Availability;
 import com.pilot.core.tool.Tool;
@@ -58,16 +56,14 @@ public class CapabilitiesController {
 
     @GetMapping("/capabilities")
     public CapabilitiesResponse capabilities(@PathVariable String id) {
-        Session session = SessionLookup.require(sessions, id);
-        String workspace = session.workspace() == null || session.workspace().isBlank() ? agentProperties.workspace()
-            : session.workspace();
-        Path root = Path.of(workspace);
+        Path root = SessionLookup.workspace(sessions, agentProperties, id);
+        String workspace = root.toString();
         // 插件体检与升级前预览共用同一份判断，页面不另写一套「健康度」口径。
         var plugins = pluginCompat.inspect(id);
 
-        return new CapabilitiesResponse(root.toString(), modelSettings.snapshot().model(),
-            permissionSettings.mode().name(), tools(id, workspace), servers(root), localCapabilities.discover(),
-            plugins.items(), plugins.counts(), plugins.markdown());
+        return new CapabilitiesResponse(workspace, modelSettings.snapshot().model(), permissionSettings.mode().name(),
+            tools(id, workspace), servers(root), localCapabilities.discover(), plugins.items(), plugins.counts(),
+            plugins.markdown());
     }
 
     /**
@@ -108,23 +104,13 @@ public class CapabilitiesController {
         for (McpServerConfig config : configured.values()) {
             boolean running = manager.running(workspace, config.name());
             List<McpToolInfo> known = manager.knownTools(workspace, config.name());
-            result.add(new McpServerPayload(config.name(), commandLine(config), config.usable(), running,
+            result.add(new McpServerPayload(config.name(), config.displayCommand(), config.usable(), running,
                 manager.failure(workspace, config.name()), config.unsupported(),
                 known.stream().map(McpToolInfo::name).toList(),
                 manager.definedInWorkspaceConfig(workspace, config.name()) ? "workspace" : "user",
                 manager.trustState(workspace, config.name())));
         }
         return List.copyOf(result);
-    }
-
-    private static String commandLine(McpServerConfig config) {
-        if (config.isRemote()) {
-            return config.transport().toUpperCase(Locale.ROOT) + " " + config.url();
-        }
-        if (config.command() == null) {
-            return "";
-        }
-        return config.args().isEmpty() ? config.command() : config.command() + " " + String.join(" ", config.args());
     }
 
     private static ToolPayload payload(Tool tool) {

@@ -15,7 +15,6 @@ import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -31,7 +30,6 @@ import com.pilot.core.project.Project;
 import com.pilot.core.project.ProjectRepository;
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
-import com.pilot.server.api.ApiErrors;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.session.SessionCleanupService;
 import com.pilot.server.workspace.ProjectRulesFile;
@@ -158,12 +156,6 @@ public class ProjectController {
         }
         projects.delete(id);
         return ResponseEntity.noContent().build();
-    }
-
-    /** 项目下某个会话清理失败时项目保留，返回 409 让客户端重试删除。 */
-    @ExceptionHandler(SessionCleanupService.CleanupException.class)
-    public ResponseEntity<?> cleanupFailed(SessionCleanupService.CleanupException failure) {
-        return ApiErrors.conflict(failure);
     }
 
     /** 文件夹路径逐个校验：必须是存在的目录，否则整个请求拒绝，避免建出一个点不开的项目。 */

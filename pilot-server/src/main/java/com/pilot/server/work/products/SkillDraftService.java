@@ -4,12 +4,10 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryNotEmptyException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
@@ -20,6 +18,7 @@ import org.springframework.stereotype.Service;
 
 import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
+import com.pilot.core.util.FileTrees;
 import com.pilot.core.util.Sha256;
 import com.pilot.core.util.WireEnum;
 import com.pilot.server.skill.SkillService;
@@ -234,7 +233,6 @@ public class SkillDraftService {
     }
 
     private void replace(Path workspace, Path file, String content, String expected) {
-        Path temporary = null;
         try {
             Files.createDirectories(file.getParent());
             // 目录创建后再检查一次，避免普通并发编辑被当作当前批准的版本。
@@ -251,23 +249,9 @@ public class SkillDraftService {
                 }
                 return;
             }
-            temporary = Files.createTempFile(file.getParent(), ".skill-", ".tmp");
-            Files.writeString(temporary, content, StandardCharsets.UTF_8);
-            try {
-                Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
-            }
+            FileTrees.writeAtomic(file, content);
         } catch (IOException e) {
             throw new UncheckedIOException("技能写入未完成，刷新后可核对恢复状态", e);
-        } finally {
-            if (temporary != null) {
-                try {
-                    Files.deleteIfExists(temporary);
-                } catch (IOException ignored) {
-                    // 临时文件不是 SKILL.md，目录扫描不会把它当作已安装技能。
-                }
-            }
         }
     }
 

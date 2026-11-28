@@ -48,6 +48,16 @@ public final class SqliteStore {
         void run(Connection connection) throws SQLException;
     }
 
+    @FunctionalInterface
+    public interface TransactionQuery<T> {
+        T run(Connection connection) throws SQLException;
+    }
+
+    public static final String ACTIVE_CHECKPOINT_STATUSES = "'RUNNING', 'INTERRUPTED', 'PAUSED'";
+
+    private static final Binder NO_BIND = statement -> {
+    };
+
     private static final DateTimeFormatter INSTANT_FORMAT =
         new DateTimeFormatterBuilder().appendInstant(9).toFormatter();
 
@@ -285,6 +295,11 @@ public final class SqliteStore {
         }
     }
 
+    /** 查询多行（无参数）；返回不可变列表。 */
+    public <T> List<T> query(String sql, RowMapper<T> mapper, String failure) {
+        return query(sql, NO_BIND, mapper, failure);
+    }
+
     /** 查询单行；没有结果返回空。 */
     public <T> Optional<T> queryOne(String sql, Binder binder, RowMapper<T> mapper, String failure) {
         List<T> rows = query(sql, binder, mapper, failure);
@@ -300,12 +315,24 @@ public final class SqliteStore {
         }
     }
 
+    /** 执行一条无参写语句并返回影响行数。 */
+    public int update(String sql, String failure) {
+        return update(sql, NO_BIND, failure);
+    }
+
     /** 事务内执行；抛异常自动回滚，成功后提交。 */
     public void inTransaction(TransactionWork work, String failure) {
-        transaction(() -> {
+        inTransaction(connection -> {
+            work.run(connection);
+            return null;
+        }, failure);
+    }
+
+    /** 事务内执行并返回结果；抛异常自动回滚，成功后提交。 */
+    public <T> T inTransaction(TransactionQuery<T> work, String failure) {
+        return transaction(() -> {
             try (Connection connection = open()) {
-                work.run(connection);
-                return null;
+                return work.run(connection);
             } catch (SQLException e) {
                 throw new IllegalStateException(failure, e);
             }
@@ -387,8 +414,7 @@ public final class SqliteStore {
     }
 
     public List<String> pendingValidationSessions() {
-        return query("SELECT session_id FROM validation_pending", statement -> {
-        }, rows -> rows.getString(1), "读取校验证据待写入状态失败");
+        return query("SELECT session_id FROM validation_pending", rows -> rows.getString(1), "读取校验证据待写入状态失败");
     }
 
     public void setValidationPending(String sessionId, boolean pending) {
@@ -413,10 +439,11 @@ public final class SqliteStore {
             : " AND session_id NOT IN (" + String.join(",", Collections.nCopies(liveSessions.size(), "?")) + ")";
         return transaction(() -> {
             try (Connection connection = open();
-                PreparedStatement statement = connection.prepareStatement("DELETE FROM events WHERE " + createdAt
-                    + " < ? "
-                    + "AND NOT EXISTS (SELECT 1 FROM run_checkpoints c WHERE c.session_id = events.session_id "
-                    + "AND c.status IN ('RUNNING','INTERRUPTED','PAUSED'))" + excludeLive + " RETURNING session_id")) {
+                PreparedStatement statement =
+                    connection.prepareStatement("DELETE FROM events WHERE " + createdAt + " < ? "
+                        + "AND NOT EXISTS (SELECT 1 FROM run_checkpoints c WHERE c.session_id = events.session_id "
+                        + "AND c.status IN (" + ACTIVE_CHECKPOINT_STATUSES + "))" + excludeLive
+                        + " RETURNING session_id")) {
                 statement.setString(1, timestamp);
                 int parameter = 2;
                 for (String session : liveSessions) {
@@ -451,9 +478,8 @@ public final class SqliteStore {
 
     private Set<String> recoverableIds(String column, String failure) {
         return Set.copyOf(query(
-            "SELECT DISTINCT " + column + " FROM run_checkpoints WHERE status IN ('RUNNING','INTERRUPTED','PAUSED')",
-            statement -> {
-            }, rows -> rows.getString(1), failure));
+            "SELECT DISTINCT " + column + " FROM run_checkpoints WHERE status IN (" + ACTIVE_CHECKPOINT_STATUSES + ")",
+            rows -> rows.getString(1), failure));
     }
 
     public record EventReferences(Set<String> runs, Set<String> sessions) {
@@ -573,7 +599,7 @@ public final class SqliteStore {
         s.execute("INSERT INTO schema_meta(key,value) VALUES('message_search_v1','1')");
     }
 
-    private static void addColumnIfMissing(Statement statement, String table, String column, String definition)
+    public static void addColumnIfMissing(Statement statement, String table, String column, String definition)
         throws SQLException {
         if (hasColumn(statement, table, column)) {
             return;
@@ -601,11 +627,7 @@ public final class SqliteStore {
             }
             try (Connection connection = open(); Statement statement = connection.createStatement()) {
                 statement.execute("PRAGMA journal_mode = WAL");
-                // WAL 下 NORMAL 已经足够安全：崩溃最多丢最后几个事务，但不会损坏库，
-                // 换来的是每个事件少一次 fsync
-                statement.execute("PRAGMA synchronous = NORMAL");
                 statement.execute("PRAGMA wal_autocheckpoint = 1000");
-                statement.execute("PRAGMA temp_store = MEMORY");
                 for (String ddl : SCHEMA) {
                     statement.execute(ddl);
                 }

@@ -47,10 +47,7 @@ public class SkillsController {
      */
     @GetMapping
     public SkillsResponse list(@RequestParam(name = "sessionId", required = false) String sessionId) {
-        String workspace = null;
-        if (sessionId != null && !sessionId.isBlank()) {
-            workspace = SessionLookup.require(sessions, sessionId).workspace();
-        }
+        String workspace = SessionLookup.workspaceOrNull(sessions, sessionId);
         var catalog = skills.catalogFor(workspace);
         List<SkillPayload> available = catalog.list().stream().map(SkillPayload::of).toList();
         return new SkillsResponse(available, catalog.invalid(), skills.projectRootFor(workspace).toString(),
@@ -79,8 +76,8 @@ public class SkillsController {
     @PostMapping("/preview")
     public ResponseEntity<PreviewResponse> preview(@RequestBody(required = false) PreviewRequest request) {
         var preview = installer.preview(request == null ? null : request.source(),
-            resolveWorkspace(request == null ? null : request.sessionId()), request == null ? null : request.ref(),
-            request == null ? null : request.path());
+            SessionLookup.workspaceOrNull(sessions, request == null ? null : request.sessionId()),
+            request == null ? null : request.ref(), request == null ? null : request.path());
         return ResponseEntity
             .ok(new PreviewResponse(preview.token(), preview.kind(), preview.message(),
                 preview
@@ -107,7 +104,7 @@ public class SkillsController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "target 只能是 project 或 user");
         }
         var result = installer.install(request.token(), request.skills(), project,
-            resolveWorkspace(request.sessionId()), Boolean.TRUE.equals(request.overwrite()));
+            SessionLookup.workspaceOrNull(sessions, request.sessionId()), Boolean.TRUE.equals(request.overwrite()));
         return ResponseEntity.ok(new InstallResponse(result.results().stream()
             .map(outcome -> new OutcomePayload(outcome.name(), outcome.status(), outcome.reason())).toList()));
     }
@@ -116,14 +113,6 @@ public class SkillsController {
     @ExceptionHandler(SkillInstallService.InstallException.class)
     public ResponseEntity<Map<String, String>> onInstallFailure(SkillInstallService.InstallException e) {
         return ApiErrors.message(HttpStatus.BAD_REQUEST, Objects.requireNonNullElse(e.getMessage(), "安装失败"));
-    }
-
-    /** sessionId 非空时必须存在（与 GET 同口径）；缺省按默认工作区解析。 */
-    private String resolveWorkspace(String sessionId) {
-        if (sessionId == null || sessionId.isBlank()) {
-            return null;
-        }
-        return SessionLookup.require(sessions, sessionId).workspace();
     }
 
     public record PreviewRequest(String source, String sessionId, String ref, String path) {

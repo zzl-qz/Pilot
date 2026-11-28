@@ -1,6 +1,5 @@
 package com.pilot.server.observability;
 
-import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -28,6 +27,7 @@ import com.pilot.core.session.SessionService;
 import com.pilot.core.tool.command.CommandTaskManager;
 import com.pilot.server.run.RecoveryReportService;
 import com.pilot.server.run.RunStateTracker;
+import com.pilot.server.session.lookup.SessionLookup;
 import com.pilot.server.store.StorageHealthService;
 import com.pilot.server.validation.ValidationEvidence;
 import com.pilot.server.validation.ValidationLedger;
@@ -104,8 +104,8 @@ public class TaskDiagnosticsService {
         // 账本按写入顺序保留旧到新的证据，与 ValidationLedger.report 的选取保持一致。
         List<ValidationEvidence> recentEvidence = validations.recent(sessionId);
         ValidationEvidence latestEvidence = recentEvidence.isEmpty() ? null : recentEvidence.getLast();
-        String currentCandidate =
-            latestEvidence == null ? "" : WorkspaceFingerprint.of(workspaceOf(session), latestEvidence.files());
+        String currentCandidate = latestEvidence == null ? ""
+            : WorkspaceFingerprint.of(SessionLookup.workspaceOf(session), latestEvidence.files());
         ValidationLedger.Report report = validations.report(sessionId, currentCandidate);
 
         return new Diagnostics(sessionId, session == null ? "MISSING" : session.status().name(),
@@ -152,13 +152,6 @@ public class TaskDiagnosticsService {
             return null;
         }
         return Duration.between(checkpoint.heartbeatAt(), Instant.now()).toSeconds();
-    }
-
-    private static Path workspaceOf(Session session) {
-        if (session == null || session.workspace() == null || session.workspace().isBlank()) {
-            return Path.of(System.getProperty("user.dir", "."));
-        }
-        return Path.of(session.workspace()).toAbsolutePath().normalize();
     }
 
     private static <T extends SessionEvent> T last(List<EventEnvelope> events, Class<T> type) {

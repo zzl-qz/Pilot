@@ -23,14 +23,12 @@ import com.pilot.core.event.RunFailureCode;
 import com.pilot.core.event.SessionEvent;
 import com.pilot.core.event.SubagentFinished;
 import com.pilot.core.event.SubagentStarted;
-import com.pilot.core.event.ToolStarted;
 import com.pilot.core.loop.AgentLoop;
 import com.pilot.core.loop.ExecutionPolicy;
 import com.pilot.core.loop.ToolExecutor;
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.message.ToolNames;
-import com.pilot.core.model.MeteredModelClient;
 import com.pilot.core.model.ModelClient;
 import com.pilot.core.model.ModelUsage;
 import com.pilot.core.multi.profile.AgentProfile;
@@ -52,7 +50,7 @@ import com.pilot.core.workspace.AgentScope;
  * 子代理的工具集不包含 spawn_agent，避免递归派生。
  */
 public final class SpawnAgentTool implements Tool.ParallelReadOnly {
-    private static final int MAX_SUMMARY_CHARS = 6_000;
+    private static final String ISOLATION_PROMPT = "[子代理隔离] 你是只读探索。只完成派发的子任务，把结论交回父代理。不能改文件，不能跑命令，不能创建 Goal，不能再派生子代理。";
     /** 大项目跨包目录定位 + 读取多个源文件通常需要 12~16 步；默认给 18 步工作请求 + 1 次阶段收尾。 */
     static final int DEFAULT_MAX_SUBAGENT_STEPS = 18;
     /** 一个父 run 最多派生的子任务数；续跑会创建新 run，但累计 Goal 预算不会清零。 */
@@ -184,7 +182,8 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
         this.permissionGate = Objects.requireNonNull(permissionGate, "permissionGate must not be null");
         this.approvals = Objects.requireNonNull(approvals, "approvals must not be null");
         this.budget = budget == null ? Budget.DEFAULT : budget;
-        this.config = subagentConfig(Objects.requireNonNull(config, "config must not be null"), this.budget.maxSteps());
+        this.config = SubagentSupport.subagentConfig(Objects.requireNonNull(config, "config must not be null"),
+            this.budget.maxSteps(), ISOLATION_PROMPT);
         this.history = Objects.requireNonNull(history, "history must not be null");
         this.events = Objects.requireNonNull(events, "events must not be null");
         this.cancelled = Objects.requireNonNull(cancelled, "cancelled must not be null");
@@ -236,7 +235,7 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
 
     @Override
     public boolean readOnly(Map<String, Object> args) {
-        return !"write".equals(text(args == null ? null : args.get("mode")));
+        return !"write".equals(SubagentSupport.text(args == null ? null : args.get("mode")));
     }
 
     @Override
@@ -246,14 +245,14 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
 
     @Override
     public ToolResult executeResult(Map<String, Object> args) {
-        String task = args == null ? "" : text(args.get("task"));
+        String task = args == null ? "" : SubagentSupport.text(args.get("task"));
         if (task.isBlank()) {
             return ToolResult.text("ERROR: task 不能为空");
         }
-        String fork = args == null ? "" : text(args.get("fork_turns"));
+        String fork = args == null ? "" : SubagentSupport.text(args.get("fork_turns"));
         boolean inherit = "all".equals(fork);
-        String resumeId = args == null ? "" : text(args.get("resumeAgentId"));
-        if (!resumeId.isEmpty() && "write".equals(text(args.get("mode")))) {
+        String resumeId = args == null ? "" : SubagentSupport.text(args.get("resumeAgentId"));
+        if (!resumeId.isEmpty() && "write".equals(SubagentSupport.text(args.get("mode")))) {
             return ToolResult.text("ERROR: 续跑只支持只读子代理");
         }
         List<Message> prior = List.of();
@@ -263,7 +262,7 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
                 return ToolResult.text("ERROR: 没有找到子代理 " + resumeId + " 的已有结论，无法继续");
             }
         }
-        String requestedModel = args == null ? "" : text(args.get("model"));
+        String requestedModel = args == null ? "" : SubagentSupport.text(args.get("model"));
         ModelClient chosen = client;
         if (!requestedModel.isEmpty()) {
             ModelClient found = alternateModels.get(requestedModel);
@@ -277,18 +276,15 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
             }
             chosen = found;
         } else {
-            String route = childRoute.get();
-            if (route != null && !route.isBlank()) {
-                ModelClient found = routedModels.apply(route.strip());
-                if (found == null) {
-                    return ToolResult.text("ERROR: 子代理模型 " + route.strip() + " 未能创建");
-                }
-                chosen = found;
+            try {
+                chosen = SubagentSupport.resolveRoutedClient(client, childRoute.get(), routedModels);
+            } catch (IllegalStateException e) {
+                return ToolResult.text("ERROR: " + e.getMessage());
             }
         }
 
         // 自定义代理：名字必须在目录里存在，拿不到明确报错而不是静默退回普通子代理
-        String agentName = args == null ? "" : text(args.get("agent"));
+        String agentName = args == null ? "" : SubagentSupport.text(args.get("agent"));
         AgentProfile profile = null;
         if (!agentName.isEmpty()) {
             profile = profiles.find(agentName).orElse(null);
@@ -297,15 +293,16 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
                 return ToolResult
                     .text("ERROR: 引用的代理 " + agentName + " 不存在（可用：" + (available.isEmpty() ? "无" : available) + "）");
             }
-            if (!profile.writable() && "write".equals(text(args.get("mode")))) {
+            if (!profile.writable() && "write".equals(SubagentSupport.text(args.get("mode")))) {
                 return ToolResult.text("ERROR: 代理 " + agentName + " 配置为只读（writable=false），禁止以 write 模式运行");
             }
         }
-        String displayName = args == null || text(args.get("name")).isEmpty() ? agentName : text(args.get("name"));
+        String displayName = args == null || SubagentSupport.text(args.get("name")).isEmpty() ? agentName
+            : SubagentSupport.text(args.get("name"));
         String checkoutNote = "";
         Path checkoutPath = null;
-        if ("worktree".equals(text(args == null ? null : args.get("isolation")))
-            && "write".equals(text(args.get("mode")))) {
+        if ("worktree".equals(SubagentSupport.text(args == null ? null : args.get("isolation")))
+            && "write".equals(SubagentSupport.text(args.get("mode")))) {
             if (checkouts == null || checkoutWorkspace == null) {
                 return ToolResult.text("ERROR: 无法创建独立检出。未修改父工作区。");
             }
@@ -352,14 +349,14 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
                     prompt = prompt + "\n工作目录是独立检出 " + checkoutPath + "，不要改父目录。";
                 }
                 // 子代理有独立累计器；子 run 的终止事件绝不能流入父 sink，否则会提前完成/中断父任务。
-                AgentLoop.Result result =
-                    loop.run(prompt, context, event -> forwardChildEvent(event, completion, agentId));
+                AgentLoop.Result result = loop.run(prompt, context,
+                    event -> SubagentSupport.forwardChildEvent(events, event, agentId, completion, true));
                 remember(agentId, result);
                 String manifest = resultManifest(artifacts, completion.get());
-                String closing = truncateSummary(result.finalText());
+                String closing = SubagentSupport.truncateSummary(result.finalText());
                 if (result.failed()) {
                     String code = result.failureCode() == null ? "UNKNOWN" : result.failureCode();
-                    if (hasAuthoredConclusion(closing, code)) {
+                    if (SubagentSupport.hasAuthoredConclusion(closing, code)) {
                         // 对齐 DSH 结算通知：输出提取与停止原因解耦，触顶阶段总结必须完整交回父代理，避免父代理重抓一遍。
                         String header = "[子代理阶段结算：" + settlementNote(code) + "]";
                         String report = header + "\n\n" + closing + manifest + agentLine(agentId);
@@ -387,7 +384,12 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
                     artifacts.checks());
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                return ToolResult.text("ERROR: 等待子代理空位时被中断");
+                String report = "ERROR: 等待子代理空位时被中断";
+                if (!finishedSent) {
+                    events.accept(new SubagentFinished(agentId, report, false, "INTERRUPTED", false));
+                    finishedSent = true;
+                }
+                return ToolResult.text(report);
             } catch (RuntimeException e) {
                 String reason = "子代理异常：" + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
                 String report = "ERROR: " + reason + resultManifest(artifacts, completion.get());
@@ -421,22 +423,6 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
         return "\nagent_id: " + agentId;
     }
 
-    private static String truncateSummary(String raw) {
-        String summary = raw == null ? "" : raw.strip();
-        if (summary.length() > MAX_SUMMARY_CHARS) {
-            return summary.substring(0, MAX_SUMMARY_CHARS) + "…";
-        }
-        return summary;
-    }
-
-    /** 排除 AgentLoop 本地的兜底空模板，只有模型真正写出了阶段结论才按阶段交付结算。 */
-    private static boolean hasAuthoredConclusion(String closing, String code) {
-        if (closing.isBlank()) {
-            return false;
-        }
-        return !closing.startsWith("本轮未能完整结束（" + code + "）：");
-    }
-
     private static String settlementNote(String code) {
         if (RunFailureCode.MAX_STEPS.is(code)) {
             return "达到探索步数上限（MAX_STEPS），以下为已收集证据的阶段结论；未核实部分由父代理按需补查";
@@ -444,25 +430,12 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
         return "提前结束（" + code + "），以下为已收集证据的阶段结论";
     }
 
-    private static String text(Object value) {
-        return value == null ? "" : String.valueOf(value).strip();
-    }
-
     /** 将重试与收尾也计入独立请求保险丝；正常路径是 maxSteps 个工作请求 + 1 个阶段收尾。 */
     private ModelClient boundedClient(ModelClient delegate) {
         int maxRequests = budget.maxSteps() + 1;
-        AtomicInteger requests = new AtomicInteger();
-        return MeteredModelClient.observeUsage(delegate, () -> {
-            if (requests.incrementAndGet() > maxRequests) {
-                throw new ExecutionPolicy.Stop(RunFailureCode.MAX_STEPS,
-                    "子代理已达到独立模型请求上限 " + maxRequests + "，返回已有证据给父代理收尾。");
-            }
-            if (runRequests.incrementAndGet() > budget.maxRequestsPerRun()) {
-                throw new ExecutionPolicy.Stop(RunFailureCode.MAX_STEPS,
-                    "本轮所有子代理累计模型请求已达到 " + budget.maxRequestsPerRun() + "，请由父代理合并已有证据并收尾。");
-            }
-            usageSink.beforeRequest();
-        }, usageSink::afterRequest);
+        return SubagentSupport.boundedClient(delegate, maxRequests, "子代理已达到独立模型请求上限 " + maxRequests + "，返回已有证据给父代理收尾。",
+            runRequests, budget.maxRequestsPerRun(),
+            "本轮所有子代理累计模型请求已达到 " + budget.maxRequestsPerRun() + "，请由父代理合并已有证据并收尾。", usageSink);
     }
 
     private ToolRegistry buildChildTools(Path checkoutPath, AgentProfile profile) {
@@ -494,14 +467,14 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
                 return PermissionResult.deny("代理 " + profile.name() + " 为只读角色，禁止写操作 " + call.name());
             }
             if (ToolNames.RUN_COMMAND.equals(call.name()) && callArgs != null) {
-                String cmd = text(callArgs.get("command"));
+                String cmd = SubagentSupport.text(callArgs.get("command"));
                 if (!cmd.isEmpty() && !scope.allowsCommand(cmd)) {
                     return PermissionResult.deny(scope.commandHint(cmd));
                 }
             }
             if (callArgs != null && (!scope.allowFiles().isEmpty() || !scope.denyFiles().isEmpty())) {
                 for (String key : List.of("path", "from", "to", "source", "destination")) {
-                    String raw = text(callArgs.get(key));
+                    String raw = SubagentSupport.text(callArgs.get(key));
                     if (!raw.isEmpty() && !scope.allowsPath(raw) && !scope.allowsDirectory(raw)) {
                         return PermissionResult.deny("路径 " + raw + " 不在代理 " + profile.name() + " 允许范围内");
                     }
@@ -537,33 +510,6 @@ public final class SpawnAgentTool implements Tool.ParallelReadOnly {
         return new AgentLoop.Config(config.maxSteps(), config.repeatRemindAt(), config.repeatAbortAt(),
             config.systemPrompt() + "\n\n[角色设定]\n" + profile.prompt(), config.plan(), config.maxPlanContinues(),
             config.contextLimit(), config.completionChecks());
-    }
-
-    /** 子代理不继承父计划，也不共享父步数上限；最多 maxSteps 次工作请求，AgentLoop 仍保留一次阶段收尾。 */
-    private static AgentLoop.Config subagentConfig(AgentLoop.Config parent, int maxSteps) {
-        int steps = Math.min(parent.maxSteps(), maxSteps);
-        return new AgentLoop.Config(steps, parent.repeatRemindAt(), parent.repeatAbortAt(),
-            parent.systemPrompt() + "\n\n[子代理隔离] 你是只读探索。只完成派发的子任务，把结论交回父代理。" + "不能改文件，不能跑命令，不能创建 Goal，不能再派生子代理。",
-            List::of, 0, parent.contextLimit(), parent.completionChecks());
-    }
-
-    private void forwardChildEvent(SessionEvent event, AtomicReference<RunCompleted> completion, String agentId) {
-        if (event instanceof RunCompleted completed) {
-            completion.set(completed);
-            return;
-        }
-        if (event instanceof ToolStarted started) {
-            // 标上归属，前端才能把这些操作收进对应的子智能体，而不是混在主智能体的操作里。
-            events.accept(started.forAgent(agentId));
-            return;
-        }
-        // 子 run 的 assistant/run/plan/usage 事件没有 agentId，转发会污染父时间线和任务状态。
-        // 工具与审批事件仍需透传，否则用户看不到执行进度，也无法批准子代理操作。
-        switch (event.type()) {
-            case TOOL_STARTED, TOOL_COMPLETED, APPROVAL_REQUIRED, APPROVAL_RESOLVED -> events.accept(event);
-            default -> {
-            }
-        }
     }
 
     /** 让父模型拿到可合并的结果清单；生命周期状态仍由父 run 自己决定。 */

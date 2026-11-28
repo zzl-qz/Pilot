@@ -9,13 +9,15 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import jakarta.annotation.PreDestroy;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+
+import com.pilot.core.session.EventStreamLimits;
 
 /** SSE 连接共享的调度资源与聚合指标。 */
 @Component
-public final class SessionEventTransport {
-    private static final long MAX_QUEUED_BYTES = 128L * 1024 * 1024;
-
+public final class SseStreamTransport {
+    private final long maxQueuedBytes;
     private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor(task -> {
         Thread thread = new Thread(task, "pilot-stream-monitor");
         thread.setDaemon(true);
@@ -28,6 +30,15 @@ public final class SessionEventTransport {
     private final AtomicLong sentFrames = new AtomicLong();
     private final AtomicLong maxSendNanos = new AtomicLong();
     private final Map<String, AtomicLong> closed = new ConcurrentHashMap<>();
+
+    @Autowired
+    public SseStreamTransport(EventStreamLimits limits) {
+        this.maxQueuedBytes = limits == null ? EventStreamLimits.defaults().totalBytes() : limits.totalBytes();
+    }
+
+    SseStreamTransport() {
+        this(EventStreamLimits.defaults());
+    }
 
     public record Metrics(long connections, long queuedBytes, long peakQueuedBytes, long sentBytes, long sentFrames,
         long maxSendNanos, Map<String, Long> closed) {
@@ -45,7 +56,7 @@ public final class SessionEventTransport {
         long current;
         do {
             current = queuedBytes.get();
-            if (bytes > MAX_QUEUED_BYTES - current) {
+            if (bytes > maxQueuedBytes - current) {
                 return false;
             }
         } while (!queuedBytes.compareAndSet(current, current + bytes));

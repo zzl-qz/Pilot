@@ -26,7 +26,7 @@ import com.pilot.core.coordination.WorkspaceEventSubscription;
 import com.pilot.core.session.SessionRepository;
 import com.pilot.core.workspace.PathValidator;
 import com.pilot.server.session.events.AsyncEventStream;
-import com.pilot.server.session.events.SessionEventTransport;
+import com.pilot.server.session.events.SseStreamTransport;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -50,7 +50,7 @@ public class WorkspaceCoordinationStreamController {
     private final SessionRepository sessions;
     private final CoordinationScopeResolver scopes;
     private final WorkspaceCoordinationEventBus events;
-    private final SessionEventTransport streams;
+    private final SseStreamTransport streams;
     private final SessionPresenceRegistry presence;
     private final ObjectMapper objectMapper;
 

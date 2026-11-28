@@ -14,6 +14,9 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -29,6 +32,11 @@ import lombok.extern.slf4j.Slf4j;
 @Order(Ordered.HIGHEST_PRECEDENCE + 10)
 @Slf4j
 public class RemoteAccessFilter extends OncePerRequestFilter {
+    private static final ObjectMapper JSON = JsonMapper.builder().build();
+
+    private record DenyBody(String error, int status) {
+    }
+
     /** 首次用 {@code ?token=} 通过后写入的 HttpOnly Cookie。 */
     static final String COOKIE_NAME = "PILOT_ACCESS";
 
@@ -179,11 +187,7 @@ public class RemoteAccessFilter extends OncePerRequestFilter {
         response.setHeader("Cache-Control", "no-store");
         response.setHeader("X-Content-Type-Options", "nosniff");
         response.setContentType("application/json;charset=UTF-8");
-        response.getWriter()
-            .write("{\"error\":\"" + escape(decision.reason()) + "\",\"status\":" + decision.status() + "}");
-    }
-
-    private static String escape(String value) {
-        return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"");
+        response.getWriter().write(JSON
+            .writeValueAsString(new DenyBody(decision.reason() == null ? "" : decision.reason(), decision.status())));
     }
 }

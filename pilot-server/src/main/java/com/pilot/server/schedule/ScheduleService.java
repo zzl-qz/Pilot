@@ -327,6 +327,7 @@ public class ScheduleService {
                 }
                 change(job, state.get(), "执行时间已更新", runAt);
             }
+            default -> throw new IllegalArgumentException("不支持的计划操作：" + action);
         }
         return get(id);
     }

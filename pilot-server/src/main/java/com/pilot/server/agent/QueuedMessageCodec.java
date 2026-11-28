@@ -2,8 +2,7 @@ package com.pilot.server.agent;
 
 import java.util.List;
 
-import com.pilot.core.message.Attachment;
-import com.pilot.server.run.RunStarter.QueueRequirements;
+import com.pilot.server.run.RunStarter.QueuedMessage;
 
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -21,39 +20,7 @@ final class QueuedMessageCodec {
     private QueuedMessageCodec() {
     }
 
-    record Stored(String content, List<Attachment> attachments, List<Integer> imagePositions,
-        QueueRequirements requirements, String mode, String skill) {
-        Stored {
-            content = content == null ? "" : content;
-            attachments = attachments == null ? List.of() : List.copyOf(attachments);
-            imagePositions = imagePositions == null ? List.of() : List.copyOf(imagePositions);
-            skill = skill == null || skill.isBlank() ? null : skill.strip();
-        }
-
-        Stored(String content, List<Attachment> attachments, List<Integer> imagePositions) {
-            this(content, attachments, imagePositions, null, null, null);
-        }
-
-        Stored(String content, List<Attachment> attachments, List<Integer> imagePositions,
-            QueueRequirements requirements) {
-            this(content, attachments, imagePositions, requirements, null, null);
-        }
-
-        Stored(String content, List<Attachment> attachments, List<Integer> imagePositions,
-            QueueRequirements requirements, String mode) {
-            this(content, attachments, imagePositions, requirements, mode, null);
-        }
-
-        Stored withContent(String text) {
-            return new Stored(text, attachments, imagePositions, requirements, mode, skill);
-        }
-
-        Stored withRequirements(QueueRequirements value) {
-            return new Stored(content, attachments, imagePositions, value, mode, skill);
-        }
-    }
-
-    static String encode(Stored item) {
+    static String encode(QueuedMessage item) {
         if (item.attachments().isEmpty() && item.requirements() == null && !"plan".equalsIgnoreCase(item.mode())
             && item.skill() == null) {
             return item.content();
@@ -61,18 +28,18 @@ final class QueuedMessageCodec {
         return PREFIX + MAPPER.writeValueAsString(item);
     }
 
-    static Stored decode(String raw) {
+    static QueuedMessage decode(String raw) {
         if (raw == null) {
-            return new Stored("", List.of(), List.of());
+            return new QueuedMessage("", List.of(), List.of());
         }
         if (!raw.startsWith(PREFIX)) {
-            return new Stored(raw, List.of(), List.of());
+            return new QueuedMessage(raw, List.of(), List.of());
         }
         try {
-            return MAPPER.readValue(raw.substring(PREFIX.length()), Stored.class);
+            return MAPPER.readValue(raw.substring(PREFIX.length()), QueuedMessage.class);
         } catch (RuntimeException e) {
             // 损坏的记录宁可丢掉附件也不能让整个队列读不出来，正文留一句提示避免空消息启动运行
-            return new Stored("（这条排队消息的附件已损坏，请重新发送）", List.of(), List.of());
+            return new QueuedMessage("（这条排队消息的附件已损坏，请重新发送）", List.of(), List.of());
         }
     }
 }

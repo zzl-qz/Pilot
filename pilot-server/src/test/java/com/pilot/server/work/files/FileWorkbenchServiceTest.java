@@ -303,4 +303,22 @@ class FileWorkbenchServiceTest {
         assertTrue(service.versions(session, id).isEmpty());
         assertTrue(Files.exists(pdf), "工作区里的真实文件属于用户，不能被级联删除");
     }
+
+    @Test
+    void versionSnapshotsPreserveOriginalExtensionCaseForCaseSensitiveFilesystems() throws Exception {
+        Path upper = workspace.resolve("outputs/ANNUAL.PDF");
+        byte[] v1Bytes = Files.readAllBytes(pdf);
+        Files.write(upper, v1Bytes);
+        var asset = service.list(session).stream().filter(item -> item.path().equals("outputs/ANNUAL.PDF")).findFirst()
+            .orElseThrow();
+        var v1 = service.snapshot(session, asset.id(), "大写扩展名快照");
+        Path expectedSnapshot =
+            temp.resolve("data").resolve("file-versions").resolve(session).resolve(asset.id()).resolve("v1.PDF");
+        assertTrue(Files.isRegularFile(expectedSnapshot), "快照文件应保留原扩展名大小写以兼容 Linux");
+        assertEquals("v1.PDF", expectedSnapshot.toRealPath().getFileName().toString(), "快照文件真实名称必须保留原始扩展名大小写");
+
+        Files.write(upper, "modified".getBytes(StandardCharsets.UTF_8));
+        service.revert(session, asset.id(), v1.version());
+        assertArrayEquals(v1Bytes, Files.readAllBytes(upper));
+    }
 }

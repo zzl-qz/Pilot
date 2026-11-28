@@ -7,12 +7,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -29,10 +30,8 @@ import com.pilot.core.mcp.McpManager;
 import com.pilot.core.mcp.McpServerConfig;
 import com.pilot.core.mcp.McpToolInfo;
 import com.pilot.core.mcp.McpTrustStore;
-import com.pilot.core.session.Session;
 import com.pilot.core.session.SessionService;
 import com.pilot.core.util.Texts;
-import com.pilot.server.api.ApiErrors;
 import com.pilot.server.config.AgentProperties;
 import com.pilot.server.config.EndpointSecurity;
 import com.pilot.server.session.lookup.SessionLookup;
@@ -78,7 +77,7 @@ public class McpConfigController {
     /** 合并视图：用户级 + 工作区，带来源、运行状态、工具数与信任态。 */
     @GetMapping
     public List<ServerPayload> servers(@PathVariable String id) {
-        Path workspace = workspace(id);
+        Path workspace = SessionLookup.workspace(sessions, agentProperties, id);
         McpManager manager = mcpManager.getIfAvailable();
         if (manager == null) {
             return List.of();
@@ -109,75 +108,42 @@ public class McpConfigController {
         String url = request.url() == null ? "" : request.url().strip();
         String command = request.command() == null ? "" : request.command().strip();
         boolean remote = REMOTE_TYPES.contains(rawTransport) || (!url.isEmpty() && command.isEmpty());
-        Path workspace = workspace(id);
+        Path workspace = SessionLookup.workspace(sessions, agentProperties, id);
         if (manager.definedInWorkspaceConfig(workspace, name)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                 "工作区 .mcp.json 里已有同名服务器 " + name + "（会覆盖用户级配置）；请改名或先从工作区配置中移除");
         }
+        boolean preserve = Boolean.TRUE.equals(request.preserveExistingSecrets());
         if (remote) {
-            String urlError = McpServerConfig.validateRemoteUrl(url);
-            if (urlError != null) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, urlError);
-            }
-            if (EndpointSecurity.isCloudMetadataUrl(url)) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "远程 MCP 地址不能指向云元数据地址");
-            }
-            if (request.headers() != null && request.headers().values().stream().anyMatch(value -> value == null)) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "headers 的值不能为 null");
-            }
+            validateRemoteUrl(url, "");
+            Map<String, String> headers = sanitizeStringMap(request.headers(), "headers");
             String normalizedType =
                 "sse".equals(rawTransport) ? McpServerConfig.TRANSPORT_SSE : McpServerConfig.TRANSPORT_HTTP;
-            Map<String, String> headers = new LinkedHashMap<>();
-            if (request.headers() != null) {
-                request.headers().forEach((key, value) -> {
-                    if (key != null && !key.isBlank() && value != null) {
-                        headers.put(key.strip(), value);
-                    }
-                });
-            }
-            boolean preserve = Boolean.TRUE.equals(request.preserveExistingSecrets());
-            try {
-                manager.updateUserConfig(root -> {
-                    ObjectNode servers = serversNode(root);
-                    JsonNode existing = servers.path(name);
-                    ObjectNode entry =
-                        existing.isObject() ? ((ObjectNode)existing).deepCopy() : mapper.createObjectNode();
-                    boolean mayPreserve = preserve && existing.path("type").asString("").equals(normalizedType)
-                        && EndpointSecurity.sameOrigin(existing.path("url").asString(""), url);
-                    JsonNode oldHeaders = mayPreserve ? existing.path("headers") : mapper.nullNode();
-                    Map<String, String> mergedHeaders = new LinkedHashMap<>();
-                    headers.forEach((key, value) -> {
-                        if (value.isEmpty() && preserve && oldHeaders.isObject() && oldHeaders.path(key).isTextual()) {
-                            mergedHeaders.put(key, oldHeaders.path(key).asString());
-                        } else {
-                            mergedHeaders.put(key, value);
-                        }
-                    });
-                    entry.remove("command");
-                    entry.remove("args");
-                    entry.remove("env");
-                    entry.put("type", normalizedType);
-                    entry.put("url", url);
-                    if (mergedHeaders.isEmpty()) {
-                        entry.remove("headers");
-                    } else {
-                        entry.set("headers", mapper.valueToTree(mergedHeaders));
-                    }
-                    servers.set(name, entry);
-                    return null;
-                });
-            } catch (McpException e) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
-            } catch (IOException e) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "写入用户级配置失败：" + e.getMessage());
-            }
+            updateConfig(manager, root -> {
+                ObjectNode servers = serversNode(root);
+                JsonNode existing = servers.path(name);
+                ObjectNode entry = existing.isObject() ? ((ObjectNode)existing).deepCopy() : mapper.createObjectNode();
+                boolean mayPreserve = preserve && existing.path("type").asString("").equals(normalizedType)
+                    && EndpointSecurity.sameOrigin(existing.path("url").asString(""), url);
+                Map<String, String> mergedHeaders =
+                    mergeSecrets(headers, mayPreserve ? existing.path("headers") : mapper.nullNode(), mayPreserve);
+                entry.remove("command");
+                entry.remove("args");
+                entry.remove("env");
+                entry.put("type", normalizedType);
+                entry.put("url", url);
+                if (mergedHeaders.isEmpty()) {
+                    entry.remove("headers");
+                } else {
+                    entry.set("headers", mapper.valueToTree(mergedHeaders));
+                }
+                servers.set(name, entry);
+            });
         } else {
             if (command.isEmpty()) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "command 不能为空，例如 npx / node / uvx");
             }
-            if (request.env() != null && request.env().values().stream().anyMatch(value -> value == null)) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "env 的值不能为 null");
-            }
+            Map<String, String> env = sanitizeStringMap(request.env(), "env");
             List<String> args;
             try {
                 args = McpArgsParser.parse(request.args());
@@ -185,59 +151,35 @@ public class McpConfigController {
                 // 解析错误直接把带示例的文案给用户
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
             }
-            Map<String, String> env = new LinkedHashMap<>();
-            if (request.env() != null) {
-                request.env().forEach((key, value) -> {
-                    if (key != null && !key.isBlank() && value != null) {
-                        env.put(key.strip(), value);
-                    }
-                });
-            }
-            boolean preserve = Boolean.TRUE.equals(request.preserveExistingSecrets());
-            try {
-                manager.updateUserConfig(root -> {
-                    ObjectNode servers = serversNode(root);
-                    JsonNode existing = servers.path(name);
-                    // 覆盖时保留 pilotPermissions 等手写字段，只替换这次表单管理的 command/args/env；
-                    // 旧的 url/headers/非 stdio type 不能和新命令混在一起
-                    ObjectNode entry =
-                        existing.isObject() ? ((ObjectNode)existing).deepCopy() : mapper.createObjectNode();
-                    boolean mayPreserveEnv =
-                        preserve && existing.isObject() && existing.path("command").asString("").equals(command)
-                            && sameStringList(existing.path("args"), args);
-                    JsonNode oldEnv = mayPreserveEnv ? existing.path("env") : mapper.nullNode();
-                    Map<String, String> mergedEnv = new LinkedHashMap<>();
-                    env.forEach((key, value) -> {
-                        if (value.isEmpty() && preserve && oldEnv.isObject() && oldEnv.path(key).isTextual()) {
-                            mergedEnv.put(key, oldEnv.path(key).asString());
-                        } else {
-                            mergedEnv.put(key, value);
-                        }
-                    });
-                    entry.remove("url");
-                    entry.remove("headers");
-                    if (!entry.path("type").isMissingNode() && !"stdio".equals(entry.path("type").asString())) {
-                        entry.remove("type");
-                    }
-                    entry.put("command", command);
-                    if (args.isEmpty()) {
-                        entry.remove("args");
-                    } else {
-                        entry.set("args", mapper.valueToTree(args));
-                    }
-                    if (mergedEnv.isEmpty()) {
-                        entry.remove("env");
-                    } else {
-                        entry.set("env", mapper.valueToTree(mergedEnv));
-                    }
-                    servers.set(name, entry);
-                    return null;
-                });
-            } catch (McpException e) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
-            } catch (IOException e) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "写入用户级配置失败：" + e.getMessage());
-            }
+            updateConfig(manager, root -> {
+                ObjectNode servers = serversNode(root);
+                JsonNode existing = servers.path(name);
+                // 覆盖时保留 pilotPermissions 等手写字段，只替换这次表单管理的 command/args/env；
+                // 旧的 url/headers/非 stdio type 不能和新命令混在一起
+                ObjectNode entry = existing.isObject() ? ((ObjectNode)existing).deepCopy() : mapper.createObjectNode();
+                boolean mayPreserveEnv =
+                    preserve && existing.isObject() && existing.path("command").asString("").equals(command)
+                        && sameStringList(existing.path("args"), args);
+                Map<String, String> mergedEnv =
+                    mergeSecrets(env, mayPreserveEnv ? existing.path("env") : mapper.nullNode(), mayPreserveEnv);
+                entry.remove("url");
+                entry.remove("headers");
+                if (!entry.path("type").isMissingNode() && !"stdio".equals(entry.path("type").asString())) {
+                    entry.remove("type");
+                }
+                entry.put("command", command);
+                if (args.isEmpty()) {
+                    entry.remove("args");
+                } else {
+                    entry.set("args", mapper.valueToTree(args));
+                }
+                if (mergedEnv.isEmpty()) {
+                    entry.remove("env");
+                } else {
+                    entry.set("env", mapper.valueToTree(mergedEnv));
+                }
+                servers.set(name, entry);
+            });
         }
         McpServerConfig config = manager.servers(workspace).get(name);
         if (config == null) {
@@ -251,27 +193,20 @@ public class McpConfigController {
     @DeleteMapping("/{name}")
     public void delete(@PathVariable String id, @PathVariable String name) {
         McpManager manager = required();
-        Path workspace = workspace(id);
+        Path workspace = SessionLookup.workspace(sessions, agentProperties, id);
         if (manager.definedInWorkspaceConfig(workspace, name)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "服务器 " + name + " 定义在工作区 .mcp.json 里，请直接编辑该文件");
         }
         if (!manager.userConfigReadable()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "用户级 MCP 配置无法解析，请先修复或备份后重试；本次未删除");
         }
-        try {
-            manager.updateUserConfig(root -> {
-                JsonNode servers = root.path("mcpServers");
-                if (!servers.isObject() || !servers.has(name)) {
-                    throw new ResponseStatusException(HttpStatus.NOT_FOUND, "没有名为 " + name + " 的 MCP 服务器");
-                }
-                ((ObjectNode)servers).remove(name);
-                return null;
-            });
-        } catch (McpException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
-        } catch (IOException e) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "写入用户级配置失败：" + e.getMessage());
-        }
+        updateConfig(manager, root -> {
+            JsonNode servers = root.path("mcpServers");
+            if (!servers.isObject() || !servers.has(name)) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "没有名为 " + name + " 的 MCP 服务器");
+            }
+            ((ObjectNode)servers).remove(name);
+        });
         if (manager.trustStore() != null) {
             manager.trustStore().revoke(workspace, name);
         }
@@ -289,7 +224,7 @@ public class McpConfigController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请求体不能为空");
         }
         McpManager manager = required();
-        Path workspace = workspace(id);
+        Path workspace = SessionLookup.workspace(sessions, agentProperties, id);
         Map<String, JsonNode> entries;
         try {
             entries = McpConfigImports.parse(request.config());
@@ -317,17 +252,10 @@ public class McpConfigController {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                 "导入会覆盖同名用户级配置：" + String.join("、", overwritten) + "；确认后再次导入；本次未写入");
         }
-        try {
-            manager.updateUserConfig(root -> {
-                ObjectNode servers = serversNode(root);
-                sanitized.forEach(servers::set);
-                return null;
-            });
-        } catch (McpException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
-        } catch (IOException e) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "写入用户级配置失败：" + e.getMessage());
-        }
+        updateConfig(manager, root -> {
+            ObjectNode servers = serversNode(root);
+            sanitized.forEach(servers::set);
+        });
         return new ImportResponse(List.copyOf(entries.keySet()), List.copyOf(overwritten));
     }
 
@@ -341,7 +269,7 @@ public class McpConfigController {
     @PostMapping("/{name}/probe")
     public ProbeResponse probe(@PathVariable String id, @PathVariable String name) {
         McpManager manager = required();
-        Path workspace = workspace(id);
+        Path workspace = SessionLookup.workspace(sessions, agentProperties, id);
         McpServerConfig config = manager.servers(workspace).get(name);
         if (config == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "没有名为 " + name + " 的 MCP 服务器");
@@ -361,10 +289,68 @@ public class McpConfigController {
 
     // ————— 内部 —————
 
-    /** 把 ResponseStatusException 的原因带进响应体；默认错误页只给状态短语，界面上看不到原因。 */
-    @org.springframework.web.bind.annotation.ExceptionHandler(ResponseStatusException.class)
-    public ResponseEntity<?> status(ResponseStatusException failure) {
-        return ApiErrors.message(failure.getStatusCode(), failure.getReason());
+    private static void updateConfig(McpManager manager, Consumer<ObjectNode> mutation) {
+        try {
+            manager.updateUserConfig(root -> {
+                mutation.accept(root);
+                return null;
+            });
+        } catch (McpException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "写入用户级配置失败：" + e.getMessage());
+        }
+    }
+
+    private static Map<String, String> sanitizeStringMap(Map<String, String> raw, String fieldName) {
+        if (raw != null && raw.values().stream().anyMatch(Objects::isNull)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, fieldName + " 的值不能为 null");
+        }
+        Map<String, String> clean = new LinkedHashMap<>();
+        if (raw != null) {
+            raw.forEach((key, value) -> {
+                if (key != null && !key.isBlank() && value != null) {
+                    clean.put(key.strip(), value);
+                }
+            });
+        }
+        return clean;
+    }
+
+    private static Map<String, String> mergeSecrets(Map<String, String> incoming, JsonNode existingSecrets,
+        boolean preserve) {
+        Map<String, String> merged = new LinkedHashMap<>();
+        incoming.forEach((key, value) -> {
+            if (value.isEmpty() && preserve && existingSecrets.isObject() && existingSecrets.path(key).isTextual()) {
+                merged.put(key, existingSecrets.path(key).asString());
+            } else {
+                merged.put(key, value);
+            }
+        });
+        return merged;
+    }
+
+    private static void validateRemoteUrl(String url, String prefix) {
+        String urlError = McpServerConfig.validateRemoteUrl(url);
+        if (urlError != null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, prefix + urlError);
+        }
+        if (EndpointSecurity.isCloudMetadataUrl(url)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, prefix + "远程 MCP 地址不能指向云元数据地址");
+        }
+    }
+
+    private static void validateJsonStringMap(String serverName, String fieldName, JsonNode node) {
+        if (!node.isObject()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                "服务器 " + serverName + " 的 " + fieldName + " 必须是字符串映射");
+        }
+        for (String key : node.propertyNames()) {
+            if (!node.path(key).isTextual()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "服务器 " + serverName + " 的 " + fieldName + " 值必须是字符串");
+            }
+        }
     }
 
     /** 导入白名单：接受 stdio（command/args/env）与远程 HTTP/SSE（url/headers/type），拒绝本地授权字段与未知字段。 */
@@ -399,26 +385,13 @@ public class McpConfigController {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "服务器 " + name + " 缺少远程 url");
             }
             String url = urlNode.asString().strip();
-            String urlError = McpServerConfig.validateRemoteUrl(url);
-            if (urlError != null) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "服务器 " + name + "：" + urlError);
-            }
-            if (EndpointSecurity.isCloudMetadataUrl(url)) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "服务器 " + name + "：远程 MCP 地址不能指向云元数据地址");
-            }
+            validateRemoteUrl(url, "服务器 " + name + "：");
             ObjectNode clean = mapper.createObjectNode();
             clean.put("type", "sse".equals(type) ? McpServerConfig.TRANSPORT_SSE : McpServerConfig.TRANSPORT_HTTP);
             clean.put("url", url);
             JsonNode headers = entry.path("headers");
             if (!headers.isMissingNode()) {
-                if (!headers.isObject()) {
-                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "服务器 " + name + " 的 headers 必须是字符串映射");
-                }
-                for (String key : headers.propertyNames()) {
-                    if (!headers.path(key).isTextual()) {
-                        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "服务器 " + name + " 的 headers 值必须是字符串");
-                    }
-                }
+                validateJsonStringMap(name, "headers", headers);
                 clean.set("headers", headers.deepCopy());
             }
             return clean;
@@ -443,14 +416,7 @@ public class McpConfigController {
         }
         JsonNode env = entry.path("env");
         if (!env.isMissingNode()) {
-            if (!env.isObject()) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "服务器 " + name + " 的 env 必须是字符串映射");
-            }
-            for (String key : env.propertyNames()) {
-                if (!env.path(key).isTextual()) {
-                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "服务器 " + name + " 的 env 值必须是字符串");
-                }
-            }
+            validateJsonStringMap(name, "env", env);
             clean.set("env", env.deepCopy());
         }
         if ("stdio".equals(type)) {
@@ -484,13 +450,6 @@ public class McpConfigController {
         return servers;
     }
 
-    private Path workspace(String sessionId) {
-        Session session = SessionLookup.require(sessions, sessionId);
-        String workspace = session.workspace() == null || session.workspace().isBlank() ? agentProperties.workspace()
-            : session.workspace();
-        return Path.of(workspace);
-    }
-
     private McpManager required() {
         McpManager manager = mcpManager.getIfAvailable();
         if (manager == null) {
@@ -499,20 +458,10 @@ public class McpConfigController {
         return manager;
     }
 
-    private static String commandLine(McpServerConfig config) {
-        if (config.isRemote()) {
-            return config.transport().toUpperCase(Locale.ROOT) + " " + config.url();
-        }
-        if (config.command() == null) {
-            return "";
-        }
-        return config.args().isEmpty() ? config.command() : config.command() + " " + String.join(" ", config.args());
-    }
-
     private static ServerPayload toPayload(McpServerConfig config, String source, boolean running, String failure,
         List<McpToolInfo> known, String trustState, String trustNote) {
-        return new ServerPayload(config.name(), source, commandLine(config), config.command(), config.usable(), running,
-            failure, config.unsupported(), known.size(),
+        return new ServerPayload(config.name(), source, config.displayCommand(), config.command(), config.usable(),
+            running, failure, config.unsupported(), known.size(),
             known.stream().map(McpToolInfo::name).limit(MAX_LISTED_TOOLS).toList(), trustState, trustNote,
             McpTrustStore.hash(config), config.transport(), config.args(), config.url() == null ? "" : config.url(),
             List.copyOf(config.env().keySet()), List.copyOf(config.headers().keySet()));
