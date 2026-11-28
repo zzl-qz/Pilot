@@ -92,6 +92,7 @@ export function ChangesPanel() {
     : untracked;
   const trackedPaths = useMemo(() => tracked.map((file) => file.path), [tracked]);
   const allPaths = useMemo(() => files.map((file) => file.path), [files]);
+  const selectedSet = useMemo(() => new Set(selectedPaths), [selectedPaths]);
   const viewIndex = trackedPaths.indexOf(view || '');
   const canCommit = !scoped && isGit && !empty && state !== 'error';
 
@@ -218,19 +219,24 @@ export function ChangesPanel() {
     setStashMessage('');
   }, [sessionId, workspace]);
 
-  const runGitAction = async (action: () => Promise<{ ok: boolean; error: string | null } | null>, successText?: string) => {
+  const runGitAction = async (
+    action: () => Promise<{ ok: boolean; error: string | null } | null>,
+    successText?: string,
+    fallbackError = 'Git 操作失败',
+    refreshTools = true
+  ) => {
     if (gitBusy || useStore.getState().running) return false;
     setGitBusy(true); setGitError(''); setGitFeedback('');
     try {
       const result = await action();
-      if (!result?.ok) { setGitError(result?.error || 'Git 操作失败'); return false; }
+      if (!result?.ok) { setGitError(result?.error || fallbackError); return false; }
       if (successText) setGitFeedback(successText);
       await useStore.getState().loadChanges();
-      await loadGitTools();
+      if (refreshTools) await loadGitTools();
       if (historyOpen) void loadGitLog();
       return true;
     } catch (error) {
-      setGitError(errorInfo(error).message || 'Git 操作失败');
+      setGitError(errorInfo(error).message || fallbackError);
       return false;
     } finally { setGitBusy(false); }
   };
@@ -244,19 +250,15 @@ export function ChangesPanel() {
   };
 
   const discardOne = async (path: string) => {
-    if (!sessionId || !canUndo || restoring || gitBusy || useStore.getState().running) return false;
-    setGitBusy(true); setGitError(''); setGitFeedback('');
-    try {
-      const result = await api.discardUnstaged(sessionId, path);
-      if (!result?.ok) { setGitError(result?.error || '放弃未暂存改动失败'); return false; }
-      setConfirm(null);
-      setGitFeedback(`已放弃 ${path} 的未暂存改动`);
-      await useStore.getState().loadChanges();
-      return true;
-    } catch (error) {
-      setGitError(errorInfo(error).message || '放弃未暂存改动失败');
-      return false;
-    } finally { setGitBusy(false); }
+    if (!sessionId || !canUndo || restoring) return false;
+    const ok = await runGitAction(
+      () => api.discardUnstaged(sessionId, path),
+      `已放弃 ${path} 的未暂存改动`,
+      '放弃未暂存改动失败',
+      false
+    );
+    if (ok) setConfirm(null);
+    return ok;
   };
 
   const toggleSelected = (filePath: string) => {
@@ -309,6 +311,24 @@ export function ChangesPanel() {
       setCommitting(false);
     }
   };
+
+  const renderChangeRow = (file: ChangeFile, isUntracked: boolean) => (
+    <ChangeRow
+      key={file.path}
+      file={file}
+      active={view === file.path}
+      untracked={isUntracked || undefined}
+      selectable={canCommit}
+      selected={selectedSet.has(file.path)}
+      onToggleSelect={() => toggleSelected(file.path)}
+      confirming={confirm?.type === 'one' && confirm.path === file.path}
+      canUndo={canUndo}
+      busy={restoring || committing || gitBusy}
+      onAskUndo={() => setConfirm({ type: 'one', path: file.path })}
+      onCancelUndo={() => setConfirm(null)}
+      onUndo={() => (isUntracked ? restoreOne(file.path) : discardOne(file.path))}
+    />
+  );
 
   // 还没开始任务时没有会话，也就没有工作区可读；给一句明确的话，别显示「没有改动」
   if (!sessionId) {
@@ -488,22 +508,7 @@ export function ChangesPanel() {
         )}
         {!empty && (
           <div id="change-files" className="change-files">
-            {visibleTracked.map((file) => (
-              <ChangeRow
-                key={file.path}
-                file={file}
-                active={view === file.path}
-                selectable={canCommit}
-                selected={selectedPaths.includes(file.path)}
-                onToggleSelect={() => toggleSelected(file.path)}
-                confirming={confirm?.type === 'one' && confirm.path === file.path}
-                canUndo={canUndo}
-                busy={restoring || committing || gitBusy}
-                onAskUndo={() => setConfirm({ type: 'one', path: file.path })}
-                onCancelUndo={() => setConfirm(null)}
-                onUndo={() => discardOne(file.path)}
-              />
-            ))}
+            {visibleTracked.map((file) => renderChangeRow(file, false))}
             {keyword && !visibleTracked.length && <p className="change-more">没有匹配「{query}」的文件。</p>}
             {untracked.length > 0 && (
               <button
@@ -519,23 +524,7 @@ export function ChangesPanel() {
                 <span className="change-row-stat">{showUntracked ? '收起' : '展开'}</span>
               </button>
             )}
-            {showUntracked && visibleUntracked.slice(0, UNTRACKED_LIMIT).map((file) => (
-              <ChangeRow
-                key={file.path}
-                file={file}
-                active={view === file.path}
-                untracked
-                selectable={canCommit}
-                selected={selectedPaths.includes(file.path)}
-                onToggleSelect={() => toggleSelected(file.path)}
-                confirming={confirm?.type === 'one' && confirm.path === file.path}
-                canUndo={canUndo}
-                busy={restoring || committing || gitBusy}
-                onAskUndo={() => setConfirm({ type: 'one', path: file.path })}
-                onCancelUndo={() => setConfirm(null)}
-                onUndo={() => restoreOne(file.path)}
-              />
-            ))}
+            {showUntracked && visibleUntracked.slice(0, UNTRACKED_LIMIT).map((file) => renderChangeRow(file, true))}
             {showUntracked && visibleUntracked.length > UNTRACKED_LIMIT && (
               <p className="change-more">还有 {visibleUntracked.length - UNTRACKED_LIMIT} 个未跟踪文件没列出，建议先清理或写进 .gitignore。</p>
             )}
@@ -677,8 +666,6 @@ function ChangeRow({ file, active, untracked, selectable, selected, onToggleSele
 /** 单文件差异最多渲染这么多行：再多滚动会明显掉帧。 */
 const DIFF_LINE_LIMIT = 4000;
 
-/** git 状态码 → 一个字母的徽标。 */
-
 function DiffView({ report, scoped, path, change, prevPath, nextPath, index, total, canUndo, busy, onUndo }: { report: ReviewReport | null; scoped: boolean; path: string; change?: ChangeFile; prevPath: string | null; nextPath: string | null; index: number; total: number; canUndo: boolean; busy: boolean; onUndo: () => void | Promise<boolean> }) {
   const sessionId = useStore((state) => state.sessionId);
   const untracked = change?.status === '??';
@@ -773,7 +760,30 @@ function DiffView({ report, scoped, path, change, prevPath, nextPath, index, tot
     safeLocalStorage().setItem('pilot.diffMode', next);
   };
   useEffect(() => { setSelection(null); setFeedback(''); }, [path, report]);
-  const selected = selection ? lines.slice(Math.min(selection.anchor, selection.end), Math.max(selection.anchor, selection.end) + 1) : [];
+  const selStart = selection ? Math.min(selection.anchor, selection.end) : -1;
+  const selEnd = selection ? Math.max(selection.anchor, selection.end) : -1;
+  const isLineSelected = (lineIndex: number | null | undefined) => lineIndex != null && selection !== null && lineIndex >= selStart && lineIndex <= selEnd;
+  const selectLine = (lineIndex: number, shiftKey: boolean) => {
+    setSelection((current) => ({ anchor: shiftKey && current ? current.anchor : lineIndex, end: lineIndex }));
+  };
+  const selected = selection ? lines.slice(selStart, selEnd + 1) : [];
+  const renderHunkUndo = (hunkIndex: number) => canDiscardHunk && (
+    <button
+      type="button"
+      className="diff-hunk-undo"
+      disabled={busy || discardingHunk != null}
+      onClick={() => { void handleDiscardHunk(hunkIndex); }}
+    >
+      {discardingHunk === hunkIndex ? '撤销中…' : '撤销此块'}
+    </button>
+  );
+  const renderNoDiffFallback = () => {
+    if (truncated || change?.note) return null;
+    if (untracked && !scoped) return <pre className="diff-raw">{content ?? '读取中…'}</pre>;
+    if (patchState === 'loading') return <p className="diff-empty">读取差异中…</p>;
+    if (patchState === 'error') return <p className="diff-empty">读取差异失败，点右上角的刷新再试一次。</p>;
+    return <p className="diff-empty">这个文件没有可显示的文本差异（可能是二进制、纯重命名或权限变更）。</p>;
+  };
   const addFeedback = () => {
     const state = useStore.getState();
     const quote = reviewQuote(path, selected, feedback);
@@ -878,21 +888,12 @@ function DiffView({ report, scoped, path, change, prevPath, nextPath, index, tot
                         <div key={rowIdx} className="diff-line is-hunk diff-split-hunk">
                           <span className="n" />
                           <code>{row.text}</code>
-                          {canDiscardHunk && (
-                            <button
-                              type="button"
-                              className="diff-hunk-undo"
-                              disabled={busy || discardingHunk != null}
-                              onClick={() => { void handleDiscardHunk(row.index); }}
-                            >
-                              {discardingHunk === row.index ? '撤销中…' : '撤销此块'}
-                            </button>
-                          )}
+                          {renderHunkUndo(row.index)}
                         </div>
                       );
                     }
-                    const leftSelected = row.leftIndex != null && Boolean(selection && row.leftIndex >= Math.min(selection.anchor, selection.end) && row.leftIndex <= Math.max(selection.anchor, selection.end));
-                    const rightSelected = row.rightIndex != null && Boolean(selection && row.rightIndex >= Math.min(selection.anchor, selection.end) && row.rightIndex <= Math.max(selection.anchor, selection.end));
+                    const leftSelected = isLineSelected(row.leftIndex);
+                    const rightSelected = isLineSelected(row.rightIndex);
                     return (
                       <div key={rowIdx} className="diff-split-row">
                         <div className={`diff-line diff-split-cell ${row.left ? `is-${row.left.kind}` : 'is-empty'}${leftSelected ? ' is-selected' : ''}`}>
@@ -901,7 +902,7 @@ function DiffView({ report, scoped, path, change, prevPath, nextPath, index, tot
                               <button type="button" className="n is-old"
                                 aria-label={`选择原文件第 ${row.left.old} 行`}
                                 aria-pressed={leftSelected}
-                                onClick={event => setSelection(current => ({ anchor: event.shiftKey && current ? current.anchor : row.leftIndex!, end: row.leftIndex! }))}>
+                                onClick={event => selectLine(row.leftIndex!, event.shiftKey)}>
                                 {row.left.old}
                               </button>
                               <code>{renderCodeWithWords(row.left.text, row.leftIndex, row.left.kind)}</code>
@@ -914,7 +915,7 @@ function DiffView({ report, scoped, path, change, prevPath, nextPath, index, tot
                               <button type="button" className="n"
                                 aria-label={`选择现文件第 ${row.right.next} 行`}
                                 aria-pressed={rightSelected}
-                                onClick={event => setSelection(current => ({ anchor: event.shiftKey && current ? current.anchor : row.rightIndex!, end: row.rightIndex! }))}>
+                                onClick={event => selectLine(row.rightIndex!, event.shiftKey)}>
                                 {row.right.next}
                               </button>
                               <code>{renderCodeWithWords(row.right.text, row.rightIndex, row.right.kind)}</code>
@@ -926,28 +927,22 @@ function DiffView({ report, scoped, path, change, prevPath, nextPath, index, tot
                   })}
                 </div>
               ) : (
-                lines.map((line, index) => (
-                  <div key={index} className={`diff-line is-${line.kind}${selection && index >= Math.min(selection.anchor, selection.end) && index <= Math.max(selection.anchor, selection.end) ? ' is-selected' : ''}`}>
-                    {line.kind === 'hunk' ? <span className="n" /> : <button type="button"
-                      className={`n${line.kind === 'del' ? ' is-old' : ''}`}
-                      aria-label={`选择${line.kind === 'del' ? '原文件' : '现文件'}第 ${line.kind === 'del' ? line.old : line.next} 行`}
-                      aria-pressed={Boolean(selection && index >= Math.min(selection.anchor, selection.end) && index <= Math.max(selection.anchor, selection.end))}
-                      onClick={event => setSelection(current => ({ anchor: event.shiftKey && current ? current.anchor : index, end: index }))}>
-                      {line.kind === 'del' ? line.old : line.next}
-                    </button>}
-                    <code>{renderCodeWithWords(line.text, index, line.kind)}</code>
-                    {line.kind === 'hunk' && canDiscardHunk && (
-                      <button
-                        type="button"
-                        className="diff-hunk-undo"
-                        disabled={busy || discardingHunk != null}
-                        onClick={() => { void handleDiscardHunk(index); }}
-                      >
-                        {discardingHunk === index ? '撤销中…' : '撤销此块'}
-                      </button>
-                    )}
-                  </div>
-                ))
+                lines.map((line, index) => {
+                  const lineSelected = isLineSelected(index);
+                  return (
+                    <div key={index} className={`diff-line is-${line.kind}${lineSelected ? ' is-selected' : ''}`}>
+                      {line.kind === 'hunk' ? <span className="n" /> : <button type="button"
+                        className={`n${line.kind === 'del' ? ' is-old' : ''}`}
+                        aria-label={`选择${line.kind === 'del' ? '原文件' : '现文件'}第 ${line.kind === 'del' ? line.old : line.next} 行`}
+                        aria-pressed={lineSelected}
+                        onClick={event => selectLine(index, event.shiftKey)}>
+                        {line.kind === 'del' ? line.old : line.next}
+                      </button>}
+                      <code>{renderCodeWithWords(line.text, index, line.kind)}</code>
+                      {line.kind === 'hunk' && renderHunkUndo(index)}
+                    </div>
+                  );
+                })
               )}
               {/* 生成出来的大文件动辄上万行，全铺出来会卡住滚动；先给一个明确的截断提示 */}
               {displayableLines.length > DIFF_LINE_LIMIT && (
@@ -957,13 +952,7 @@ function DiffView({ report, scoped, path, change, prevPath, nextPath, index, tot
               )}
             </>
           )
-          : truncated || change?.note ? null : untracked && !scoped
-            ? <pre className="diff-raw">{content ?? '读取中…'}</pre>
-            : (patchState === 'loading'
-              ? <p className="diff-empty">读取差异中…</p>
-              : (patchState === 'error'
-                ? <p className="diff-empty">读取差异失败，点右上角的刷新再试一次。</p>
-                : <p className="diff-empty">这个文件没有可显示的文本差异（可能是二进制、纯重命名或权限变更）。</p>))}
+          : renderNoDiffFallback()}
       </div>
     </div>
   );

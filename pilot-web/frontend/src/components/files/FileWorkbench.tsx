@@ -3,11 +3,12 @@ import { useStore } from '../../store.js';
 import { api } from '../../api.js';
 import { submissions } from '../../lib/submissions.js';
 import { errorInfo } from '../../lib/errors.js';
+import { formatBytes } from '../../lib/attachments/attachments.js';
 import type {
   WorkbenchAnnotation, WorkbenchFile, WorkbenchPreview, WorkbenchVersion
 } from '../../types/api.js';
 import {
-  changeHint, emptyPdfForm, formatBytes, formatLabel, formatMoment, pdfOperations, type PdfForm
+  changeHint, emptyPdfForm, formatLabel, formatMoment, pdfOperations, type PdfForm
 } from './file-workbench.js';
 import { StructuredDocumentView } from './StructuredDocumentView.jsx';
 import './file-workbench.css';
@@ -255,7 +256,7 @@ export default function FileWorkbench() {
         {files.map(file => <li key={file.id}>
           <button type="button" className={`fw-file${file.id === activeId ? ' is-active' : ''}`} onClick={() => select(file.id)}>
             <span className="fw-file-name">{file.filename}</span>
-            <span className="fw-file-meta">{formatLabel(file.format)} · {formatBytes(file.bytes)} · {formatMoment(file.modifiedAt)}</span>
+            <span className="fw-file-meta">{formatLabel(file.format)} · {formatBytes(file.bytes, '—')} · {formatMoment(file.modifiedAt)}</span>
             {file.changedExternally && <span className="fw-file-flag">外部已修改</span>}
           </button>
         </li>)}

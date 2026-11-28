@@ -102,26 +102,25 @@ test('各运行入口通过真实 API 封装发送独立凭据并正确处理成
   } finally {fetchHandler=originalFetch;globalThis.localStorage=originalStorage;useStore.setState(saved);}
 });
 
-test('切会话后能力、浏览器、验证、用量与想法的迟到响应不覆盖当前状态', async () => {
+test('切会话后能力、浏览器、验证与想法的迟到响应不覆盖当前状态', async () => {
   reset();
   const saved = useStore.getState();
   const { api } = await import('../src/api.js');
   const original = { ...api };
-  const gates = Object.fromEntries(['capabilities', 'browserStatus', 'validation', 'usage', 'notes'].map(name => [name, deferred()]));
+  const gates = Object.fromEntries(['capabilities', 'browserStatus', 'validation', 'notes'].map(name => [name, deferred()]));
   for (const name of Object.keys(gates)) api[name] = () => gates[name].promise;
   try {
-    const actions = ['loadCapabilities', 'loadBrowserStatus', 'loadValidation', 'loadUsage', 'loadNotes'];
-    const pending = actions.map(name => useStore.getState()[name](7));
+    const actions = ['loadCapabilities', 'loadBrowserStatus', 'loadValidation', 'loadNotes'];
+    const pending = actions.map(name => useStore.getState()[name]());
     useStore.setState({ sessionId: 'other', sessionEpoch: 2 });
     for (const [name, gate] of Object.entries(gates)) {
-      gate.resolve(name === 'usage' ? { total: 99 } : name === 'notes' ? [{ id: 'old' }] : { marker: 'old' });
+      gate.resolve(name === 'notes' ? [{ id: 'old' }] : { marker: 'old' });
     }
     await Promise.all(pending);
     const state = useStore.getState();
     assert.equal(state.capabilities, null);
     assert.equal(state.ui.browserStatus, null);
     assert.equal(state.validation, null);
-    assert.notDeepEqual(state.usageData, { total: 99 });
     assert.deepEqual(state.notes, []);
   } finally { Object.assign(api, original); useStore.setState(saved); }
 });
@@ -801,4 +800,104 @@ test('activate 切换会话后不再晚到调用 composerApi.setText 抹除已�
     Object.assign(api, original);
     useStore.setState(saved);
   }
+});
+
+test('setQueueHeld 同步更新 queue 与 queueEntries，不出现漂移', async () => {
+  reset();
+  const saved = useStore.getState();
+  const { api } = await import('../src/api.js');
+  const original = { ...api };
+  api.holdQueue = async () => ({
+    held: true,
+    revision: 'rev-2',
+    waitingReason: '手动暂停',
+    items: [{ content: '排队一', index: 0 }, { content: '排队二', index: 1 }]
+  });
+  try {
+    assert.equal(await useStore.getState().setQueueHeld(true), true);
+    const state = useStore.getState();
+    assert.equal(state.queueHeld, true);
+    assert.equal(state.queueRevision, 'rev-2');
+    assert.deepEqual(state.queue, ['排队一', '排队二']);
+    assert.equal(state.queueEntries.length, 2);
+  } finally { Object.assign(api, original); useStore.setState(saved); }
+});
+
+test('decideSandbox 遇到 412 未校验时走 askConfirm 弹窗确认与取消', async () => {
+  reset();
+  const saved = useStore.getState();
+  const previousFetch = fetchHandler;
+  const notices = [];
+  const bodies = [];
+  useStore.setState({ showNotice: message => notices.push(message) });
+  fetchHandler = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    bodies.push(body);
+    if (!body.acknowledgeUnverified) {
+      return new Response(JSON.stringify({ message: '未执行校验' }), { status: 412 });
+    }
+    return new Response(JSON.stringify({ ok: true, written: ['a.ts'] }), { status: 200 });
+  };
+  try {
+    const cancelTask = useStore.getState().decideSandbox('box', 'accept', 'h1');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.ok(useStore.getState().ui.confirm);
+    useStore.getState().ui.confirm.onCancel();
+    assert.equal(await cancelTask, false);
+    assert.equal(bodies.length, 1);
+    assert.match(notices.at(-1), /未执行校验/);
+
+    const okTask = useStore.getState().decideSandbox('box', 'accept', 'h2');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.ok(useStore.getState().ui.confirm);
+    await useStore.getState().ui.confirm.onConfirm();
+    assert.equal(await okTask, true);
+    assert.equal(bodies.at(-1).acknowledgeUnverified, true);
+    assert.equal(bodies.at(-1).candidateHash, 'h2');
+  } finally { fetchHandler = previousFetch; useStore.setState(saved); }
+});
+
+test('askConfirm 回调仅触发一次、外部清空不挂起且旧取消异常不阻断新弹窗', async () => {
+  reset();
+  const saved = useStore.getState();
+  try {
+    let confirmCalls = 0;
+    let cancelCalls = 0;
+    const p1 = useStore.getState().askConfirm({
+      title: '确认',
+      message: '操作一',
+      onConfirm: async () => { confirmCalls += 1; },
+      onCancel: () => { cancelCalls += 1; }
+    });
+    const dialog1 = useStore.getState().ui.confirm;
+    const run = dialog1.onConfirm();
+    useStore.getState().setUi({ confirm: null });
+    await dialog1.onConfirm();
+    dialog1.onCancel();
+    await run;
+    assert.equal(await p1, true);
+    assert.equal(confirmCalls, 1);
+    assert.equal(cancelCalls, 0);
+
+    let clearedCancel = 0;
+    const p2 = useStore.getState().askConfirm({
+      title: '外部关闭',
+      message: '操作二',
+      onCancel: () => { clearedCancel += 1; }
+    });
+    useStore.getState().setUi({ confirm: null });
+    assert.equal(await p2, false);
+    assert.equal(clearedCancel, 1);
+
+    const p3 = useStore.getState().askConfirm({
+      title: '抛错取消',
+      message: '操作三',
+      onCancel: () => { throw new Error('boom'); }
+    });
+    const p4 = useStore.getState().askConfirm({ title: '新确认', message: '操作四' });
+    assert.equal(await p3, false);
+    assert.equal(useStore.getState().ui.confirm?.title, '新确认');
+    useStore.getState().ui.confirm.onCancel();
+    assert.equal(await p4, false);
+  } finally { useStore.setState(saved); }
 });

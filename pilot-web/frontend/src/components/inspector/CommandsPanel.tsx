@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../../store.js';
 import { writeClipboard } from '../../lib/clipboard.js';
 import { isCommandActive, commandStatusLabel, stripAnsi } from '../../lib/command-tasks.js';
+import { parseTimestamp } from '../../lib/tool-meta.js';
 
 /* ---------- 命令面板 ---------- */
 
@@ -170,33 +171,14 @@ export function CommandsPanel() {
 
 /** 命令耗时：运行中的任务算到现在，结束的按 startedAt→finishedAt。 */
 function durationLabel(task: CommandTask | null | undefined, running: boolean) {
-  const start = parseTimestamp(task?.startedAt);
-  if (!start) {
-    return '';
-  }
-  const end = parseTimestamp(task?.finishedAt) || (running ? Date.now() : 0);
-  if (!end || end < start) {
-    return '';
-  }
+  const start = parseTimestamp(task?.startedAt) ?? 0;
+  if (!start) return '';
+  const end = (parseTimestamp(task?.finishedAt) ?? 0) || (running ? Date.now() : 0);
+  if (!end || end < start) return '';
   const ms = end - start;
-  if (ms < 1000) {
-    return `${ms}ms`;
-  }
-  if (ms < 60000) {
-    return `${(ms / 1000).toFixed(1)}s`;
-  }
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
   const minutes = Math.floor(ms / 60000);
   const seconds = Math.round((ms % 60000) / 1000);
   return `${minutes}m ${seconds}s`;
-}
-
-function parseTimestamp(value: string | number | null | undefined) {
-  if (value == null || value === '') {
-    return 0;
-  }
-  if (typeof value === 'number') {
-    return value;
-  }
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : 0;
 }

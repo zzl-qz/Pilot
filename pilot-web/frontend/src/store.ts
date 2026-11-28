@@ -8,17 +8,18 @@ import { createModelSettingsActions } from './store/model-settings.js';
 import { createPanelActions } from './store/panels.js';
 import { createSideChatActions } from './store/side-chats.js';
 import { createInputActions } from './store/input.js';
-import { requireData } from './store/shared.js';
+import { dismissDesktopAlert, requireData, setDesktopWindowAttention } from './store/shared.js';
+import type { Draft } from 'immer';
 import type { StoreState, UiState, AlertPreferences } from './types/store.js';
 import type * as S from './types/server.js';
 import type { EventEnvelope } from './types/events.js';
 import type { PendingQuestion } from './types/thread.js';
-import type { GlobalPendingApproval, GlobalPendingQuestion, PendingInteractionsSnapshot, RunAttentionPayload } from './types/api.js';
+import type { BrowserHandoff, GlobalPendingApproval, GlobalPendingQuestion, PendingInteractionsSnapshot, RunAttentionPayload } from './types/api.js';
 import { errorInfo } from './lib/errors.js';
 import { resolveTheme } from './lib/theme.js';
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import { api, apiFetch } from './api.js';
+import { api, apiFetch, readApiError } from './api.js';
 import { initialThread } from './thread-reducer.js';
 import { classifyApprovalRisk, faviconHref, isWindowBackgrounded, tabTitleWithCount } from './lib/attention.js';
 import { readAlertPreferences, writeAlertPreferences } from './lib/sound.js';
@@ -47,7 +48,6 @@ let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 let noticeCallback: (() => unknown) | null = null;
 let skillLoadSequence = 0;
 let memoryDraftCountSequence = 0;
-let usageLoadSequence = 0;
 let capabilitiesLoadSequence = 0;
 let validationLoadSequence = 0;
 let browserStatusLoadSequence = 0;
@@ -116,6 +116,37 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     resetAlertDedup();
     streams.closeAll();
   };
+  async function runBrowserAction<T extends { ok: boolean; error?: string }>(
+    request: (sessionId: string) => Promise<T | null>,
+    fallbackError: string,
+    onSuccess: (draft: Draft<StoreState>, result: T) => void
+  ) {
+    const { sessionId } = get();
+    if (!sessionId) return false;
+    try {
+      const result = await request(sessionId);
+      if (!result || !result.ok) {
+        get().showNotice(result?.error || fallbackError);
+        return false;
+      }
+      set((draft) => { onSuccess(draft, result); });
+      return true;
+    } catch (error) {
+      get().showNotice(errorInfo(error).message || fallbackError);
+      return false;
+    }
+  }
+
+  function resolveBrowserHandoff(
+    request: (sessionId: string) => Promise<{ ok: boolean; handoffs?: BrowserHandoff[]; error?: string } | null>,
+    fallbackError: string
+  ) {
+    return runBrowserAction(request, fallbackError, (draft, result) => {
+      if (Array.isArray(result.handoffs)) draft.ui.mirror.handoffs = result.handoffs;
+      if (!draft.ui.mirror.handoffs.length) draft.ui.mirror.paused = false;
+    });
+  }
+
   return {
   /* ---------- 会话 / 项目 ---------- */
   sessionId: null,
@@ -312,14 +343,14 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     const next = get().alertPrefs;
     writeAlertPreferences(next);
     if (!next.taskbarAttention) {
-      void globalThis.window?.pilotDesktop?.setWindowAttention?.({ urgentCount: 0, kind: 'idle', bounce: false })?.catch?.(() => {});
+      setDesktopWindowAttention({ urgentCount: 0, kind: 'idle', bounce: false });
     } else {
       const urgentCount = computeUrgentCount(get());
-      void globalThis.window?.pilotDesktop?.setWindowAttention?.({
+      setDesktopWindowAttention({
         urgentCount,
         kind: urgentCount > 0 ? 'attention' : get().ui.attentionKind,
         bounce: false
-      })?.catch?.(() => {});
+      });
     }
   },
   setDesktopFocused(focused: boolean) {
@@ -330,11 +361,11 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       const state = get();
       const urgentCount = computeUrgentCount(state);
       if (state.alertPrefs.taskbarAttention) {
-        void globalThis.window?.pilotDesktop?.setWindowAttention?.({
+        setDesktopWindowAttention({
           urgentCount,
           kind: urgentCount > 0 ? 'attention' : 'idle',
           bounce: false
-        })?.catch?.(() => {});
+        });
       }
     }
   },
@@ -347,12 +378,11 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     const nextApprovalIds = new Set(approvals.map((item) => item.callId));
     const nextQuestionIds = new Set(questions.map((item) => item.callId));
 
-    const desktop = globalThis.window?.pilotDesktop;
     for (const id of prevApprovalIds) {
-      if (!nextApprovalIds.has(id)) void desktop?.dismissFloatingAlert?.(`approval:${id}`)?.catch?.(() => {});
+      if (!nextApprovalIds.has(id)) dismissDesktopAlert(`approval:${id}`);
     }
     for (const id of prevQuestionIds) {
-      if (!nextQuestionIds.has(id)) void desktop?.dismissFloatingAlert?.(`question:${id}`)?.catch?.(() => {});
+      if (!nextQuestionIds.has(id)) dismissDesktopAlert(`question:${id}`);
     }
 
     set((draft) => {
@@ -369,60 +399,48 @@ export const useStore = create<StoreState>()(immer((set, get) => {
     interactionsInitialized = true;
 
     if (wasInitialized) {
-      const { desktop: bridge, backgrounded, theme, onSelectSession, focusWindow } = alertEnv(after);
+      const { theme, dispatchAlert } = createAlertSender(after, urgentCount);
       for (const item of approvals) {
         if (!prevApprovalIds.has(item.callId)) {
           const risk = classifyApprovalRisk(item.toolName, item.argsSummary, item.structuredArgs);
-          void dispatchAttentionAlert({
+          dispatchAlert({
             eventKey: `approval:${item.callId}`,
             kind: 'approval',
             sessionId: item.sessionId,
             title: `${item.sessionTitle || '对话'} · 等待批准`,
             body: risk.summary || item.argsSummary || item.toolName,
-            prefs: after.alertPrefs,
-            backgrounded,
-            notifyEnabled: after.notifyEnabled,
-            theme,
-            floatingAlert: buildApprovalFloatingAlert(item, theme),
-            urgentCount,
-            desktop: bridge,
-            onSelectSession,
-            focusWindow
+            floatingAlert: buildApprovalFloatingAlert(item, theme)
           });
         }
       }
       for (const item of questions) {
         if (!prevQuestionIds.has(item.callId)) {
-          void dispatchAttentionAlert({
+          dispatchAlert({
             eventKey: `question:${item.callId}`,
             kind: 'question',
             sessionId: item.sessionId,
             title: `${item.sessionTitle || '对话'} · 需要选择`,
             body: item.question,
-            prefs: after.alertPrefs,
-            backgrounded,
-            notifyEnabled: after.notifyEnabled,
-            theme,
-            floatingAlert: buildQuestionFloatingAlert(item, theme),
-            urgentCount,
-            desktop: bridge,
-            onSelectSession,
-            focusWindow
+            floatingAlert: buildQuestionFloatingAlert(item, theme)
           });
         }
       }
     }
 
-    if (urgentCount !== prevCount && after.alertPrefs.taskbarAttention && desktop?.setWindowAttention) {
-      void desktop.setWindowAttention({
+    if (urgentCount !== prevCount && after.alertPrefs.taskbarAttention) {
+      setDesktopWindowAttention({
         urgentCount,
         kind: urgentCount > 0 ? 'attention' : 'idle',
         bounce: false
-      })?.catch?.(() => {});
+      });
     }
   },
   setUi(patch) {
+    const prevConfirm = get().ui.confirm;
     set((draft) => { Object.assign(draft.ui, typeof patch === 'function' ? patch(draft.ui) : patch); });
+    if (prevConfirm && !get().ui.confirm) {
+      try { prevConfirm.onCancel?.(); } catch (error) { console.warn('关闭确认框时取消回调执行失败', error); }
+    }
   },
   setFilters(value) {
     set((draft) => { draft.ui.filters = value; });
@@ -728,14 +746,24 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       let response = await post(false);
       if (get().sessionId !== sessionId) return false;
       if (action !== 'accept') {
-        if (!response.ok) throw new Error(await describeError(response));
+        if (!response.ok) throw await readApiError(response);
         get().showNotice(action === 'recover' ? '恢复已完成，请重新审阅变更' : `已拒绝 ${sandboxId} 的改动`);
         return true;
       }
       if (response.status === 409 || response.status === 412) {
-        const reason = await describeError(response);
-        if (response.status === 409 || !window.confirm(`${reason}\n\n仍要接受这批未通过校验的改动吗？`)) {
+        const reason = (await readApiError(response)).message;
+        if (response.status === 409) {
           get().showNotice(reason);
+          return false;
+        }
+        const confirmed = await get().askConfirm({
+          title: '确认接受未通过校验的改动',
+          message: `${reason}\n\n仍要接受这批未通过校验的改动吗？`,
+          confirmText: '仍要接受',
+          danger: true
+        });
+        if (!confirmed || get().sessionId !== sessionId) {
+          if (!confirmed && get().sessionId === sessionId) get().showNotice(reason);
           return false;
         }
         response = await post(true);
@@ -760,7 +788,29 @@ export const useStore = create<StoreState>()(immer((set, get) => {
 
   /** 通用二次确认：危险操作统一走这里，避免各处 window.confirm 风格不一。 */
   askConfirm(options) {
-    set((draft) => { draft.ui.confirm = options; });
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      const finish = (accepted: boolean) => {
+        if (settled) return false;
+        settled = true;
+        resolve(accepted);
+        return true;
+      };
+      try { get().ui.confirm?.onCancel?.(); } catch (error) { console.warn('替换确认框时旧取消回调执行失败', error); }
+      set((draft) => {
+        draft.ui.confirm = {
+          ...options,
+          onConfirm: async () => {
+            if (!finish(true)) return;
+            await options.onConfirm?.();
+          },
+          onCancel: () => {
+            if (!finish(false)) return;
+            options.onCancel?.();
+          }
+        };
+      });
+    });
   },
 
   ...createModelSettingsActions({ set, get }),
@@ -917,93 +967,38 @@ export const useStore = create<StoreState>()(immer((set, get) => {
       return null;
     }
   },
-  async selectBrowserLane(browserSessionId) {
-    const { sessionId } = get();
-    if (!sessionId) return false;
-    try {
-      const result = await api.selectBrowserLane(sessionId, browserSessionId);
-      if (!result || !result.ok) {
-        get().showNotice(result?.error || '切换浏览器泳道失败');
-        return false;
-      }
-      set((draft) => {
-        if (result.activeLane) draft.ui.mirror.activeLane = result.activeLane;
-      });
-      return true;
-    } catch (error) {
-      get().showNotice(errorInfo(error).message || '切换浏览器泳道失败');
-      return false;
-    }
+  selectBrowserLane(browserSessionId) {
+    return runBrowserAction(
+      (sid) => api.selectBrowserLane(sid, browserSessionId),
+      '切换浏览器泳道失败',
+      (draft, result) => { if (result.activeLane) draft.ui.mirror.activeLane = result.activeLane; }
+    );
   },
-  async resumeBrowserHandoff(browserSessionId, note) {
-    const { sessionId } = get();
-    if (!sessionId) return false;
-    try {
-      const result = await api.resumeBrowserHandoff(sessionId, { browserSessionId, note });
-      if (!result || !result.ok) {
-        get().showNotice(result?.error || '交回浏览器控制权失败');
-        return false;
-      }
-      set((draft) => {
-        if (Array.isArray(result.handoffs)) draft.ui.mirror.handoffs = result.handoffs;
-        if (!draft.ui.mirror.handoffs.length) draft.ui.mirror.paused = false;
-      });
-      return true;
-    } catch (error) {
-      get().showNotice(errorInfo(error).message || '交回浏览器控制权失败');
-      return false;
-    }
+  resumeBrowserHandoff(browserSessionId, note) {
+    return resolveBrowserHandoff(
+      (sid) => api.resumeBrowserHandoff(sid, { browserSessionId, note }),
+      '交回浏览器控制权失败'
+    );
   },
-  async cancelBrowserHandoff(browserSessionId, reason) {
-    const { sessionId } = get();
-    if (!sessionId) return false;
-    try {
-      const result = await api.cancelBrowserHandoff(sessionId, { browserSessionId, reason });
-      if (!result || !result.ok) {
-        get().showNotice(result?.error || '取消浏览器接管失败');
-        return false;
-      }
-      set((draft) => {
-        if (Array.isArray(result.handoffs)) draft.ui.mirror.handoffs = result.handoffs;
-        if (!draft.ui.mirror.handoffs.length) draft.ui.mirror.paused = false;
-      });
-      return true;
-    } catch (error) {
-      get().showNotice(errorInfo(error).message || '取消浏览器接管失败');
-      return false;
-    }
+  cancelBrowserHandoff(browserSessionId, reason) {
+    return resolveBrowserHandoff(
+      (sid) => api.cancelBrowserHandoff(sid, { browserSessionId, reason }),
+      '取消浏览器接管失败'
+    );
   },
   async stopBrowserControl(browserSessionId) {
-    const { sessionId } = get();
-    if (!sessionId) return false;
-    try {
-      const result = await api.stopBrowserControl(sessionId, browserSessionId);
-      if (!result || !result.ok) {
-        get().showNotice(result?.error || '停止浏览器控制失败');
-        return false;
-      }
-      set((draft) => {
+    const ok = await runBrowserAction(
+      (sid) => api.stopBrowserControl(sid, browserSessionId),
+      '停止浏览器控制失败',
+      (draft) => {
         draft.ui.mirror.agentControlled = false;
         draft.ui.mirror.controlStatus = '';
         draft.ui.mirror.paused = true;
-      });
-      void get().loadBrowserStatus();
-      return true;
-    } catch (error) {
-      get().showNotice(errorInfo(error).message || '停止浏览器控制失败');
-      return false;
-    }
+      }
+    );
+    if (ok) void get().loadBrowserStatus();
+    return ok;
   },
-  async loadUsage(days) {
-    const { sessionId, sessionEpoch } = get();
-    const request = ++usageLoadSequence;
-    try {
-      const data = await api.usage(days);
-      if (request !== usageLoadSequence || get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch) return;
-      set((draft) => { draft.usageData = data; draft.ui.usageDays = days; });
-    } catch { /* 用量读取失败不阻塞 */ }
-  },
-
 
   };
 }));
@@ -1022,30 +1017,6 @@ if (typeof document !== 'undefined') {
 }
 
 /* ---------- 模块级辅助 ---------- */
-
-/**
- * 后端错误体 → 可读文案（旧版 errorText 的顺序：message → detail → error）。
- *
- * <p>Spring 默认错误体把业务原因放在 {@code message}，{@code error} 只是状态短语
- * （如 "Precondition Failed"）；先取 error 会把「为什么被拦」整段丢掉。
- */
-async function describeError(response: Response) {
-  let body: Record<string, unknown> | null = null;
-  try {
-    body = await response.json() as Record<string, unknown> | null;
-  } catch {
-    // 非 JSON 错误体（网关返回的 HTML 之类）
-  }
-  if (body && typeof body === 'object') {
-    for (const key of ['message', 'detail', 'error']) {
-      const value = body[key];
-      if (typeof value === 'string' && value.trim()) {
-        return value.trim();
-      }
-    }
-  }
-  return `HTTP ${response.status}`;
-}
 
 function applyTheme(mode: string, accent: string) {
   document.documentElement.dataset.theme = resolveTheme(mode);
@@ -1107,31 +1078,48 @@ function alertEnv(state: StoreState) {
   return { desktop, backgrounded, theme, onSelectSession, focusWindow };
 }
 
+type AlertPayload = Omit<
+  Parameters<typeof dispatchAttentionAlert>[0],
+  'prefs' | 'backgrounded' | 'notifyEnabled' | 'theme' | 'urgentCount' | 'desktop' | 'onSelectSession' | 'focusWindow'
+>;
+
+function createAlertSender(state: StoreState, urgentCount: number) {
+  const env = alertEnv(state);
+  const dispatchAlert = (payload: AlertPayload) => {
+    void dispatchAttentionAlert({
+      ...payload,
+      prefs: state.alertPrefs,
+      backgrounded: env.backgrounded,
+      notifyEnabled: state.notifyEnabled,
+      theme: env.theme,
+      urgentCount,
+      desktop: env.desktop,
+      onSelectSession: env.onSelectSession,
+      focusWindow: env.focusWindow
+    });
+  };
+  return { ...env, dispatchAlert };
+}
+
 function handleRunAttention(payload: RunAttentionPayload) {
   const state = useStore.getState();
-  const kind = payload.kind === 'error' ? 'error' : payload.kind === 'done' ? 'done' : 'attention';
+  let kind: 'error' | 'done' | 'attention' = 'attention';
+  if (payload.kind === 'error') kind = 'error';
+  else if (payload.kind === 'done') kind = 'done';
   const sid = String(payload.sessionId || '');
   const title = payload.title || (sid === state.sessionId ? state.sessionTitle : '') || '对话';
   const urgentCount = computeUrgentCount(state);
-  const { desktop, backgrounded, theme, onSelectSession, focusWindow } = alertEnv(state);
+  const { backgrounded, theme, dispatchAlert } = createAlertSender(state, urgentCount);
   const floatingAlert = kind === 'done' || kind === 'error'
     ? buildRunFloatingAlert(kind, sid, title, payload.summary || '', theme)
     : null;
-  void dispatchAttentionAlert({
+  dispatchAlert({
     eventKey: `run:${payload.runId || sid || 'global'}:${kind}`,
     kind,
     sessionId: sid,
     title,
     body: payload.summary || ({ done: '本轮任务已完成', error: '本轮运行失败', attention: '需要你确认' }[kind]),
-    prefs: state.alertPrefs,
-    backgrounded,
-    notifyEnabled: state.notifyEnabled,
-    theme,
-    floatingAlert,
-    urgentCount,
-    desktop,
-    onSelectSession,
-    focusWindow
+    floatingAlert
   });
   if (sid && sid !== state.sessionId) {
     if (kind === 'done' && !backgrounded) {
@@ -1152,14 +1140,14 @@ function applyAttention(
 ) {
   const state = useStore.getState();
   const urgentCount = syncTabSignal(state, kind, title);
-  const { desktop, backgrounded, theme, onSelectSession, focusWindow } = alertEnv(state);
+  const { theme, dispatchAlert } = createAlertSender(state, urgentCount);
 
   let dispatchedFromEvents = false;
   for (const item of applied) {
     if (item.type === 'approval.resolved' && item.payload?.callId) {
-      void desktop?.dismissFloatingAlert?.(`approval:${item.payload.callId}`)?.catch?.(() => {});
+      dismissDesktopAlert(`approval:${item.payload.callId}`);
     } else if (item.type === 'tool.completed' && item.payload?.callId && beforeQuestions[item.payload.callId]) {
-      void desktop?.dismissFloatingAlert?.(`question:${item.payload.callId}`)?.catch?.(() => {});
+      dismissDesktopAlert(`question:${item.payload.callId}`);
     } else if (item.type === 'approval.required' && item.payload?.callId) {
       dispatchedFromEvents = true;
       const callId = item.payload.callId;
@@ -1178,21 +1166,13 @@ function applyAttention(
         requestedAt: new Date(entry?.requestedAt || Date.now()).toISOString(),
         expiresAt: entry?.expiresAt ? new Date(entry.expiresAt).toISOString() : null
       };
-      void dispatchAttentionAlert({
+      dispatchAlert({
         eventKey: `approval:${callId}`,
         kind: 'approval',
         sessionId: floating.sessionId,
         title: `${floating.sessionTitle} · 等待批准`,
         body: risk.summary || argsSummary || toolName,
-        prefs: state.alertPrefs,
-        backgrounded,
-        notifyEnabled: state.notifyEnabled,
-        theme,
-        floatingAlert: buildApprovalFloatingAlert(floating, theme),
-        urgentCount,
-        desktop,
-        onSelectSession,
-        focusWindow
+        floatingAlert: buildApprovalFloatingAlert(floating, theme)
       });
     } else if (item.type === 'tool.started' && item.payload?.name === 'ask_user' && item.payload?.callId) {
       dispatchedFromEvents = true;
@@ -1209,40 +1189,24 @@ function applyAttention(
           requestedAt: new Date(entry?.requestedAt || Date.now()).toISOString(),
           expiresAt: entry?.expiresAt ? new Date(entry.expiresAt).toISOString() : null
         };
-        void dispatchAttentionAlert({
+        dispatchAlert({
           eventKey: `question:${callId}`,
           kind: 'question',
           sessionId: floating.sessionId,
           title: `${floating.sessionTitle} · 需要选择`,
           body: floating.question,
-          prefs: state.alertPrefs,
-          backgrounded,
-          notifyEnabled: state.notifyEnabled,
-          theme,
-          floatingAlert: buildQuestionFloatingAlert(floating, theme),
-          urgentCount,
-          desktop,
-          onSelectSession,
-          focusWindow
+          floatingAlert: buildQuestionFloatingAlert(floating, theme)
         });
       }
     } else if (item.type === 'arbitration.required') {
       dispatchedFromEvents = true;
       const arbId = String(item.payload?.arbitrationId || item.sequence || 'arb');
-      void dispatchAttentionAlert({
+      dispatchAlert({
         eventKey: `arb:${arbId}`,
         kind: 'attention',
         sessionId: item.sessionId || state.sessionId || '',
         title: `${title || state.sessionTitle || '对话'} · 等待裁决`,
-        body: String(item.payload?.title || item.payload?.summary || '多代理产出需要裁决'),
-        prefs: state.alertPrefs,
-        backgrounded,
-        notifyEnabled: state.notifyEnabled,
-        theme,
-        urgentCount,
-        desktop,
-        onSelectSession,
-        focusWindow
+        body: String(item.payload?.title || item.payload?.summary || '多代理产出需要裁决')
       });
     }
   }
@@ -1254,42 +1218,25 @@ function applyAttention(
     const sessionName = title || state.sessionTitle || '对话';
     const summary = (latestResult?.type === 'result' ? latestResult.detail || latestResult.title : '')
       || (kind === 'done' ? '本轮任务已完成' : '本轮运行失败');
-    void dispatchAttentionAlert({
+    dispatchAlert({
       eventKey: `run:${runEnd?.runId || sid || 'active'}:${kind}`,
       kind,
       sessionId: sid,
       title: sessionName,
       body: summary,
-      prefs: state.alertPrefs,
-      backgrounded,
-      notifyEnabled: state.notifyEnabled,
-      theme,
-      floatingAlert: buildRunFloatingAlert(kind, sid, sessionName, summary, theme),
-      urgentCount,
-      desktop,
-      onSelectSession,
-      focusWindow
+      floatingAlert: buildRunFloatingAlert(kind, sid, sessionName, summary, theme)
     });
   } else if (kind === 'attention' && !dispatchedFromEvents) {
     const sid = state.sessionId || 'active';
-    void dispatchAttentionAlert({
+    dispatchAlert({
       eventKey: `attention:${sid}:${title || ''}`,
       kind: 'attention',
       sessionId: state.sessionId || '',
       title: title || '新任务',
-      body: '任务需要确认',
-      prefs: state.alertPrefs,
-      backgrounded,
-      notifyEnabled: state.notifyEnabled,
-      theme,
-      urgentCount,
-      desktop,
-      onSelectSession,
-      focusWindow
+      body: '任务需要确认'
     });
-  } else if ((kind === 'idle' || kind === 'running') && urgentCount === 0
-    && state.alertPrefs.taskbarAttention && desktop?.setWindowAttention) {
-    void desktop.setWindowAttention({ urgentCount: 0, kind, bounce: false })?.catch?.(() => {});
+  } else if ((kind === 'idle' || kind === 'running') && urgentCount === 0 && state.alertPrefs.taskbarAttention) {
+    setDesktopWindowAttention({ urgentCount: 0, kind, bounce: false });
   }
 }
 

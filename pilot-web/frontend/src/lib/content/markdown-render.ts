@@ -77,37 +77,6 @@ export function setMarkdownContext(ctx: { getWorkspace?: () => string; openFile?
   if (ctx?.openFile) openFile = ctx.openFile;
 }
 
-const ACTION_ICONS: Record<string, string> = {
-  edit: '<path d="M10.8 2.7l2.5 2.5-7.6 7.6-3.2.7.7-3.2z"/><path d="M9.4 4.1l2.5 2.5"/>',
-  branch: '<circle cx="4.5" cy="3.6" r="1.7"/><circle cx="4.5" cy="12.4" r="1.7"/><circle cx="11.5" cy="5.6" r="1.7"/><path d="M4.5 5.3v5.4M11.5 7.3c0 2.5-2.3 3.4-6 3.9"/>',
-  copy: '<rect x="5.6" y="5.6" width="7.9" height="7.9" rx="2"/><path d="M10.4 3.4A1.4 1.4 0 0 0 9 2H4.2A1.7 1.7 0 0 0 2.5 3.7V9c0 .8.6 1.4 1.4 1.4"/>',
-  check: '<path d="M3.4 8.6l3.1 3.1 6.1-7"/>'
-};
-
-
-function actionIconSvg(name: string) {
-  return `<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ACTION_ICONS[name]}</svg>`;
-}
-
-/** 图标按钮：不写字，悬停时用自带的小气泡说明（data-tip），读屏和键盘用 aria-label。 */
-function actionIcon(label: string, icon: string, className: string, onClick: (event: MouseEvent) => void) {
-  const node = document.createElement('button');
-  node.type = 'button';
-  node.className = 'icon-action ' + className;
-  node.setAttribute('aria-label', label);
-  node.dataset.tip = label;
-  node.innerHTML = actionIconSvg(icon);
-  node.addEventListener('click', onClick);
-  return node;
-}
-
-
-/** 复用同一复制兼容路径；UI 层仍保留已有的成功/失败反馈。 */
-async function writeClipboard(value: unknown) {
-  if (!await tryWriteClipboard(value)) throw new Error('当前环境不支持复制，请手动选择文本');
-}
-
-
 /**
  * 代码块头部的复制按钮：文案按钮，点击后短暂反馈，失败走 notice。
  * 之前这里调用的是一个从未定义过的 copyControl，带代码块的回复一渲染就抛
@@ -124,7 +93,10 @@ function copyControl(label: string, getText: () => string, options: { tip?: bool
   }
   node.addEventListener('click', async () => {
     try {
-      await writeClipboard(getText());
+      if (!await tryWriteClipboard(getText())) {
+        notify('复制失败');
+        return;
+      }
       node.textContent = '已复制';
       setTimeout(() => { node.textContent = label; }, 1200);
     } catch {
@@ -938,4 +910,4 @@ function patchMarkdownBlock(existing: Node, next: MarkdownBlock, _previous?: Mar
   return false;
 }
 
-export { renderMarkdown, markdownBlocks, markdownBlockRecords, patchMarkdownBlock, actionIconSvg, actionIcon };
+export { renderMarkdown, markdownBlocks, markdownBlockRecords, patchMarkdownBlock };

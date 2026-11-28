@@ -53,7 +53,7 @@ export interface ComposerBridge {
   editMessage?(sequence: number, text: string): void;
   cancelEdit?(): void;
 }
-export interface ConfirmDialog { title: string; message: string; confirmText?: string; danger?: boolean; onConfirm?: () => unknown }
+export interface ConfirmDialog { title: string; message: string; confirmText?: string; danger?: boolean; onConfirm?: () => unknown; onCancel?: () => unknown }
 export interface CheckpointDialog { sequence?: number; loading?: boolean; applying?: boolean; error?: string; info?: S.CheckpointControllerPreview | null }
 export interface UiState {
   exportCopy?: string | null;
@@ -138,7 +138,7 @@ export interface StoreActions {
   submitInput(text: string, attachments?: DraftAttachment[], imagePositions?: number[]): Promise<boolean>;
   steer(text: string, attachments?: DraftAttachment[]): Promise<boolean>; pauseRun(): Promise<void>; cancelRun(): Promise<void>;
   continueRun(): Promise<false | void>; resendMessage(sequence: number, text: string, attachments?: DraftAttachment[]): Promise<boolean>;
-  resolveApproval(id: string, approved: boolean, sessionId?: string, reason?: string): Promise<void>;
+  resolveApproval(id: string, approved: boolean, sessionId?: string, reason?: string): Promise<boolean>;
   resolveApprovalWithTrust(id: string, approved: boolean, trust: { action: string; server: string; tool?: string; configHash?: string; toolHash?: string }): Promise<void>;
   resolveApprovalWithRule(callId: string, rule: string): Promise<void>;
   answerQuestion(callId: string, choice: string, sessionId?: string): Promise<boolean>;
@@ -167,7 +167,7 @@ export interface StoreActions {
   loadCommandTasks(): Promise<void>; loadCommandLog(task: CommandTask): Promise<void>; stopCommand(task: CommandTask): Promise<void>;
   renameSession(title: string, id?: string | null): Promise<boolean>; updateSessionPreferences(id: string, values: { pinned?: boolean; unread?: boolean }): Promise<boolean>;
   archiveSession(id: string, archived?: boolean): Promise<boolean>; deleteSession(id: string): Promise<boolean>; regenerate(): Promise<void>;
-  askConfirm(options: ConfirmDialog): void; loadSettings(): Promise<void>; savePermissionMode(mode: string): Promise<void>;
+  askConfirm(options: ConfirmDialog): Promise<boolean>; loadSettings(): Promise<void>; savePermissionMode(mode: string): Promise<void>;
   clearModelKey(): Promise<boolean>; resetModelFeedback(): void;
   saveModel(body: Parameters<ApiClient['saveModel']>[0], options?: { clearKey?: boolean }): Promise<boolean>;
   probeModels(body: Parameters<ApiClient['probeModels']>[0]): ReturnType<ApiClient['probeModels']>;
@@ -178,6 +178,6 @@ export interface StoreActions {
   resumeBrowserHandoff(browserSessionId?: string, note?: string): Promise<boolean>;
   cancelBrowserHandoff(browserSessionId?: string, reason?: string): Promise<boolean>;
   stopBrowserControl(browserSessionId?: string): Promise<boolean>;
-  loadUsage(days: number): Promise<void>; refreshActiveRun(): Promise<void>;
+  refreshActiveRun(): Promise<void>;
 }
 export type StoreState = StoreData & StoreActions;

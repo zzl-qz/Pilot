@@ -220,16 +220,9 @@ export interface ModelProfilesView {
   fallbackProfileId?: string;
   profiles: ModelProfileView[];
 }
-export interface ModelProfileSaveRequest {
+export interface ModelProfileSaveRequest extends Partial<S.SettingsControllerModelRequest> {
   name?: string;
-  endpoint?: string;
-  model?: string;
-  apiKey?: string;
-  clearApiKey?: boolean;
   inheritCurrentKey?: boolean;
-  contextTokens?: number | null;
-  maxOutputTokens?: number | null;
-  childModel?: string;
   activate?: boolean;
 }
 

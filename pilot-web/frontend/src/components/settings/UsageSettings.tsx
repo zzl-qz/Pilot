@@ -7,15 +7,7 @@ import { errorInfo } from "../../lib/errors.js";
 import { formatCache, totalCost } from "../../lib/request-usage.js";
 import { useStore } from "../../store.js";
 import { api } from "../../api.js";
-
-/** token 数字口径：与旧版一致（万级以上转 k/M/B）。 */
-export function formatCount(value: unknown) {
-  const number = Number(value) || 0;
-  if (number >= 1_000_000_000) return `${(number / 1_000_000_000).toFixed(1)}B`;
-  if (number >= 1_000_000) return `${(number / 1_000_000).toFixed(1)}M`;
-  if (number >= 10_000) return `${(number / 1_000).toFixed(0)}k`;
-  return number.toLocaleString('zh-CN');
-}
+import { formatCompactCount } from "../../thread-utils.js";
 
 export function UsageSettings() {
   const usage = useStore(state => state.usageData);
@@ -47,9 +39,9 @@ export function UsageSettings() {
   }, [load]);
 
   const totals = usage && [
-    ['模型请求', formatCount(usage.totalRequests)],
-    ['输入 Token', formatCount(usage.totalInputTokens)],
-    ['输出 Token', formatCount(usage.totalOutputTokens)],
+    ['模型请求', formatCompactCount(usage.totalRequests)],
+    ['输入 Token', formatCompactCount(usage.totalInputTokens)],
+    ['输出 Token', formatCompactCount(usage.totalOutputTokens)],
     ['缓存命中', formatCache(usage.details)],
     ['费用估算', totalCost(usage.details)]
   ];
@@ -82,7 +74,7 @@ export function UsageSettings() {
         <ul id="usage-sessions" className="usage-sessions">
           {(usage.sessions || []).map(session => <li key={session.sessionId}>
             <span className="usage-session-name" title={`${session.title}（${session.sessionId}）`}>{session.title}</span>
-            <span className="usage-session-meta">{formatCount((session.inputTokens || 0) + (session.outputTokens || 0))} Token · {session.requests} 请求</span>
+            <span className="usage-session-meta">{formatCompactCount((session.inputTokens || 0) + (session.outputTokens || 0))} Token · {session.requests} 请求</span>
           </li>)}
           {!usage.sessions?.length && <li className="panel-empty">还没有可统计的对话。</li>}
         </ul>
@@ -96,12 +88,12 @@ function UsageTrend({ daily }: { daily: S.UsageServiceDayTotal[] }) {
   const ticks = new Set([0, Math.floor((daily.length - 1) / 2), daily.length - 1]);
   return <>
     <figure className="usage-trend" aria-hidden="true">
-      <div className="usage-axis"><span>{maxTokens > 0 ? formatCount(maxTokens) : ''}</span><span>0</span></div>
+      <div className="usage-axis"><span>{maxTokens > 0 ? formatCompactCount(maxTokens) : ''}</span><span>0</span></div>
       <div className="usage-series" data-dense={daily.length > 8 || undefined}
         style={{ '--usage-day-count': daily.length } as React.CSSProperties}>
         <div className="usage-series-bars">
           {daily.map(day => <div key={day.date} className="usage-series-day"
-            title={`${day.date} · 输入 ${formatCount(day.inputTokens)} · 输出 ${formatCount(day.outputTokens)} · ${day.requests} 请求`}>
+            title={`${day.date} · 输入 ${formatCompactCount(day.inputTokens)} · 输出 ${formatCompactCount(day.outputTokens)} · ${day.requests} 请求`}>
             <span style={{ height: `${(day.outputTokens || 0) / (maxTokens || 1) * 100}%` }} />
             <span style={{ height: `${(day.inputTokens || 0) / (maxTokens || 1) * 100}%` }} />
           </div>)}

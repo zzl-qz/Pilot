@@ -19,6 +19,15 @@ export function formatCount(value: unknown) {
   return `${sign}${(abs / 100000000).toFixed(1)}亿`;
 }
 
+/** 紧凑数字口径：万级以上转 k/M/B，供设置页用量与诊断指标复用。 */
+export function formatCompactCount(value: unknown) {
+  const number = Number(value) || 0;
+  if (number >= 1_000_000_000) return `${(number / 1_000_000_000).toFixed(1)}B`;
+  if (number >= 1_000_000) return `${(number / 1_000_000).toFixed(1)}M`;
+  if (number >= 10_000) return `${(number / 1_000).toFixed(0)}k`;
+  return number.toLocaleString('zh-CN');
+}
+
 export function preview(value: unknown, maxLength: number) {
   const single = String(value ?? '').replace(/\s+/g, ' ').trim();
   return single.length <= maxLength ? single : single.slice(0, maxLength) + '…';

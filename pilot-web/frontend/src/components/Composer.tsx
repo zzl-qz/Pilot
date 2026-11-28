@@ -1,29 +1,23 @@
-import type { DraftAttachment, BuiltinCommand, SkillCommand } from '../types/input.js';
+import type { DraftAttachment } from '../types/input.js';
+import type { ThreadRow } from '../types/thread.js';
 import { Button } from '@astryxdesign/core/Button';
 import { IconButton } from '@astryxdesign/core/IconButton';
-type QuickCommand = BuiltinCommand | SkillCommand;
-interface ReferenceMenu { items: string[]; message?: string; loading?: boolean }
-import { errorInfo } from '../lib/errors.js';
 import { formatCache, requestContext } from '../lib/request-usage.js';
 import React, { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useStore } from '../store.js';
 import { ErrorBoundary } from './ErrorBoundary.jsx';
-import { api } from '../api.js';
 import { Icon } from './Icon.jsx';
 import { VoiceInput } from './VoiceInput.jsx';
 import { SubmissionNotice } from './SubmissionNotice.jsx';
 import { VerificationStrip } from './VerificationStrip.jsx';
 import { createComposerInput } from '../lib/composer-input.js';
 import { resolveComposerAction, resolveSteerEntry } from '../lib/composer-state.js';
-import { rankFileMatches } from '../lib/mention.js';
-import { filterQuickCommands, expandQuickCommand } from '../lib/commands.js';
 import { stepHistory } from '../lib/input-history.js';
-import { readTransferFiles, hasFileTransferHint, readTransferFilePaths, transferDirectoryNames } from '../lib/clipboard.js';
-import { readAttachmentFile, readDesktopClipboardFiles } from '../lib/attachments/input.js';
-import { checkIncomingFile, requireAttachmentLimits } from '../lib/attachments/attachments.js';
 import { DRAFT_STORAGE as localStore, writeDraft, readDraft, dropDraft, readDraftSnapshot, writeDraftSnapshot, dropDraftSnapshot } from '../lib/drafts.js';
 import { PERMISSION_MODES, normalizePermission, permissionLabel } from '../lib/permission.js';
 import { usageBudgetTitle, usageLevel } from '../lib/context-usage.js';
+import { useComposerAttachments } from './composer/useComposerAttachments.js';
+import { ComposerSuggestions, useComposerSuggestions } from './composer/ComposerSuggestions.js';
 import './conversation.css';
 
 const ContextUsagePanel = lazy(() => import('./RequestUsage.jsx').then(m => ({ default: m.ContextUsagePanel })));
@@ -76,15 +70,13 @@ function DeferredChangesStrip() {
   return <ErrorBoundary name="变更摘要"><Suspense fallback={null}><ComposerChangesStrip /></Suspense></ErrorBoundary>;
 }
 
-/** 是否有真正阻止交互的模态弹窗；普通 <dialog open>（非模态）不算。 */
-function blockingDialogOpen() {
-  try {
-    return Boolean(document.querySelector('dialog[open]:modal'));
-  } catch {
-    // 旧内核不支持 :modal
-    const open = document.querySelector('dialog[open]') as HTMLElement | null;
-    return Boolean(open && open.getClientRects().length);
+function countSteeredRows(rows?: readonly ThreadRow[]): number {
+  if (!rows) return 0;
+  let count = 0;
+  for (const row of rows) {
+    if (row.type === 'user' && row.steered) count += 1;
   }
+  return count;
 }
 
 /**
@@ -93,8 +85,8 @@ function blockingDialogOpen() {
  */
 export function Composer() {
   const sessionId = useStore((state) => state.sessionId);
-  const sessionEpoch = useStore(state => state.sessionEpoch);
-  const workspace = useStore(state => state.workspace);
+  const sessionEpoch = useStore((state) => state.sessionEpoch);
+  const workspace = useStore((state) => state.workspace);
   const running = useStore((state) => state.running);
   const lastOutcome = useStore((state) => state.lastOutcome);
   const queueHeld = useStore((state) => state.queueHeld);
@@ -125,8 +117,8 @@ export function Composer() {
   const voiceFeedbackRef = useRef<HTMLDivElement>(null);
   const permTriggerRef = useRef<HTMLButtonElement>(null);
   const permMenuRef = useRef<HTMLDivElement>(null);
+  const modelTriggerRef = useRef<HTMLButtonElement>(null);
   const contextTriggerRef = useRef<HTMLButtonElement>(null);
-  const referenceRequest = useRef(0);
   const inputRef = useRef<ReturnType<typeof createComposerInput> | null>(null);
   const railRef = useRef<HTMLDivElement>(null);
   const [preview, setPreview] = useState<{ name: string; src: string } | null>(null);
@@ -137,34 +129,41 @@ export function Composer() {
   const modelOpen = toolbarPanel === 'model';
   const contextOpen = toolbarPanel === 'context';
   const notesOpen = useStore((state) => Boolean(state.ui.ideasOpen));
-  const [refMenu, setRefMenu] = useState<ReferenceMenu | null>(null);
-  const [slashMenu, setSlashMenu] = useState<{ items: QuickCommand[]; query: string } | null>(null);
-  const [menuIndex, setMenuIndex] = useState(0);
-  const menuRef = useRef<HTMLDivElement>(null);
   const draftFilesRef = useRef(new Map<string, DraftAttachment>());
-  const fileQueueRef = useRef(Promise.resolve());
-  const pendingFilesRef = useRef(0);
   const submittingRef = useRef(false);
   const submittingEpoch = useRef<number | null>(null);
-  const [pendingFiles, setPendingFiles] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [voiceBusy, setVoiceBusy] = useState(false);
   const voiceBusyRef = useRef(false);
-  const [dragging, setDragging] = useState(false);
   const [steerPending, setSteerPending] = useState<{ runId: string; text: string; baseline: number } | null>(null);
   const runId = useStore((state) => state.runId);
-  const steeredCount = useStore((state) => (state.thread?.rows || []).filter((row) => row.type === 'user' && row.steered).length);
+  const steeredCount = useStore((state) => (steerPending ? countSteeredRows(state.thread?.rows) : 0));
   const sessionDraftsRef = useRef(new Map<string | null, { html: string; files: Map<string, DraftAttachment>; attachmentIds: string[] }>());
   const previousSessionRef = useRef(sessionId);
   const snapshotTimer = useRef<number | null>(null);
   const snapshotWarnedRef = useRef(false);
 
+  const {
+    dragging,
+    pendingFiles,
+    pendingFilesRef,
+    currentDraftFiles,
+    addFiles,
+    receiveFiles
+  } = useComposerAttachments({ flowRef, inputRef, draftFilesRef, submittingRef });
+
+  const suggestions = useComposerSuggestions({ inputRef, sessionId, sessionEpoch, workspace });
+
+  function focusToolbarTrigger(panel: 'perm' | 'model' | 'context') {
+    const ref = { perm: permTriggerRef, model: modelTriggerRef, context: contextTriggerRef }[panel];
+    ref.current?.focus({ preventScroll: true });
+  }
+
   /** 把当前正文、附件与图片位置写成草稿副本；附件为空时清掉旧副本。 */
   function persistSnapshot(sessionKey: string | null = useStore.getState().sessionId) {
     const input = inputRef.current;
     if (!input) return;
-    const files = input.attachmentIds()
-      .map((id) => draftFilesRef.current.get(id)).filter((item): item is DraftAttachment => Boolean(item));
+    const files = currentDraftFiles(input);
     if (!files.length) {
       dropDraftSnapshot(localStore, sessionKey);
       return;
@@ -193,9 +192,7 @@ export function Composer() {
    * 那一下正在输入的内容和刚附上的文件都会被冲掉；现在草稿改成按当前会话动态取键。
    */
   useEffect(() => {
-    if (!flowRef.current) {
-      return undefined;
-    }
+    if (!flowRef.current) return undefined;
     const input = createComposerInput(flowRef.current, {
       rail: railRef.current,
       onRemove: (id) => draftFilesRef.current.delete(id),
@@ -301,7 +298,7 @@ export function Composer() {
       }
     }
     const saved = sessionDraftsRef.current.get(sessionId);
-      const stored = readDraftSnapshot(localStore, sessionId);
+    const stored = readDraftSnapshot(localStore, sessionId);
     if (stored.error === 'corrupt') {
       useStore.getState().showNotice('未发送的附件草稿已损坏并清除，请重新添加需要保留的附件。');
     }
@@ -342,188 +339,14 @@ export function Composer() {
     setSendAction(sendState());
   }, [running, queueHeld, lastOutcome, pendingInputs.length, steering, pausing, cancelling, editTarget, modelSaving, composerEnabled]);
 
-  /*
-   * 文件拖到窗口任意位置都算「拖进输入框」：浏览器默认会用文件替换整页，
-   * 只绑在输入框上则拖到侧栏或空白处会静默失败，用户看到的就是「拖了没反应」。
-   * 落点在输入框内时按鼠标位置插入，落在别处则追加到草稿末尾。
-   */
-  useEffect(() => {
-    const fileDrag = (event: DragEvent) => hasFileTransferHint(event.dataTransfer);
-    const enter = (event: DragEvent) => {
-      if (!fileDrag(event)) return;
-      event.preventDefault();
-      setDragging(true);
-    };
-    const over = (event: DragEvent) => {
-      if (!fileDrag(event)) return;
-      event.preventDefault();
-      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
-    };
-    const leave = (event: DragEvent) => {
-      // relatedTarget 为 null 表示真正离开窗口；在元素间移动不算
-      if (!event.relatedTarget && !fileDrag(event)) return;
-      if (!event.relatedTarget) setDragging(false);
-    };
-    const drop = (event: DragEvent) => {
-      setDragging(false);
-      if (!fileDrag(event)) return;
-      event.preventDefault();
-      // 弹窗打开时不把文件加进背后的输入框，避免用户以为拖进了当前表单
-      if (blockingDialogOpen()) return;
-      const folders = transferDirectoryNames(event.dataTransfer);
-      if (folders.length) {
-        useStore.getState().showNotice(
-          `不能直接添加文件夹（${folders.slice(0, 3).join('、')}${folders.length > 3 ? ' 等' : ''}）；请压缩后再拖入，或拖入其中的文件。`);
-        return;
-      }
-      const target = event.target;
-      if (flowRef.current && target instanceof Node && flowRef.current.contains(target)) {
-        inputRef.current?.placeCaretAtPoint(event.clientX, event.clientY);
-      } else {
-        inputRef.current?.focusEnd();
-      }
-      void receiveFiles(event, event.dataTransfer!, 'drop');
-    };
-    window.addEventListener('dragenter', enter);
-    window.addEventListener('dragover', over);
-    window.addEventListener('dragleave', leave);
-    window.addEventListener('drop', drop);
-    return () => {
-      window.removeEventListener('dragenter', enter);
-      window.removeEventListener('dragover', over);
-      window.removeEventListener('dragleave', leave);
-      window.removeEventListener('drop', drop);
-    };
-  }, []);
-
-  /* 附件上传：选择 / 拖放 / 粘贴共用 */
-  async function attachmentLimits() {
-    const settings = useStore.getState().settingsData || await api.settings();
-    return requireAttachmentLimits(settings?.attachmentLimits);
-  }
-
-  /** 所有入口（选择器、拖放、粘贴、桌面剪贴板路径）都经过同一条队列，保证预算和顺序一致。 */
-  function queueAttachments(sources: Array<{ name: string; size: number; mimeType?: string; load: () => Promise<DraftAttachment> }>) {
-    if (!sources.length) return;
-    if (submittingRef.current) {
-      useStore.getState().showNotice('正在发送当前消息，附件将在发送完成后才能继续添加。');
-      return;
-    }
-    const owner = useStore.getState();
-    const ownsDraft = () => {
-      const { sessionId, sessionEpoch } = useStore.getState();
-      return sessionId === owner.sessionId && sessionEpoch === owner.sessionEpoch;
-    };
-    pendingFilesRef.current += sources.length;
-    setPendingFiles(pendingFilesRef.current);
-    fileQueueRef.current = fileQueueRef.current.then(async () => {
-      for (const source of sources) {
-        try {
-          if (!ownsDraft()) continue;
-          const existing = (inputRef.current?.attachmentIds() || [])
-            .map((id) => draftFilesRef.current.get(id)).filter((item): item is DraftAttachment => Boolean(item));
-          const limits = await attachmentLimits();
-          if (!ownsDraft()) continue;
-          const result = checkIncomingFile(existing, source, limits);
-          if (!result.ok) {
-            if (!result.silent) useStore.getState().showNotice(result.reason);
-            continue;
-          }
-          const item = await source.load();
-          if (!ownsDraft() || !inputRef.current) continue;
-          // 按「同名 + 同大小 + 同内容」去重：同一张截图粘贴两次会被忽略，
-// 不同文件即使内容完全相同（例如两个都叫 hello 的 txt）也各自保留。
-          const duplicate = (inputRef.current.attachmentIds() || [])
-            .map((id) => draftFilesRef.current.get(id))
-            .some((current) => current && current.name === item.name && current.size === item.size
-              && current.dataBase64 === item.dataBase64);
-          if (duplicate) continue;
-          draftFilesRef.current.set(item.id, item);
-          inputRef.current.insertAttachments([item]);
-          inputRef.current.focus();
-        } catch (error) {
-          useStore.getState().showNotice('读取附件失败：' + errorInfo(error).message);
-        } finally {
-          pendingFilesRef.current -= 1;
-          setPendingFiles(pendingFilesRef.current);
-        }
-      }
-    });
-  }
-
-  function addFiles(fileList: ArrayLike<File> | null) {
-    const files = Array.from(fileList || []);
-    queueAttachments(files.map(file => ({
-      name: file.name || '未命名文件', size: file.size, mimeType: file.type,
-      load: () => readAttachmentFile(file)
-    })));
-  }
-
-  function addDesktopAttachments(items: DraftAttachment[]) {
-    queueAttachments(items.map(item => ({
-      name: item.name, size: item.size, mimeType: item.mimeType,
-      load: async () => item
-    })));
-  }
-
-  /**
-   * 系统文件管理器只把文件路径放进剪贴板时（尤其桌面端 Cmd/Ctrl+V），
-   * 浏览器剪贴板事件里没有 File，需要主进程按路径读取内容。
-   */
-  async function addClipboardAttachments() {
-    if (submittingRef.current) return;
-    const owner = useStore.getState();
-    const ownsDraft = () => {
-      const { sessionId, sessionEpoch } = useStore.getState();
-      return sessionId === owner.sessionId && sessionEpoch === owner.sessionEpoch;
-    };
-    pendingFilesRef.current += 1;
-    setPendingFiles(pendingFilesRef.current);
-    try {
-      const items = await readDesktopClipboardFiles(await attachmentLimits());
-      if (!ownsDraft()) return;
-      if (!items.length) throw new Error('系统剪贴板中没有可读取的文件。');
-      addDesktopAttachments(items);
-    } catch (error) {
-      useStore.getState().showNotice('读取剪贴板文件失败：' + errorInfo(error).message);
-    } finally {
-      pendingFilesRef.current -= 1;
-      setPendingFiles(pendingFilesRef.current);
-    }
-  }
-
-  async function receiveFiles(event: { preventDefault: () => void }, transfer: DataTransfer, source: 'paste' | 'drop') {
-    const files = readTransferFiles(transfer);
-    if (files.length) {
-      event.preventDefault();
-      addFiles(files);
-      return;
-    }
-    if (!hasFileTransferHint(transfer)) return;
-    event.preventDefault();
-    if (source === 'paste' && window.pilotDesktop?.readClipboardFiles) {
-      await addClipboardAttachments();
-      return;
-    }
-    if (readTransferFilePaths(transfer).length) {
-      useStore.getState().showNotice('当前环境未提供文件内容，只能拿到文件路径；请使用桌面版，或把文件直接拖入输入框。');
-      return;
-    }
-    useStore.getState().showNotice('当前环境未提供文件内容，请拖入文件或使用“添加文件或图片”。');
-  }
-
   async function submit() {
     const input = inputRef.current;
     if (voiceBusyRef.current || pendingFilesRef.current || submittingRef.current || sendState().disabled) return;
-    if (!input) {
-      return;
-    }
+    if (!input) return;
     const { text, imagePositions } = input.getDraft();
-    const attachments = input.attachmentIds().map((id) => draftFilesRef.current.get(id)).filter((item): item is DraftAttachment => Boolean(item));
+    const attachments = currentDraftFiles(input);
     const state = useStore.getState();
-    if (!text.trim() && !attachments.length) {
-      return;
-    }
+    if (!text.trim() && !attachments.length) return;
     submittingRef.current = true;
     submittingEpoch.current = state.sessionEpoch;
     setSubmitting(true);
@@ -559,25 +382,21 @@ export function Composer() {
     if (!input || !runId || steerPending) return;
     const text = input.getText();
     if (!text.trim()) return;
-    const baseline = steeredCount;
     const state = useStore.getState();
-    const sessionId = state.sessionId;
-    const sessionEpoch = state.sessionEpoch;
+    const baseline = countSteeredRows(state.thread?.rows);
+    const ownerSession = state.sessionId;
+    const ownerEpoch = state.sessionEpoch;
     const sent = await state.steer(text, []);
     const current = useStore.getState();
-    if (current.sessionId !== sessionId || current.sessionEpoch !== sessionEpoch) return;
-    if (!sent) {
-      // store 已提示失败原因；文本保留在输入框
-      return;
-    }
+    if (current.sessionId !== ownerSession || current.sessionEpoch !== ownerEpoch) return;
+    if (!sent) return;
     if (!inputRef.current) return;
-    const submitter = current;
     inputRef.current.setText('');
     draftFilesRef.current.clear();
-    writeDraft(localStore, submitter.sessionId, '');
-    dropDraftSnapshot(localStore, submitter.sessionId);
+    writeDraft(localStore, current.sessionId, '');
+    dropDraftSnapshot(localStore, current.sessionId);
     setSteerPending({ runId, text, baseline });
-    submitter.showNotice('纠正已提交，等待本轮在安全点应用。');
+    current.showNotice('纠正已提交，等待本轮在安全点应用。');
   }
 
   /* 收到对应的纠正事件后才显示已应用 */
@@ -602,85 +421,12 @@ export function Composer() {
     useStore.getState().showNotice('本轮已结束，纠正可能未被应用；内容已放回输入框，可重试或加入队列。');
   }, [runId, steerPending]);
 
-  /* @ 引用菜单：按光标前文本过滤 */
-  function onInput(event: React.FormEvent<HTMLDivElement>) {
-    if ((event.nativeEvent as InputEvent).isComposing) return;
-    const textBefore = inputRef.current?.textBeforeCaret?.() || '';
-    referenceRequest.current += 1;
-    const atMatch = textBefore.match(/(^|\s)@([^\s@\uFFFC]*)$/);
-    if (atMatch) {
-      openRefMenu(atMatch[2]);
-      return;
-    }
-    const slashMatch = textBefore.match(/(^|\s)\/([\w-]*)$/);
-    if (slashMatch) {
-      // 签名是 filterQuickCommands(query, commands)：参数写反会让命令菜单永远是空的
-      const commands = filterQuickCommands(slashMatch[2], useStore.getState().quickCommands || []);
-      setSlashMenu(commands.length ? { items: commands, query: slashMatch[2] } : null);
-      setRefMenu(null);
-      setMenuIndex(0);
-      return;
-    }
-    setRefMenu(null);
-    setSlashMenu(null);
-  }
-
-  async function openRefMenu(query: string) {
-    const state = useStore.getState();
-    const owner = state.sessionId;
-    const workspace = state.workspace || state.draftSession?.workspace;
-    const key = owner || workspace ? `${owner || 'draft'}:${workspace || ''}` : '';
-    const request = ++referenceRequest.current;
-    setSlashMenu(null);
-    setMenuIndex(0);
-    if (!key) {
-      setRefMenu({ items: [], message: '先选择工作区，再引用文件' });
-      return;
-    }
-    setRefMenu({ items: [], loading: true });
-    try {
-      let items = state.fileIndex.key === key ? state.fileIndex.items : null;
-      if (!items) {
-        const data = owner ? await api.filesFlat(owner) : await api.workspaceFiles(workspace || '');
-        items = data?.files || (Array.isArray(data) ? data : []);
-        if (request !== referenceRequest.current) return;
-        useStore.setState({ fileIndex: { items, key, sessionId: owner, loading: false } });
-      }
-      if (request === referenceRequest.current) setRefMenu({ items: rankFileMatches(items, query).slice(0, 8) });
-    } catch {
-      if (request === referenceRequest.current) setRefMenu({ items: [], message: '读取文件失败，请重新输入 @ 重试' });
-    }
-  }
-
-  function pickRef(path: string) {
-    inputRef.current?.insertMention(path);
-    inputRef.current?.focus();
-    referenceRequest.current += 1;
-    setRefMenu(null);
-  }
-
-  function pickSlash(command: QuickCommand) {
-    const expansion = 'skill' in command
-      ? `${command.name.startsWith('/') ? command.name : '/' + command.name} `
-      : expandQuickCommand(command, '');
-    if (expansion) inputRef.current?.replaceCommand(expansion);
-    setSlashMenu(null);
-    inputRef.current?.focus();
-  }
-
-  function clearSuggestions() {
-    referenceRequest.current += 1;
-    setRefMenu(null);
-    setSlashMenu(null);
-  }
-
   function toggleToolbarPanel(panel: NonNullable<typeof toolbarPanel>) {
-    clearSuggestions();
-    setToolbarPanel(current => current === panel ? null : panel);
+    suggestions.clearSuggestions();
+    setToolbarPanel((current) => (current === panel ? null : panel));
   }
 
   useEffect(() => {
-    clearSuggestions();
     setToolbarPanel(null);
   }, [sessionId, sessionEpoch, workspace]);
 
@@ -688,8 +434,6 @@ export function Composer() {
     if (permOpen) permMenuRef.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus({ preventScroll: true });
   }, [permOpen]);
 
-  const suggestionItems = refMenu?.items || slashMenu?.items || [];
-  const suggestionsOpen = Boolean(refMenu || slashMenu);
   useEffect(() => {
     if (!toolbarPanel) return;
     const key = (event: KeyboardEvent) => {
@@ -697,11 +441,9 @@ export function Composer() {
       event.preventDefault();
       event.stopImmediatePropagation();
       setToolbarPanel(null);
-      document.getElementById(toolbarPanel + '-chip')?.focus({ preventScroll: true });
+      focusToolbarTrigger(toolbarPanel);
     };
-    const owned = toolbarPanel === 'context'
-      ? '#context-chip, #context-menu'
-      : '#' + toolbarPanel + '-chip, #' + toolbarPanel + '-menu';
+    const owned = `#${toolbarPanel}-chip, #${toolbarPanel}-menu`;
     const closeOutside = (event: Event) => {
       if (event.target instanceof Element && !event.target.closest(owned)) {
         setToolbarPanel(null);
@@ -738,34 +480,15 @@ export function Composer() {
     if (next !== undefined) items[next]?.focus();
   }
 
-  /* 方向键只滚动候选列表，保持消息区和输入框的位置。 */
-  useEffect(() => {
-    if (!refMenu && !slashMenu) {
-      return;
-    }
-    const menu = menuRef.current;
-    const item = menu?.querySelector('[aria-selected="true"]');
-    if (!menu || !item) return;
-    const bounds = menu.getBoundingClientRect(), option = item.getBoundingClientRect();
-    if (option.top < bounds.top) menu.scrollTop += option.top - bounds.top;
-    if (option.bottom > bounds.bottom) menu.scrollTop += option.bottom - bounds.bottom;
-  }, [menuIndex, refMenu, slashMenu]);
-
   /** ↑/↓ 翻本会话发过的输入；多行草稿靠 caretOnEdgeLine 判断，只在首/末行接管。 */
   function handleHistoryKey(event: React.KeyboardEvent<HTMLDivElement>) {
     const state = useStore.getState();
     const input = inputRef.current;
-    if (!state.inputHistory.length || !input || input.hasChips?.()) {
-      return false;
-    }
+    if (!state.inputHistory.length || !input || input.hasChips?.()) return false;
     const up = event.key === 'ArrowUp';
-    if (!input.caretOnEdgeLine?.(up ? 'first' : 'last')) {
-      return false;
-    }
+    if (!input.caretOnEdgeLine?.(up ? 'first' : 'last')) return false;
     const browsing = state.inputHistoryIndex >= 0;
-    if (!browsing && !up) {
-      return false;
-    }
+    if (!browsing && !up) return false;
     event.preventDefault();
     const draftText = browsing ? state.inputHistoryDraft : input.getText();
     const next = stepHistory(state.inputHistory, browsing ? state.inputHistoryIndex : -1, up ? 'up' : 'down', draftText);
@@ -783,38 +506,10 @@ export function Composer() {
 
   function onComposerKeydown(event: React.KeyboardEvent<HTMLDivElement>) {
     // 中文输入法组字期间的回车不是发送
-    if (event.nativeEvent.isComposing || event.keyCode === 229) {
-      return;
-    }
-    if (suggestionsOpen) {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        clearSuggestions();
-        return;
-      }
-      if (refMenu?.loading && event.key === 'Enter' && !event.shiftKey) {
-        event.preventDefault();
-        return;
-      }
-      if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && suggestionItems.length) {
-        event.preventDefault();
-        const delta = event.key === 'ArrowDown' ? 1 : -1;
-        setMenuIndex(index => (index + delta + suggestionItems.length) % suggestionItems.length);
-        return;
-      }
-      if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey && suggestionItems.length) {
-        event.preventDefault();
-        const item = suggestionItems[Math.min(menuIndex, suggestionItems.length - 1)];
-        if (typeof item === 'string') pickRef(item);
-        else pickSlash(item);
-        return;
-      }
-    }
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+    if (suggestions.handleKeyDown(event)) return;
     if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
-      if (handleHistoryKey(event)) {
-        return;
-      }
+      if (handleHistoryKey(event)) return;
     }
     if (event.key === 'Tab' && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
       event.preventDefault();
@@ -827,13 +522,20 @@ export function Composer() {
     if (sendKey === 'mod-enter') {
       if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
         event.preventDefault();
-        submit();
+        void submit();
       }
     } else if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      submit();
+      void submit();
     }
   }
+
+  const defaultSendTitle = sendKey === 'mod-enter'
+    ? '发送任务 (Ctrl/Cmd+Enter · Shift+Tab 切模式)'
+    : '发送任务 (Enter · Shift+Tab 切模式)';
+  const sendTitle = sendAction.stop ? sendAction.title : defaultSendTitle;
+  const defaultSendShortcut = sendKey === 'mod-enter' ? 'Control+Enter Meta+Enter' : 'Enter';
+  const sendShortcut = sendAction.stop ? 'Escape' : defaultSendShortcut;
 
   return (
     <div className="composer-wrap conversation-composer">
@@ -858,7 +560,7 @@ export function Composer() {
       <form
         id="composer"
         className={`composer${dragging ? ' is-dragging' : ''}${executionMode === 'plan' ? ' is-plan-mode' : ''}`}
-        onSubmit={(event) => { event.preventDefault(); submit(); }}
+        onSubmit={(event) => { event.preventDefault(); void submit(); }}
         onPaste={(event) => void receiveFiles(event, event.clipboardData, 'paste')}
       >
         {dragging && <div className="attachment-drop-overlay" aria-hidden="true">松开以添加文件</div>}
@@ -867,35 +569,25 @@ export function Composer() {
         </div>}
         <div id="input-flow" className="input-flow" contentEditable={!submitting}
           role="textbox" aria-label="消息输入框" aria-multiline="true" aria-busy={pendingFiles > 0 || submitting}
-          aria-readonly={submitting || undefined} tabIndex={0} aria-autocomplete="list" aria-controls={suggestionItems.length ? 'composer-suggestions' : undefined}
-          aria-activedescendant={suggestionItems.length ? 'composer-option-' + menuIndex : undefined}
+          aria-readonly={submitting || undefined} tabIndex={0} aria-autocomplete="list"
+          aria-controls={suggestions.items.length ? 'composer-suggestions' : undefined}
+          aria-activedescendant={suggestions.items.length ? 'composer-option-' + suggestions.menuIndex : undefined}
           ref={flowRef}
           data-placeholder={executionMode === 'plan' ? '只读分析模式：提问、排查或规划方案，不会修改文件' : '描述任务，@ 引用文件，/ 快捷指令'}
-          onInput={onInput}
-          onCompositionEnd={onInput}
+          onInput={suggestions.onInput}
+          onCompositionEnd={suggestions.onInput}
           onKeyDown={onComposerKeydown}
-          onBlur={clearSuggestions}
+          onBlur={suggestions.clearSuggestions}
         />
-        {suggestionsOpen && (
-          <div className="composer-suggestions composer-flyout" ref={menuRef}>
-            {refMenu && !refMenu.items.length
-              ? <div className="ref-empty" role="status">{refMenu.loading ? '正在读取文件…' : refMenu.message || '没有匹配的文件'}</div>
-              : <div id="composer-suggestions" role="listbox" aria-label={refMenu ? '文件引用' : '快捷指令'}>
-                {suggestionItems.map((item, index) => (
-                  <Button key={typeof item === 'string' ? item : item.name}
-                    id={'composer-option-' + index}
-                    label={typeof item === 'string' ? item : item.name + (item.hint || item.label ? ' · ' + (item.hint || item.label) : '')}
-                    className="ref-item" size="sm" variant="ghost" width="100%"
-                    role="option" aria-selected={index === menuIndex} tabIndex={-1}
-                    onMouseDown={event => event.preventDefault()} onMouseEnter={() => setMenuIndex(index)}
-                    onClick={() => typeof item === 'string' ? pickRef(item) : pickSlash(item)}>
-                    <span className="composer-option-label">{typeof item === 'string' ? item
-                      : <><strong>{item.name.startsWith('/') ? item.name : '/' + item.name}</strong> · {item.hint || item.label}</>}</span>
-                  </Button>
-                ))}
-              </div>}
-          </div>
-        )}
+        <ComposerSuggestions
+          open={suggestions.open}
+          refMenu={suggestions.refMenu}
+          items={suggestions.items}
+          menuIndex={suggestions.menuIndex}
+          onHoverIndex={suggestions.setMenuIndex}
+          onPickRef={suggestions.pickRef}
+          onPickSlash={suggestions.pickSlash}
+        />
         <div className="composer-bar">
           <input ref={fileRef} type="file" multiple hidden onChange={(event) => { addFiles(event.target.files); event.target.value = ''; }} />
           <div className="composer-left">
@@ -942,7 +634,7 @@ export function Composer() {
               )}
             </div>
             <div className="perm-picker composer-model-picker">
-              <Button id="model-chip" className="composer-choice composer-model" size="sm" variant="ghost"
+              <Button id="model-chip" ref={modelTriggerRef} className="composer-choice composer-model" size="sm" variant="ghost"
                 label={currentModel ? '切换模型，当前 ' + currentModel : '选择模型'}
                 aria-haspopup="dialog" aria-expanded={modelOpen} aria-controls={modelOpen ? 'model-menu' : undefined}
                 endContent={<Icon name="chevron" className="composer-chevron" />} onClick={() => toggleToolbarPanel('model')}>
@@ -951,7 +643,7 @@ export function Composer() {
               {modelOpen && (
                 <ErrorBoundary name="模型选择" onReset={() => setToolbarPanel(null)}><Suspense fallback={null}>
                   <ModelPicker key={currentEndpoint} models={modelOptions} initialModel={currentModel} initialEndpoint={currentEndpoint}
-                    onClose={() => { setToolbarPanel(null); document.getElementById('model-chip')?.focus(); }} />
+                    onClose={() => { setToolbarPanel(null); focusToolbarTrigger('model'); }} />
                 </Suspense></ErrorBoundary>
               )}
             </div>
@@ -990,10 +682,10 @@ export function Composer() {
                   label={steerAction.label} isDisabled={steerAction.disabled} onClick={() => void steerCurrent()} />
               </span> : null;
             })()}
-            <span title={sendAction.stop ? sendAction.title : (sendKey === 'mod-enter' ? '发送任务 (Ctrl/Cmd+Enter · Shift+Tab 切模式)' : '发送任务 (Enter · Shift+Tab 切模式)')}>
+            <span title={sendTitle}>
               <IconButton id="send" className="composer-primary" variant="primary"
                 type={sendAction.stop ? 'button' : 'submit'} label={sendAction.ariaLabel}
-                aria-keyshortcuts={sendAction.stop ? 'Escape' : (sendKey === 'mod-enter' ? 'Control+Enter Meta+Enter' : 'Enter')}
+                aria-keyshortcuts={sendShortcut}
                 isLoading={sendAction.stop ? cancelling : submitting}
                 isDisabled={sendAction.disabled || (!sendAction.stop && (pendingFiles > 0 || submitting || voiceBusy))}
                 onClick={sendAction.stop ? () => useStore.getState().cancelRun() : undefined}
@@ -1005,7 +697,7 @@ export function Composer() {
         </div>
         <div className="composer-voice-feedback" ref={voiceFeedbackRef} />
       </form>
- {preview && <ErrorBoundary name="图片预览" onReset={() => setPreview(null)}><Suspense fallback={null}><ImagePreview name={preview.name} src={preview.src} onClose={() => setPreview(null)} /></Suspense></ErrorBoundary>}
+      {preview && <ErrorBoundary name="图片预览" onReset={() => setPreview(null)}><Suspense fallback={null}><ImagePreview name={preview.name} src={preview.src} onClose={() => setPreview(null)} /></Suspense></ErrorBoundary>}
     </div>
   );
 }

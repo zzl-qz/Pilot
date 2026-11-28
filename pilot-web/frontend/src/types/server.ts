@@ -588,7 +588,7 @@ export interface ModelProfile {
 
 /** ModelRequestCompleted.java / ModelRequestCompleted */
 export interface ModelRequestCompleted {
-  report: RequestReport;
+  report: ServerRequestReport;
 }
 
 /** ModelRuntimeController.java / Update */
@@ -670,11 +670,7 @@ export interface PlanItem {
 }
 
 /** PlanUpdated.java / PlanItemPayload */
-export interface PlanUpdatedPlanItemPayload {
-  step: string;
-  status: string;
-  note?: string;
-}
+export type PlanUpdatedPlanItemPayload = PlanItem;
 
 /** PlanUpdated.java / PlanUpdated */
 export interface PlanUpdated {
@@ -712,13 +708,6 @@ export interface RecoveryReportServiceSnapshot {
   entries: (RunStateTrackerRecoveryEntry)[];
   note: string;
   completed: boolean;
-}
-
-/** RecurringScheduleService.java / Create */
-export interface RecurringScheduleServiceCreate {
-  task: ScheduleServiceCreate;
-  cron: string;
-  misfire: string;
 }
 
 /** RecurringScheduleService.java / Series */
@@ -763,7 +752,7 @@ export interface RequestReportPrefix {
 }
 
 /** RequestReport.java / RequestReport */
-export interface RequestReport {
+export interface ServerRequestReport {
   id: string;
   purpose: string;
   model: string;
@@ -1408,11 +1397,6 @@ export interface TaskControlServiceTaskContract {
   status: string;
   execution: TaskControlServiceExecution;
   automation: TaskControlServiceAutomation;
-}
-
-/** TaskControlService.java / TaskSnapshot */
-export interface TaskControlServiceTaskSnapshot {
-  task: TaskControlServiceTaskContract;
 }
 
 /** TaskControlService.java / Usage */

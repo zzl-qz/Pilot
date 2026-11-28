@@ -1,6 +1,13 @@
 import type { BrowserActionEvent, BrowserHandoff, BrowserLane } from '../types/api.js';
 import type { MirrorState } from '../types/store.js';
 
+export const HANDOFF_KIND_LABELS: Record<string, string> = {
+  auth: '登录 / MFA',
+  captcha: '人机验证',
+  payment: '支付确认',
+  manual: '人工协助'
+};
+
 /** 人在地址栏输入的地址。本机没写协议时用 http，其它主机用 https。 */
 export function userPageUrl(input: unknown) {
   const text = String(input || '').trim();

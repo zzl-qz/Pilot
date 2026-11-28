@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
+import { apiFetch } from '../../api.js';
 import type { UniversalStructuredPreview } from '../../types/api.js';
 
 const PdfAttachmentPreview = lazy(() => import('../PdfAttachmentPreview.jsx'));
@@ -12,7 +13,7 @@ export function PdfPreview({ url, name }: { url: string; name: string }) {
     const controller = new AbortController();
     setBuffer(null);
     setError('');
-    fetch(url, { signal: controller.signal })
+    apiFetch(url, { signal: controller.signal })
       .then(res => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.arrayBuffer();

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type React from "react";
 import type { PendingApproval, PendingQuestion, ThreadRow } from "../../types/thread.js";
 import { Button } from "@astryxdesign/core/Button";
 import { StatusDot } from "@astryxdesign/core/StatusDot";
@@ -8,6 +9,8 @@ import { latestRunResult } from "../../lib/events.js";
 import { classifyApprovalRisk, formatCountdown, suggestAllowRule } from "../../lib/attention.js";
 import { questionChoice, toolArgsText, toolLabel } from "../../lib/tool-meta.js";
 import { agentStatusLabel, agentStatusDotVariant, summarizeAgents } from "../../lib/agents.js";
+import { isModalBlockingShortcuts } from "../../lib/interaction.js";
+import { HANDOFF_KIND_LABELS } from "../../lib/browser-mirror.js";
 import { Icon } from "../Icon.jsx";
 
 const EMPTY_ROWS: ThreadRow[] = [];
@@ -46,22 +49,67 @@ function formatApprovalArgs(name: string, raw: unknown): string {
   return '';
 }
 
-function blockingModalOpen() {
-  const hasVisibleAriaModal = () => Array.from(document.querySelectorAll('[aria-modal="true"]'))
-    .some((node) => (node as HTMLElement).getClientRects().length > 0);
-  try {
-    return Boolean(document.querySelector('dialog[open]:modal')) || hasVisibleAriaModal();
-  } catch {
-    const open = document.querySelector('dialog[open]') as HTMLElement | null;
-    return Boolean(open && open.getClientRects().length) || hasVisibleAriaModal();
-  }
-}
-
 function isTypingElement(target: EventTarget | null): boolean {
   const el = target instanceof HTMLElement ? target : null;
   if (!el) return false;
   if (el.isContentEditable || el.closest('[contenteditable="true"]')) return true;
   return Boolean(el.closest('input, textarea, select'));
+}
+
+function isAltDockShortcut(event: KeyboardEvent): boolean {
+  if (event.isComposing || event.keyCode === 229 || event.getModifierState?.('AltGraph')) return false;
+  if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
+  return !isModalBlockingShortcuts() && !isTypingElement(event.target);
+}
+
+function useExpiryTick(hasExpiry: boolean) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!hasExpiry) return;
+    const timer = setInterval(() => setTick((value) => value + 1), 1000);
+    return () => clearInterval(timer);
+  }, [hasExpiry]);
+}
+
+function useImeEnterGuard() {
+  const composingRef = useRef(false);
+  const inputProps = {
+    onCompositionStart: () => { composingRef.current = true; },
+    onCompositionEnd: () => { composingRef.current = false; },
+    onKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => {
+      if ((event.nativeEvent.isComposing || event.keyCode === 229 || composingRef.current) && event.key === 'Enter') {
+        event.preventDefault();
+      }
+    }
+  };
+  return { composingRef, inputProps };
+}
+
+function DockMetaBadges({ index, total, expiresAt, now }: { index: number; total: number; expiresAt?: string | number | null; now: number }) {
+  const countdown = formatCountdown(expiresAt, now);
+  return (
+    <>
+      {total > 1 && <span className="approval-count">{index + 1} / {total}</span>}
+      {countdown && (
+        <span className={`approval-countdown${countdown.remainingSeconds <= 60 ? ' is-urgent' : ''}`}>
+          {countdown.label}
+        </span>
+      )}
+    </>
+  );
+}
+
+function previewDiffLineClass(line: string): string {
+  if (line.startsWith('+') && !line.startsWith('+++')) return 'is-add';
+  if (line.startsWith('-') && !line.startsWith('---')) return 'is-del';
+  if (line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++')) return 'is-hunk';
+  return '';
+}
+
+function digitShortcut(event: KeyboardEvent): number {
+  if (/^[1-9]$/.test(event.key)) return Number(event.key);
+  if (/^Digit([1-9])$/.test(event.code)) return Number(event.code.slice(5));
+  return 0;
 }
 
 export function ApprovalDock() {
@@ -71,22 +119,13 @@ export function ApprovalDock() {
   const resolveWithTrust = useStore((state) => state.resolveApprovalWithTrust);
   const resolveWithRule = useStore((state) => state.resolveApprovalWithRule);
   const entries = Object.values(pending || {});
-  const hasExpiry = entries.some((item) => item.expiresAt != null);
-  const [, setTick] = useState(0);
-
-  useEffect(() => {
-    if (!hasExpiry) return;
-    const timer = setInterval(() => setTick((value) => value + 1), 1000);
-    return () => clearInterval(timer);
-  }, [hasExpiry]);
+  useExpiryTick(entries.some((item) => item.expiresAt != null));
 
   useEffect(() => {
     const first = entries.find((item) => !item.busy);
     if (!first) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.isComposing || event.keyCode === 229 || event.getModifierState?.('AltGraph')) return;
-      if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-      if (blockingModalOpen() || isTypingElement(event.target)) return;
+      if (!isAltDockShortcut(event)) return;
       const key = event.key.toLowerCase();
       if (key === 'y' || event.code === 'KeyY') {
         event.preventDefault();
@@ -159,13 +198,13 @@ function ApprovalCard({
   total: number;
   now: number;
   workspace: string;
-  resolve: (id: string, approved: boolean, sessionId?: string, reason?: string) => Promise<void>;
+  resolve: (id: string, approved: boolean, sessionId?: string, reason?: string) => Promise<boolean>;
   resolveWithTrust: (id: string, approved: boolean, trust: { action: string; server: string; tool?: string; configHash?: string; toolHash?: string }) => Promise<void>;
   resolveWithRule: (callId: string, rule: string) => Promise<void>;
 }) {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
-  const composingRef = useRef(false);
+  const ime = useImeEnterGuard();
 
   // 绑定信息来自审批事件：配置/工具哈希确保用户信任的是卡片上展示的那一版
   const server = typeof item.structuredArgs?.server === 'string' ? item.structuredArgs.server as string : '';
@@ -179,10 +218,9 @@ function ApprovalCard({
   const isMcp = toolName === 'mcp_tools' || toolName === 'mcp_call';
   const risk = classifyApprovalRisk(toolName, item.args, item.structuredArgs);
   const allowSuggestion = !isMcp && workspace ? suggestAllowRule(toolName, item.args, item.structuredArgs) : null;
-  const countdown = formatCountdown(item.expiresAt, now);
 
   const submitRejectWithReason = () => {
-    if (composingRef.current || item.busy) return;
+    if (ime.composingRef.current || item.busy) return;
     const trimmed = rejectReason.trim();
     void resolve(item.callId, false, undefined, trimmed || undefined);
   };
@@ -194,12 +232,7 @@ function ApprovalCard({
         <div className="approval-badges">
           <span className="approval-category">{risk.category}</span>
           {risk.highRisk && <span className="approval-risk-badge">高风险操作</span>}
-          {total > 1 && <span className="approval-count">{index + 1} / {total}</span>}
-          {countdown && (
-            <span className={`approval-countdown${countdown.remainingSeconds <= 60 ? ' is-urgent' : ''}`}>
-              {countdown.label}
-            </span>
-          )}
+          <DockMetaBadges index={index} total={total} expiresAt={item.expiresAt} now={now} />
         </div>
       </header>
       {formattedArgs && <pre className="approval-args" tabIndex={0} aria-label="操作参数">{formattedArgs}</pre>}
@@ -207,16 +240,9 @@ function ApprovalCard({
         <details className="approval-diff-preview">
           <summary>预览改动差异{previewPath ? `（${previewPath}）` : ''}</summary>
           <pre className="approval-diff-lines">
-            {previewDiff.split('\n').map((line, i) => {
-              const cls = line.startsWith('+') && !line.startsWith('+++')
-                ? 'is-add'
-                : line.startsWith('-') && !line.startsWith('---')
-                  ? 'is-del'
-                  : line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++')
-                    ? 'is-hunk'
-                    : '';
-              return <span key={i} className={`approval-diff-line ${cls}`}>{line}{'\n'}</span>;
-            })}
+            {previewDiff.split('\n').map((line, i) => (
+              <span key={i} className={`approval-diff-line ${previewDiffLineClass(line)}`}>{line}{'\n'}</span>
+            ))}
           </pre>
         </details>
       )}
@@ -229,13 +255,7 @@ function ApprovalCard({
             aria-label="拒绝原因或改法建议"
             disabled={item.busy}
             onChange={(event) => setRejectReason(event.target.value)}
-            onCompositionStart={() => { composingRef.current = true; }}
-            onCompositionEnd={() => { composingRef.current = false; }}
-            onKeyDown={(event) => {
-              if ((event.nativeEvent.isComposing || event.keyCode === 229 || composingRef.current) && event.key === 'Enter') {
-                event.preventDefault();
-              }
-            }}
+            {...ime.inputProps}
           />
           <Button type="submit" size="sm" variant="primary" label="提交拒绝" isDisabled={item.busy} />
         </form>
@@ -297,14 +317,7 @@ export function QuestionDock() {
   const pending = useStore((state) => state.pendingQuestions);
   const answerQuestion = useStore((state) => state.answerQuestion);
   const entries = Object.values(pending || {});
-  const hasExpiry = entries.some((item) => item.expiresAt != null);
-  const [, setTick] = useState(0);
-
-  useEffect(() => {
-    if (!hasExpiry) return;
-    const timer = setInterval(() => setTick((value) => value + 1), 1000);
-    return () => clearInterval(timer);
-  }, [hasExpiry]);
+  useExpiryTick(entries.some((item) => item.expiresAt != null));
 
   if (!entries.length) {
     return null;
@@ -340,22 +353,15 @@ function QuestionCard({
   onSubmit: (choice: string) => Promise<boolean>;
 }) {
   const [custom, setCustom] = useState('');
-  const composingRef = useRef(false);
+  const ime = useImeEnterGuard();
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const options = item.options || [];
-  const countdown = formatCountdown(item.expiresAt, now);
 
   useEffect(() => {
     if (index !== 0 || item.busy) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.isComposing || event.keyCode === 229 || event.getModifierState?.('AltGraph')) return;
-      if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-      if (blockingModalOpen() || isTypingElement(event.target)) return;
-      const digit = /^[1-9]$/.test(event.key)
-        ? Number(event.key)
-        : /^Digit([1-9])$/.test(event.code)
-          ? Number(event.code.slice(5))
-          : 0;
+      if (!isAltDockShortcut(event)) return;
+      const digit = digitShortcut(event);
       if (digit > 0) {
         const optionIndex = digit - 1;
         if (optionIndex < options.length) {
@@ -384,12 +390,7 @@ function QuestionCard({
       <header className="question-head">
         <span className="question-badge"><Icon name="info" /> 需要你的选择</span>
         <div className="question-meta">
-          {total > 1 && <span className="approval-count">{index + 1} / {total}</span>}
-          {countdown && (
-            <span className={`approval-countdown${countdown.remainingSeconds <= 60 ? ' is-urgent' : ''}`}>
-              {countdown.label}
-            </span>
-          )}
+          <DockMetaBadges index={index} total={total} expiresAt={item.expiresAt} now={now} />
         </div>
       </header>
       <p className="question-title">{item.question}</p>
@@ -417,7 +418,7 @@ function QuestionCard({
         className="question-form"
         onSubmit={(event) => {
           event.preventDefault();
-          if (composingRef.current || item.busy) return;
+          if (ime.composingRef.current || item.busy) return;
           const choice = questionChoice('', custom);
           if (!choice) return;
           void onSubmit(choice);
@@ -430,13 +431,7 @@ function QuestionCard({
           aria-label="自己填写答案"
           disabled={Boolean(item.busy)}
           onChange={(event) => setCustom(event.target.value)}
-          onCompositionStart={() => { composingRef.current = true; }}
-          onCompositionEnd={() => { composingRef.current = false; }}
-          onKeyDown={(event) => {
-            if ((event.nativeEvent.isComposing || event.keyCode === 229 || composingRef.current) && event.key === 'Enter') {
-              event.preventDefault();
-            }
-          }}
+          {...ime.inputProps}
         />
         <Button
           type="submit"
@@ -544,13 +539,6 @@ export function ComposerChangesStrip() {
   );
 }
 
-const HANDOFF_KIND_LABELS: Record<string, string> = {
-  auth: '需要登录 / MFA',
-  captcha: '需要人机验证',
-  payment: '需要支付确认',
-  manual: '需要人工协助'
-};
-
 export function BrowserControlDock() {
   const mirror = useStore((state) => state.ui.mirror);
   const stopBrowserControl = useStore((state) => state.stopBrowserControl);
@@ -611,7 +599,8 @@ export function BrowserHandoffDock() {
     <section id="browser-handoff-dock" className="browser-handoff-dock" role="region" aria-label="浏览器接管请求">
       {handoffs.map((item) => {
         const busy = busyId === item.handoffId;
-        const label = HANDOFF_KIND_LABELS[item.kind] || '请求接管浏览器';
+        const baseLabel = HANDOFF_KIND_LABELS[item.kind];
+        const label = baseLabel ? `需要${baseLabel}` : '请求接管浏览器';
         return (
           <article key={item.handoffId} className="browser-handoff-card">
             <div className="browser-handoff-head">

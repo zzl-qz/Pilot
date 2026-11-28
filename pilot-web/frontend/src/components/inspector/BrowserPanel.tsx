@@ -10,7 +10,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../../store.js';
 import { isModalBlockingShortcuts, isShortcutModifier } from '../../lib/interaction.js';
 import { api } from '../../api.js';
-import { formatScreenshotFeedback, userPageUrl } from '../../lib/browser-mirror.js';
+import { formatBytes } from '../../lib/attachments/attachments.js';
+import { formatScreenshotFeedback, HANDOFF_KIND_LABELS, userPageUrl } from '../../lib/browser-mirror.js';
 
 /* ---------- 内置浏览器 ---------- */
 
@@ -45,13 +46,6 @@ const ACTION_TEXT: Record<string, string> = {
   evaluate: '执行脚本',
   handoff: '请求接管',
   resize: '调整视口'
-};
-
-const HANDOFF_KIND_LABELS: Record<string, string> = {
-  auth: '登录 / MFA',
-  captcha: '人机验证',
-  payment: '支付确认',
-  manual: '人工协助'
 };
 
 /** 原生页面不吃 CSS 裁剪。按祖先的 overflow 把矩形收到真正看得见的那一块。 */
@@ -336,6 +330,144 @@ function submitCanvasFeedback(
   onDone();
 }
 
+function insertBrowserElementQuote(rawText: string, notice?: string) {
+  const composer = useStore.getState().composerApi;
+  if (!composer) return;
+  const quoted = rawText.split('\n').map((line) => `> ${line}`).join('\n');
+  composer.appendText(`\n> 页面元素引用\n${quoted}\n\n`);
+  composer.focus();
+  if (notice) useStore.getState().showNotice(notice);
+}
+
+function AgentTargetOverlay(props: {
+  box?: { x: number; y: number; width: number; height: number } | null;
+  x?: number | null; y?: number | null; stageWidth: number; stageHeight: number; minBoxPct?: number;
+}) {
+  const { box, x, y, stageWidth, stageHeight, minBoxPct = 0 } = props;
+  if (stageWidth <= 0 || stageHeight <= 0) return null;
+  return (
+    <>
+      {box && (
+        <div className="browser-target-box" style={{
+          left: `${(box.x / stageWidth) * 100}%`, top: `${(box.y / stageHeight) * 100}%`,
+          width: `${Math.max(minBoxPct, (box.width / stageWidth) * 100)}%`,
+          height: `${Math.max(minBoxPct, (box.height / stageHeight) * 100)}%`
+        }} />
+      )}
+      {typeof x === 'number' && typeof y === 'number' && (
+        <div className="browser-agent-cursor-dot" style={{ left: `${(x / stageWidth) * 100}%`, top: `${(y / stageHeight) * 100}%` }} />
+      )}
+    </>
+  );
+}
+
+function EvidenceCanvas(props: {
+  src: string; alt: string; dragBox: DragRect | null;
+  onDragBoxChange: (next: DragRect) => void; onDragStart?: () => void; children?: React.ReactNode;
+}) {
+  const { src, alt, dragBox, onDragBoxChange, onDragStart, children } = props;
+  const imgRef = useRef<HTMLImageElement>(null);
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  return (
+    <div
+      className="browser-evidence-canvas"
+      onPointerDown={(event) => {
+        const pt = canvasCoordsFromEvent(imgRef.current, event.clientX, event.clientY);
+        if (!pt) return;
+        onDragStart?.();
+        dragStartRef.current = { x: pt.x, y: pt.y };
+        onDragBoxChange({ x: pt.x, y: pt.y, w: 0, h: 0, nw: pt.nw, nh: pt.nh });
+      }}
+      onPointerMove={(event) => {
+        if (!dragStartRef.current) return;
+        const pt = canvasCoordsFromEvent(imgRef.current, event.clientX, event.clientY);
+        if (!pt) return;
+        const { x: sx, y: sy } = dragStartRef.current;
+        onDragBoxChange({ x: Math.min(sx, pt.x), y: Math.min(sy, pt.y), w: Math.abs(pt.x - sx), h: Math.abs(pt.y - sy), nw: pt.nw, nh: pt.nh });
+      }}
+      onPointerUp={() => { dragStartRef.current = null; }}
+    >
+      <img ref={imgRef} src={src} alt={alt} draggable={false} />
+      {children}
+      {dragBox && dragBox.nw > 0 && dragBox.nh > 0 && (
+        <div className="browser-evidence-box" style={{
+          left: `${(dragBox.x / dragBox.nw) * 100}%`, top: `${(dragBox.y / dragBox.nh) * 100}%`,
+          width: `${Math.max(1.5, (dragBox.w / dragBox.nw) * 100)}%`,
+          height: `${Math.max(1.5, (dragBox.h / dragBox.nh) * 100)}%`
+        }} />
+      )}
+    </div>
+  );
+}
+
+function BrowserNavBar(props: {
+  canGoBack: boolean; canGoForward: boolean; canReload: boolean; loading?: boolean;
+  backTitle?: string; forwardTitle?: string; reloadTitle?: string;
+  onBack: () => void; onForward: () => void; onReload: () => void; onStop?: () => void;
+}) {
+  const { canGoBack, canGoForward, canReload, loading = false, backTitle = '后退', forwardTitle = '前进', reloadTitle = '刷新页面', onBack, onForward, onReload, onStop } = props;
+  return (
+    <>
+      <button type="button" className="icon-btn" aria-label="后退" title={backTitle} disabled={!canGoBack} onClick={onBack}>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+      </button>
+      <button type="button" className="icon-btn" aria-label="前进" title={forwardTitle} disabled={!canGoForward} onClick={onForward}>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+      </button>
+      <button type="button" className="icon-btn" aria-label={loading ? '停止加载' : '刷新页面'} title={loading ? '停止加载' : reloadTitle}
+        disabled={!canReload} onClick={() => (loading && onStop ? onStop() : onReload())}>
+        {loading
+          ? <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.4 4.4l7.2 7.2M11.6 4.4l-7.2 7.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
+          : <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.6-3.7M13 2.6V5.4h-2.8" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+      </button>
+    </>
+  );
+}
+
+function BrowserAddressForm(props: {
+  inputRef?: React.RefObject<HTMLInputElement | null>; value: string; placeholder: string; loading?: boolean;
+  badge?: React.ReactNode; onChange: (value: string) => void; onEditingChange: (editing: boolean) => void; onSubmit: (event: React.FormEvent) => void;
+}) {
+  const { inputRef, value, placeholder, loading = false, badge, onChange, onEditingChange, onSubmit } = props;
+  return (
+    <form className={`browser-address${loading ? ' is-loading' : ''}`} onSubmit={onSubmit}>
+      {badge}
+      <input ref={inputRef} className="browser-address-input mono" aria-label="地址栏" spellCheck={false} autoComplete="off"
+        placeholder={placeholder} value={value} onChange={(event) => onChange(event.target.value)}
+        onFocus={(event) => { onEditingChange(true); event.target.select(); }} onBlur={() => onEditingChange(false)} />
+    </form>
+  );
+}
+
+function BrowserConsoleDrawer({ networkLog, text, closeLabel, onClose }: { networkLog: boolean; text: string; closeLabel: string; onClose: () => void }) {
+  return (
+    <div className="browser-console">
+      <div className="browser-console-head">
+        <span>{networkLog ? '网络记录' : '页面控制台'}</span>
+        <button type="button" className="icon-btn" aria-label={closeLabel} title="关闭" onClick={onClose}>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.4 4.4l7.2 7.2M11.6 4.4l-7.2 7.2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+        </button>
+      </div>
+      <pre className="browser-console-body">{text}</pre>
+    </div>
+  );
+}
+
+function BrowserControlNotice(props: {
+  className: string; textClassName: string; label: string; status?: string; lane?: string; role?: string; stopPropagation?: boolean;
+}) {
+  const { className, textClassName, label, status, lane, role, stopPropagation = false } = props;
+  return (
+    <div className={className} role={role} onClick={stopPropagation ? (event) => event.stopPropagation() : undefined}>
+      <span className="browser-control-dot" aria-hidden="true" />
+      <span className={textClassName}>{label}{status ? ` · ${status}` : ''}</span>
+      <button type="button" className="browser-stop-btn" onClick={() => void useStore.getState().stopBrowserControl(lane || undefined)}>
+        停止控制 (Stop)
+      </button>
+    </div>
+  );
+}
+
 function RecordingReplayModal({
   sessionId,
   item,
@@ -353,8 +485,6 @@ function RecordingReplayModal({
   const [speed, setSpeed] = useState<0.5 | 1 | 2>(1);
   const [dragBox, setDragBox] = useState<DragRect | null>(null);
   const [feedbackNote, setFeedbackNote] = useState('');
-  const imgRef = useRef<HTMLImageElement>(null);
-  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -501,72 +631,22 @@ function RecordingReplayModal({
           </div>
           <div className="browser-replay-body">
             <div className="browser-replay-stage">
-              <div
-                className="browser-evidence-canvas"
-                onPointerDown={(event) => {
-                  const pt = canvasCoordsFromEvent(imgRef.current, event.clientX, event.clientY);
-                  if (!pt) return;
-                  setPlaying(false);
-                  dragStartRef.current = { x: pt.x, y: pt.y };
-                  setDragBox({ x: pt.x, y: pt.y, w: 0, h: 0, nw: pt.nw, nh: pt.nh });
-                }}
-                onPointerMove={(event) => {
-                  if (!dragStartRef.current) return;
-                  const pt = canvasCoordsFromEvent(imgRef.current, event.clientX, event.clientY);
-                  if (!pt) return;
-                  const sx = dragStartRef.current.x;
-                  const sy = dragStartRef.current.y;
-                  setDragBox({
-                    x: Math.min(sx, pt.x),
-                    y: Math.min(sy, pt.y),
-                    w: Math.abs(pt.x - sx),
-                    h: Math.abs(pt.y - sy),
-                    nw: pt.nw,
-                    nh: pt.nh
-                  });
-                }}
-                onPointerUp={() => {
-                  dragStartRef.current = null;
-                }}
+              <EvidenceCanvas
+                src={`data:image/jpeg;base64,${curFrame.data}`}
+                alt={`录像第 ${safeIdx + 1} 帧`}
+                dragBox={dragBox}
+                onDragStart={() => setPlaying(false)}
+                onDragBoxChange={setDragBox}
               >
-                <img
-                  ref={imgRef}
-                  src={`data:image/jpeg;base64,${curFrame.data}`}
-                  alt={`录像第 ${safeIdx + 1} 帧`}
-                  draggable={false}
+                <AgentTargetOverlay
+                  box={activeAction?.box}
+                  x={activeAction?.x}
+                  y={activeAction?.y}
+                  stageWidth={stageW}
+                  stageHeight={stageH}
+                  minBoxPct={0.8}
                 />
-                {activeAction?.box && stageW > 0 && stageH > 0 && (
-                  <div
-                    className="browser-target-box"
-                    style={{
-                      left: `${(activeAction.box.x / stageW) * 100}%`,
-                      top: `${(activeAction.box.y / stageH) * 100}%`,
-                      width: `${Math.max(0.8, (activeAction.box.width / stageW) * 100)}%`,
-                      height: `${Math.max(0.8, (activeAction.box.height / stageH) * 100)}%`
-                    }}
-                  />
-                )}
-                {typeof activeAction?.x === 'number' && typeof activeAction?.y === 'number' && stageW > 0 && stageH > 0 && (
-                  <div
-                    className="browser-agent-cursor-dot"
-                    style={{
-                      left: `${(activeAction.x / stageW) * 100}%`,
-                      top: `${(activeAction.y / stageH) * 100}%`
-                    }}
-                  />
-                )}
-                {dragBox && dragBox.nw > 0 && dragBox.nh > 0 && (
-                  <div
-                    className="browser-evidence-box"
-                    style={{
-                      left: `${(dragBox.x / dragBox.nw) * 100}%`,
-                      top: `${(dragBox.y / dragBox.nh) * 100}%`,
-                      width: `${Math.max(1.5, (dragBox.w / dragBox.nw) * 100)}%`,
-                      height: `${Math.max(1.5, (dragBox.h / dragBox.nh) * 100)}%`
-                    }}
-                  />
-                )}
-              </div>
+              </EvidenceCanvas>
             </div>
             <aside className="browser-replay-timeline" aria-label="操作步骤时间轴">
               {actions.length === 0 && <div className="browser-evidence-empty">无动作标记</div>}
@@ -610,8 +690,6 @@ function BrowserEvidenceView({ sessionId }: { sessionId: string | null }) {
   const [replaying, setReplaying] = useState<BrowserEvidenceItem | null>(null);
   const [feedbackNote, setFeedbackNote] = useState('');
   const [dragBox, setDragBox] = useState<DragRect | null>(null);
-  const imgRef = useRef<HTMLImageElement>(null);
-  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -631,10 +709,6 @@ function BrowserEvidenceView({ sessionId }: { sessionId: string | null }) {
       });
     return () => { alive = false; };
   }, [sessionId, evidenceVersion]);
-
-  function toImageCoords(clientX: number, clientY: number) {
-    return canvasCoordsFromEvent(imgRef.current, clientX, clientY);
-  }
 
   function insertFeedback() {
     if (!selected || !dragBox) return;
@@ -681,7 +755,7 @@ function BrowserEvidenceView({ sessionId }: { sessionId: string | null }) {
             {item.summary && <p className="browser-evidence-text">{item.summary}</p>}
             {item.downloadName && (
               <div className="browser-evidence-meta">
-                下载：{item.downloadName}{item.downloadBytes ? ` (${item.downloadBytes} bytes)` : ''}
+                下载：{item.downloadName}{item.downloadBytes ? ` (${formatBytes(item.downloadBytes)})` : ''}
               </div>
             )}
             {item.recordingPath && (
@@ -723,46 +797,12 @@ function BrowserEvidenceView({ sessionId }: { sessionId: string | null }) {
             <span>在截图上点击或拖拽框选问题位置</span>
             <button type="button" className="browser-ctrl-btn" onClick={() => setSelected(null)}>关闭</button>
           </div>
-          <div
-            className="browser-evidence-canvas"
-            onPointerDown={(event) => {
-              const pt = toImageCoords(event.clientX, event.clientY);
-              if (!pt) return;
-              dragStartRef.current = { x: pt.x, y: pt.y };
-              setDragBox({ x: pt.x, y: pt.y, w: 0, h: 0, nw: pt.nw, nh: pt.nh });
-            }}
-            onPointerMove={(event) => {
-              if (!dragStartRef.current) return;
-              const pt = toImageCoords(event.clientX, event.clientY);
-              if (!pt) return;
-              const sx = dragStartRef.current.x;
-              const sy = dragStartRef.current.y;
-              setDragBox({
-                x: Math.min(sx, pt.x),
-                y: Math.min(sy, pt.y),
-                w: Math.abs(pt.x - sx),
-                h: Math.abs(pt.y - sy),
-                nw: pt.nw,
-                nh: pt.nh
-              });
-            }}
-            onPointerUp={() => {
-              dragStartRef.current = null;
-            }}
-          >
-            <img ref={imgRef} src={api.browserEvidenceImageUrl(sessionId, selected.id)} alt={selected.title || '证据截图'} draggable={false} />
-            {dragBox && dragBox.nw > 0 && dragBox.nh > 0 && (
-              <div
-                className="browser-evidence-box"
-                style={{
-                  left: `${(dragBox.x / dragBox.nw) * 100}%`,
-                  top: `${(dragBox.y / dragBox.nh) * 100}%`,
-                  width: `${Math.max(1.5, (dragBox.w / dragBox.nw) * 100)}%`,
-                  height: `${Math.max(1.5, (dragBox.h / dragBox.nh) * 100)}%`
-                }}
-              />
-            )}
-          </div>
+          <EvidenceCanvas
+            src={api.browserEvidenceImageUrl(sessionId, selected.id)}
+            alt={selected.title || '证据截图'}
+            dragBox={dragBox}
+            onDragBoxChange={setDragBox}
+          />
           <div className="browser-evidence-modal-foot">
             <input
               type="text"
@@ -881,12 +921,7 @@ function WebBrowserPanel() {
       setPickMode(false);
       const res = await api.browserPick(sessionId, { ...coords, browserSessionId: activeLane });
       if (res?.ok && res.text) {
-        const composer = useStore.getState().composerApi;
-        if (composer) {
-          composer.appendText(`\n> 页面元素引用\n> ${res.text.replace(/\n/g, '\n> ')}\n\n`);
-          composer.focus();
-          useStore.getState().showNotice('已将元素引用插入输入框');
-        }
+        insertBrowserElementQuote(res.text, '已将元素引用插入输入框');
       } else {
         setActionError(res?.error || '未能拾取到元素');
       }
@@ -968,31 +1003,21 @@ function WebBrowserPanel() {
           <>
             <div className="browser-chrome">
               <div className="browser-bar">
-                <button type="button" className="icon-btn" aria-label="后退" title="后退" disabled={!sessionId}
-                  onClick={() => sessionId && api.browserBack(sessionId, activeLane)}>
-                  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                </button>
-                <button type="button" className="icon-btn" aria-label="前进" title="前进" disabled={!sessionId}
-                  onClick={() => sessionId && api.browserForward(sessionId, activeLane)}>
-                  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                </button>
-                <button type="button" className="icon-btn" aria-label="刷新" title="刷新页面" disabled={!sessionId}
-                  onClick={() => sessionId && api.browserReload(sessionId, activeLane)}>
-                  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.6-3.7M13 2.6V5.4h-2.8" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                </button>
-                <form className="browser-address" onSubmit={submitAddress}>
-                  <input
-                    className="browser-address-input mono"
-                    aria-label="地址栏"
-                    spellCheck={false}
-                    autoComplete="off"
-                    placeholder="输入 http(s):// 或 localhost:端口"
-                    value={address}
-                    onChange={(event) => setAddress(event.target.value)}
-                    onFocus={(event) => { setEditing(true); event.target.select(); }}
-                    onBlur={() => setEditing(false)}
-                  />
-                </form>
+                <BrowserNavBar
+                  canGoBack={Boolean(sessionId)}
+                  canGoForward={Boolean(sessionId)}
+                  canReload={Boolean(sessionId)}
+                  onBack={() => { if (sessionId) void api.browserBack(sessionId, activeLane); }}
+                  onForward={() => { if (sessionId) void api.browserForward(sessionId, activeLane); }}
+                  onReload={() => { if (sessionId) void api.browserReload(sessionId, activeLane); }}
+                />
+                <BrowserAddressForm
+                  value={address}
+                  placeholder="输入 http(s):// 或 localhost:端口"
+                  onChange={setAddress}
+                  onEditingChange={setEditing}
+                  onSubmit={submitAddress}
+                />
                 <button type="button" className={`browser-ctrl-btn${pickMode ? ' is-primary' : ''}`}
                   disabled={!sessionId || !frameSrc || mirror.agentControlled} onClick={() => setPickMode((v) => !v)}>
                   {pickMode ? '点击页面元素…' : '选元素'}
@@ -1035,25 +1060,8 @@ function WebBrowserPanel() {
                 ? (
                   <div className="mirror-stage-canvas">
                     <img ref={imgRef} className="mirror-frame" src={frameSrc} alt="浏览器实时画面" onClick={handleStageClick} draggable={false} />
-                    {mirror.agentControlled && actionBox && vpW > 0 && vpH > 0 && (
-                      <div
-                        className="browser-target-box"
-                        style={{
-                          left: `${(actionBox.x / vpW) * 100}%`,
-                          top: `${(actionBox.y / vpH) * 100}%`,
-                          width: `${(actionBox.width / vpW) * 100}%`,
-                          height: `${(actionBox.height / vpH) * 100}%`
-                        }}
-                      />
-                    )}
-                    {mirror.agentControlled && typeof cursorX === 'number' && typeof cursorY === 'number' && vpW > 0 && vpH > 0 && (
-                      <div
-                        className="browser-agent-cursor-dot"
-                        style={{
-                          left: `${(cursorX / vpW) * 100}%`,
-                          top: `${(cursorY / vpH) * 100}%`
-                        }}
-                      />
+                    {mirror.agentControlled && (
+                      <AgentTargetOverlay box={actionBox} x={cursorX} y={cursorY} stageWidth={vpW} stageHeight={vpH} />
                     )}
                   </div>
                 )
@@ -1068,29 +1076,23 @@ function WebBrowserPanel() {
                   </div>
                 )}
               {mirror.agentControlled && (
-                <div className="browser-stage-control-overlay" onClick={(event) => event.stopPropagation()}>
-                  <span className="browser-control-dot" aria-hidden="true" />
-                  <span className="browser-stage-control-text">
-                    Pilot 正在控制{mirror.controlStatus ? ` · ${mirror.controlStatus}` : ''}
-                  </span>
-                  <button
-                    type="button"
-                    className="browser-stop-btn"
-                    onClick={() => void useStore.getState().stopBrowserControl(activeLane)}
-                  >
-                    停止控制 (Stop)
-                  </button>
-                </div>
+                <BrowserControlNotice
+                  className="browser-stage-control-overlay"
+                  textClassName="browser-stage-control-text"
+                  label="Pilot 正在控制"
+                  status={mirror.controlStatus}
+                  lane={activeLane}
+                  stopPropagation
+                />
               )}
             </div>
             {consoleOpen && (
-              <div className="browser-console">
-                <div className="browser-console-head">
-                  <span>{networkLog ? '网络记录' : '页面控制台'}</span>
-                  <button type="button" className="icon-btn" aria-label="关闭日志" onClick={() => setConsoleOpen(false)}>×</button>
-                </div>
-                <pre className="browser-console-body">{consoleText}</pre>
-              </div>
+              <BrowserConsoleDrawer
+                networkLog={networkLog}
+                text={consoleText}
+                closeLabel="关闭日志"
+                onClose={() => setConsoleOpen(false)}
+              />
             )}
           </>
         )}
@@ -1281,13 +1283,7 @@ function DesktopBrowserPanel({ desktopBridge, toolsMenuOpen }: { desktopBridge: 
     if (action === 'network') toggleConsole(true);
     if (action === 'pick') {
       const result = await desktopBridge.pick();
-      if (!result?.text) return;
-      const quoted = result.text.split('\n').map((line) => `> ${line}`).join('\n');
-      const composer = useStore.getState().composerApi;
-      if (composer) {
-        composer.appendText(`\n> 页面元素引用\n${quoted}\n\n`);
-        composer.focus();
-      }
+      if (result?.text) insertBrowserElementQuote(result.text);
     }
   }
 
@@ -1340,53 +1336,29 @@ function DesktopBrowserPanel({ desktopBridge, toolsMenuOpen }: { desktopBridge: 
             </div>
             <div className="browser-chrome">
               <div className="browser-bar">
-                <button
-                  type="button"
-                  className="icon-btn"
-                  aria-label="后退"
-                  title={desktopState?.canGoBack ? '后退' : '没有可后退的页面'}
-                  disabled={!desktopState?.canGoBack}
-                  onClick={() => desktopBridge.back()}
-                >
-                  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                </button>
-                <button
-                  type="button"
-                  className="icon-btn"
-                  aria-label="前进"
-                  title={desktopState?.canGoForward ? '前进' : '没有可前进的页面'}
-                  disabled={!desktopState?.canGoForward}
-                  onClick={() => desktopBridge.forward()}
-                >
-                  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                </button>
-                <button
-                  type="button"
-                  className="icon-btn"
-                  aria-label={pageLoading ? '停止加载' : '刷新页面'}
-                  title={pageLoading ? '停止加载' : '刷新当前页面'}
-                  disabled={!desktopState?.activeId}
-                  onClick={() => (pageLoading ? desktopBridge.stop() : desktopBridge.reload())}
-                >
-                  {pageLoading
-                    ? <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.4 4.4l7.2 7.2M11.6 4.4l-7.2 7.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
-                    : <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.6-3.7M13 2.6V5.4h-2.8" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-                </button>
-                <form className={`browser-address${pageLoading ? ' is-loading' : ''}`} onSubmit={submitAddress}>
-                  {localPage && !editing && !freshTab && <span className="browser-address-lock">本机</span>}
-                  <input
-                    ref={addressRef}
-                    className="browser-address-input mono"
-                    aria-label="地址栏"
-                    spellCheck={false}
-                    autoComplete="off"
-                    placeholder="搜索或输入网址"
-                    value={address}
-                    onChange={(event) => setAddress(event.target.value)}
-                    onFocus={(event) => { setEditing(true); event.target.select(); }}
-                    onBlur={() => setEditing(false)}
-                  />
-                </form>
+                <BrowserNavBar
+                  canGoBack={Boolean(desktopState?.canGoBack)}
+                  canGoForward={Boolean(desktopState?.canGoForward)}
+                  canReload={Boolean(desktopState?.activeId)}
+                  loading={pageLoading}
+                  backTitle={desktopState?.canGoBack ? '后退' : '没有可后退的页面'}
+                  forwardTitle={desktopState?.canGoForward ? '前进' : '没有可前进的页面'}
+                  reloadTitle="刷新当前页面"
+                  onBack={() => desktopBridge.back()}
+                  onForward={() => desktopBridge.forward()}
+                  onReload={() => desktopBridge.reload()}
+                  onStop={() => desktopBridge.stop()}
+                />
+                <BrowserAddressForm
+                  inputRef={addressRef}
+                  value={address}
+                  placeholder="搜索或输入网址"
+                  loading={pageLoading}
+                  badge={localPage && !editing && !freshTab ? <span className="browser-address-lock">本机</span> : null}
+                  onChange={setAddress}
+                  onEditingChange={setEditing}
+                  onSubmit={submitAddress}
+                />
                 <div className="browser-menu">
                   <button
                     type="button"
@@ -1423,19 +1395,14 @@ function DesktopBrowserPanel({ desktopBridge, toolsMenuOpen }: { desktopBridge: 
             </div>
             {(desktopState?.error || error) && <p className="browser-reason is-error">{desktopState?.error || error}</p>}
             {desktopControlled && (
-              <div className="browser-desktop-control-banner" role="status">
-                <span className="browser-control-dot" aria-hidden="true" />
-                <span className="browser-desktop-control-text">
-                  Pilot 正在控制页面{desktopControlStatus ? ` · ${desktopControlStatus}` : ''}
-                </span>
-                <button
-                  type="button"
-                  className="browser-stop-btn"
-                  onClick={() => void useStore.getState().stopBrowserControl(mirror.activeLane || undefined)}
-                >
-                  停止控制 (Stop)
-                </button>
-              </div>
+              <BrowserControlNotice
+                className="browser-desktop-control-banner"
+                textClassName="browser-desktop-control-text"
+                label="Pilot 正在控制页面"
+                status={desktopControlStatus}
+                lane={mirror.activeLane}
+                role="status"
+              />
             )}
             <div
               id="mirror-stage"
@@ -1487,15 +1454,12 @@ function DesktopBrowserPanel({ desktopBridge, toolsMenuOpen }: { desktopBridge: 
                 )}
             </div>
             {consoleOpen && (
-              <div className="browser-console">
-                <div className="browser-console-head">
-                  <span>{networkLog ? '网络记录' : '页面控制台'}</span>
-                  <button type="button" className="icon-btn" aria-label="关闭控制台" title="关闭" onClick={() => setConsoleOpen(false)}>
-                    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.4 4.4l7.2 7.2M11.6 4.4l-7.2 7.2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
-                  </button>
-                </div>
-                <pre className="browser-console-body">{consoleText}</pre>
-              </div>
+              <BrowserConsoleDrawer
+                networkLog={networkLog}
+                text={consoleText}
+                closeLabel="关闭控制台"
+                onClose={() => setConsoleOpen(false)}
+              />
             )}
             {desktopState?.emulated && (
               <div className="browser-status">

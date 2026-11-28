@@ -29,7 +29,12 @@ const MAX_TIMELINE_EVENTS = 300;
 const DEFAULT_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_QUESTION_TIMEOUT_MS = 10 * 60 * 1000;
 
-function activeAttentionKind(draft: ReducerState): string {
+export function activeAttentionKind(draft: {
+  pendingApprovals?: Record<string, unknown>;
+  pendingQuestions?: Record<string, unknown>;
+  pendingArbitrations?: Record<string, unknown>;
+  running?: boolean;
+}): string {
   if (Object.keys(draft.pendingApprovals || {}).length > 0
     || Object.keys(draft.pendingQuestions || {}).length > 0
     || Object.keys(draft.pendingArbitrations || {}).length > 0) {
@@ -175,6 +180,9 @@ export function settleStoppedWork(draft: ReducerState, finishedAt = Date.now()) 
       settleTurn(row, finishedAt);
       row.reply.live = false;
       row.reply.preview = '';
+      for (const agent of Object.values(row.agents || {})) {
+        if (draft.agents?.[agent.id]) draft.agents[agent.id] = { ...agent };
+      }
     }
   }
   if (draft.runUsage && !draft.runUsage.finishedAt) {
@@ -198,62 +206,64 @@ function syncToolRow(turn: TurnRow, tool: ToolRow) {
   turn.toolIndex[tool.callId] = { ...tool };
 }
 
-/**
- * 这一轮已经结束。用量上的结束时间要写回这一轮自己的统计，
- * 否则界面会拿「现在」继续加秒，看起来像还在跑。
- */
-function finishTurnClock(draft: ReducerState, turn: TurnRow | null, event: EventMetadata) {
-  const finishedAt = eventTimestamp(event);
-  if (draft.runUsage) {
-    draft.runUsage.finishedAt = finishedAt;
-  }
-  if (turn) {
-    if (turn.stats || draft.runUsage) {
-      turn.stats = { ...(turn.stats || draft.runUsage), finishedAt };
-    }
-    if (turn.thinking?.live) {
-      turn.thinking.live = false;
-      turn.thinking.finishedAt = finishedAt;
-    }
-    for (const agent of Object.values(turn.agents || {})) {
-      if (agent.status === 'running') {
-        agent.status = 'stopped';
-        agent.finishedAt = agent.finishedAt || finishedAt;
-      }
-      // Immer 在后续事件中会分离两个路径的引用，不能依赖最初赋值的对象别名同步状态。
-      if (draft.agents[agent.id]) draft.agents[agent.id] = { ...agent };
-    }
-  }
-  // 底部 dock 读的是 draft.agents：主任务结束时，凡是还挂着 running 的都停住，别留假运行。
-  for (const [id, agent] of Object.entries(draft.agents || {})) {
-    if (agent.status === 'running') {
-      draft.agents[id] = { ...agent, status: 'stopped', finishedAt: agent.finishedAt || finishedAt };
-    }
-  }
-}
-
 function settleRun(draft: ReducerState, event: EventMetadata) {
   // runId 对不上时，才落到当前这段还开着的回合。
   const turn = turnForRun(draft, event.runId) || openTurn(draft);
+  const finishedAt = eventTimestamp(event);
   draft.lastRunId = event.runId || draft.lastRunId;
   draft.running = false;
   draft.cancelling = false;
   draft.runStartedAt = 0;
-  draft.pendingApprovals = {};
-  draft.pendingQuestions = {};
-  draft.pendingArbitrations = {};
-  finishTurnClock(draft, turn, event);
+  if (draft.runUsage) draft.runUsage.finishedAt = finishedAt;
   if (turn) {
-    turn.reply.live = false;
+    if (turn.stats || draft.runUsage) turn.stats = { ...(turn.stats || draft.runUsage), finishedAt };
+    if (turn.thinking?.live) {
+      turn.thinking.live = false;
+      turn.thinking.finishedAt = finishedAt;
+    }
     turn.end = event.sequence;
   }
-  settleStoppedWork(draft, eventTimestamp(event));
+  settleStoppedWork(draft, finishedAt);
   return turn;
 }
 
 const OUTCOME_LABELS: Record<string, string> = {
   WAITING: '等待外部事件', NEED_INPUT: '需要输入', UNVERIFIED: '结果未验证',
   NO_PROGRESS: '暂无有效进展', REVIEW_UNAVAILABLE: '核验暂不可用'
+};
+
+const ENDED_OUTCOME_TITLES: Record<string, string> = {
+  BLOCKED: '任务遇到阻塞',
+  NEED_INPUT: '等待补充信息',
+  WAITING: '等待外部事件',
+  BUDGET_LIMITED: '本轮已达预算',
+  NO_PROGRESS: '暂无有效进展',
+  REVIEW_UNAVAILABLE: '核验暂不可用',
+  VERIFICATION_FAILED: '验证未通过',
+  PARTIAL: '本轮部分交付'
+};
+
+function describeRunFailure(failure: ReturnType<typeof classifyRunFailure>, code: string): { title: string; status: string } {
+  const label = OUTCOME_LABELS[failure.outcome];
+  if (label) return { title: `本轮结束 · ${label}`, status: label };
+  if (failure.incomplete) return { title: '还有步骤没做完', status: '可继续' };
+  if (failure.blocked) return { title: '任务遇到阻塞', status: '遇到阻塞' };
+  if (failure.budgetLimited) return { title: '本轮已达预算', status: '已达预算' };
+  if (failure.paused) return { title: '本轮已暂停', status: '可继续' };
+  if (failure.interrupted) return { title: '运行已中断', status: '已中断' };
+  if (failure.cancelled) return { title: '本轮已取消', status: '已取消' };
+  return { title: `运行失败 · ${code || 'ERROR'}`, status: '失败' };
+}
+
+function subagentOutcome(isOk: boolean, isPartial: boolean) {
+  if (isOk) return { agentStatus: 'done', tone: 'ok', status: '完成' };
+  if (isPartial) return { agentStatus: 'partial', tone: 'warn', status: '阶段交付' };
+  return { agentStatus: 'failed', tone: 'err', status: '失败' };
+}
+
+const BUDGET_STATUS: Record<string, { status: string; tone: string }> = {
+  stopped: { status: '软停止', tone: 'warn' },
+  completed: { status: '完成', tone: 'ok' }
 };
 
 function appendRunResult(draft: ReducerState, event: Extract<EventEnvelope, { type: typeof RUN_END_EVENTS[number] }>, live: boolean) {
@@ -286,19 +296,9 @@ function appendRunResult(draft: ReducerState, event: Extract<EventEnvelope, { ty
     const ended = event.payload;
     const outcome = String(ended.outcome || 'PARTIAL');
     result.outcome = outcome;
-    const blocked = outcome === 'BLOCKED';
-    const partial = outcome === 'PARTIAL';
-    const title = blocked ? '任务遇到阻塞'
-      : outcome === 'NEED_INPUT' ? '等待补充信息'
-      : outcome === 'WAITING' ? '等待外部事件'
-      : outcome === 'BUDGET_LIMITED' ? '本轮已达预算'
-      : outcome === 'NO_PROGRESS' ? '暂无有效进展'
-      : outcome === 'REVIEW_UNAVAILABLE' ? '核验暂不可用'
-      : outcome === 'VERIFICATION_FAILED' ? '验证未通过'
-      : partial ? '本轮部分交付' : '本轮结束';
     Object.assign(result, {
       tone: 'warn',
-      title,
+      title: ENDED_OUTCOME_TITLES[outcome] || '本轮结束',
       detail: ended.summary || null,
       changedFiles: (ended.changedFiles || []).map(path => ({ path, countsKnown: false })),
       resumable: ended.resumable !== false
@@ -312,17 +312,9 @@ function appendRunResult(draft: ReducerState, event: Extract<EventEnvelope, { ty
     const code = String(event.payload?.code || '');
     const failure = classifyRunFailure(code);
     result.outcome = failure.outcome || code;
-    const label = OUTCOME_LABELS[failure.outcome] || '';
-    result.title = label ? `本轮结束 · ${label}`
-      : failure.incomplete ? '还有步骤没做完'
-      : failure.blocked ? '任务遇到阻塞'
-      : failure.budgetLimited ? '本轮已达预算'
-      : failure.paused ? '本轮已暂停'
-      : failure.interrupted ? '运行已中断'
-      : failure.cancelled ? '本轮已取消'
-      : `运行失败 · ${code || 'ERROR'}`;
-    status = label || (failure.incomplete ? '可继续' : failure.blocked ? '遇到阻塞' : failure.budgetLimited ? '已达预算'
-      : failure.paused ? '可继续' : failure.interrupted ? '已中断' : failure.cancelled ? '已取消' : '失败');
+    const summary = describeRunFailure(failure, code);
+    result.title = summary.title;
+    status = summary.status;
     result.tone = failure.resumable || failure.cancelled ? 'warn' : 'error';
     result.detail = event.payload?.message || event.payload?.error || null;
     // NEED_INPUT 需要补充信息，隐藏原样继续的按钮。
@@ -768,8 +760,12 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
         body: '',
         agentId: event.payload.agentId || null
       };
-      turn.tools.push(row);
-      turn.toolIndex[row.callId] = row;
+      if (turn.toolIndex[row.callId]) {
+        syncToolRow(turn, row);
+      } else {
+        turn.tools.push(row);
+        turn.toolIndex[row.callId] = { ...row };
+      }
       draft.pendingApprovals[event.payload.callId] = {
         callId: event.payload.callId,
         agent: event.payload.agentId || null,
@@ -779,7 +775,6 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
         expiresAt: requestedAt + DEFAULT_APPROVAL_TIMEOUT_MS,
         structuredArgs: event.payload.args || null
       };
-      syncToolRow(turn, row);
       record(draft, event, {
         kind: 'approval', tone: 'warn', status: '待审批',
         title: `${toolLabel(event.payload.name)} · ${toolArgsText(event.payload.name, event.payload.argsSummary)}`,
@@ -853,13 +848,8 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
           break;
         }
       }
-      if (event.runId) {
-        draft.runId = event.runId;
-      }
-      const turn = ensureTurn(draft, event.runId);
-      if (event.runId && !turn.runIds.includes(event.runId)) {
-        turn.runIds.push(event.runId);
-      }
+      if (event.runId) draft.runId = event.runId;
+      ensureTurn(draft, event.runId);
       draft.running = true;
       draft.runStartedAt = eventTimestamp(event);
       record(draft, event, { kind: 'run', tone: 'run', status: '继续', title: '继续执行', detail: null });
@@ -923,18 +913,15 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
       const id = event.payload?.agentId || event.payload?.id;
       const turn = turnWithAgent(draft, id);
       const agent = id ? turn?.agents?.[id] || draft.agents[id] : undefined;
-      const isPartial = Boolean(event.payload?.partial);
-      const isOk = event.payload?.ok !== false;
+      const outcome = subagentOutcome(event.payload?.ok !== false, Boolean(event.payload?.partial));
       if (agent && id) {
-        agent.status = isOk ? 'done' : (isPartial ? 'partial' : 'failed');
+        agent.status = outcome.agentStatus;
         agent.stopReason = event.payload?.stopReason || '';
         agent.result = event.payload?.result || event.payload?.summary || agent.result || '';
         agent.finishedAt = eventTimestamp(event);
         if (draft.agents[id]) draft.agents[id] = { ...agent };
       }
-      const recordTone = isOk ? 'ok' : (isPartial ? 'warn' : 'err');
-      const recordStatus = isOk ? '完成' : (isPartial ? '阶段交付' : '失败');
-      record(draft, event, { kind: 'run', tone: recordTone, status: recordStatus, title: `子智能体${recordStatus} · ${id}`, detail: preview(event.payload?.result || event.payload?.summary || '', 160) });
+      record(draft, event, { kind: 'run', tone: outcome.tone, status: outcome.status, title: `子智能体${outcome.status} · ${id}`, detail: preview(event.payload?.result || event.payload?.summary || '', 160) });
       break;
     }
 
@@ -952,9 +939,7 @@ export function applyEvent(draft: ReducerState, event: EventEnvelope, { live }: 
       ].filter(Boolean).join('\n');
       const existing = draft.timeline.find((item) => item.type === event.type
         && item.dispatchId === payload.dispatchId);
-      const status = payload.status === 'stopped' ? '软停止'
-        : payload.status === 'completed' ? '完成' : '运行中';
-      const tone = payload.status === 'stopped' ? 'warn' : payload.status === 'completed' ? 'ok' : 'run';
+      const { status, tone } = BUDGET_STATUS[String(payload.status || '')] || { status: '运行中', tone: 'run' };
       if (existing) {
         Object.assign(existing, { tone, status, title: '多智能体派发预算', detail, sequence: event.sequence, timestamp: event.timestamp });
       } else {
@@ -1148,26 +1133,27 @@ function mergeSplitTurn(older: TurnRow, newer: TurnRow, keepKey: string): TurnRo
   };
 }
 
+function replayHistoryEvents(draft: ReducerState, events: EventEnvelope[]): ThreadRow[] {
+  const bucket: ThreadRow[] = [];
+  const scope = openReplayScope(draft);
+  for (const event of events) applyEventInto(draft, event, bucket, scope);
+  return bucket;
+}
+
+function joinRowSegments(older: ThreadRow[], newer: ThreadRow[], keep: 'older' | 'newer'): ThreadRow[] {
+  const tail = older[older.length - 1];
+  const head = newer[0];
+  if (tail?.type === 'turn' && head?.type === 'turn' && sharesRunId(tail, head)) {
+    return [...older.slice(0, -1), mergeSplitTurn(tail, head, keep === 'older' ? tail.key : head.key), ...newer.slice(1)];
+  }
+  return [...older, ...newer];
+}
+
 /** 历史页（更早）前插：合并事件窗口 + 行注册表，位置由浏览器 scroll anchoring 保持。 */
 export function prependHistoryPage(draft: ReducerState, events: EventEnvelope[]) {
   const thread = draft.thread;
-  const before = thread.windowEvents.length;
   thread.windowEvents = mergeHistoryEvents(events, thread.windowEvents);
-  const added = thread.windowEvents.length - before;
-  // 新行插到最前面（按事件顺序重建前段）
-  const replayed: ThreadRow[] = [];
-  const scope = openReplayScope(draft);
-  for (const event of events) {
-    applyEventInto(draft, event, replayed, scope);
-  }
-  const tail = replayed[replayed.length - 1];
-  const head = thread.rows[0];
-  if (tail?.type === 'turn' && head?.type === 'turn' && sharesRunId(tail, head)) {
-    thread.rows = [...replayed.slice(0, -1), mergeSplitTurn(tail, head, head.key), ...thread.rows.slice(1)];
-  } else {
-    thread.rows = [...replayed, ...thread.rows];
-  }
-  void added;
+  thread.rows = joinRowSegments(replayHistoryEvents(draft, events), thread.rows, 'newer');
 }
 
 /**
@@ -1260,16 +1246,5 @@ function applyEventInto(root: ReducerState, event: EventEnvelope, bucket: Thread
 export function appendHistoryPage(draft: ReducerState, events: EventEnvelope[]) {
   const thread = draft.thread;
   thread.windowEvents = mergeHistoryEvents(thread.windowEvents, events);
-  const bucket: ThreadRow[] = [];
-  const scope = openReplayScope(draft);
-  for (const event of events) {
-    applyEventInto(draft, event, bucket, scope);
-  }
-  const tail = thread.rows[thread.rows.length - 1];
-  const head = bucket[0];
-  if (tail?.type === 'turn' && head?.type === 'turn' && sharesRunId(tail, head)) {
-    thread.rows = [...thread.rows.slice(0, -1), mergeSplitTurn(tail, head, tail.key), ...bucket.slice(1)];
-  } else {
-    thread.rows = [...thread.rows, ...bucket];
-  }
+  thread.rows = joinRowSegments(thread.rows, replayHistoryEvents(draft, events), 'older');
 }

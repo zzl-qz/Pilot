@@ -93,31 +93,48 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
     return true;
   }
 
+  function resetWindow() {
+    const generation = ++historyGeneration;
+    attachedDiffs = new Set();
+    earlierPage = null;
+    earlierInflight = null;
+    earlierRequest = null;
+    laterInflight = null;
+    return generation;
+  }
+
+  function replayEvents(
+    draft: Draft<StoreState>,
+    events: EventEnvelope[],
+    options: { hasMore: boolean; hasNewer: boolean; runChanges?: HistoryPage['runChanges']; epoch: number }
+  ) {
+    draft.thread = initialThread();
+    draft.thread.replaying = true;
+    for (const event of events) applyEvent(draft, event, { live: false });
+    if (!draft.running) settleStoppedWork(draft);
+    draft.thread.replaying = false;
+    draft.thread.history.hasMore = options.hasMore;
+    draft.thread.history.hasNewer = options.hasNewer;
+    draft.thread.history.error = false;
+    draft.thread.history.forwardError = false;
+    hydrateEmbeddedRunDiffs(draft, options.runChanges, options.epoch);
+  }
+
   const actions: StoreSlice<'loadHistory' | 'loadHistoryAround' | 'returnToLatest' | 'prefetchEarlier' | 'applyEarlierPage' | 'loadEarlier' | 'requestEarlierHistory' | 'loadLater' | 'requestLaterHistory'> = {
     /* ---------- 历史 ---------- */
     async loadHistory() {
       const { sessionId, thread } = get();
-      if (!sessionId) {
-        return false;
-      }
-      const generation = ++historyGeneration;
+      if (!sessionId) return false;
       // 换会话 / 重建窗口：旧的预取页对不上新窗口的游标，直接丢弃
-      attachedDiffs = new Set();
-      earlierPage = null;
-      earlierInflight = null;
-      earlierRequest = null;
-      laterInflight = null;
+      const generation = resetWindow();
       try {
         const data = requireData(await api.history(sessionId, {
           limit: thread.history.pageSize, compactTools: true, alignTurns: true, minTurns: 3, includeRunChanges: true
         }));
-        if (get().sessionId !== sessionId || historyGeneration !== generation) {
-          return false;
-        }
+        if (get().sessionId !== sessionId || historyGeneration !== generation) return false;
         const epoch = get().sessionEpoch;
         set((draft) => {
           draft.historyRevision = data.historyRevision ?? 0;
-          draft.thread = initialThread();
           draft.running = false;
           draft.runId = null;
           draft.lastRunId = null;
@@ -125,21 +142,13 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
           draft.pendingQuestions = {};
           draft.pendingArbitrations = {};
           draft.agents = {};
-          draft.thread.replaying = true;
-          draft.thread.rows = [];
-          draft.thread.windowEvents = [];
           draft.timeline = [];
-          draft.thread.cursor = 0;
-          for (const event of data.events || []) {
-            applyEvent(draft, event, { live: false });
-          }
-          if (!draft.running) settleStoppedWork(draft);
-          draft.thread.replaying = false;
-          draft.thread.history.hasMore = Boolean(data.hasMore === true && (data.events?.length || 0) > 0);
-          draft.thread.history.hasNewer = false;
-          draft.thread.history.error = false;
-          draft.thread.history.forwardError = false;
-          hydrateEmbeddedRunDiffs(draft, data.runChanges, epoch);
+          replayEvents(draft, data.events || [], {
+            hasMore: Boolean(data.hasMore === true && (data.events?.length || 0) > 0),
+            hasNewer: false,
+            runChanges: data.runChanges,
+            epoch
+          });
           // 窗口整体重建（切会话 / 重连）后落在最新一条，而不是停在上次的滚动位置。
           draft.ui.bottomSignal += 1;
         });
@@ -154,44 +163,24 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
     /** 锚点直达：一次请求载入目标消息序号前后上下文窗口（支持搜索与远距书签 1 跳直达）。 */
     async loadHistoryAround(sequence) {
       const { sessionId, thread } = get();
-      if (!sessionId || !Number.isSafeInteger(sequence) || sequence < 1) {
-        return false;
-      }
-      const generation = ++historyGeneration;
-      attachedDiffs = new Set();
-      earlierPage = null;
-      earlierInflight = null;
-      earlierRequest = null;
-      laterInflight = null;
+      if (!sessionId || !Number.isSafeInteger(sequence) || sequence < 1) return false;
+      const generation = resetWindow();
       try {
         const data = requireData(await api.history(sessionId, {
           limit: thread.history.pageSize, around: sequence, compactTools: true, alignTurns: true, includeRunChanges: true
         }));
-        if (get().sessionId !== sessionId || historyGeneration !== generation) {
-          return false;
-        }
+        if (get().sessionId !== sessionId || historyGeneration !== generation) return false;
         const events = Array.isArray(data.events) ? data.events : [];
-        if (!events.length) {
-          return false;
-        }
+        if (!events.length) return false;
         const epoch = get().sessionEpoch;
         set((draft) => {
           draft.historyRevision = data.historyRevision ?? draft.historyRevision ?? 0;
-          draft.thread = initialThread();
-          draft.thread.replaying = true;
-          draft.thread.rows = [];
-          draft.thread.windowEvents = [];
-          draft.thread.cursor = 0;
-          for (const event of events) {
-            applyEvent(draft, event, { live: false });
-          }
-          if (!draft.running) settleStoppedWork(draft);
-          draft.thread.replaying = false;
-          draft.thread.history.hasMore = Boolean(data.hasMore === true);
-          draft.thread.history.hasNewer = Boolean(data.hasNewer === true);
-          draft.thread.history.error = false;
-          draft.thread.history.forwardError = false;
-          hydrateEmbeddedRunDiffs(draft, data.runChanges, epoch);
+          replayEvents(draft, events, {
+            hasMore: Boolean(data.hasMore === true),
+            hasNewer: Boolean(data.hasNewer === true),
+            runChanges: data.runChanges,
+            epoch
+          });
         });
         attachRunDiffs();
         return true;
@@ -447,12 +436,7 @@ export function createHistoryController({ set, get }: StoreContext, rebuildStrea
   return {
     actions,
     reset() {
-      historyGeneration++;
-      attachedDiffs = new Set();
-      earlierPage = null;
-      earlierInflight = null;
-      earlierRequest = null;
-      laterInflight = null;
+      resetWindow();
     }
   };
 }

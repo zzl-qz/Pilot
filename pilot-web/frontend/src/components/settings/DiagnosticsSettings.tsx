@@ -7,9 +7,10 @@ import { commandStatusLabel } from "../../lib/command-tasks.js";
 import { verificationLabel } from "../../lib/verification/run.js";
 import { writeClipboard } from "../../lib/clipboard.js";
 import { formatBytes } from "../../lib/attachments/attachments.js";
+import { sessionStatusLabel } from "../../lib/coordination/board.js";
 import { useStore } from "../../store.js";
 import { api } from "../../api.js";
-import { formatCount } from "./UsageSettings.js";
+import { formatCompactCount } from "../../thread-utils.js";
 
 type DiagnosticsSnapshot = {
   maintenance: ApiResults['maintenanceStatus'] | null;
@@ -18,23 +19,6 @@ type DiagnosticsSnapshot = {
   diagnostics: ApiResults['diagnostics'] | null;
   validation: ApiResults['validation'] | null;
 };
-
-const SESSION_STATUS_LABELS: Record<string, string> = {
-  CREATED: '已创建',
-  RUNNING: '运行中',
-  WAITING_APPROVAL: '等待批准',
-  COMPLETED: '已完成',
-  FAILED: '失败',
-  CANCELLED: '已取消',
-  PAUSED: '已暂停',
-  INTERRUPTED: '已中断',
-  MISSING: '会话不存在'
-};
-
-function sessionStatusLabel(status: string | null | undefined) {
-  const key = String(status || '').trim().toUpperCase();
-  return SESSION_STATUS_LABELS[key] || status || '未知';
-}
 
 export function DiagnosticsSettings() {
   const sessionId = useStore((state) => state.sessionId);
@@ -229,7 +213,7 @@ export function DiagnosticsSettings() {
               {counters.length > 0 && (
                 <ul className="diag-counters">
                   {counters.map(([name, value]) => (
-                    <li key={name}><span>{name}</span><b>{formatCount(value)}</b></li>
+                    <li key={name}><span>{name}</span><b>{formatCompactCount(value)}</b></li>
                   ))}
                 </ul>
               )}
@@ -255,11 +239,11 @@ export function DiagnosticsSettings() {
           {diagnostics && (
             <>
               <dl className="diag-grid">
-                <div><dt>状态</dt><dd>{sessionStatusLabel(diagnostics.sessionStatus)} · {verificationLabel(diagnostics.phase) || diagnostics.phase || '—'} 第 {diagnostics.step} 步</dd></div>
+                <div><dt>状态</dt><dd>{sessionStatusLabel(diagnostics.sessionStatus, '已创建')} · {verificationLabel(diagnostics.phase) || diagnostics.phase || '—'} 第 {diagnostics.step} 步</dd></div>
                 <div><dt>上次成功</dt><dd>{diagnostics.lastSuccessfulStep || '—'}</dd></div>
                 <div><dt>下一步</dt><dd>{diagnostics.nextAction || '—'}</dd></div>
                 <div><dt>模型请求</dt><dd>{diagnostics.modelRequests} 次</dd></div>
-                <div><dt>Token</dt><dd>{formatCount(diagnostics.inputTokens)} 输入 / {formatCount(diagnostics.outputTokens)} 输出{diagnostics.usageExact ? '' : '（估算）'}</dd></div>
+                <div><dt>Token</dt><dd>{formatCompactCount(diagnostics.inputTokens)} 输入 / {formatCompactCount(diagnostics.outputTokens)} 输出{diagnostics.usageExact ? '' : '（估算）'}</dd></div>
                 <div><dt>最近工具</dt><dd>{diagnostics.lastToolSummary || '—'}</dd></div>
               </dl>
               {diagnostics.retryAttempt != null && (

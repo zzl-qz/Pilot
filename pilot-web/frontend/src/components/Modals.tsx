@@ -226,13 +226,18 @@ function ConfirmDialog() {
   const dialog = useStore((state) => state.ui.confirm);
   const close = () => useStore.getState().setUi({ confirm: null });
   if (!dialog) return null;
+  const cancel = () => {
+    close();
+    dialog.onCancel?.();
+  };
   return (
-    <Modal id="confirm-dialog" title={dialog.title || '确认操作'} onClose={close} initialFocus="#confirm-cancel" footer={<>
-      <Button id="confirm-cancel" label="取消" onClick={close} />
+    <Modal id="confirm-dialog" title={dialog.title || '确认操作'} onClose={cancel} initialFocus="#confirm-cancel" footer={<>
+      <Button id="confirm-cancel" label="取消" onClick={cancel} />
       <Button id="confirm-ok" variant={dialog.danger ? 'destructive' : 'primary'} label={dialog.confirmText || '确定'}
         onClick={async () => {
+          const pending = dialog.onConfirm?.();
           close();
-          await dialog.onConfirm?.();
+          await pending;
         }} />
     </>}>
       <p className="confirm-message">{dialog.message}</p>

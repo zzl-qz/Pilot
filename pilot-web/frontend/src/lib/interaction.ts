@@ -35,8 +35,27 @@ export function shouldReorderQueueOnArrow(event: { key: string; targetTagName: s
   return event.targetTagName === 'BUTTON' || event.altKey;
 }
 
-export function isModalBlockingShortcuts(root: ParentNode = document) {
-  return Boolean(root.querySelector('dialog[open], [role="dialog"][aria-modal="true"], .modal'));
+const MODAL_FALLBACK_SELECTOR = 'dialog[open], [role="dialog"][aria-modal="true"], .modal';
+
+function isNodeVisible(node: Element | null): boolean {
+  if (!node) return false;
+  return typeof (node as HTMLElement).getClientRects !== 'function'
+    || (node as HTMLElement).getClientRects().length > 0;
+}
+
+/** 是否有真正阻止交互的模态弹窗；支持 :modal 时只认模态 dialog，同时兼容 aria-modal 与 .modal。 */
+export function isModalBlockingShortcuts(root: ParentNode = document): boolean {
+  if (typeof root.querySelectorAll !== 'function') {
+    return isNodeVisible(root.querySelector(MODAL_FALLBACK_SELECTOR));
+  }
+  let hasModalDialog = false;
+  try {
+    hasModalDialog = Boolean(root.querySelector('dialog[open]:modal'));
+  } catch {
+    hasModalDialog = isNodeVisible(root.querySelector('dialog[open]'));
+  }
+  if (hasModalDialog) return true;
+  return Array.from(root.querySelectorAll('[aria-modal="true"], .modal')).some(isNodeVisible);
 }
 
 export function runPhase({running, cancelling, pausing, queueHeld, pendingApprovals = {}, pendingQuestions = {}, pendingArbitrations = {}, thread, lastOutcome}: RunPhaseInput) {

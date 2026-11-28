@@ -1,28 +1,24 @@
+import type { Draft } from 'immer';
 import type { StoreContext, StoreSlice } from './context.js';
-import { planInOpenSegment } from '../thread-reducer.js';
+import type { StoreState } from '../types/store.js';
+import type { ApiResults } from '../types/api.js';
+import { activeAttentionKind, planInOpenSegment } from '../thread-reducer.js';
 import { api, ApiError } from '../api.js';
-import { writeDraft } from '../lib/drafts.js';
+import { writeDraft, DRAFT_STORAGE } from '../lib/drafts.js';
 import { errorInfo } from '../lib/errors.js';
 import { buildTakeBackDraftText, fetchQueuedDraft, locateQueueTarget, normalizeQueue, queueEntryKey } from '../lib/queue.js';
 import { formatSkillPrefix } from '../lib/skills.js';
-import { DRAFT_STORAGE } from '../lib/drafts.js';
+import { dismissDesktopAlert } from './shared.js';
 
-const dismissDesktopAlert = (id: string) => {
-  void globalThis.window?.pilotDesktop?.dismissFloatingAlert?.(id)?.catch?.(() => {});
-};
+type PendingKind = 'approval' | 'question';
 
-function computeAttentionKind(draft: {
-  pendingApprovals?: Record<string, unknown>;
-  pendingQuestions?: Record<string, unknown>;
-  pendingArbitrations?: Record<string, unknown>;
-  running?: boolean;
-}) {
-  if (Object.keys(draft.pendingApprovals || {}).length > 0
-    || Object.keys(draft.pendingQuestions || {}).length > 0
-    || Object.keys(draft.pendingArbitrations || {}).length > 0) {
-    return 'attention';
-  }
-  return draft.running ? 'running' : 'idle';
+function applyQueueSnapshot(draft: Draft<StoreState>, data: ApiResults['queue'] | null | undefined) {
+  const normalized = normalizeQueue(data);
+  draft.queue = normalized.texts;
+  draft.queueEntries = normalized.rows;
+  draft.queueRevision = data?.revision || null;
+  draft.queueHeld = Boolean(data?.held);
+  draft.queueWaitingReason = data?.waitingReason || '';
 }
 
 /** 运行面板的数据同步：计划、队列、任务契约和上下文各自保留现有响应归属检查。 */
@@ -31,46 +27,55 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
   let queueHoldSequence = 0;
   let activeRunSequence = 0;
 
-  async function approveCallBeforeRule(callId: string, sessionId: string, sessionEpoch: number, entry: { busy?: boolean }) {
-    const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
+  function clearPendingEntry(
+    kind: PendingKind,
+    callId: string,
+    sessionId: string | null,
+    sessionEpoch: number,
+    clearLocal: boolean
+  ) {
+    dismissDesktopAlert(`${kind}:${callId}`);
     set((draft) => {
-      draft.pendingApprovals[callId].busy = true;
-      draft.pendingApprovals[callId].error = '';
-    });
-    try {
-      await api.approval(callId, true);
-      dismissDesktopAlert(`approval:${callId}`);
-      set((draft) => {
+      if (kind === 'approval') {
         draft.globalPendingApprovals = draft.globalPendingApprovals.filter((item) => item.callId !== callId);
-      });
-      return true;
-    } catch (error) {
-      const message = errorInfo(error).message;
-      const stale = error instanceof ApiError && (error.status === 404 || error.status === 409);
-      if (stale) {
-        dismissDesktopAlert(`approval:${callId}`);
-        set((draft) => {
-          if (draft.sessionId === sessionId && draft.sessionEpoch === sessionEpoch && draft.pendingApprovals[callId]) {
-            delete draft.pendingApprovals[callId];
-            draft.ui.attentionKind = computeAttentionKind(draft);
-          }
-          draft.globalPendingApprovals = draft.globalPendingApprovals.filter((item) => item.callId !== callId);
-        });
-        get().showNotice('该审批已过期或已被处理');
-        return false;
+      } else {
+        draft.globalPendingQuestions = draft.globalPendingQuestions.filter((item) => item.callId !== callId);
       }
-      if (!current()) return false;
-      get().showNotice('提交审批失败：' + message);
-      if (entry && current()) {
-        set((draft) => {
-          if (draft.pendingApprovals[callId]) {
-            draft.pendingApprovals[callId].busy = false;
-            draft.pendingApprovals[callId].error = message;
-          }
-        });
+      if (!clearLocal || draft.sessionId !== sessionId || draft.sessionEpoch !== sessionEpoch) return;
+      const map = kind === 'approval' ? draft.pendingApprovals : draft.pendingQuestions;
+      if (map?.[callId]) {
+        delete map[callId];
+        draft.ui.attentionKind = activeAttentionKind(draft);
       }
+    });
+  }
+
+  function handlePendingError(
+    kind: PendingKind,
+    callId: string,
+    error: unknown,
+    ctx: { sessionId: string | null; sessionEpoch: number; isBackground: boolean; hasEntry: boolean; staleNotice: string; failPrefix: string }
+  ): false {
+    const message = errorInfo(error).message;
+    const stale = error instanceof ApiError && (error.status === 404 || error.status === 409);
+    if (stale) {
+      clearPendingEntry(kind, callId, ctx.sessionId, ctx.sessionEpoch, !ctx.isBackground);
+      get().showNotice(ctx.staleNotice);
       return false;
     }
+    const current = get().sessionId === ctx.sessionId && get().sessionEpoch === ctx.sessionEpoch;
+    if (!ctx.isBackground && !current) return false;
+    get().showNotice(ctx.failPrefix + message);
+    if (ctx.hasEntry && current) {
+      set((draft) => {
+        const entry = (kind === 'approval' ? draft.pendingApprovals : draft.pendingQuestions)?.[callId];
+        if (entry) {
+          entry.busy = false;
+          entry.error = message;
+        }
+      });
+    }
+    return false;
   }
 
   return {
@@ -78,11 +83,10 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
     async resolveApproval(callId, approved, targetSessionId, reason) {
       const { sessionId, sessionEpoch, pendingApprovals, globalPendingApprovals } = get();
       const entry = pendingApprovals[callId];
-      if (entry?.busy) return;
+      if (entry?.busy) return false;
       const isBackground = Boolean(targetSessionId && targetSessionId !== sessionId);
       const hasGlobal = globalPendingApprovals.some((item) => item.callId === callId);
-      if (!isBackground && !entry && !hasGlobal) return;
-      const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
+      if (!isBackground && !entry && !hasGlobal) return false;
       if (entry) {
         set((draft) => {
           if (draft.pendingApprovals[callId]) {
@@ -95,38 +99,20 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
         await (reason && reason.trim()
           ? api.approval(callId, approved, reason.trim())
           : api.approval(callId, approved));
-        dismissDesktopAlert(`approval:${callId}`);
-        set((draft) => {
-          draft.globalPendingApprovals = draft.globalPendingApprovals.filter((item) => item.callId !== callId);
-        });
+        clearPendingEntry('approval', callId, sessionId, sessionEpoch, false);
         if (isBackground) {
           get().showNotice(approved ? '已在后台会话批准操作' : '已在后台会话拒绝操作');
         }
+        return true;
       } catch (error) {
-        const message = errorInfo(error).message;
-        const stale = error instanceof ApiError && (error.status === 404 || error.status === 409);
-        if (stale) {
-          dismissDesktopAlert(`approval:${callId}`);
-          set((draft) => {
-            if (draft.sessionId === sessionId && draft.sessionEpoch === sessionEpoch && draft.pendingApprovals[callId]) {
-              delete draft.pendingApprovals[callId];
-              draft.ui.attentionKind = computeAttentionKind(draft);
-            }
-            draft.globalPendingApprovals = draft.globalPendingApprovals.filter((item) => item.callId !== callId);
-          });
-          get().showNotice('该审批已过期或已被处理');
-          return;
-        }
-        if (!isBackground && !current()) return;
-        get().showNotice('提交审批失败：' + message);
-        if (entry && current()) {
-          set((draft) => {
-            if (draft.pendingApprovals[callId]) {
-              draft.pendingApprovals[callId].busy = false;
-              draft.pendingApprovals[callId].error = message;
-            }
-          });
-        }
+        return handlePendingError('approval', callId, error, {
+          sessionId,
+          sessionEpoch,
+          isBackground,
+          hasEntry: Boolean(entry),
+          staleNotice: '该审批已过期或已被处理',
+          failPrefix: '提交审批失败：'
+        });
       }
     },
 
@@ -145,7 +131,7 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
         return;
       }
       const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
-      if (!(await approveCallBeforeRule(callId, sessionId, sessionEpoch, entry)) || !current()) return;
+      if (!(await get().resolveApproval(callId, true)) || !current()) return;
       try {
         await api.mcpTrust(sessionId, trust);
         if (current()) {
@@ -165,7 +151,7 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
       const entry = pendingApprovals[callId];
       if (!sessionId || !entry || entry.busy) return;
       const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
-      if (!(await approveCallBeforeRule(callId, sessionId, sessionEpoch, entry)) || !current() || !cleanRule || !workspace) return;
+      if (!(await get().resolveApproval(callId, true)) || !current() || !cleanRule || !workspace) return;
       try {
         const existing = await api.permissionRules(workspace);
         const allow = Array.isArray(existing?.allow) ? [...existing.allow] : [];
@@ -201,7 +187,6 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
       if (entry?.busy) return false;
       const hasGlobal = globalPendingQuestions.some((item) => item.callId === callId);
       if (!isBackground && !entry && !hasGlobal) return false;
-      const current = () => get().sessionId === sessionId && get().sessionEpoch === sessionEpoch;
       if (entry) {
         set((draft) => {
           if (draft.pendingQuestions?.[callId]) {
@@ -212,46 +197,18 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
       }
       try {
         await api.answerQuestion(resolvedSessionId, callId, trimmed);
-        dismissDesktopAlert(`question:${callId}`);
-        set((draft) => {
-          draft.globalPendingQuestions = draft.globalPendingQuestions.filter((item) => item.callId !== callId);
-          if (!isBackground && draft.pendingQuestions?.[callId]
-            && draft.sessionId === sessionId && draft.sessionEpoch === sessionEpoch) {
-            delete draft.pendingQuestions[callId];
-            draft.ui.attentionKind = computeAttentionKind(draft);
-          }
-        });
-        if (isBackground) {
-          get().showNotice('已在后台会话提交选择');
-        }
+        clearPendingEntry('question', callId, sessionId, sessionEpoch, !isBackground);
+        if (isBackground) get().showNotice('已在后台会话提交选择');
         return true;
       } catch (error) {
-        const message = errorInfo(error).message;
-        const stale = error instanceof ApiError && (error.status === 404 || error.status === 409);
-        if (stale) {
-          dismissDesktopAlert(`question:${callId}`);
-          set((draft) => {
-            draft.globalPendingQuestions = draft.globalPendingQuestions.filter((item) => item.callId !== callId);
-            if (!isBackground && draft.pendingQuestions?.[callId]
-              && draft.sessionId === sessionId && draft.sessionEpoch === sessionEpoch) {
-              delete draft.pendingQuestions[callId];
-              draft.ui.attentionKind = computeAttentionKind(draft);
-            }
-          });
-          get().showNotice('该提问已超时或已被回答');
-          return false;
-        }
-        if (!isBackground && !current()) return false;
-        get().showNotice('提交选择失败：' + message);
-        if (entry && current()) {
-          set((draft) => {
-            if (draft.pendingQuestions?.[callId]) {
-              draft.pendingQuestions[callId].busy = false;
-              draft.pendingQuestions[callId].error = message;
-            }
-          });
-        }
-        return false;
+        return handlePendingError('question', callId, error, {
+          sessionId,
+          sessionEpoch,
+          isBackground,
+          hasEntry: Boolean(entry),
+          staleNotice: '该提问已超时或已被回答',
+          failPrefix: '提交选择失败：'
+        });
       }
     },
 
@@ -297,21 +254,12 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
 
     async loadQueue({ strict = false } = {}) {
       const { sessionId, sessionEpoch } = get();
-      if (!sessionId) {
-        return;
-      }
+      if (!sessionId) return;
       const request = ++queueLoadSequence;
       try {
         const data = await api.queue(sessionId);
         if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch || request !== queueLoadSequence) return;
-        const normalized = normalizeQueue(data);
-        set((draft) => {
-          draft.queue = normalized.texts;
-          draft.queueEntries = normalized.rows;
-          draft.queueRevision = data?.revision || null;
-          draft.queueHeld = Boolean(data?.held);
-          draft.queueWaitingReason = data?.waitingReason || '';
-        });
+        set((draft) => { applyQueueSnapshot(draft, data); });
       } catch (error) { if (strict) throw error; /* 队列读取失败不阻塞 */ }
     },
 
@@ -324,13 +272,7 @@ export function createRunStateActions({ set, get }: StoreContext): StoreSlice<'r
       try {
         const data = await api.holdQueue(sessionId, held);
         if (get().sessionId !== sessionId || get().sessionEpoch !== sessionEpoch || request !== queueHoldSequence) return false;
-        const normalized = normalizeQueue(data);
-        set((draft) => {
-          draft.queueEntries = normalized.rows;
-          draft.queueRevision = data?.revision || null;
-          draft.queueHeld = Boolean(data?.held);
-          draft.queueWaitingReason = data?.waitingReason || '';
-        });
+        set((draft) => { applyQueueSnapshot(draft, data); });
         return true;
       } catch (error) {
         if (get().sessionId === sessionId && get().sessionEpoch === sessionEpoch) {

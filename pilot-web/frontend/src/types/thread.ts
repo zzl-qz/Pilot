@@ -3,7 +3,7 @@ import type { MessageAttachment, ContextStatus, RequestReport, AgentSummary } fr
 import type { ChangeFile } from './core.js';
 import type * as S from './server.js';
 
-export interface PlanItem { text?: string; step: string; status: string; note?: string }
+export interface PlanItem extends S.PlanItem { text?: string }
 export interface ToolRow { callId: string; name: string; args: string; status: string; meta: string; body: string; detailSequence?: number; startedAt?: number; finishedAt?: number; agentId: string | null; runId?: string | null }
 export interface AgentView extends AgentSummary { name: string; task: string; status: string; startedAt: number; finishedAt?: number; tools: ToolRow[]; result: string }
 export interface RunUsage {

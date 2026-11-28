@@ -5,7 +5,7 @@ import type * as S from '../../types/server.js';
 
 const STATUS_LABELS: Record<string, string> = {
   CREATED: '待启动', RUNNING: '运行中', WAITING_APPROVAL: '等待批准', COMPLETED: '已完成',
-  FAILED: '失败', CANCELLED: '已取消', PAUSED: '已暂停', INTERRUPTED: '已中断'
+  FAILED: '失败', CANCELLED: '已取消', PAUSED: '已暂停', INTERRUPTED: '已中断', MISSING: '会话不存在'
 };
 
 const REQUEST_LABELS: Record<string, string> = {
@@ -25,8 +25,10 @@ const EMPTY_SNAPSHOT: CoordinationSnapshot = {
   projectId: null, sessions: [], claims: [], requests: [], handoffs: [], alerts: []
 };
 
-export function sessionStatusLabel(status: string | undefined | null): string {
-  return (status && STATUS_LABELS[status]) || status || '未知';
+export function sessionStatusLabel(status: string | undefined | null, createdLabel = '待启动'): string {
+  const key = String(status || '').trim().toUpperCase();
+  if (key === 'CREATED') return createdLabel;
+  return (key && STATUS_LABELS[key]) || status || '未知';
 }
 
 export function requestStatusLabel(status: string): string {
