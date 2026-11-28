@@ -15,6 +15,16 @@ object Protocol {
     const val MAX_FRAME = 16 * 1024 * 1024
     const val MAX_RESPONSE = 16 * 1024 * 1024
 
+    fun validateRelays(relays: List<String>) {
+        require(relays.size <= 4) { "最多配置 4 个中继地址" }
+        relays.forEach { relay ->
+            val uri = runCatching { java.net.URI(relay) }.getOrNull()
+            require(uri?.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null && uri.fragment == null) {
+                "中继必须使用不含认证信息的 HTTPS 地址"
+            }
+        }
+    }
+
     suspend fun write(stream: SendStream, bytes: ByteArray) {
         require(bytes.size <= MAX_FRAME) { "消息超过传输上限" }
         stream.writeAll(ByteBuffer.allocate(4).putInt(bytes.size).array())
@@ -68,13 +78,7 @@ data class PairingInvite(
             require(invite.expiresAt > now && invite.expiresAt <= now + 10 * 60_000) { "配对码已过期或手机时间不正确，请重新生成并检查自动时间设置" }
             require(invite.secret.matches(Regex("[A-Za-z0-9_-]{43}"))) { "配对凭证无效" }
             require(invite.ticket.length in 20..4096 && invite.name.length in 1..80) { "配对信息无效" }
-            require(invite.relays.size <= 4) { "中继配置无效" }
-            invite.relays.forEach { relay ->
-                val uri = java.net.URI(relay)
-                require(uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null && uri.fragment == null) {
-                    "中继必须使用 HTTPS"
-                }
-            }
+            Protocol.validateRelays(invite.relays)
             return invite
         }
     }

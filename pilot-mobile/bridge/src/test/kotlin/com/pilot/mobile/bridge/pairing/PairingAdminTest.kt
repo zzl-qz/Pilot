@@ -33,8 +33,9 @@ class PairingAdminTest {
             val url = URI(admin.start())
             val root = "http://127.0.0.1:${url.port}"
             val http = HttpClient.newHttpClient()
-            fun request(path: String, method: String = "GET", auth: Boolean = true, origin: String? = null): HttpResponse<String> {
-                val builder = HttpRequest.newBuilder(URI(root + path)).method(method, HttpRequest.BodyPublishers.noBody())
+            fun request(path: String, method: String = "GET", auth: Boolean = true, origin: String? = null, body: String? = null): HttpResponse<String> {
+                val publisher = if (body == null) HttpRequest.BodyPublishers.noBody() else HttpRequest.BodyPublishers.ofString(body)
+                val builder = HttpRequest.newBuilder(URI(root + path)).method(method, publisher)
                 if (auth) builder.header("X-Pilot-Pairing", url.fragment)
                 if (origin != null) builder.header("Origin", origin)
                 return http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
@@ -47,6 +48,9 @@ class PairingAdminTest {
             assertTrue(response.headers().firstValue("Content-Security-Policy").get().contains("frame-ancestors 'none'"))
             val payload = Protocol.json.parseToJsonElement(response.body()).jsonObject
             assertEquals("relay-enabled", payload.text("connectionMode"))
+            val reused = Protocol.json.parseToJsonElement(request("/api/pair", "POST", origin = root, body = """{"reuse":true}""").body()).jsonObject
+            assertEquals(payload.text("code"), reused.text("code"))
+            assertEquals(503, request("/api/pair", "POST", origin = root, body = "x".repeat(4097)).statusCode())
             val bytes = Base64.getDecoder().decode(payload.text("image").substringAfter(','))
             val bitmap = BinaryBitmap(HybridBinarizer(BufferedImageLuminanceSource(ImageIO.read(bytes.inputStream()))))
             val hints = mapOf(DecodeHintType.POSSIBLE_FORMATS to listOf(BarcodeFormat.QR_CODE), DecodeHintType.TRY_HARDER to true)
@@ -62,6 +66,8 @@ class PairingAdminTest {
             assertEquals("我的手机", status["pairedDevice"]!!.jsonObject.text("name"))
             assertEquals(JsonNull, status["invite"])
             assertFalse(status.toString().contains(invite.secret))
+            assertEquals(200, request("/api/revoke", "POST", origin = root, body = """{"id":"phone-1"}""").statusCode())
+            assertEquals("[]", request("/api/devices").body())
             repeat(24) {
                 val rotated = Protocol.json.parseToJsonElement(request("/api/pair", "POST", origin = root).body()).jsonObject
                 val image = Base64.getDecoder().decode(rotated.text("image").substringAfter(','))

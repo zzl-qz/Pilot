@@ -193,6 +193,39 @@ fun VerdictBadge(validation: JsonObject?, modifier: Modifier = Modifier) {
     }
 }
 
+@Composable
+fun TextInputDialog(
+    title: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+    label: String? = null,
+    confirmText: String = "保存",
+    confirmEnabled: Boolean = value.isNotBlank(),
+    maxLength: Int = 200,
+    maxLines: Int = Int.MAX_VALUE,
+    extra: (@Composable ColumnScope.() -> Unit)? = null,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = { onValueChange(it.take(maxLength)) },
+                    label = label?.let { { Text(it) } },
+                    maxLines = maxLines,
+                )
+                extra?.invoke(this)
+            }
+        },
+        confirmButton = { TextButton(onClick = onConfirm, enabled = confirmEnabled) { Text(confirmText) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AppearanceSettings() {

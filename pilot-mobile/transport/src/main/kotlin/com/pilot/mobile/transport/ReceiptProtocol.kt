@@ -21,7 +21,7 @@ object ReceiptProtocol {
     }
     fun confirmable(status: Int, parsed: JsonElement?): Boolean =
         status in 200..499 && status !in setOf(401, 403, 408, 410, 426, 429) && parsed is JsonObject &&
-            parsed["uncertain"]?.jsonPrimitive?.booleanOrNull != true
+            !parsed.bool("uncertain")
 
     fun acknowledge(id: String): Request = Request("POST", ACK_PATH, buildJsonObject { put("requestId", id) }.toString())
 }

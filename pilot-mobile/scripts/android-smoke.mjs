@@ -1,32 +1,17 @@
-import { spawn, execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdtemp, rm, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-const exec = promisify(execFile);
+import { redactPairingCodes, resolveJava, resolvePilotAdb, waitFor } from './smoke-helpers.mjs';
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const sdk = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT;
-if (!sdk) throw new Error('请设置 ANDROID_HOME');
-const adb = path.join(sdk, 'platform-tools', process.platform === 'win32' ? 'adb.exe' : 'adb');
 const serial = process.argv[2];
 const automatic = process.argv.includes('--automatic');
 const networkSwitch = process.argv.includes('--network-switch');
-if (!serial) throw new Error('传入专用测试设备编号：node scripts/android-smoke.mjs emulator-5580');
-const runAdb = async (...args) => {
-  try { return await exec(adb, ['-s', serial, ...args], { timeout: 120000, maxBuffer: 1024 * 1024 }); }
-  catch (error) {
-    // execFile 的原始异常包含整条命令；配对参数不能随着设备故障写进日志。
-    const details = `${error.stdout || ''}\n${error.stderr || ''}`.replace(/pilot:\/\/pair\/[A-Za-z0-9_-]+/g, '[配对码已隐藏]').slice(-4000);
-    throw new Error(`设备 ${serial} 的 ${args.slice(0, 3).join(' ')} 操作中断（${error.code ?? 'unknown'}），本轮不计通过。\n${details}`);
-  }
-};
-{
-  if (!/^emulator-\d+$/.test(serial || '')) throw new Error('应用验收只能使用 Pilot 专用模拟器');
-  if (!/^pilot[-_]/i.test((await runAdb('emu','avd','name')).stdout)) throw new Error('不能操作其他项目的模拟器');
-}
+const { runAdb } = await resolvePilotAdb(serial);
 const directory = await mkdtemp(path.join(tmpdir(), 'pilot-mobile-qa-'));
 const events = [{ sequence: 1, type: 'run.started', runId: 'run_test', payload: { input: '正在核对测试夹具' } }];
 const subscribers = new Set();
@@ -123,14 +108,21 @@ const server = createServer(async (req, res) => {
   } else { res.statusCode = 404; json({ error: 'unknown fixture endpoint' }); }
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-const java = process.env.JAVA_HOME ? path.join(process.env.JAVA_HOME, 'bin', process.platform === 'win32' ? 'java.exe' : 'java') : 'java';
-const bridge = spawn(java, ['-cp', path.join(root, 'bridge/build/install/bridge/lib/*'), 'com.pilot.mobile.bridge.MainKt', '--pilot-port', String(server.address().port), '--data-dir', directory, ...(automatic ? [] : ['--no-relay']), '--no-open'], { stdio: ['ignore', 'pipe', 'pipe'] });
+const java = resolveJava();
+const bridge = spawn(java, ['--enable-native-access=ALL-UNNAMED', '-cp', path.join(root, 'bridge/build/install/bridge/lib/*'), 'com.pilot.mobile.bridge.MainKt', '--pilot-port', String(server.address().port), '--data-dir', directory, ...(automatic ? [] : ['--no-relay']), '--no-open'], { stdio: ['ignore', 'pipe', 'pipe'] });
 for (const signal of ['SIGTERM','SIGINT']) process.once(signal, () => {
   bridge.kill(); server.closeAllConnections(); server.close();
   rm(directory,{recursive:true,force:true}).finally(()=>process.exit(1));
 });
 let bridgeErrors = '';
 bridge.stderr.on('data', chunk => { bridgeErrors += chunk; });
+const runInstrument = async (target, { extras = {}, expected = 'OK (1 test)', failureMessage }) => {
+  const extraArgs = Object.entries(extras).flatMap(([key, value]) => ['-e', key, value]);
+  const result = await runAdb('shell', 'am', 'instrument', '-w', '-r', '-e', 'class', target, ...extraArgs, 'com.pilot.mobile.qa.test/androidx.test.runner.AndroidJUnitRunner');
+  console.log(redactPairingCodes(result.stdout));
+  if (!result.stdout.includes(expected)) throw new Error(failureMessage);
+  return result.stdout;
+};
 try {
   const admin = await new Promise((resolve, reject) => {
     let output = '';
@@ -143,39 +135,30 @@ try {
   if (!response.ok) throw new Error('生成配对码失败');
   let invite = await response.json();
   if (automatic) {
-    const deadline = Date.now()+35000;
-    let state;
-    do {
-      state = await (await fetch(new URL('/api/status',admin),{headers:{'X-Pilot-Pairing':auth}})).json();
-      if (state.networkState==='ready') break;
-      await new Promise(resolve=>setTimeout(resolve,500));
-    } while (Date.now()<deadline);
-    if (state.networkState!=='ready' || !state.invite?.development) throw new Error('自动模式公共服务未就绪，不计跨网模式验收通过');
-    invite=state.invite;
+    const state = await waitFor(
+      async () => (await fetch(new URL('/api/status', admin), { headers: { 'X-Pilot-Pairing': auth } })).json(),
+      s => s.networkState === 'ready',
+      { timeoutMs: 35000, intervalMs: 500 },
+    );
+    if (state.networkState !== 'ready' || !state.invite?.development) throw new Error('自动模式公共服务未就绪，不计跨网模式验收通过');
+    invite = state.invite;
   }
   await runAdb('install', '-r', path.join(root, 'app/build/outputs/apk/qa/app-qa.apk'));
   await runAdb('install', '-r', path.join(root, 'app/build/outputs/apk/androidTest/qa/app-qa-androidTest.apk'));
   // 仅重置独立 .qa 包，用户安装的 com.pilot.mobile 不受影响。
   await runAdb('shell', 'pm', 'clear', 'com.pilot.mobile.qa');
-  const output = await runAdb('shell', 'am', 'instrument', '-w', '-r', '-e', 'class', 'com.pilot.mobile.MobileSmokeTest#nativePairingTaskAndReconnect', '-e', 'pairingCode', invite.code, 'com.pilot.mobile.qa.test/androidx.test.runner.AndroidJUnitRunner');
-  console.log(output.stdout.replaceAll(invite.code, '[配对码已隐藏]'));
-  if (!output.stdout.includes('OK (1 test)')) throw new Error('配对与任务流程验收失败，不继续依赖它的恢复用例');
-  const restored = await runAdb('shell', 'am', 'instrument', '-w', '-r', '-e', 'class', 'com.pilot.mobile.MobileSmokeTest#restoresDeviceAndDraftAfterProcessRestart', 'com.pilot.mobile.qa.test/androidx.test.runner.AndroidJUnitRunner');
-  console.log(restored.stdout);
-  if (!restored.stdout.includes('OK (1 test)')) throw new Error('重启恢复验收失败');
-  const nextInvite = await (await fetch(new URL('/api/pair', admin), {method:'POST',headers:{'X-Pilot-Pairing':auth}})).json();
-  const boundaries = await runAdb('shell','am','instrument','-w','-r','-e','class','com.pilot.mobile.MobileSmokeTest#attachmentLimitsAndMultipleComputerStorage','-e','pairingCode',nextInvite.code,...(networkSwitch?['-e','networkSwitch','true']:[]),'com.pilot.mobile.qa.test/androidx.test.runner.AndroidJUnitRunner');
-  console.log(boundaries.stdout.replaceAll(nextInvite.code,'[配对码已隐藏]'));
-  if (!boundaries.stdout.includes('OK (1 test)')) throw new Error('附件与多电脑隔离验收失败');
-  const design = await runAdb('shell', 'am', 'instrument', '-w', '-r', '-e', 'class', 'com.pilot.mobile.MobileDesignTest', 'com.pilot.mobile.qa.test/androidx.test.runner.AndroidJUnitRunner');
-  console.log(design.stdout);
-  if (!design.stdout.includes('OK (4 tests)')) throw new Error('小屏、大字体、主题与消息排版验收失败');
-  const persistence = await runAdb('shell','am','instrument','-w','-r','-e','class','com.pilot.mobile.ReceiptPersistenceTest','com.pilot.mobile.qa.test/androidx.test.runner.AndroidJUnitRunner');
-  console.log(persistence.stdout);
-  if (!persistence.stdout.includes('OK (1 test)')) throw new Error('回执本地持久化与确认队列恢复失败');
+  await runInstrument('com.pilot.mobile.MobileSmokeTest#nativePairingTaskAndReconnect', { extras: { pairingCode: invite.code }, failureMessage: '配对与任务流程验收失败，不继续依赖它的恢复用例' });
+  await runInstrument('com.pilot.mobile.MobileSmokeTest#restoresDeviceAndDraftAfterProcessRestart', { failureMessage: '重启恢复验收失败' });
+  const nextInvite = await (await fetch(new URL('/api/pair', admin), { method: 'POST', headers: { 'X-Pilot-Pairing': auth } })).json();
+  await runInstrument('com.pilot.mobile.MobileSmokeTest#attachmentLimitsAndMultipleComputerStorage', {
+    extras: { pairingCode: nextInvite.code, ...(networkSwitch ? { networkSwitch: 'true' } : {}) },
+    failureMessage: '附件与多电脑隔离验收失败',
+  });
+  await runInstrument('com.pilot.mobile.MobileDesignTest', { expected: 'OK (4 tests)', failureMessage: '小屏、大字体、主题与消息排版验收失败' });
+  await runInstrument('com.pilot.mobile.ReceiptPersistenceTest', { failureMessage: '回执本地持久化与确认队列恢复失败' });
   const counts = { posted, approved, steered, paused, continued, cancelled, acknowledged };
   if (acknowledged < 1) throw new Error('手机必须在收到结果后发送回执确认');
-  if (!output.stdout.includes('OK (1 test)') || posted !== 2 || [approved,steered,paused,continued,cancelled].some(count => count !== 1)) throw new Error(`Android 验收失败：${JSON.stringify(counts)}`);
+  if (posted !== 2 || [approved, steered, paused, continued, cancelled].some(count => count !== 1)) throw new Error(`Android 验收失败：${JSON.stringify(counts)}`);
   if (!parallelTaskReads || firstHistoryLimit !== 60 || unchangedSnapshots === 0) throw new Error(`性能回归：${JSON.stringify({parallelTaskReads,firstHistoryLimit,fullSnapshots,unchangedSnapshots})}`);
   console.log('性能验收：' + JSON.stringify({parallelTaskReads,firstHistoryLimit,fullSnapshots,unchangedSnapshots,perReadDelayMs:500}));
   const artifacts = path.join(root, 'build/mobile-qa'); await mkdir(artifacts, { recursive: true });
@@ -186,9 +169,7 @@ try {
     await runAdb('pull', `/sdcard/Android/data/com.pilot.mobile.qa/files/design-${name}.png`, path.join(artifacts, `design-${name}.png`));
   }
   await runAdb('shell', 'pm', 'clear', 'com.pilot.mobile.qa');
-  const scanning = await runAdb('shell', 'am', 'instrument', '-w', '-r', '-e', 'class', 'com.pilot.mobile.PairingScannerTest', 'com.pilot.mobile.qa.test/androidx.test.runner.AndroidJUnitRunner');
-  console.log(scanning.stdout);
-  if (!scanning.stdout.includes('OK (2 tests)')) throw new Error('竖屏扫码、取消与粘贴切换验收失败');
+  await runInstrument('com.pilot.mobile.PairingScannerTest', { expected: 'OK (2 tests)', failureMessage: '竖屏扫码、取消与粘贴切换验收失败' });
   await runAdb('pull', '/sdcard/Android/data/com.pilot.mobile.qa/files/scanner-portrait.png', path.join(artifacts, 'scanner-portrait.png'));
   console.log('通过：应用级多任务、审批归属、原生配对、QUIC/SSE、指令与控制、断线回执去重、独立进程恢复草稿、设备移除。');
 } finally {

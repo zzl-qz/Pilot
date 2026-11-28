@@ -1,6 +1,7 @@
 package com.pilot.mobile
 
 import com.pilot.mobile.transport.Request
+import com.pilot.mobile.transport.bool
 import com.pilot.mobile.transport.text
 import java.io.IOException
 import kotlinx.serialization.json.JsonObject

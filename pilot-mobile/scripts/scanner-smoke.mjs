@@ -1,36 +1,29 @@
 // 只允许专用 Pilot 模拟器和独立 QA 包；不修改真机或其他项目的数据。
 import assert from 'node:assert/strict';
-import {execFile} from 'node:child_process';
-import {promisify} from 'node:util';
-import {mkdir,writeFile} from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import {fileURLToPath} from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { resolvePilotAdb, waitFor as pollUntil } from './smoke-helpers.mjs';
 
-const exec=promisify(execFile);
-const root=fileURLToPath(new URL('..',import.meta.url));
-const sdk=process.env.ANDROID_HOME||process.env.ANDROID_SDK_ROOT;
-if(!sdk)throw new Error('请设置 ANDROID_HOME');
-const serial=process.argv[2];
-if(!/^emulator-\d+$/.test(serial||''))throw new Error('只接受 Pilot 专用模拟器编号');
-const adb=path.join(sdk,'platform-tools',process.platform==='win32'?'adb.exe':'adb');
-async function run(...args){return (await exec(adb,['-s',serial,...args],{timeout:30000,maxBuffer:2*1024*1024})).stdout.trim();}
-assert.match(await run('emu','avd','name'),/^pilot[-_]/i,'不能使用其他项目的模拟器');
-const artifacts=path.join(root,'build/scanner-qa');await mkdir(artifacts,{recursive:true});
-function nodes(xml){
- return [...xml.matchAll(/<node\b[^>]*>/g)].map(([tag])=>Object.fromEntries([...tag.matchAll(/([\w-]+)="([^"]*)"/g)].map(([,key,value])=>[key,value])));
+const exec = promisify(execFile);
+const root = fileURLToPath(new URL('..', import.meta.url));
+const serial = process.argv[2];
+const { adb, runAdb } = await resolvePilotAdb(serial, { timeout: 30000 });
+const run = async (...args) => (await runAdb(...args)).stdout.trim();
+const artifacts = path.join(root, 'build/scanner-qa'); await mkdir(artifacts, { recursive: true });
+function nodes(xml) {
+  return [...xml.matchAll(/<node\b[^>]*>/g)].map(([tag]) => Object.fromEntries([...tag.matchAll(/([\w-]+)="([^"]*)"/g)].map(([, key, value]) => [key, value])));
 }
-async function snapshot(){
- await run('shell','rm','-f','/sdcard/pilot-scanner-test.xml');
- const dumped=await run('shell','uiautomator','dump','/sdcard/pilot-scanner-test.xml');
- if(!dumped.includes('dumped'))return {xml:'',nodes:[]};
- const xml=await run('shell','cat','/sdcard/pilot-scanner-test.xml');
- return {xml,nodes:nodes(xml)};
+async function snapshot() {
+  await run('shell', 'rm', '-f', '/sdcard/pilot-scanner-test.xml');
+  const dumped = await run('shell', 'uiautomator', 'dump', '/sdcard/pilot-scanner-test.xml');
+  if (!dumped.includes('dumped')) return { xml: '', nodes: [] };
+  const xml = await run('shell', 'cat', '/sdcard/pilot-scanner-test.xml');
+  return { xml, nodes: nodes(xml) };
 }
-async function waitFor(predicate){
- const end=Date.now()+25000;
- while(Date.now()<end){const state=await snapshot();if(predicate(state))return state;await new Promise(r=>setTimeout(r,150));}
- throw new Error('等待扫码页面状态超时');
-}
+const waitFor = predicate => pollUntil(snapshot, predicate, { timeoutMs: 25000, intervalMs: 150, onTimeout: '等待扫码页面状态超时' });
 const text=value=>state=>state.nodes.some(n=>n.text===value);
 async function clickWhere(predicate){
  const state=await waitFor(s=>s.nodes.some(predicate));const node=state.nodes.find(predicate);

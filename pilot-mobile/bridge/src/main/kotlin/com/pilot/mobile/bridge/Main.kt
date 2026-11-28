@@ -9,6 +9,8 @@ import kotlinx.coroutines.*
 import java.net.URI
 import java.nio.file.Path
 
+internal const val DEFAULT_RELAY_URL = "https://aps1-1.relay.n0.iroh.link"
+
 /**
  * 配对只在工作台的「连接手机」弹窗里完成，连接桥一律不打开独立的浏览器窗口。
  * 只有显式诊断调用才额外打印一份可手动复制的管理地址；参数开关不再控制任何弹窗。
@@ -57,16 +59,13 @@ fun main(args: Array<String>) = runBlocking {
     val parent = option("--parent-pid")?.let { ProcessHandle.of(it.toLong()).orElseThrow { IllegalArgumentException("Pilot 后台已经退出") } }
     val store = PairingStore(Path.of(option("--data-dir") ?: ".pilot/mobile"))
     val relays = configuredRelays()
-    require(relays.size <= 4) { "最多配置 4 个中继地址" }
-    relays.forEach {
-        val uri = runCatching { URI(it) }.getOrNull()
-        require(uri?.scheme == "https" && uri.host != null && uri.userInfo == null && uri.fragment == null) { "中继必须使用不含认证信息的 HTTPS 地址" }
-    }
+    Protocol.validateRelays(relays)
     require("--no-relay" !in args || relays.isEmpty()) { "不能同时配置中继与 --no-relay" }
     val publicServices = "--no-relay" !in args && relays.isEmpty()
     val mode = if (relays.isNotEmpty()) "relay-enabled" else if (publicServices) "automatic" else "direct-only"
     val endpoint = createEndpoint(store.key, relays, publicServices)
     val bridge = Bridge(endpoint, store, port, System.getenv("PILOT_SECURITY_TOKEN") ?: "")
+    val probeTarget = URI(relays.firstOrNull() ?: DEFAULT_RELAY_URL)
     val network = PairingNetwork(store, mode, ticket = {
         endpoint.addr().use { address ->
             EndpointTicket.fromAddr(address).use { ticket ->
@@ -74,8 +73,8 @@ fun main(args: Array<String>) = runBlocking {
             }
         }
     }, online = if (publicServices || relays.isNotEmpty()) ({ endpoint.online() }) else null,
-        diagnose = { diagnoseNetwork(URI(relays.firstOrNull() ?: "https://aps1-1.relay.n0.iroh.link").host) },
-        observe = { observeEnvironment(URI(relays.firstOrNull() ?: "https://aps1-1.relay.n0.iroh.link"),
+        diagnose = { diagnoseNetwork(probeTarget.host) },
+        observe = { observeEnvironment(probeTarget,
             inspectSystemProxy = mode != "direct-only" && System.getProperty("java.net.useSystemProxies") == "true") },
         relayAvailable = { endpoint.addr().use { it.relayUrl() != null } },
         currentRelayUrl = { endpoint.addr().use { it.relayUrl()?.toString() } })

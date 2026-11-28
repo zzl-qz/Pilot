@@ -171,9 +171,12 @@ fun PilotApp(model: PilotViewModel = viewModel()) {
         }
         }
     }
-    if (showCode) AlertDialog(onDismissRequest = { showCode = false; code = "" }, title = { Text("粘贴配对码") }, text = {
-        OutlinedTextField(value = code, onValueChange = { code = it.take(8192) }, label = { Text("电脑生成的配对码") }, maxLines = 5)
-    }, confirmButton = { TextButton(onClick = { showCode = false; model.pair(code); code = "" }, enabled = code.isNotBlank() && !state.busy) { Text("连接") } }, dismissButton = { TextButton(onClick = { showCode = false; code = "" }) { Text("取消") } })
+    if (showCode) TextInputDialog(
+        title = "粘贴配对码", value = code, onValueChange = { code = it }, label = "电脑生成的配对码",
+        confirmText = "连接", confirmEnabled = code.isNotBlank() && !state.busy, maxLength = 8192, maxLines = 5,
+        onConfirm = { showCode = false; model.pair(code); code = "" },
+        onDismiss = { showCode = false; code = "" },
+    )
     if (showProjects) AlertDialog(onDismissRequest = { showProjects = false }, title = { Text("在哪个项目中新建任务？") }, text = {
         LazyColumn {
             if (state.projects.isEmpty()) item { Text("还没有项目。请到“项目”添加电脑上的目录。") }
@@ -183,8 +186,11 @@ fun PilotApp(model: PilotViewModel = viewModel()) {
     state.blankProject?.let { project -> AlertDialog(onDismissRequest = model::dismissBlank, title = { Text("项目中已有空白任务") }, text = { Text("可以继续填写现有任务，或归档它再新建。已有内容不会被删除。") },
         confirmButton = { TextButton(onClick = { model.dismissBlank(); model.openTask(project.text("blankSessionId")) }) { Text("打开现有任务") } },
         dismissButton = { TextButton(onClick = { model.create(project, true) }) { Text("归档后新建") } }) }
-    if (rename != null) AlertDialog(onDismissRequest = { rename = null }, title = { Text("重命名任务") }, text = { OutlinedTextField(renameText, { renameText = it.take(200) }, label = { Text("任务名称") }) },
-        confirmButton = { TextButton(onClick = { model.rename(rename!!, renameText); rename = null }, enabled = renameText.isNotBlank()) { Text("保存") } }, dismissButton = { TextButton(onClick = { rename = null }) { Text("取消") } })
+    rename?.let { target -> TextInputDialog(
+        title = "重命名任务", value = renameText, onValueChange = { renameText = it }, label = "任务名称",
+        onConfirm = { model.rename(target, renameText); rename = null },
+        onDismiss = { rename = null },
+    ) }
     if (showDiscard) AlertDialog(onDismissRequest = { showDiscard = false }, title = { Text("已在任务记录中核实？") }, text = { Text("取消待核对提示后可以提交新指令。请先确认上次指令是否已经执行，避免重复操作。") },
         confirmButton = { TextButton(onClick = { showDiscard = false; model.dismissPending() }) { Text("确认已核实") } }, dismissButton = { TextButton(onClick = { showDiscard = false }) { Text("返回") } })
     if (state.detail != null) DetailSheet(state, model)

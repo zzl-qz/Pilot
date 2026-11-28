@@ -1,6 +1,6 @@
 package com.pilot.mobile
 
-import com.pilot.mobile.transport.text
+import com.pilot.mobile.transport.long
 import kotlinx.serialization.json.JsonObject
 
 /** 服务端配置与手机传输上限的交集；旧电脑端未声明时保留原有手机上限。 */
@@ -26,7 +26,7 @@ internal data class AttachmentBudget(val maxFiles: Int, val maxFileBytes: Int, v
             require(capabilities != null) { "尚未取得电脑端附件限制，请刷新后重试" }
             fun limit(name: String, fallback: Int): Int {
                 val raw = capabilities[name] ?: return fallback
-                val parsed = capabilities.text(name).toLongOrNull()
+                val parsed = capabilities.long(name)
                 require(parsed != null && parsed > 0) { "电脑端附件限制无效：$name=$raw" }
                 return minOf(parsed, fallback.toLong()).toInt()
             }

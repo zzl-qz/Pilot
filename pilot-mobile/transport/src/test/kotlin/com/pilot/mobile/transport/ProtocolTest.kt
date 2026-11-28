@@ -32,6 +32,30 @@ class ProtocolTest {
         assertFailsWith<IllegalArgumentException> { PairingInvite.decode(invite().copy(ticket = "x".repeat(5000)).encode(), now) }
         assertFailsWith<IllegalArgumentException> { PairingInvite.decode(invite().copy(relays = listOf("http://relay.test")).encode(), now) }
         assertFailsWith<IllegalArgumentException> { PairingInvite.decode(invite().copy(secret = "short").encode(), now) }
+        Protocol.validateRelays(emptyList())
+        Protocol.validateRelays(listOf("https://relay-1.test", "https://relay-2.test", "https://relay-3.test", "https://relay-4.test"))
+        for (invalid in listOf(
+            listOf("https://a.test", "https://b.test", "https://c.test", "https://d.test", "https://e.test"),
+            listOf("http://relay.test"),
+            listOf("https://"),
+            listOf("https://user:pass@relay.test"),
+            listOf("https://relay.test/#frag"),
+            listOf("https://bad host"),
+        )) assertFailsWith<IllegalArgumentException> { Protocol.validateRelays(invalid) }
+    }
+
+    @Test fun `JsonObject 扩展安全提取文本布尔长整型和对象数组`() {
+        val obj = Protocol.json.parseToJsonElement("""{"s":"hi","b":true,"f":false,"n":42,"bad":"abc","arr":[{"k":"v"},1,"x"]}""").jsonObject
+        assertEquals("hi", obj.text("s"))
+        assertEquals("", obj.text("missing"))
+        assertTrue(obj.bool("b"))
+        assertFalse(obj.bool("f"))
+        assertFalse(obj.bool("arr"))
+        assertEquals(42L, obj.long("n"))
+        assertNull(obj.long("bad"))
+        assertNull(obj.long("missing"))
+        assertEquals(listOf("v"), obj.objects("arr").map { it.text("k") })
+        assertTrue(obj.objects("s").isEmpty())
     }
     @Test fun `SSE 支持中文跨字节分片多行和心跳`() {
         val events = mutableListOf<String>()

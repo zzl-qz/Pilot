@@ -48,9 +48,10 @@ $('copy').onclick = async () => {
   }
 };
 setInterval(() => {
+  if (!deadline) return;
   const seconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
   $('expiry').textContent = seconds ? `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒后过期` : '配对码已过期，请重新生成';
-  if (!seconds) { $('invite').hidden = true; code = ''; }
+  if (!seconds) { $('invite').hidden = true; code = ''; deadline = 0; }
 }, 1000);
 devices().catch(error => { $('devices').textContent = error.message; });
 setInterval(() => {

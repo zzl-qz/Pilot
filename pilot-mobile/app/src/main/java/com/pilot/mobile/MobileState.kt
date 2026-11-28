@@ -10,6 +10,8 @@ data class MobileAttachment(val name: String, val mimeType: String, val dataBase
 @Serializable
 data class TaskDraft(val text: String = "", val attachments: List<MobileAttachment> = emptyList())
 
+enum class DetailKind { GENERIC, PRODUCTS, CONTEXT, WORKSPACE_DIFF, FILE_DIFF }
+
 data class MobileState(
     val computer: String = "", val computerId: String = "", val computers: List<PairedComputer> = emptyList(),
     val status: String = "未连接", val networkError: String = "", val error: String = "", val busy: Boolean = false, val tab: String = "任务",
@@ -21,7 +23,7 @@ data class MobileState(
     val queued: List<String> = emptyList(), val queueRevision: String = "", val draft: String = "",
     val attachments: List<MobileAttachment> = emptyList(), val pins: Set<String> = emptySet(),
     val viewingHistory: Boolean = false, val limitedHistory: Boolean = false, val pending: Request? = null, val blankProject: JsonObject? = null,
-    val detailTitle: String = "", val detail: JsonObject? = null, val browse: JsonObject? = null,
+    val detailTitle: String = "", val detailKind: DetailKind = DetailKind.GENERIC, val detail: JsonObject? = null, val browse: JsonObject? = null,
     /** 与电脑同一本账的验证结论；空对象表示还没读到。 */
     val validation: JsonObject? = null,
 )

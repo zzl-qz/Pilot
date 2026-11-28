@@ -14,7 +14,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.*
 import java.net.URLEncoder
 import java.util.Base64
@@ -73,12 +72,16 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
         RemoteClient(endpoint, computer.ticket, diagnostic = { Log.d("PilotConnection", it) },
             relays = computer.relays, allowPublicRelays = computer.development)
 
-    private suspend fun replaceEndpoint(computer: PairedComputer) {
-        val oldClient = client
-        val oldEndpoint = endpoint
+    private fun detachTransport(keepClient: RemoteClient? = null, keepEndpoint: Endpoint? = null) {
+        val previousClient = client
+        val previousEndpoint = endpoint
         client = null
         endpoint = null
-        releaseTransport(oldClient, oldEndpoint)
+        releaseTransport(previousClient?.takeUnless { it === keepClient }, previousEndpoint?.takeUnless { it === keepEndpoint })
+    }
+
+    private suspend fun replaceEndpoint(computer: PairedComputer) {
+        detachTransport()
         val fresh = createEndpoint(store.identity(), computer.relays, computer.development)
         endpoint = fresh
         client = remote(fresh, computer)
@@ -86,9 +89,7 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun connect(computer: PairedComputer, readyEndpoint: Endpoint? = null, readyClient: RemoteClient? = null) {
         saveDraft(); monitor?.cancelAndJoin()
-        val previousClient = client; val previousEndpoint = endpoint
-        client = null; endpoint = null
-        releaseTransport(previousClient?.takeUnless { it === readyClient }, previousEndpoint?.takeUnless { it === readyEndpoint })
+        detachTransport(keepClient = readyClient, keepEndpoint = readyEndpoint)
         workbench = WorkbenchSnapshot()
         store.select(computer.id)
         mutable.value = MobileState(computer = computer.name, computerId = computer.id, computers = store.computers(), status = "正在连接", busy = state.value.busy,
@@ -104,7 +105,8 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
     fun pair(code: String) = action {
         val invite = PairingInvite.decode(code)
         val computer = PairedComputer(invite.ticket, invite.name, invite.relays, invite.developmentRelays)
-        require(store.computers().size < 16 || store.computers().any { it.id == computer.id }) { "最多保存 16 台电脑" }
+        val computers = store.computers()
+        require(computers.size < SecureDeviceStore.MAX_COMPUTERS || computers.any { it.id == computer.id }) { "最多保存 ${SecureDeviceStore.MAX_COMPUTERS} 台电脑" }
         val candidateEndpoint = createEndpoint(store.identity(), computer.relays, computer.development)
         val candidate = remote(candidateEndpoint, computer)
         var adopted = false
@@ -147,8 +149,8 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
                                 val payload = event["payload"] as? JsonObject
                                 if (event.text("type") == "stream.error") throw StreamStopped(payload?.text("message") ?: "事件恢复失败，请重新打开会话")
                                 if (event.text("type") == "stream.event") {
-                                    throw EventReferenceRequired(payload?.text("sequence")?.toLongOrNull() ?: error("事件引用无效"),
-                                        payload.text("historyRevision").toLongOrNull() ?: error("历史版本无效"))
+                                    throw EventReferenceRequired(payload?.long("sequence") ?: error("事件引用无效"),
+                                        payload.long("historyRevision") ?: error("历史版本无效"))
                                 }
                                 try { conversation.accept(event) } catch (failure: RuntimeException) { throw StreamConsumptionFailed(failure) }
                                 if (conversation.needsReplay) {
@@ -175,7 +177,7 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
                             try {
                             val value = api(Request(path = "/api/sessions/$id/events/${reference.sequence}?revision=${reference.revision}")).jsonObject
                             val event = value["event"]?.jsonObject ?: error("事件引用响应无效")
-                            require(event.text("sequence").toLongOrNull() == reference.sequence && value.text("historyRevision").toLongOrNull() == reference.revision) { "事件引用不匹配" }
+                            require(event.long("sequence") == reference.sequence && value.long("historyRevision") == reference.revision) { "事件引用不匹配" }
                             conversation.accept(event); recordEvent(event, false)
                             mutable.update { it.copy(rows = conversation.snapshot(), phase = conversation.phase) }
                             referenceApplied = true
@@ -233,7 +235,7 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
         conversation = Conversation(6000); historyEvents.clear(); historyChars = 0
         val draft = loadDraft(session.text("id"))
         mutable.update { it.copy(selected = session, rows = emptyList(), runId = "", phase = "读取历史…", queued = emptyList(), viewingHistory = false, limitedHistory = false,
-            draft = draft.text, attachments = draft.attachments, detail = null, validation = null) }
+            draft = draft.text, attachments = draft.attachments, detail = null, detailKind = DetailKind.GENERIC, validation = null) }
         try {
             coroutineScope {
                 val run = async { readRunState(session.text("id")) }
@@ -257,7 +259,7 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
         val before = if (older && historyEvents.isNotEmpty()) "&before=${historyEvents.firstKey()}" else ""
         val page = api(Request(path = "/api/sessions/$id/history?limit=${if (older) 100 else 60}$before")).jsonObject
         val events = page.objects("events")
-        val revision = page.text("historyRevision").toLongOrNull() ?: 0
+        val revision = page.long("historyRevision") ?: 0
         if (!older || conversation.historyRevision != null && conversation.historyRevision != revision) {
             historyEvents.clear(); historyChars = 0
             if (older) { loadHistory(false); return }
@@ -270,7 +272,7 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun recordEvent(event: JsonObject, keepOlder: Boolean) {
-        val sequence = event.text("sequence").toLongOrNull() ?: return
+        val sequence = event.long("sequence") ?: return
         val old = historyEvents.put(sequence, event)
         historyChars += event.toString().length - (old?.toString()?.length ?: 0)
         while (historyEvents.size > 1 && (historyEvents.size > 5000 || historyChars > 4_000_000)) {
@@ -301,7 +303,7 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
         applyRunState(id, run.await())
     }
 
-    fun back() = action { saveDraft(); mutable.update { it.copy(selected = null, draft = "", attachments = emptyList(), detail = null) }; restartMonitor() }
+    fun back() = action { saveDraft(); mutable.update { it.copy(selected = null, draft = "", attachments = emptyList(), detail = null, detailKind = DetailKind.GENERIC) }; restartMonitor() }
     fun tab(tab: String) { if (!state.value.busy) mutable.update { it.copy(tab = tab) } }
     fun draft(text: String) { mutable.update { it.copy(draft = text.take(32_000)) }; persistDraftSoon() }
     fun clearError() { mutable.update { it.copy(error = "", networkError = "") } }
@@ -431,36 +433,42 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
             }
             getApplication<Application>().contentResolver.openOutputStream(destination, "wt")?.use { it.write(bytes) } ?: error("无法保存到所选位置")
         }
-        mutable.update { it.copy(detail = null) }
+        mutable.update { it.copy(detail = null, detailKind = DetailKind.GENERIC) }
     }
     fun result(item: JsonObject) = detail("任务结果", "/api/results/${item.text("id")}")
     fun receipt(item: JsonObject, action: String) = action { api(Request("POST", "/api/results/${item.text("id")}/receipt", json("revision" to item.text("revision"), "action" to action).toString())); refresh() }
-    fun inspect(kind: String) { val id = state.value.selected?.text("id") ?: return; detail(when(kind) { "diff" -> "工作区改动"; "context" -> "上下文与用量"; else -> "任务成果" }, "/api/sessions/$id/$kind") }
-    fun fileDiff(path: String) { val id = state.value.selected?.text("id") ?: return; detail(path, "/api/sessions/$id/diff/file?path=${encode(path)}") }
-    private fun detail(title: String, path: String) = action {
+    fun inspect(kind: String) {
+        val id = state.value.selected?.text("id") ?: return
+        val (title, detailKind) = when (kind) {
+            "diff" -> "工作区改动" to DetailKind.WORKSPACE_DIFF
+            "context" -> "上下文与用量" to DetailKind.CONTEXT
+            else -> "任务成果" to DetailKind.PRODUCTS
+        }
+        detail(title, "/api/sessions/$id/$kind", detailKind)
+    }
+    fun fileDiff(path: String) { val id = state.value.selected?.text("id") ?: return; detail(path, "/api/sessions/$id/diff/file?path=${encode(path)}", DetailKind.FILE_DIFF) }
+    private fun detail(title: String, path: String, kind: DetailKind = DetailKind.GENERIC) = action {
         val value = api(Request(path = path))
         var objectValue = value as? JsonObject ?: buildJsonObject { put("items", value) }
-        if (path.endsWith("/context")) {
+        if (kind == DetailKind.CONTEXT) {
             val usage = historyEvents.values.lastOrNull { it.text("type") == "run.usage" }?.get("payload") as? JsonObject
-            objectValue = buildJsonObject {
-                objectValue.forEach { (key, entry) -> put(key, entry) }
-                if (usage != null) {
-                    val details = usage["details"] as? JsonObject
-                    val observed = details?.text("observedCacheInputTokens")?.toDoubleOrNull() ?: 0.0
-                    val cached = details?.text("cacheReadTokens")?.toDoubleOrNull() ?: 0.0
-                    put("usage", buildJsonObject {
-                        put("输入 Tokens", usage.text("inputTokens")); put("输出 Tokens", usage.text("outputTokens"))
-                        put("请求数", usage.text("modelRequests")); put("缓存命中率", if (observed > 0) "${"%.1f".format(cached / observed * 100)}%" else "未知（接口未提供）")
-                        val costs = details?.get("costs") as? JsonObject
-                        put("费用估算", if (costs.isNullOrEmpty()) "未知（未配置价格）" else costs.entries.joinToString { "${it.value.jsonPrimitive.content} ${it.key}" })
-                        put("计价请求", "${details?.text("pricedRequests") ?: "0"} / ${usage.text("modelRequests")}")
-                    })
-                }
+            if (usage != null) {
+                val details = usage["details"] as? JsonObject
+                val observed = details?.text("observedCacheInputTokens")?.toDoubleOrNull() ?: 0.0
+                val cached = details?.text("cacheReadTokens")?.toDoubleOrNull() ?: 0.0
+                val costs = details?.get("costs") as? JsonObject
+                objectValue = JsonObject(objectValue + ("usage" to buildJsonObject {
+                    put("inputTokens", usage.text("inputTokens")); put("outputTokens", usage.text("outputTokens"))
+                    put("requestCount", usage.text("modelRequests"))
+                    put("cacheHitRate", if (observed > 0) "${"%.1f".format(java.util.Locale.ROOT, cached / observed * 100)}%" else "未知（接口未提供）")
+                    put("estimatedCost", if (costs.isNullOrEmpty()) "未知（未配置价格）" else costs.entries.joinToString { "${it.value.jsonPrimitive.content} ${it.key}" })
+                    put("pricedRequests", "${details?.text("pricedRequests") ?: "0"} / ${usage.text("modelRequests")}")
+                }))
             }
         }
-        mutable.update { it.copy(detailTitle = title, detail = objectValue) }
+        mutable.update { it.copy(detailTitle = title, detailKind = kind, detail = objectValue) }
     }
-    fun closeDetail() { mutable.update { it.copy(detail = null) } }
+    fun closeDetail() { mutable.update { it.copy(detail = null, detailKind = DetailKind.GENERIC) } }
 
     fun retryPending() = action {
         val pending = state.value.pending ?: return@action
@@ -485,9 +493,7 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
         val active = id == state.value.computerId
         if (active) {
             saveDraft(); monitor?.cancelAndJoin(); monitor = null
-            val previousClient = client; val previousEndpoint = endpoint
-            client = null; endpoint = null
-            releaseTransport(previousClient, previousEndpoint)
+            detachTransport()
         }
         store.forget(id)
         if (active) { mutable.value = MobileState(computers = store.computers()); store.computer()?.let { connect(it) } }
@@ -538,7 +544,7 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
                     for (id in pending) {
                         if (client !== owner || state.value.computerId != host) break
                         val response = withTimeout(10_000) { owner.request(ReceiptProtocol.acknowledge(id)) }
-                        if (response.first.status !in 200..299 || runCatching { Protocol.json.parseToJsonElement(response.second).jsonObject["acknowledged"]?.jsonPrimitive?.booleanOrNull }.getOrNull() != true) break
+                        if (response.first.status !in 200..299 || !runCatching { Protocol.json.parseToJsonElement(response.second).jsonObject.bool("acknowledged") }.getOrDefault(false)) break
                         withContext(Dispatchers.IO) { store.acknowledged(host, id) }
                     }
                 } catch (e: CancellationException) {
@@ -568,14 +574,10 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         networkMonitor.close(); networkRecovery.close()
         monitor?.cancel()
-        val previousClient = client
-        val previousEndpoint = endpoint
-        releaseTransport(previousClient, previousEndpoint)
+        detachTransport()
     }
 }
 
-fun JsonObject.bool(key: String): Boolean = (this[key] as? JsonPrimitive)?.booleanOrNull == true
-fun JsonObject.objects(key: String): List<JsonObject> = (this[key] as? JsonArray)?.mapNotNull { it as? JsonObject }.orEmpty()
 fun json(vararg pairs: Pair<String, String>): JsonObject = buildJsonObject { pairs.forEach { (key, value) -> put(key, value) } }
 fun encode(value: String): String = URLEncoder.encode(value, "UTF-8")
 fun statusLabel(status: String): String = when (status) {

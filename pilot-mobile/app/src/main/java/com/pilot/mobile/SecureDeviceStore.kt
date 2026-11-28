@@ -16,7 +16,9 @@ import javax.crypto.spec.GCMParameterSpec
 
 @Serializable
 data class PairedComputer(val ticket: String, val name: String, val relays: List<String>, val development: Boolean) {
-    val id: String get() = EndpointTicket.fromString(ticket).use { it.endpointAddr().use { address -> address.id().use { key -> key.toString() } } }
+    val id: String by lazy {
+        EndpointTicket.fromString(ticket).use { it.endpointAddr().use { address -> address.id().use { key -> key.toString() } } }
+    }
 }
 
 /** 连接身份由 Android Keystore 加密，关闭系统备份，不把密钥写入日志或 Intent。 */
@@ -67,7 +69,7 @@ class SecureDeviceStore(context: Context) {
     fun select(id: String) { check(preferences.edit().putString("selected", id).commit()) }
     fun save(computer: PairedComputer) {
         val list = computers().filterNot { it.id == computer.id } + computer
-        require(list.size <= 16) { "最多保存 16 台电脑，请先移除不用的连接" }
+        require(list.size <= MAX_COMPUTERS) { "最多保存 $MAX_COMPUTERS 台电脑，请先移除不用的连接" }
         write("computers", Protocol.json.encodeToString(ListSerializer(PairedComputer.serializer()), list).toByteArray())
         check(preferences.edit().remove("computer").putString("selected", computer.id).commit())
     }
@@ -81,5 +83,9 @@ class SecureDeviceStore(context: Context) {
     fun value(host: String, key: String, value: String?) {
         if (value == null) check(preferences.edit().remove("host:$host:$key").commit())
         else write("host:$host:$key", value.toByteArray())
+    }
+
+    companion object {
+        const val MAX_COMPUTERS = 16
     }
 }

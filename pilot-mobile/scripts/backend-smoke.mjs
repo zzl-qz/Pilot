@@ -1,17 +1,19 @@
 import assert from 'node:assert/strict';
-import { spawn, execFile } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { randomBytes, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveJava, startIsolatedServer, waitFor } from './smoke-helpers.mjs';
+
 const exec = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const directory = await mkdtemp(path.join(tmpdir(), 'pilot-mobile-backend-'));
 const data = path.join(directory, 'data');
 const workspace = path.join(directory, 'workspace'); await mkdir(workspace);
-const java = process.env.JAVA_HOME ? path.join(process.env.JAVA_HOME, 'bin', process.platform === 'win32' ? 'java.exe' : 'java') : 'java';
+const java = resolveJava();
 const token = randomUUID();
 const libraries = process.env.PILOT_TEST_MOBILE_LIBRARIES || path.join(root, 'bridge/build/install/bridge/lib');
 const serverJar = process.env.PILOT_TEST_SERVER_JAR || path.resolve(root, '../pilot-server/target/pilot-server-0.0.1-SNAPSHOT.jar');
@@ -22,44 +24,26 @@ const direct = process.argv.includes('--direct');
 const phoneKey = randomBytes(32).toString('base64');
 const requestFile = path.join(directory, 'request-id.txt');
 let server;
-const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
 async function start(mobileLibraries = libraries, relay = '', mode = direct ? 'direct' : 'auto') {
-  server = spawn(java, ['--enable-native-access=ALL-UNNAMED', '-jar', serverJar, '--server.address=127.0.0.1', '--server.port=0', `--pilot.data.dir=${data}`, `--pilot.agent.workspace=${workspace}`, `--pilot.mobile.libraries=${mobileLibraries}`, `--pilot.mobile.relay=${relay}`, `--pilot.mobile.mode=${mode}`, '--pilot.runtime.provision=false', '--pilot.web-search.local=false', '--pilot.model.api-key=', '--pilot.model.endpoint=http://127.0.0.1:9/v1/chat/completions', '--pilot.security.mode=token', `--pilot.security.token=${token}`], { cwd: directory, stdio: ['ignore', 'pipe', 'pipe'] });
-  return new Promise((resolve, reject) => {
-    let output = '';
-    const timer = setTimeout(() => reject(new Error('真实服务启动超时，请先构建服务端 Jar 并使用 Java 25')), 30000);
-    const capture = chunk => {
-      output = (output + chunk).slice(-262144);
-      const match = output.match(/Tomcat started on port (\d+)/);
-      if (match) { clearTimeout(timer); resolve(`http://127.0.0.1:${match[1]}`); }
-    };
-    server.stdout.on('data', capture); server.stderr.on('data', capture);
-    server.once('error', () => { clearTimeout(timer); reject(new Error('无法启动隔离服务，请检查 Java 和 Jar')); });
-    server.once('exit', code => { clearTimeout(timer); reject(new Error(`真实服务提前退出 ${code}`)); });
+  server = await startIsolatedServer({
+    java, serverJar, cwd: directory, dataDir: data, workspace, mobileLibraries, token,
+    extraArgs: [`--pilot.mobile.relay=${relay}`, `--pilot.mobile.mode=${mode}`],
   });
+  return server.baseUrl;
 }
-async function stop(force = false) {
-  if (!server || server.exitCode !== null) return;
-  const target = server;
-  target.kill(force ? 'SIGKILL' : 'SIGTERM');
-  await new Promise(resolve => {
-    const timer = setTimeout(() => { target.kill('SIGKILL'); resolve(); }, 10000);
-    target.once('exit', () => { clearTimeout(timer); resolve(); });
-  });
-}
+async function stop(force = false) { await server?.stop(force); }
 async function bridgeProcesses(operation = 'list') {
-  const result = await exec(java, [probe, String(server.pid), path.join(data,'mobile'), operation], {timeout:10000});
+  const result = await exec(java, [probe, String(server.pid), path.join(data, 'mobile'), operation], { timeout: 10000 });
   return result.stdout.trim().split(/\r?\n/).filter(Boolean);
 }
 async function waitBridge(previous = '') {
-  const deadline = Date.now() + 45000;
-  while (Date.now() < deadline) {
-    const pids = await bridgeProcesses();
-    if (pids.length === 1 && pids[0] !== previous) return pids[0];
-    await delay(1000);
-  }
-  throw new Error('没有打开电脑端连接页面时，连接组件未能自动恢复');
+  const pids = await waitFor(
+    () => bridgeProcesses(),
+    list => list.length === 1 && list[0] !== previous,
+    { timeoutMs: 45000, intervalMs: 1000, onTimeout: '没有打开电脑端连接页面时，连接组件未能自动恢复' },
+  );
+  return pids[0];
 }
 async function checkPhone(code, reconnect = false) {
   const result = await exec(java, ['--enable-native-access=ALL-UNNAMED', '-cp', classpath, 'com.pilot.mobile.bridge.BackendSmokeKt'], {
@@ -95,33 +79,29 @@ try {
     assert.equal(invite.networkState, 'local');
     assert.equal(invite.development, false);
   } else {
-    const expiresAt = invite.expiresAt, networkDeadline = Date.now()+35000;
-    let network;
-    do {
-      network = await (await fetch(base+'/api/mobile/connection',{headers:{'X-Pilot-Token':token}})).json();
-      if (network.networkState === 'ready') break;
-      await delay(500);
-    } while (Date.now()<networkDeadline);
-    assert.equal(network.networkState,'ready','公共服务未完成初始化，不能把本地连接成功当作跨网恢复');
-    assert.equal(network.invite.expiresAt,expiresAt,'路由就绪不能延长配对授权');
+    const expiresAt = invite.expiresAt;
+    const network = await waitFor(
+      async () => (await fetch(base + '/api/mobile/connection', { headers: { 'X-Pilot-Token': token } })).json(),
+      state => state.networkState === 'ready',
+      { timeoutMs: 35000, intervalMs: 500 },
+    );
+    assert.equal(network.networkState, 'ready', '公共服务未完成初始化，不能把本地连接成功当作跨网恢复');
+    assert.equal(network.invite.expiresAt, expiresAt, '路由就绪不能延长配对授权');
     invite = network.invite;
   }
-  const {code} = invite;
+  const { code } = invite;
   await checkPhone(code);
   async function reconnectCode() {
     if (!direct) return code;
     // 纯直连测试不使用公共发现；新进程的 UDP 端口变化，刷新路由但保留原设备身份与授权。
-    const deadline = Date.now()+15000;
-    while (Date.now()<deadline) {
-      const response = await fetch(base+'/api/mobile/connection/pair',{method:'POST',headers:{'X-Pilot-Token':token,'Content-Type':'application/json'},body:'{}'});
-      if (response.ok) {
-        const current = await response.json();
-        assert.equal(current.connectionMode,'direct-only');
-        return current.code;
-      }
-      await delay(200);
-    }
-    throw new Error('监督进程恢复后无法取得当前本地路由');
+    const response = await waitFor(
+      () => fetch(base + '/api/mobile/connection/pair', { method: 'POST', headers: { 'X-Pilot-Token': token, 'Content-Type': 'application/json' }, body: '{}' }),
+      res => res.ok,
+      { timeoutMs: 15000, intervalMs: 200, onTimeout: '监督进程恢复后无法取得当前本地路由' },
+    );
+    const current = await response.json();
+    assert.equal(current.connectionMode, 'direct-only');
+    return current.code;
   }
   if (recovery) {
     const oldPid = (await bridgeProcesses('stop')).at(0);
@@ -129,17 +109,15 @@ try {
     const recovered = await waitBridge(oldPid);
     // 先确认监督进程已自动恢复，再读取纯直连的当前路由；自动模式始终沿用旧票据。
     await checkPhone(await reconnectCode(), true);
-    assert.deepEqual(await bridgeProcesses(),[recovered],'读取路由不能替代监督进程恢复或另起连接桥');
+    assert.deepEqual(await bridgeProcesses(), [recovered], '读取路由不能替代监督进程恢复或另起连接桥');
     const child = (await bridgeProcesses()).at(0);
     await stop(true);
-    const deadline = Date.now() + 10000;
-    let orphan = true;
-    while (orphan && Date.now() < deadline) {
-      const result = await exec(java,[probe,child,path.join(data,'mobile'),'alive'],{timeout:10000});
-      orphan = result.stdout.trim() === 'true';
-      if (orphan) await delay(500);
-    }
-    assert.equal(orphan,false,'强制退出后台后不能遗留连接桥');
+    const orphan = await waitFor(
+      async () => (await exec(java, [probe, child, path.join(data, 'mobile'), 'alive'], { timeout: 10000 })).stdout.trim() === 'true',
+      alive => !alive,
+      { timeoutMs: 10000, intervalMs: 500 },
+    );
+    assert.equal(orphan, false, '强制退出后台后不能遗留连接桥');
     base = await start();
     await waitBridge();
     await checkPhone(await reconnectCode(), true);
@@ -148,21 +126,20 @@ try {
   if (!recovery) {
     await stop();
     base = await start(libraries, 'https://127.0.0.1:9');
-    const status = await (await fetch(base+'/api/mobile/connection', {headers:{'X-Pilot-Token':token}})).json();
-    assert.equal(status.connectionMode,'relay-enabled','只有明确配置后端中继才进入中继模式');
+    const status = await (await fetch(base + '/api/mobile/connection', { headers: { 'X-Pilot-Token': token } })).json();
+    assert.equal(status.connectionMode, 'relay-enabled', '只有明确配置后端中继才进入中继模式');
     const started = Date.now();
-    const response = await fetch(base+'/api/mobile/connection/pair',{method:'POST',headers:{'X-Pilot-Token':token,'Content-Type':'application/json'},body:'{}'});
-    assert.equal(response.status,200);
+    const response = await fetch(base + '/api/mobile/connection/pair', { method: 'POST', headers: { 'X-Pilot-Token': token, 'Content-Type': 'application/json' }, body: '{}' });
+    assert.equal(response.status, 200);
     const configured = await response.json();
-    assert.ok(configured.code && configured.image && Date.now()-started < 3000,'自建中继不可用也应在本地快速出码');
-    const deadline = Date.now()+25000;
-    let current;
-    do {
-      await delay(500);
-      current = await (await fetch(base+'/api/mobile/connection',{headers:{'X-Pilot-Token':token}})).json();
-    } while (current.networkState !== 'unavailable' && Date.now()<deadline);
-    assert.equal(current.networkState,'unavailable');
-    assert.equal(current.invite.code,configured.code,'网络准备失败不能销毁或刷新授权');
+    assert.ok(configured.code && configured.image && Date.now() - started < 3000, '自建中继不可用也应在本地快速出码');
+    const current = await waitFor(
+      async () => (await fetch(base + '/api/mobile/connection', { headers: { 'X-Pilot-Token': token } })).json(),
+      state => state.networkState === 'unavailable',
+      { timeoutMs: 25000, intervalMs: 500 },
+    );
+    assert.equal(current.networkState, 'unavailable');
+    assert.equal(current.invite.code, configured.code, '网络准备失败不能销毁或刷新授权');
     console.log('PASS: 自建中继故障只影响后台就绪状态，本地仍快速出码；不回退默认公共中继');
     await stop();
     base = await start(libraries, '', 'direct');

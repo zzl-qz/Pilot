@@ -87,38 +87,49 @@ data class Measurement(val label: String, val samples: List<Sample>) {
  */
 suspend fun measure(target: String, relays: List<String>, samples: Int, label: String): Measurement {
     require(samples in 1..200) { "样本数需要在 1..200 之间" }
-    val endpoint = createEndpoint(SecretKey.generate().toBytes(), relays, relays.isEmpty())
+    val endpoint = createEndpoint(SecretKey.generate().use { it.toBytes() }, relays, relays.isEmpty())
     val collected = mutableListOf<Sample>()
     try {
         endpoint.online()
         repeat(samples) {
             val started = System.nanoTime()
-            val connection = endpoint.connect(EndpointTicket.fromString(target).endpointAddr(), Protocol.alpn)
-            val connected = System.nanoTime()
-            val stream = connection.openBi()
-            val send = stream.send()
-            val recv = stream.recv()
-            Protocol.write(send, "pilot-latency-probe".toByteArray())
-            send.finish()
-            Protocol.read(recv)
-            val received = System.nanoTime()
-            val path = connection.paths().firstOrNull { it.isSelected }
-            collected += Sample(
-                connectMs = (connected - started) / 1_000_000,
-                firstByteMs = (received - connected) / 1_000_000,
-                rttMs = path?.rttMs?.toLong(),
-                relay = path?.isRelay == true,
-            )
-            recv.close(); send.close(); stream.close(); connection.close(0, byteArrayOf())
+            val connection = EndpointTicket.fromString(target).use { parsed ->
+                parsed.endpointAddr().use { address -> endpoint.connect(address, Protocol.alpn) }
+            }
+            try {
+                val connected = System.nanoTime()
+                connection.openBi().use { stream ->
+                    stream.send().use { send ->
+                        stream.recv().use { recv ->
+                            Protocol.write(send, "pilot-latency-probe".toByteArray())
+                            send.finish()
+                            Protocol.read(recv)
+                            val received = System.nanoTime()
+                            val path = connection.paths().firstOrNull { it.isSelected }
+                            collected += Sample(
+                                connectMs = (connected - started) / 1_000_000,
+                                firstByteMs = (received - connected) / 1_000_000,
+                                rttMs = path?.rttMs?.toLong(),
+                                relay = path?.isRelay == true,
+                            )
+                        }
+                    }
+                }
+            } finally {
+                runCatching { connection.close(0, byteArrayOf()) }
+                runCatching { connection.close() }
+            }
             delay(200)
         }
     } finally {
-        endpoint.shutdown()
+        try { endpoint.shutdown() } finally { runCatching { endpoint.close() } }
     }
     return Measurement(label, collected)
 }
 
+private val prettyJson = Json { prettyPrint = true }
+
 /** 打印一份可直接贴进验证记录的 JSON。 */
 fun Measurement.printJson() {
-    println(Json { prettyPrint = true }.encodeToString(JsonObject.serializer(), summary()))
+    println(prettyJson.encodeToString(JsonObject.serializer(), summary()))
 }

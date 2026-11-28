@@ -25,15 +25,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.pilot.mobile.transport.text
-import com.pilot.mobile.bool
-import com.pilot.mobile.objects
+import com.pilot.mobile.DetailKind
 import com.pilot.mobile.MobileState
 import com.pilot.mobile.PilotViewModel
+import com.pilot.mobile.transport.Protocol
+import com.pilot.mobile.transport.bool
+import com.pilot.mobile.transport.long
+import com.pilot.mobile.transport.objects
+import com.pilot.mobile.transport.text
 import kotlinx.serialization.json.*
 
 @Composable
 fun TaskDetail(state: MobileState, model: PilotViewModel) {
+    val canAct = !state.busy && state.pending == null
     val list = rememberLazyListState()
     var expandedActivity by rememberSaveable(state.selected?.text("id")) { mutableStateOf(false) }
     var editQueue by remember { mutableStateOf(-1) }
@@ -53,8 +57,8 @@ fun TaskDetail(state: MobileState, model: PilotViewModel) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatusDot(if (state.runId.isNotBlank()) "RUNNING" else state.selected?.text("status").orEmpty())
             Text(state.phase.ifBlank { "等待任务" }, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (state.runId.isNotBlank()) TextButton(onClick = { model.control("pause") }, enabled = !state.busy && state.pending == null) { Text("暂停") }
-            else if (state.selected?.text("status") in setOf("PAUSED", "INTERRUPTED", "CANCELLED", "FAILED")) TextButton(onClick = { model.control("continue") }, enabled = !state.busy && state.pending == null) { Text("继续") }
+            if (state.runId.isNotBlank()) TextButton(onClick = { model.control("pause") }, enabled = canAct) { Text("暂停") }
+            else if (state.selected?.text("status") in setOf("PAUSED", "INTERRUPTED", "CANCELLED", "FAILED")) TextButton(onClick = { model.control("continue") }, enabled = canAct) { Text("继续") }
             Box {
                 TextButton(onClick = { showTools = true }, enabled = !state.busy) { Icon(Icons.Outlined.FolderOpen, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("资料") }
                 DropdownMenu(showTools, onDismissRequest = { showTools = false }) {
@@ -67,7 +71,7 @@ fun TaskDetail(state: MobileState, model: PilotViewModel) {
         HorizontalDivider(Modifier.padding(horizontal = 20.dp), color = MaterialTheme.colorScheme.outlineVariant)
         VerdictBadge(state.validation, Modifier.padding(horizontal = 20.dp, vertical = 8.dp).fillMaxWidth())
         LazyColumn(state = list, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-            items(approvals, key = { "approval-${it.text("callId")}" }) { ApprovalCard(it, state.busy || state.pending != null, model, false) }
+            items(approvals, key = { "approval-${it.text("callId")}" }) { ApprovalCard(it, !canAct, model, false) }
             if (activityKeys.size > visibleActivity.size || expandedActivity) item {
                 TextButton(onClick = { expandedActivity = !expandedActivity }) {
                     Icon(if (expandedActivity) Icons.Outlined.ExpandLess else Icons.Outlined.ChevronRight, null, Modifier.size(18.dp))
@@ -97,10 +101,10 @@ fun TaskDetail(state: MobileState, model: PilotViewModel) {
                 PilotPanel(Modifier.fillMaxWidth()) {
                     Text(state.queued[index], maxLines = 3, overflow = TextOverflow.Ellipsis, fontSize = 14.sp)
                     Row(Modifier.horizontalScroll(rememberScrollState())) {
-                        TextButton(onClick = { model.steer(index) }, enabled = state.runId.isNotBlank() && !state.busy && state.pending == null) { Text("引导") }
-                        TextButton(onClick = { editQueue = index; queueText = state.queued[index]; editingRevision = state.queueRevision }, enabled = !state.busy && state.pending == null) { Text("编辑") }
-                        if (index > 0) TextButton(onClick = { model.queue(index, "up") }, enabled = !state.busy && state.pending == null) { Text("上移") }
-                        IconButton(onClick = { removeQueue = index; editingRevision = state.queueRevision }, enabled = !state.busy && state.pending == null) { Icon(Icons.Outlined.DeleteOutline, "删除队列第 ${index + 1} 条") }
+                        TextButton(onClick = { model.steer(index) }, enabled = state.runId.isNotBlank() && canAct) { Text("引导") }
+                        TextButton(onClick = { editQueue = index; queueText = state.queued[index]; editingRevision = state.queueRevision }, enabled = canAct) { Text("编辑") }
+                        if (index > 0) TextButton(onClick = { model.queue(index, "up") }, enabled = canAct) { Text("上移") }
+                        IconButton(onClick = { removeQueue = index; editingRevision = state.queueRevision }, enabled = canAct) { Icon(Icons.Outlined.DeleteOutline, "删除队列第 ${index + 1} 条") }
                     }
                 }
             }
@@ -110,8 +114,11 @@ fun TaskDetail(state: MobileState, model: PilotViewModel) {
             }
         }
     }
-    if (editQueue >= 0) AlertDialog(onDismissRequest = { editQueue = -1 }, title = { Text("编辑待发送内容") }, text = { OutlinedTextField(queueText, { queueText = it.take(32_000) }, maxLines = 8) },
-        confirmButton = { TextButton(onClick = { model.queue(editQueue, "edit", queueText, editingRevision); editQueue = -1 }, enabled = queueText.isNotBlank()) { Text("保存") } }, dismissButton = { TextButton(onClick = { editQueue = -1 }) { Text("取消") } })
+    if (editQueue >= 0) TextInputDialog(
+        title = "编辑待发送内容", value = queueText, onValueChange = { queueText = it }, maxLength = 32_000, maxLines = 8,
+        onConfirm = { model.queue(editQueue, "edit", queueText, editingRevision); editQueue = -1 },
+        onDismiss = { editQueue = -1 },
+    )
     if (removeQueue >= 0) AlertDialog(onDismissRequest = { removeQueue = -1 }, title = { Text("删除这条待发送内容？") }, text = { Text(state.queued.getOrNull(removeQueue).orEmpty(), maxLines = 5) },
         confirmButton = { TextButton(onClick = { model.queue(removeQueue, "remove", expectedRevision = editingRevision); removeQueue = -1 }) { Text("删除") } }, dismissButton = { TextButton(onClick = { removeQueue = -1 }) { Text("取消") } })
 }
@@ -157,6 +164,7 @@ fun ApprovalCard(approval: JsonObject, busy: Boolean, model: PilotViewModel, glo
 
 @Composable
 fun Composer(state: MobileState, model: PilotViewModel, onAttach: () -> Unit, onVoice: () -> Unit) {
+    val canAct = !state.busy && state.pending == null
     Box(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).navigationBarsPadding().imePadding().padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
     Column(Modifier.widthIn(max = 800.dp).fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(24.dp)).padding(8.dp)) {
         if (state.attachments.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -173,8 +181,8 @@ fun Composer(state: MobileState, model: PilotViewModel, onAttach: () -> Unit, on
             IconButton(onClick = onVoice, enabled = !state.busy) { Icon(Icons.Outlined.MicNone, "语音输入") }
             if (state.runId.isNotBlank()) Text("发送后排队", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             else Spacer(Modifier.weight(1f))
-            if (state.draft.isBlank() && state.attachments.isEmpty() && state.runId.isNotBlank()) FilledTonalButton(onClick = { model.control("cancel") }, enabled = !state.busy && state.pending == null, contentPadding = PaddingValues(horizontal = 12.dp), modifier = Modifier.heightIn(min = 48.dp)) { Icon(Icons.Outlined.Stop, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("停止") }
-            else Button(onClick = model::send, enabled = (state.draft.isNotBlank() || state.attachments.isNotEmpty()) && !state.busy && state.pending == null, contentPadding = PaddingValues(horizontal = 12.dp), modifier = Modifier.heightIn(min = 48.dp)) { Icon(Icons.Outlined.ArrowUpward, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("发送") }
+            if (state.draft.isBlank() && state.attachments.isEmpty() && state.runId.isNotBlank()) FilledTonalButton(onClick = { model.control("cancel") }, enabled = canAct, contentPadding = PaddingValues(horizontal = 12.dp), modifier = Modifier.heightIn(min = 48.dp)) { Icon(Icons.Outlined.Stop, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("停止") }
+            else Button(onClick = model::send, enabled = (state.draft.isNotBlank() || state.attachments.isNotEmpty()) && canAct, contentPadding = PaddingValues(horizontal = 12.dp), modifier = Modifier.heightIn(min = 48.dp)) { Icon(Icons.Outlined.ArrowUpward, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("发送") }
         }
     }
     }
@@ -186,7 +194,7 @@ fun DetailSheet(state: MobileState, model: PilotViewModel) {
     val data = state.detail ?: return
     var downloadProduct by rememberSaveable { mutableStateOf("") }
     val saveFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
-        if (uri != null && downloadProduct.isNotBlank()) model.download(Json.parseToJsonElement(downloadProduct).jsonObject, uri)
+        if (uri != null && downloadProduct.isNotBlank()) model.download(Protocol.json.parseToJsonElement(downloadProduct).jsonObject, uri)
         downloadProduct = ""
     }
     val maxHeight = LocalConfiguration.current.screenHeightDp.dp * 0.9f
@@ -198,25 +206,29 @@ fun DetailSheet(state: MobileState, model: PilotViewModel) {
                 HorizontalDivider()
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 16.dp)) {
                     when {
-                        state.detailTitle == "任务成果" -> {
-                            if (data.objects("items").isEmpty()) item { Text("此任务还没有可下载的成果。") }
-                            items(data.objects("items")) { product -> Column {
-                                Text(product.text("title"), fontWeight = FontWeight.Medium); Text(product.text("summary"), fontSize = 13.sp)
-                                Row {
-                                    TextButton(onClick = { model.previewProduct(product) }, enabled = !state.busy) { Text("预览") }
-                                    TextButton(onClick = { downloadProduct = product.toString(); saveFile.launch(product.text("filename")) }, enabled = !state.busy && (product.text("bytes").toLongOrNull() ?: 0) <= 16 * 1024 * 1024) { Text("保存到手机") }
+                        state.detailKind == DetailKind.PRODUCTS -> {
+                            val items = data.objects("items")
+                            if (items.isEmpty()) item { Text("此任务还没有可下载的成果。") }
+                            items(items) { product ->
+                                val bytes = product.long("bytes") ?: 0
+                                Column {
+                                    Text(product.text("title"), fontWeight = FontWeight.Medium); Text(product.text("summary"), fontSize = 13.sp)
+                                    Row {
+                                        TextButton(onClick = { model.previewProduct(product) }, enabled = !state.busy) { Text("预览") }
+                                        TextButton(onClick = { downloadProduct = product.toString(); saveFile.launch(product.text("filename")) }, enabled = !state.busy && bytes <= Protocol.MAX_RESPONSE) { Text("保存到手机") }
+                                    }
+                                    if (bytes > Protocol.MAX_RESPONSE) Text("超过 16 MB，请在电脑端下载。", fontSize = 12.sp)
                                 }
-                                if ((product.text("bytes").toLongOrNull() ?: 0) > 16 * 1024 * 1024) Text("超过 16 MB，请在电脑端下载。", fontSize = 12.sp)
-                            } }
+                            }
                         }
-                        state.detailTitle == "上下文与用量" -> {
+                        state.detailKind == DetailKind.CONTEXT -> {
                             item { Text("${data.text("usedTokens")} / ${data.text("limitTokens")} Tokens · ${data.text("percent")}%") }
                             item { LinearProgressIndicator(progress = { (data.text("percent").toFloatOrNull() ?: 0f).coerceIn(0f, 100f) / 100f }, modifier = Modifier.fillMaxWidth()); Text(if (data.bool("estimated")) "上下文组成是估算值" else "模型上下文用量", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                             items(data.objects("segments")) { segment -> Row { Text(mapOf("system" to "系统提示", "user" to "用户消息", "assistant" to "助手消息", "tool" to "工具结果")[segment.text("role")] ?: segment.text("role"), Modifier.weight(1f)); Text("${segment.text("messages")} 条 · ${segment.text("chars")} 字符") } }
                             data["usage"]?.let { usage -> item { ReadableValue(usage) } }
                         }
-                        data.containsKey("diff") -> {
-                            if (state.detailTitle == "工作区改动") item { Text("此处包含工作区中的全部未提交改动，可能来自其他任务。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp) }
+                        state.detailKind == DetailKind.WORKSPACE_DIFF || state.detailKind == DetailKind.FILE_DIFF || data.containsKey("diff") -> {
+                            if (state.detailKind == DetailKind.WORKSPACE_DIFF) item { Text("此处包含工作区中的全部未提交改动，可能来自其他任务。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp) }
                             if (data.text("error").isNotBlank()) item { Text(data.text("error"), color = MaterialTheme.colorScheme.error) }
                             items(data.objects("files")) { file -> TextButton(onClick = { model.fileDiff(file.text("path")) }, enabled = !state.busy) { Text("${file.text("path")}  +${file.text("added")} −${file.text("removed")}") } }
                             item { SelectionContainer { Text(data.text("diff").ifBlank { "暂无文本差异" }, fontFamily = FontFamily.Monospace, fontSize = 12.sp, modifier = Modifier.horizontalScroll(rememberScrollState())) } }
@@ -233,7 +245,7 @@ fun DetailSheet(state: MobileState, model: PilotViewModel) {
 @Composable
 private fun ReadableValue(value: JsonElement, depth: Int = 0) {
     if (depth > 5 || value is JsonNull) return
-    val labels = mapOf("summary" to "摘要", "title" to "标题", "state" to "状态", "changedFiles" to "修改文件", "checks" to "验证", "openSteps" to "未完成步骤", "content" to "正文", "text" to "正文", "research" to "调研", "verification" to "验证", "acceptance" to "验收", "verificationDetail" to "验证详情", "inputTokens" to "输入 Tokens", "outputTokens" to "输出 Tokens", "cachedInputTokens" to "缓存命中 Tokens", "cacheHitRate" to "缓存命中率", "cost" to "费用", "estimatedCost" to "费用估算", "currency" to "币种", "model" to "模型", "requestCount" to "请求数")
+    val labels = mapOf("summary" to "摘要", "title" to "标题", "state" to "状态", "changedFiles" to "修改文件", "checks" to "验证", "openSteps" to "未完成步骤", "content" to "正文", "text" to "正文", "research" to "调研", "verification" to "验证", "acceptance" to "验收", "verificationDetail" to "验证详情", "inputTokens" to "输入 Tokens", "outputTokens" to "输出 Tokens", "cachedInputTokens" to "缓存命中 Tokens", "cacheHitRate" to "缓存命中率", "cost" to "费用", "estimatedCost" to "费用估算", "currency" to "币种", "model" to "模型", "requestCount" to "请求数", "pricedRequests" to "计价请求")
     when (value) {
         is JsonObject -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             value.entries.filter { (key, entry) -> key !in setOf("id", "revision", "sessionId", "runId", "scheduleId", "workspace", "read", "handled", "at", "createdAt", "updatedAt") && entry !is JsonNull }.forEach { (key, entry) ->

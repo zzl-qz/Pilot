@@ -70,9 +70,7 @@ class PairingAdmin(
                 path == "/api/devices" && e.requestMethod == "GET" ->
                     Protocol.json.encodeToString(ListSerializer(Device.serializer()), store.devices())
                 path == "/api/pair" && e.requestMethod == "POST" -> {
-                    val bytes = e.requestBody.readNBytes(4097)
-                    require(bytes.size <= 4096)
-                    val reuse = bytes.isNotEmpty() && Protocol.json.parseToJsonElement(String(bytes)).jsonObject["reuse"]?.jsonPrimitive?.booleanOrNull == true
+                    val reuse = readJsonBody(e)?.bool("reuse") == true
                     val current = if (reuse) currentPayload() else null
                     (current ?: synchronized(this) {
                         if (reuse) currentPayload()?.let { return@synchronized it }
@@ -82,9 +80,7 @@ class PairingAdmin(
                     }).toString()
                 }
                 path == "/api/revoke" && e.requestMethod == "POST" -> {
-                    val raw = e.requestBody.readNBytes(4097)
-                    require(raw.size <= 4096)
-                    val id = Protocol.json.parseToJsonElement(String(raw)).jsonObject["id"]!!.jsonPrimitive.content
+                    val id = readJsonBody(e)!!["id"]!!.jsonPrimitive.content
                     bridge.revoke(id); "{}"
                 }
                 else -> { respond(e, 404, "text/plain", byteArrayOf()); return }
@@ -96,6 +92,12 @@ class PairingAdmin(
             val type = when { resource.endsWith(".js") -> "text/javascript"; resource.endsWith(".css") -> "text/css"; else -> "text/html" }
             respond(e, 200, "$type; charset=utf-8", bytes)
         } else respond(e, 404, "text/plain", byteArrayOf())
+    }
+
+    private fun readJsonBody(e: HttpExchange): JsonObject? {
+        val bytes = e.requestBody.readNBytes(4097)
+        require(bytes.size <= 4096)
+        return if (bytes.isEmpty()) null else Protocol.json.parseToJsonElement(String(bytes)).jsonObject
     }
 
     private fun devicePayload(device: Device): JsonObject = buildJsonObject {

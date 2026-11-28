@@ -17,18 +17,32 @@ suspend fun relayProbeServer(relays: List<String>) {
     try {
         withTimeout(60_000) {
             endpoint.online()
-            val address = EndpointAddr(endpoint.id(), endpoint.addr().relayUrl(), emptyList())
-            println("PROBE_TICKET ${EndpointTicket.fromAddr(address)}")
-            val connection = endpoint.acceptNext()!!.accept().connect()
-            val stream = connection.acceptBi()
-            val recv = stream.recv(); val send = stream.send()
-            val message = Protocol.read(recv)
-            check(String(message) == "pilot-relay-probe")
-            Protocol.write(send, message); send.finish()
-            connection.closed()
-            recv.close(); send.close(); stream.close(); connection.close()
+            val ticket = endpoint.id().use { id ->
+                val relay = endpoint.addr().use { it.relayUrl() }
+                EndpointAddr(id, relay, emptyList()).use { address ->
+                    EndpointTicket.fromAddr(address).use { it.toString() }
+                }
+            }
+            println("PROBE_TICKET $ticket")
+            val connection = endpoint.acceptNext()!!.use { incoming ->
+                incoming.accept().use { it.connect() }
+            }
+            connection.use {
+                connection.acceptBi().use { stream ->
+                    stream.recv().use { recv ->
+                        stream.send().use { send ->
+                            val message = Protocol.read(recv)
+                            check(String(message) == "pilot-relay-probe")
+                            Protocol.write(send, message); send.finish()
+                            connection.closed()
+                        }
+                    }
+                }
+            }
         }
-    } finally { endpoint.shutdown() }
+    } finally {
+        try { endpoint.shutdown() } finally { runCatching { endpoint.close() } }
+    }
 }
 
 suspend fun relayProbeClient(ticket: String, relays: List<String>) {
@@ -36,16 +50,27 @@ suspend fun relayProbeClient(ticket: String, relays: List<String>) {
     try {
         withTimeout(45_000) {
             endpoint.online()
-            val connection = endpoint.connect(EndpointTicket.fromString(ticket).endpointAddr(), Protocol.alpn)
-            val stream = connection.openBi()
-            val send = stream.send(); val recv = stream.recv()
-            Protocol.write(send, "pilot-relay-probe".toByteArray()); send.finish()
-            check(String(Protocol.read(recv)) == "pilot-relay-probe")
-            val selected = connection.paths().firstOrNull { it.isSelected }
-            check(selected?.isRelay == true) { "探针未走中继，不能作为回退通过证据" }
-            println("PASS: 固定探针经公网中继往返，RTT ${selected.rttMs} ms")
-            connection.close(0, byteArrayOf())
-            recv.close(); send.close(); stream.close(); connection.close()
+            val connection = EndpointTicket.fromString(ticket).use { parsed ->
+                parsed.endpointAddr().use { address -> endpoint.connect(address, Protocol.alpn) }
+            }
+            try {
+                connection.openBi().use { stream ->
+                    stream.send().use { send ->
+                        stream.recv().use { recv ->
+                            Protocol.write(send, "pilot-relay-probe".toByteArray()); send.finish()
+                            check(String(Protocol.read(recv)) == "pilot-relay-probe")
+                            val selected = connection.paths().firstOrNull { it.isSelected }
+                            check(selected?.isRelay == true) { "探针未走中继，不能作为回退通过证据" }
+                            println("PASS: 固定探针经公网中继往返，RTT ${selected.rttMs} ms")
+                        }
+                    }
+                }
+            } finally {
+                runCatching { connection.close(0, byteArrayOf()) }
+                runCatching { connection.close() }
+            }
         }
-    } finally { endpoint.shutdown() }
+    } finally {
+        try { endpoint.shutdown() } finally { runCatching { endpoint.close() } }
+    }
 }

@@ -21,9 +21,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.pilot.mobile.transport.bool
+import com.pilot.mobile.transport.objects
 import com.pilot.mobile.transport.text
-import com.pilot.mobile.bool
-import com.pilot.mobile.objects
 import com.pilot.mobile.statusLabel
 import com.pilot.mobile.MobileState
 import com.pilot.mobile.PilotViewModel
@@ -170,15 +170,25 @@ fun ProjectsScreen(state: MobileState, model: PilotViewModel) {
             }
         }
     }
-    if (adding || renaming != null) AlertDialog(onDismissRequest = { adding = false; renaming = null }, title = { Text(if (adding) "添加项目" else "重命名项目") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedTextField(name, { name = it.take(100) }, label = { Text("项目名称") })
-            if (adding) { Text(folder.ifBlank { "请选择电脑上的目录" }, fontSize = 13.sp); OutlinedButton(onClick = { model.browse() }, enabled = !state.busy) { Text("浏览电脑目录") } }
-        }
-    }, confirmButton = { TextButton(onClick = {
-        if (adding) model.createProject(name, folder) else model.renameProject(renaming!!, name)
-        adding = false; renaming = null
-    }, enabled = !state.busy && name.isNotBlank() && (!adding || folder.isNotBlank())) { Text("保存") } }, dismissButton = { TextButton(onClick = { adding = false; renaming = null }) { Text("取消") } })
+    if (adding || renaming != null) TextInputDialog(
+        title = if (adding) "添加项目" else "重命名项目",
+        value = name,
+        onValueChange = { name = it },
+        label = "项目名称",
+        maxLength = 100,
+        confirmEnabled = !state.busy && name.isNotBlank() && (!adding || folder.isNotBlank()),
+        onConfirm = {
+            if (adding) model.createProject(name, folder) else model.renameProject(renaming!!, name)
+            adding = false; renaming = null
+        },
+        onDismiss = { adding = false; renaming = null },
+        extra = if (adding) {
+            {
+                Text(folder.ifBlank { "请选择电脑上的目录" }, fontSize = 13.sp)
+                OutlinedButton(onClick = { model.browse() }, enabled = !state.busy) { Text("浏览电脑目录") }
+            }
+        } else null,
+    )
     state.browse?.let { browse -> AlertDialog(onDismissRequest = model::clearBrowse, title = { Text("选择电脑目录") }, text = {
         Column {
             Text(browse.text("path"), fontSize = 13.sp)
@@ -196,7 +206,7 @@ fun InboxScreen(state: MobileState, model: PilotViewModel) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         if (state.approvals.isEmpty() && state.results.isEmpty()) item { EmptyState("暂时没有待处理事项", "审批、任务完成和失败结果会汇总在这里。") }
         if (state.approvals.isNotEmpty()) item { SectionTitle("需要你的确认", "${state.approvals.size} 项") }
-        items(state.approvals, key = { "approval-${it.text("callId")}" }) { ApprovalCard(it, state.busy, model, true) }
+        items(state.approvals, key = { "approval-${it.text("callId")}" }) { ApprovalCard(it, state.busy || state.pending != null, model, true) }
         if (state.results.isNotEmpty()) item { SectionTitle("任务结果", "${state.results.size} 项") }
         items(state.results, key = { "result-${it.text("id")}" }) { item ->
             PilotPanel(Modifier.fillMaxWidth()) {
@@ -237,10 +247,9 @@ fun DevicesScreen(state: MobileState, model: PilotViewModel, scan: () -> Unit, p
         item { SectionTitle("连接说明"); Text("每台电脑的项目、草稿与待核对指令分别保存。断开连接不会停止电脑上的任务。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         item { Text("授权范围：这台电脑上的 Pilot 项目和任务。要撤销手机权限，请在电脑左侧“连接手机 → 已配对设备”中移除。", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         item {
-            val configured = state.computers.firstOrNull { it.id == state.computerId }?.relays?.isNotEmpty() == true
-            val automatic = state.computers.firstOrNull { it.id == state.computerId }?.development == true
-            Text(if (configured) "电脑端已配置中继；连接优先尝试直连，必要时使用已配置的中继。"
-                else if (automatic) "自动模式已启用公共连接服务，尽力直连，必要时经中继。"
+            val current = state.computers.firstOrNull { it.id == state.computerId }
+            Text(if (current?.relays?.isNotEmpty() == true) "电脑端已配置中继；连接优先尝试直连，必要时使用已配置的中继。"
+                else if (current?.development == true) "自动模式已启用公共连接服务，尽力直连，必要时经中继。"
                 else "仅尝试 P2P 直连。两端需有可互达的网络地址。",
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }

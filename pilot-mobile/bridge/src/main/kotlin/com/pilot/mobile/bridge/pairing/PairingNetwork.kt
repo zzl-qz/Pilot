@@ -58,7 +58,6 @@ internal class PairingNetwork(
                         }
                     }
                     hint = ""
-                    if (state == "unavailable") hint = withTimeoutOrNull(3_000) { diagnose() }.orEmpty()
                 } catch (error: CancellationException) {
                     currentCoroutineContext().ensureActive()
                     state = if (environment?.availability == "none") "offline" else "unavailable"
@@ -66,8 +65,11 @@ internal class PairingNetwork(
                     state = if (environment?.availability == "none") "offline" else "unavailable"
                 }
                 checkedAt = System.currentTimeMillis()
-                if (state == "unavailable" && hint.isEmpty())
-                    hint = runCatching { withTimeout(3_000) { diagnose() } }.getOrDefault("")
+                if (state == "unavailable" && hint.isEmpty()) {
+                    hint = try { withTimeoutOrNull(3_000) { diagnose() }.orEmpty() }
+                    catch (error: CancellationException) { currentCoroutineContext().ensureActive(); "" }
+                    catch (_: Exception) { "" }
+                }
                 delay(if (state == "unavailable" && !initialized) retryMillis else pollMillis)
             }
         }

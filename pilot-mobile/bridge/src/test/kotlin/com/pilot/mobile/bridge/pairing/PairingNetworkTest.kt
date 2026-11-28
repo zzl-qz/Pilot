@@ -169,4 +169,26 @@ class PairingNetworkTest {
             assertEquals("ready", network.snapshot().text("networkState"))
         } finally { network.close(); directory.toFile().deleteRecursively() }
     }
+
+    @Test fun `中继不可用且诊断返回空时不重复调用诊断`() = runBlocking {
+        val directory = Files.createTempDirectory("pilot-single-diagnose")
+        val store = PairingStore(directory)
+        val diagnoses = AtomicInteger()
+        val firstPollDone = CompletableDeferred<Unit>()
+        val network = PairingNetwork(store, "automatic", { "test-ticket" },
+            online = {},
+            relayAvailable = { false },
+            diagnose = {
+                diagnoses.incrementAndGet()
+                firstPollDone.complete(Unit)
+                ""
+            },
+            pollMillis = 60_000, retryMillis = 60_000)
+        try {
+            withTimeout(2_000) { firstPollDone.await() }
+            delay(100)
+            assertEquals("unavailable", network.snapshot().text("networkState"))
+            assertEquals(1, diagnoses.get(), "单轮不可用状态不应连续调用两次 diagnose")
+        } finally { network.close(); directory.toFile().deleteRecursively() }
+    }
 }

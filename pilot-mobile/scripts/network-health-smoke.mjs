@@ -1,36 +1,45 @@
-import {spawn,execFile} from 'node:child_process';
-import {promisify} from 'node:util';
-import {createInterface} from 'node:readline';
-import {randomUUID} from 'node:crypto';
+import { spawn, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { createInterface } from 'node:readline';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import {fileURLToPath} from 'node:url';
-import {createServer} from 'node:http';
-import {connect} from 'node:net';
-const exec=promisify(execFile),root=path.resolve(fileURLToPath(new URL('..',import.meta.url)));
-const name='pilot-network-health-'+randomUUID();
-const libraries=path.join(root,'bridge/build/install/bridge/lib'),tests=path.join(root,'bridge/build/classes/kotlin/test');
-const java=process.env.JAVA_HOME?path.join(process.env.JAVA_HOME,'bin',process.platform==='win32'?'java.exe':'java'):'java';
+import { fileURLToPath } from 'node:url';
+import { createServer } from 'node:http';
+import { connect } from 'node:net';
+import { dockerJavaProbeArgs, resolveJava } from './smoke-helpers.mjs';
+
+const exec = promisify(execFile), root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
+const name = 'pilot-network-health-' + randomUUID();
+const libraries = path.join(root, 'bridge/build/install/bridge/lib'), tests = path.join(root, 'bridge/build/classes/kotlin/test');
+const java = resolveJava();
 // 仅验收用的短时代理，认证且只允许 iroh 服务的 443 CONNECT；不解密 TLS。
-const proxy=process.argv.includes('--with-proxy')?createServer((req,res)=>res.writeHead(405).end()):null;
-const tunnels=new Set(),password=randomUUID();
-let proxyConnections=0;
-if(proxy){
- proxy.on('connect',(req,socket,head)=>{
-  let target;try{target=new URL('https://'+req.url);}catch{socket.destroy();return;}
-  if(req.headers['proxy-authorization']!=='Basic '+Buffer.from('fixture:'+password).toString('base64')||
-     !/(^|\.)iroh\.(link|network)\.?$/i.test(target.hostname)||!['','443'].includes(target.port)){socket.destroy();return;}
-  const upstream=connect(443,target.hostname,()=>{proxyConnections++;socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');if(head.length)upstream.write(head);socket.pipe(upstream);upstream.pipe(socket);});
-  for(const item of [socket,upstream]){tunnels.add(item);item.on('close',()=>tunnels.delete(item));item.on('error',()=>{socket.destroy();upstream.destroy();});}
- });
- await new Promise((resolve,reject)=>{proxy.once('error',reject);proxy.listen(0,'0.0.0.0',resolve);});
+const proxy = process.argv.includes('--with-proxy') ? createServer((req, res) => res.writeHead(405).end()) : null;
+const tunnels = new Set(), password = randomUUID();
+let proxyConnections = 0;
+if (proxy) {
+  proxy.on('connect', (req, socket, head) => {
+    let target; try { target = new URL('https://' + req.url); } catch { socket.destroy(); return; }
+    if (req.headers['proxy-authorization'] !== 'Basic ' + Buffer.from('fixture:' + password).toString('base64') ||
+        !/(^|\.)iroh\.(link|network)\.?$/i.test(target.hostname) || !['', '443'].includes(target.port)) { socket.destroy(); return; }
+    const upstream = connect(443, target.hostname, () => { proxyConnections++; socket.write('HTTP/1.1 200 Connection Established\r\n\r\n'); if (head.length) upstream.write(head); socket.pipe(upstream); upstream.pipe(socket); });
+    for (const item of [socket, upstream]) { tunnels.add(item); item.on('close', () => tunnels.delete(item)); item.on('error', () => { socket.destroy(); upstream.destroy(); }); }
+  });
+  await new Promise((resolve, reject) => { proxy.once('error', reject); proxy.listen(0, '0.0.0.0', resolve); });
 }
-const args=['run','-i','--rm','--pull','never','--name',name,'--read-only','--tmpfs','/tmp:rw,exec,nosuid,size=512m','--network','bridge','-v',libraries+':/probe:ro','-v',tests+':/probe-test:ro'];
-if(proxy){
- const address='http://fixture:'+password+'@host.docker.internal:'+proxy.address().port;
- args.push('--env','HTTP_PROXY='+address,'--env','HTTPS_PROXY='+address);
- if(process.platform==='linux')args.push('--add-host','host.docker.internal:host-gateway');
+const dockerArgs = [];
+if (proxy) {
+  const address = 'http://fixture:' + password + '@host.docker.internal:' + proxy.address().port;
+  dockerArgs.push('--env', 'HTTP_PROXY=' + address, '--env', 'HTTPS_PROXY=' + address);
+  if (process.platform === 'linux') dockerArgs.push('--add-host', 'host.docker.internal:host-gateway');
 }
-args.push('--entrypoint','java',process.env.PILOT_PROBE_JAVA_IMAGE||'maven:3.9-eclipse-temurin-25','--enable-native-access=ALL-UNNAMED','-cp','/probe-test:/probe/*','com.pilot.mobile.bridge.NetworkHealthSmokeKt');
+const args = dockerJavaProbeArgs({
+  interactive: true,
+  name,
+  mounts: [`${libraries}:/probe:ro`, `${tests}:/probe-test:ro`],
+  dockerArgs,
+  classpath: '/probe-test:/probe/*',
+  entryArgs: ['com.pilot.mobile.bridge.NetworkHealthSmokeKt'],
+});
 const child=spawn('docker',args,{stdio:['pipe','pipe','pipe']});
 const lines=createInterface({input:child.stdout});
 let stage=0,passed=false,ticket;

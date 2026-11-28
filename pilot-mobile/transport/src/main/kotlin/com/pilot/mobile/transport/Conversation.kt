@@ -4,6 +4,9 @@ import kotlinx.serialization.json.*
 import java.io.ByteArrayOutputStream
 
 fun JsonObject.text(key: String): String = (this[key] as? JsonPrimitive)?.contentOrNull ?: ""
+fun JsonObject.bool(key: String): Boolean = (this[key] as? JsonPrimitive)?.booleanOrNull == true
+fun JsonObject.long(key: String): Long? = text(key).toLongOrNull()
+fun JsonObject.objects(key: String): List<JsonObject> = (this[key] as? JsonArray)?.mapNotNull { it as? JsonObject }.orEmpty()
 
 data class TranscriptRow(val key: String, val role: String, val text: String)
 
@@ -35,7 +38,7 @@ class Conversation(private val maxRows: Int = 300) {
         val type = event.text("type")
         val payload = event["payload"] as? JsonObject ?: return
         if (type == "stream.ready" || type == "stream.reset") {
-            val revision = payload.text("historyRevision").toLongOrNull() ?: error("历史版本无效")
+            val revision = payload.long("historyRevision") ?: error("历史版本无效")
             if (type == "stream.reset" || historyRevision != null && historyRevision != revision) {
                 rows.clear(); rowChars = 0; preview = ""; thinking = ""; cursor = 0; runId = ""; phase = "重新加载历史"
                 needsReplay = true
@@ -45,27 +48,27 @@ class Conversation(private val maxRows: Int = 300) {
         }
         if (needsReplay) return
         if (type == "stream.preview") {
-            require(payload.text("historyRevision").toLongOrNull() == historyRevision && payload.text("baseSequence").toLongOrNull() == cursor) { "临时输出历史边界不匹配" }
+            require(payload.long("historyRevision") == historyRevision && payload.long("baseSequence") == cursor) { "临时输出历史边界不匹配" }
             require(payload.text("runId").isBlank() || runId.isBlank() || payload.text("runId") == runId) { "临时输出运行不匹配" }
             preview = payload.text("text").take(128_000)
             val reasoning = payload.text("reasoning")
             if (reasoning.isNotBlank()) thinking = reasoning.take(4_000)
-            previewId = payload.text("previewId"); previewOffset = payload.text("previewOffset").toLongOrNull() ?: error("临时输出偏移无效")
-            if (payload["complete"]?.jsonPrimitive?.booleanOrNull != true) phase = "临时输出未完整保留，等待正式结果"
+            previewId = payload.text("previewId"); previewOffset = payload.long("previewOffset") ?: error("临时输出偏移无效")
+            if (!payload.bool("complete")) phase = "临时输出未完整保留，等待正式结果"
             return
         }
         if (type.startsWith("stream.")) return
         if (type == "assistant.reasoning") {
-            val reset = (payload["reset"] as? JsonPrimitive)?.booleanOrNull == true
+            val reset = payload.bool("reset")
             thinking = ((if (reset) "" else thinking) + payload.text("text")).takeLast(4_000)
             if (thinking.isNotBlank()) phase = "正在思考"
             return
         }
-        val ephemeral = type in setOf("assistant.preview", "assistant.reasoning")
-        val sequence = event.text("sequence").toLongOrNull() ?: return
+        val ephemeral = type == "assistant.preview"
+        val sequence = event.long("sequence") ?: return
         if (!ephemeral && sequence <= cursor) return
         if (ephemeral && event.text("previewId").isNotBlank()) {
-            val offset = event.text("previewOffset").toLongOrNull() ?: error("临时增量偏移无效")
+            val offset = event.long("previewOffset") ?: error("临时增量偏移无效")
             if (previewId == event.text("previewId") && offset <= previewOffset) return
             previewId = event.text("previewId"); previewOffset = offset
         }
@@ -79,8 +82,7 @@ class Conversation(private val maxRows: Int = 300) {
             "user.message" -> add(sequence, "user", payload.text("input").ifBlank { payload.text("text") })
             "assistant.preview" -> {
                 // reset：请求重试或输出被判为复读，上一次尝试的片段作废。
-                val reset = (payload["reset"] as? JsonPrimitive)?.booleanOrNull == true
-                if (reset) preview = ""
+                if (payload.bool("reset")) preview = ""
                 else if (id == runId || runId.isBlank()) preview = (preview + payload.text("text")).takeLast(128_000)
             }
             "assistant.delta" -> { preview = ""; thinking = ""; add(sequence, "assistant", payload.text("text")) }
