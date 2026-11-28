@@ -17,7 +17,7 @@ const workspace = '/workspace/pilot';
 const session = id => ({ sessionId: id, title: id === 'two' ? `手机更新 ${revision}` : '第一个任务', workspace, projectId: 'p' });
 const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>Pilot 同步验收</title></head><body><div id="root"></div><script type="module">
 import React from 'react';import {createRoot} from 'react-dom/client';import App from '/src/components/App.jsx';import {useStore} from '/src/store.js';
-import '/src/styles.css';import '/src/shell-vanilla.css';import '/src/styles-addendum.css';import '/src/workbench.css';
+import '/src/styles.css';
 window.store=useStore;window.pageInstance=crypto.randomUUID();
 createRoot(document.getElementById('root')).render(React.createElement(App));
 </script></body></html>`;

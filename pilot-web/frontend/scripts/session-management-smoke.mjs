@@ -13,7 +13,7 @@ const entry = `.sessions-fixture-${process.pid}.html`, file = join(root, entry);
 const projectFolders = ['C:\\工作区\\Pilot', '/workspace/pilot'];
 const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Pilot 会话管理</title><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
 import React from 'react';import {createRoot} from 'react-dom/client';import App from '/src/components/App.jsx';import {useStore} from '/src/store.js';import {api} from '/src/api.js'; import {installSubmissionFixture} from '/scripts/submission-fixture.mjs';
-import '/src/styles.css';import '/src/shell-vanilla.css';import '/src/styles-addendum.css';import '/src/workbench.css';
+import '/src/styles.css';
 document.documentElement.dataset.theme='dark';window.store=useStore;window.api=api;window.cancelled=0;window.archiveAttempts=0;
 const seed=[{id:'recent',title:'完善模型选择与请求同步',createdAt:'2026-11-04T00:00:00Z'}, {id:'older',title:'检查历史会话的恢复行为',createdAt:'2026-10-01T00:00:00Z'}, {id:'third',title:'补充跨平台验证记录',createdAt:'2026-09-01T00:00:00Z'}].map(s=>({...s,sessionId:s.id,projectId:'pilot',status:'COMPLETED',updatedAt:s.createdAt,pinned:false,unread:false,isBlank:false,archived:false}));
 let db=JSON.parse(localStorage.getItem('fixture-sessions')||'null')||seed;const save=()=>localStorage.setItem('fixture-sessions',JSON.stringify(db));

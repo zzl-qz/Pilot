@@ -12,7 +12,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const output = await mkdtemp(join(tmpdir(), 'pilot-notification-ui-'));
 const entry = `.notification-fixture-${process.pid}.html`;
 const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module">
-import React,{Suspense}from'react';import{createRoot}from'react-dom/client';import Notifications from'/src/components/Notifications.jsx';import{UiProvider}from'/src/components/UiProvider.jsx';import{ErrorBoundary}from'/src/components/ErrorBoundary.jsx';import{useStore}from'/src/store.js';import{api}from'/src/api.js';import'/src/styles.css';import'/src/workbench.css';
+import React,{Suspense}from'react';import{createRoot}from'react-dom/client';import Notifications from'/src/components/Notifications.jsx';import{UiProvider}from'/src/components/UiProvider.jsx';import{ErrorBoundary}from'/src/components/ErrorBoundary.jsx';import{useStore}from'/src/store.js';import{api}from'/src/api.js';import'/src/styles.css';
 window.store=useStore;window.receipts=[];window.notices=[];window.failSave=false;window.failRead=false;window.failDeliveries=false;window.failRetry=false;window.crash=true;window.deliveries=[];
 window.TestNotification=class{static permission='denied';static async requestPermission(){return this.permission;}constructor(title,options){this.title=title;this.options=options;notices.push(this);if(options.tag!=='silent-notice')setTimeout(()=>this.options.tag==='error-notice'?this.onerror?.():this.onshow?.(),0);}close(){}};
 window.Notification=window.TestNotification;

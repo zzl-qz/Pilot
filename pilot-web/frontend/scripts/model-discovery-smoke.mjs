@@ -28,7 +28,7 @@ async function until(condition) {
 }
 const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>Pilot 模型选择验收</title></head><body><div id="root"></div><script type="module">
 import React from 'react';import {createRoot} from 'react-dom/client';import App from '/src/components/App.jsx';import {useStore} from '/src/store.js';import {api} from '/src/api.js'; import {installSubmissionFixture} from '/scripts/submission-fixture.mjs';
-import '/src/styles.css';import '/src/shell-vanilla.css';import '/src/styles-addendum.css';import '/src/workbench.css';
+import '/src/styles.css';
 document.documentElement.dataset.theme='dark';
 const real={settings:api.settings,saveModel:api.saveModel,clearModelKey:api.clearModelKey,probeModels:api.probeModels,scanLocalModels:api.scanLocalModels,modelProfiles:api.modelProfiles,activateModelProfile:api.activateModelProfile};
 for(const name of Object.keys(api))if(typeof api[name]==='function')api[name]=async()=>({});Object.assign(api,real);

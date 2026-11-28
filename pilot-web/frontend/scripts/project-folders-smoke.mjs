@@ -13,7 +13,7 @@ const output = await mkdtemp(join(tmpdir(), 'pilot-project-folders-'));
 const entry = `.project-folders-${process.pid}.html`, file = join(root, entry);
 const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"><title>项目目录选择</title></head><body><div id="root"></div><script type="module">
 import React from 'react';import {createRoot} from 'react-dom/client';import {Modals} from '/src/components/Modals.jsx';import {UiProvider} from '/src/components/UiProvider.js';import {useStore} from '/src/store.js';import {api} from '/src/api.js';
-import '/src/styles.css';import '/src/shell-vanilla.css';import '/src/styles-addendum.css';import '/src/workbench.css';
+import '/src/styles.css';
 document.documentElement.dataset.theme='dark';window.store=useStore;window.api=api;window.calls=[];
 api.workspaceRoots=async()=>[{label:'工作目录',path:'/workspace'}];
 api.workspaceBrowse=async path=>{if(path==='/missing'&&!window.recovered)throw Error('目录不存在或无法访问');return {path:path||'/workspace',parent:'/',directories:path==='/workspace'?[{name:'资料 空间',path:'/workspace/资料 空间'},{name:'frontend',path:'/workspace/frontend'}]:[]};};

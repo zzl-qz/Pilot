@@ -11,7 +11,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const output = await mkdtemp(join(tmpdir(), 'pilot-sandbox-ui-'));
 const fixture = `<html lang="zh-CN" data-theme="dark"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
 import React from 'react'; import {createRoot} from 'react-dom/client'; import App from '/src/components/App.jsx'; import {useStore} from '/src/store.js'; import {api} from '/src/api.js'; import {initialThread} from '/src/thread-reducer.js';
-import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css'; import '/src/workbench.css';
+import '/src/styles.css';
 for (const key of Object.keys(api)) if (typeof api[key] === 'function' && key !== 'sandboxManifest') api[key]=async()=>({});
 api.files=async()=>({entries:[]}); api.results=async()=>({items:[]}); api.schedules=async()=>[];
 useStore.setState({init:async()=>{},sessionId:'s1',sessionTitle:'恢复中断的变更',projects:[],sessions:[],workspace:'/workspace/pilot'});
@@ -45,7 +45,12 @@ async function run(page, name, url) {
   assert.equal(await accept.isDisabled(),true); await recover.click();
   await page.getByRole('status').filter({hasText:'恢复已完成'}).waitFor(); await accept.click(); await page.getByText('已接受',{exact:true}).waitFor();
   failure='unverified'; state={...state,reviewHash:'v2'}; await page.evaluate(()=>seed());
-  page.once('dialog',async dialog=>{failure='';await dialog.accept();}); await accept.click(); await page.getByText('已接受',{exact:true}).waitFor();
+  await accept.click();
+  const confirmOk = page.locator('#confirm-ok');
+  await confirmOk.waitFor();
+  failure='';
+  await confirmOk.click();
+  await page.getByText('已接受',{exact:true}).waitFor();
   assert.equal(posts.at(-1).body.acknowledgeUnverified,true); assert.equal(posts.at(-1).body.candidateHash,'v2');
   assert.equal(posts.at(-2).body.candidateHash,'v2');
   manifestFail=true; await page.evaluate(()=>seed()); await page.getByRole('alert').filter({hasText:'读取版本失败'}).waitFor();

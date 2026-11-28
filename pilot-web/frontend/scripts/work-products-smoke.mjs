@@ -13,7 +13,7 @@ const capture = !process.argv.includes('--no-screenshots');
 const keep = new Set(['workProducts', 'productPreview', 'skillDrafts', 'decideSkill', 'downloadProduct', 'workbenchFiles', 'workbenchPreview', 'workbenchPreviewImage', 'workbenchAnnotations', 'workbenchVersions', 'workbenchText', 'workbenchOpen', 'workbenchDownload', 'workbenchRevert']);
 const fixture = `<html lang="zh-CN" data-theme="dark"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
 import React from 'react'; import {createRoot} from 'react-dom/client'; import App from '/src/components/App.jsx'; import {useStore} from '/src/store.js'; import {api} from '/src/api.js'; import {initialThread} from '/src/thread-reducer.js';
-import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css'; import '/src/workbench.css';
+import '/src/styles.css';
 const keep = new Set(${JSON.stringify([...keep])}); for (const key of Object.keys(api)) if (typeof api[key] === 'function' && !keep.has(key)) api[key]=async()=>({});
 api.files=async()=>({entries:[]}); api.results=async()=>({items:[]}); api.schedules=async()=>[];
 useStore.setState({init:async()=>{},sessionId:'s1',sessionTitle:'整理调研结论与可复用的方法',projects:[],sessions:[],workspace:'/workspace/pilot',thread:initialThread()});

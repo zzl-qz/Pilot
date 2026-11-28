@@ -11,7 +11,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const output = await mkdtemp(join(tmpdir(), 'pilot-inspector-ui-'));
 const entry = `.inspector-fixture-${process.pid}.html`;
 const fixture = `<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module">
-import React from'react';import{createRoot}from'react-dom/client';import{Inspector}from'/src/components/Inspector.jsx';import{UiProvider}from'/src/components/UiProvider.jsx';import{useStore}from'/src/store.js';import{api}from'/src/api.js';import'/src/styles.css';import'/src/styles-addendum.css';import'/src/workbench.css';
+import React from'react';import{createRoot}from'react-dom/client';import{Inspector}from'/src/components/Inspector.jsx';import{UiProvider}from'/src/components/UiProvider.jsx';import{useStore}from'/src/store.js';import{api}from'/src/api.js';import'/src/styles.css';
 window.store=useStore;window.calls=[];window.listeners={};window.menuAction='find';window.quoted='';
 const listen=(name,callback)=>{listeners[name]=callback;if(name==='state')queueMicrotask(()=>callback(browserState));return()=>{delete listeners[name];};};
 window.browserState={tabs:[{id:'one',title:'新标签',url:'http://localhost/marker/one'}],activeId:'one',url:'http://localhost/marker/one',canGoBack:false,canGoForward:false,recents:[]};

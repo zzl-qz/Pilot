@@ -14,7 +14,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { SelectionQuote } from '/src/components/SideChat.jsx';
 import { useStore } from '/src/store.js';
-import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css';
+import '/src/styles.css';
 window.store = useStore;
 useStore.setState({ embeddedSessionId: null, noteSeed: null });
 createRoot(document.getElementById('root')).render(React.createElement(SelectionQuote));
@@ -26,7 +26,7 @@ import { createRoot } from 'react-dom/client';
 import { SessionNotes } from '/src/components/SessionNotes.jsx';
 import { useStore } from '/src/store.js';
 import { api } from '/src/api.js';
-import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css';
+import '/src/styles.css';
 window.store = useStore; window.calls = [];
 document.body.insertAdjacentHTML('beforeend', '<div class="thread"><article class="msg msg-assistant" data-sequence="4">建议原文</article></div>');
 window.notes = [

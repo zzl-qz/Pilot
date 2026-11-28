@@ -13,7 +13,7 @@ const output = await mkdtemp(join(artifactDirectory(), 'pilot-notes-'));
 const entry = `.notes-${process.pid}.html`, file = join(root, entry);
 const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>会话想法</title><link rel="icon" href="data:,"><style>html,body,#root{height:100%;margin:0}#root{display:flex;flex-direction:row;min-height:100%}#shell-main{flex:1;display:flex;flex-direction:column;justify-content:flex-end;min-width:0}#shell-beside{width:360px;border-left:1px solid #333;overflow:auto}</style></head><body><div id="root"></div><script type="module">
 import React from 'react';import {createRoot} from 'react-dom/client';import {Composer} from '/src/components/Composer.jsx';import {SessionNotes} from '/src/components/SessionNotes.jsx';import {UiProvider} from '/src/components/UiProvider.jsx';import {useStore} from '/src/store.js';import {api} from '/src/api.js';
-import '/src/styles.css';import '/src/shell-vanilla.css';import '/src/styles-addendum.css';import '/src/workbench.css';
+import '/src/styles.css';
 document.documentElement.dataset.theme='dark';window.store=useStore;window.api=api;window.sent=[];window.noteSeq=100;window.failNotes=false;
 for(const name of Object.keys(api))if(typeof api[name]==='function')api[name]=async()=>({});
 if(new URLSearchParams(location.search).has('fresh'))localStorage.removeItem('notes-fixture');

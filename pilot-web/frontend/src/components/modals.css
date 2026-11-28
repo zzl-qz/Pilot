@@ -99,7 +99,7 @@ dialog#review-action-dialog.pilot-dialog { max-width: min(440px, calc(100vw - 32
 #palette .palette-search:focus-within {
   outline: none;
   border-color: color-mix(in srgb, var(--accent) 62%, var(--line));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: var(--focus-shadow);
 }
 #palette .palette-search input {
   width: 100%;

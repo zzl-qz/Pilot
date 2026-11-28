@@ -3,9 +3,6 @@ import App from './components/App.jsx';
 import { useStore } from './store.js';
 import { setMarkdownNotifier, setMarkdownContext } from './lib/content/markdown-render.js';
 import './styles.css';
-import './shell-vanilla.css';
-import './styles-addendum.css';
-import './workbench.css';
 
 setMarkdownNotifier((text) => {
   useStore.getState().showNotice(text);

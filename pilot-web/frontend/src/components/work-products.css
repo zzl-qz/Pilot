@@ -1,5 +1,4 @@
 .work-products { padding: 16px; min-width: 0; font-size: 13px; line-height: 1.65; }
-html[data-theme] .topbar .product-toggle { width: auto; padding-inline: 8px; gap: 5px; white-space: nowrap; }
 .work-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 10px; margin-bottom: 16px; }
 .work-toolbar small { min-width: 0; overflow-wrap: anywhere; }
 .work-products h2 { font-size: 18px; line-height: 1.4; margin: 0 0 12px; font-weight: 600; }
@@ -43,9 +42,7 @@ html[data-theme] .work-products .btn { min-height: 36px; flex-shrink: 0; }
 @media (max-width: 960px) {
   .work-products { padding: 16px; font-size: 14px; }
   html[data-theme] .work-products .btn, .work-products summary { min-height: 44px; }
-  html[data-theme] .topbar .product-toggle { min-width: 44px; min-height: 44px; }
   html[data-theme] .activity.inspector.products-inspector { width: 100vw; max-width: none; inset-inline: 0; }
   html[data-theme] .products-inspector .inspector-panel-head .icon-btn { min-width: 44px; min-height: 44px; }
   html[data-theme] .products-inspector .inspector-rail > button { width: 44px; }
 }
-@media (max-width: 600px) { .topbar .product-toggle span { display: none; } }

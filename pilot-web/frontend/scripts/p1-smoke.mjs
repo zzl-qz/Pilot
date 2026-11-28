@@ -13,7 +13,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const output = await mkdtemp(join(tmpdir(), 'pilot-p1-ui-'));
 const fixture = `<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
 import React from 'react'; import {createRoot} from 'react-dom/client'; import App from '/src/components/App.jsx'; import {useStore} from '/src/store.js'; import {api} from '/src/api.js';
-import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css'; import '/src/workbench.css';
+import '/src/styles.css';
 document.documentElement.dataset.theme='dark';window.store=useStore;window.calls=[];window.series=[];window.templates=[];window.searchFail=false;window.staleTemplate=false;
 for(const name of Object.keys(api)) if(typeof api[name]==='function')api[name]=async()=>({});
 window.jobs=[];api.schedules=async()=>structuredClone(jobs);api.results=async()=>({items:[]});api.worktreeInfo=async()=>({});api.queue=async()=>({items:[]});api.filesFlat=async()=>({files:[]});

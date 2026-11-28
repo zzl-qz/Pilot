@@ -24,7 +24,7 @@ async function run(name, argv, cwd = root) {
   console.log(`开始：${name}`);
   const code = await new Promise((accept, reject) => {
     const child = spawn(process.execPath, argv, { cwd, env: { ...process.env,
-      PILOT_SKIP_DEPS_ASK: '1', PILOT_TEST_ARTIFACTS_DIR: artifacts }, stdio: ['ignore', 'pipe', 'pipe'] });
+      PILOT_TEST_ARTIFACTS_DIR: artifacts }, stdio: ['ignore', 'pipe', 'pipe'] });
     child.stdout.on('data', chunk => { log += chunk; });
     child.stderr.on('data', chunk => { log += chunk; });
     child.once('error', reject);

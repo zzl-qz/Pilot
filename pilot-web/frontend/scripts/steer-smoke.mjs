@@ -15,7 +15,7 @@ import { useStore } from '/src/store.js';
 window.api = api;
 import { api } from '/src/api.js';
 import { installSubmissionFixture } from '/scripts/submission-fixture.mjs';
-import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css'; import '/src/workbench.css';
+import '/src/styles.css';
 window.store = useStore;
 const attachmentLimits = { maxFiles: 64, maxFileBytes: 2097152, maxTotalBytes: 26214400, maxRequestBytes: 37000000 };
 api.settings = async () => ({ attachmentLimits });

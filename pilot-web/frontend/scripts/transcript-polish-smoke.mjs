@@ -20,9 +20,6 @@ import { useStore } from '/src/store.js';
 import { api } from '/src/api.js';
 import { applyEvent, initialThread } from '/src/thread-reducer.js';
 import '/src/styles.css';
-import '/src/shell-vanilla.css';
-import '/src/styles-addendum.css';
-import '/src/workbench.css';
 
 window.EventSource = class MockEventSource {
   constructor() { this.readyState = 1; }

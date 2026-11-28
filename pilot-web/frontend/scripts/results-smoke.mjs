@@ -12,7 +12,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const output = await mkdtemp(join(tmpdir(), 'pilot-results-ui-'));
 const fixture = `<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
 import React from 'react'; import {createRoot} from 'react-dom/client'; import App from '/src/components/App.jsx'; import {useStore} from '/src/store.js'; import {api} from '/src/api.js'; window.api=api;
-import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css'; import '/src/workbench.css';
+import '/src/styles.css';
 document.documentElement.dataset.theme='dark'; window.store=useStore; window.calls=[]; window.fail=new URL(location.href).searchParams.has('failure'); window.previewFail=false; window.handoffFail=false; window.pendingDetail=null; window.verificationPhase='VERIFIED';
 if(new URL(location.href).searchParams.has('no-anchor')){const supports=CSS.supports.bind(CSS);CSS.supports=(...args)=>args[0]==='anchor-name'?false:supports(...args);}
 for(const name of Object.keys(api)) if(typeof api[name]==='function') api[name]=async()=>({});

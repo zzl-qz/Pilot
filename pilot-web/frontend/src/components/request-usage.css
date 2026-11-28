@@ -104,15 +104,12 @@
 .request-item > .request-note { margin-bottom: 10px; }
 .request-runtime-settings { border-top: 1px solid var(--border); margin-top: 20px; padding-top: 16px; }
 .request-runtime-settings > summary { cursor: pointer; font-weight: 500; }
-.request-prices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .request-runtime-settings .task-field { margin-top: 12px; }
-.request-setting-status { margin-top: 10px; color: var(--muted); font-size: 12px; }
 .request-runtime-settings input, .request-runtime-settings select { min-width: 0; width: 100%; }
 .request-group > summary:focus-visible, .request-item > summary:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
 @media (max-width: 640px), (pointer: coarse) {
   .request-usage-panel button { min-height: 44px; }
   .request-capacity { flex-wrap: wrap; gap: 4px 12px; }
-  .request-prices { grid-template-columns: 1fr; }
   .request-group > summary, .request-item > summary { min-height: 44px; gap: 6px; flex-wrap: wrap; }
   .request-group > summary > .request-cost { flex-basis: 100%; max-width: none; text-align: left; padding-left: 16px; }
   .request-list { padding-left: 8px; }

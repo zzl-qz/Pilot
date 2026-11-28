@@ -86,19 +86,19 @@ ${script}
 const fixtures = {
   '/__products': page('products', `
     import WorkProductsPanel from '/src/components/WorkProductsPanel.jsx';
-    import '/src/styles.css'; import '/src/styles-addendum.css';
+    import '/src/styles.css';
     useStore.setState({ init: async () => {}, sessionId: 's1', running: false, notes: [] });
     createRoot(document.getElementById('root')).render(React.createElement(WorkProductsPanel));`),
   '/__capabilities': page('capabilities', `
     import { CapabilitiesPanel } from '/src/components/inspector/CapabilitiesPanel.jsx';
-    import '/src/styles.css'; import '/src/styles-addendum.css';
+    import '/src/styles.css';
     useStore.setState({ init: async () => {}, sessionId: 's1', capabilitiesState: 'ready', notes: [] });
     createRoot(document.getElementById('root')).render(React.createElement(CapabilitiesPanel));`),
   '/__ideas': page('ideas', `
     import IdeaLibrary from '/src/components/IdeaLibrary.jsx';
     import { NavigationRail } from '/src/components/NavigationRail.jsx';
     import { Inspector } from '/src/components/Inspector.jsx';
-    import '/src/styles.css'; import '/src/styles-addendum.css';
+    import '/src/styles.css';
     const setUi = useStore.getState().setUi;
     useStore.setState({ sessionId: null, currentProjectId: 'a', notesState: 'ready', notes: ${JSON.stringify(NOTES)} });
     window.switchProject = () => {
@@ -114,7 +114,7 @@ const fixtures = {
     createRoot(document.getElementById('root')).render(React.createElement(IdeasFixture));`),
   '/__strip': page('strip', `
     import { VerificationStrip } from '/src/components/VerificationStrip.jsx';
-    import '/src/styles.css'; import '/src/styles-addendum.css';
+    import '/src/styles.css';
     const report = ${JSON.stringify(STRIP_REPORT)};
     useStore.setState({ init: async () => {}, sessionId: 's1', hasRun: true, notes: [],
       submitInput: async () => true, validation: { report, recent: report.latest ? [report.latest] : [] },
@@ -125,7 +125,7 @@ const fixtures = {
     createRoot(document.getElementById('root')).render(React.createElement(VerificationStrip));`),
   '/__task': page('task', `
     import { TaskContract } from '/src/components/Modals.jsx';
-    import '/src/styles.css'; import '/src/styles-addendum.css';
+    import '/src/styles.css';
     useStore.setState({ init: async () => {}, sessionId: 's1', running: false, notes: [],
       task: {
         taskId: 'task_1', originalGoal: '修复登录报错并补测试', constraints: [], corrections: [],

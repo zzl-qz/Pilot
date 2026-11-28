@@ -19,7 +19,7 @@ function publish(id, item, durable = true) {
 }
 const fixture = `<html><meta charset="utf-8"><body><div id="root"></div><pre id="output" hidden></pre><script type="module">
 import React from 'react';import {createRoot} from 'react-dom/client';import {Thread} from '/src/components/Thread.tsx';import {UiProvider} from '/src/components/UiProvider.tsx';
-import '/src/styles.css';import '/src/workbench.css';
+import '/src/styles.css';
 import {useStore,closeStreams} from '/src/store.ts';import {initialThread} from '/src/thread-reducer.ts';
 window.store=useStore;window.closeStreams=closeStreams;const id=new URL(location.href).searchParams.get('id');
 useStore.setState({sessionId:id,sessionEpoch:1,thread:initialThread(),loadSessions:async()=>[],loadTask:async()=>{},loadQueue:async()=>{},refreshContext:async()=>{}});

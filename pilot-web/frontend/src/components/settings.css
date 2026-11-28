@@ -125,7 +125,7 @@
 #settings :is(.settings-native-field input, .settings-native-field select, .settings-section-select select):focus {
   outline: none;
   border-color: var(--accent-line);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: var(--focus-shadow);
 }
 #settings .settings-section-select select, #settings .settings-native-field select {
   padding-inline-end: 28px;
@@ -195,7 +195,7 @@
   font: 12px/1.55 var(--mono); overflow-wrap: anywhere; tab-size: 2;
 }
 #settings .permission-rule-input::placeholder { color: var(--muted); font-family: var(--sans); }
-#settings .permission-rule-input:focus { outline: none; border-color: var(--accent-line); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
+#settings .permission-rule-input:focus { outline: none; border-color: var(--accent-line); box-shadow: var(--focus-shadow); }
 #settings .permission-rule-input:disabled { opacity: 0.66; }
 #settings .permission-inherited { margin-top: 14px; font-size: 12.5px; color: var(--muted); }
 #settings .permission-inherited-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 4px; }
@@ -246,7 +246,7 @@
   background: var(--panel); color: var(--ink);
   font: 12px/1.55 var(--mono); overflow-wrap: anywhere; tab-size: 2;
 }
-#settings .mcp-json-input:focus { outline: none; border-color: var(--accent-line); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
+#settings .mcp-json-input:focus { outline: none; border-color: var(--accent-line); box-shadow: var(--focus-shadow); }
 #settings .mcp-json-input:disabled { opacity: 0.66; }
 #settings .mcp-import-hint { margin: 0; font-size: 11.5px; color: var(--muted); line-height: 1.5; overflow-wrap: anywhere; }
 #settings .memory-body-preview { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -255,7 +255,7 @@
   padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; appearance: none;
   background: var(--panel); color: var(--ink); font: 13px/1.5 var(--sans);
 }
-#settings .memory-textarea:focus { outline: none; border-color: var(--accent-line); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
+#settings .memory-textarea:focus { outline: none; border-color: var(--accent-line); box-shadow: var(--focus-shadow); }
 @media (max-width: 640px) {
   #settings .mcp-add-fields { grid-template-columns: minmax(0, 1fr); }
   #settings .mcp-env-row { grid-template-columns: minmax(0, 1fr); }
@@ -602,7 +602,7 @@
 #settings .agent-profile-editor:focus {
   outline: none;
   border-color: var(--accent-line);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: var(--focus-shadow);
 }
 #settings .agent-profile-editor:disabled { opacity: 0.66; }
 #settings .agent-profile-invalid { margin: 8px 0; }

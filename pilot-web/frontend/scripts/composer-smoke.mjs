@@ -20,7 +20,7 @@ const server = await createServer({ root, publicDir: '../src/main/resources/stat
       import {UiProvider} from '/src/components/UiProvider.js';
       import {useStore} from '/src/store.js';
       import {api} from '/src/api.js'; import {installSubmissionFixture} from '/scripts/submission-fixture.mjs';
-      import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css'; import '/src/workbench.css';
+      import '/src/styles.css';
       document.documentElement.dataset.theme='dark'; window.store=useStore; window.api=api; window.sent=[];
       for(const name of Object.keys(api)) if(typeof api[name]==='function') api[name]=async()=>({});
       const attachmentLimits={maxFiles:64,maxFileBytes:2097152,maxTotalBytes:26214400,maxRequestBytes:37000000};

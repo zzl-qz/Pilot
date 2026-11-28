@@ -52,7 +52,7 @@
 .automation-native-control:focus {
   outline: none;
   border-color: var(--accent-line);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: var(--focus-shadow);
 }
 .automation-task-row:focus-visible,
 .automation-disclosure summary:focus-visible, .automation-body [tabindex="-1"]:focus-visible {

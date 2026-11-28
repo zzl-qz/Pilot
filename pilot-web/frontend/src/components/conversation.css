@@ -262,12 +262,6 @@ html[data-theme] .conversation-empty .empty-keys kbd {
   font-family: var(--mono);
   font-size: 10.5px;
 }
-html[data-theme="light"] .conversation-composer .composer {
-  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05), 0 1px 2px rgba(15, 23, 42, 0.04);
-}
-html[data-theme="light"] .conversation-composer .composer:focus-within {
-  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08), 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
-}
 html[data-theme] .conversation-thread .is-navigation-target {
   border-radius: 12px;
   animation: pilot-nav-pulse 1.5s ease-out;
@@ -2131,6 +2125,8 @@ html[data-theme] .composer-wrap.conversation-composer {
 }
 html[data-theme] .conversation-composer .composer {
   position: relative;
+  container-type: inline-size;
+  container-name: composer;
   gap: 4px;
   padding: 12px 14px 10px;
   border: 1px solid var(--composer-edge);
@@ -2161,10 +2157,6 @@ html[data-theme] .conversation-composer .input-flow {
   line-height: 1.58;
 }
 html[data-theme] .conversation-composer .input-flow[data-empty="true"]::before { color: var(--muted); }
-html[data-theme] .conversation-composer .composer {
-  container-type: inline-size;
-  container-name: composer;
-}
 html[data-theme] .conversation-composer .composer .composer-bar {
   flex-wrap: nowrap;
   align-items: center;
@@ -2570,8 +2562,7 @@ html[data-theme] .conversation-composer .voice-timer { font-family: var(--sans);
 }
 @media (pointer: coarse) {
   html[data-theme] .conversation-composer .queue-grip { display: none; }
-  .conversation-composer .queue-actions > button,
-  .conversation-composer .queue-more > button { min-height: 44px; }
+  .conversation-composer .queue-actions > button { min-height: 44px; }
 }
 @media (max-width: 420px) {
   .conversation-prompt-note { display: block; }
@@ -2888,7 +2879,7 @@ html[data-theme] .message-queue .queue-edit textarea {
 html[data-theme] .message-queue .queue-edit textarea:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: var(--focus-shadow);
 }
 
 html[data-theme] .message-queue .queue-edit-meta-grid {
@@ -3454,19 +3445,6 @@ html[data-theme="light"] .tool-live-tail {
   font: 11.5px/1.55 var(--mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-.tool-slow-hint {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 4px;
-  padding: 6px 10px;
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-  color: var(--muted);
-  font-size: 12px;
 }
 .result-next-steps {
   display: flex;

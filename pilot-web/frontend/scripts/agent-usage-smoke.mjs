@@ -14,7 +14,7 @@ const output = await mkdtemp(join(tmpdir(), 'pilot-agent-usage-'));
 const entry = `.agent-usage-fixture-${process.pid}.html`, file = join(root, entry);
 const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Pilot 任务用量</title><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
 import React from 'react';import {createRoot} from 'react-dom/client';import App from '/src/components/App.jsx';import {useStore} from '/src/store.js';import {api} from '/src/api.js';import {applyEvent,initialThread} from '/src/thread-reducer.js';
-import '/src/styles.css';import '/src/shell-vanilla.css';import '/src/styles-addendum.css';import '/src/workbench.css';
+import '/src/styles.css';
 document.documentElement.dataset.theme='dark';window.store=useStore;
 for(const name of Object.keys(api))if(typeof api[name]==='function')api[name]=async()=>({});
 api.files=async()=>({entries:[]});api.results=async()=>({items:[]});api.schedules=async()=>[];
@@ -57,6 +57,7 @@ async function run(page, name) {
   assert.equal(await page.locator('.agent-group > summary').innerText(), '2 个子智能体 · 1 失败');
   assert.equal(await page.locator('.agent-card:visible').count(), 0, '智能体默认只显示一行汇总');
   assert.equal(await page.locator('#agents-dock').count(), 0, '已结束子任务不重复占据输入框上方');
+  await stats.locator('.request-group').first().waitFor();
   assert.equal(await stats.locator('.request-group').count(), 2);
   assert.equal(await stats.locator('.request-item:visible').count(), 0, '展开用量不铺开每次请求');
   const sub = stats.locator('.request-group[data-purpose="subagent"]');

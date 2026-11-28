@@ -20,9 +20,6 @@ import { useStore } from '/src/store.js';
 import { api, ApiError } from '/src/api.js';
 import { applyEvent } from '/src/thread-reducer.js';
 import '/src/styles.css';
-import '/src/shell-vanilla.css';
-import '/src/styles-addendum.css';
-import '/src/workbench.css';
 
 document.documentElement.dataset.theme = 'dark';
 window.store = useStore;

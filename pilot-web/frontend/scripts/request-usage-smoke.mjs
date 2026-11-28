@@ -24,7 +24,7 @@ const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="view
       import {Composer} from '/src/components/Composer.jsx'; import {UiProvider} from '/src/components/UiProvider.js'; import {ModelRuntimeSettings} from '/src/components/model/ModelRuntimeSettings.jsx';
       import {useStore} from '/src/store.js'; import {api} from '/src/api.js';
       import {applyEvent, initialThread, prependHistoryPage} from '/src/thread-reducer.js';
-      import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css'; import '/src/workbench.css';
+      import '/src/styles.css';
       import '/src/components/settings.css';
       document.documentElement.dataset.theme='dark'; window.store=useStore; window.api=api; window.applyEvent=applyEvent; window.initialThread=initialThread;
       window.EventSource=class { constructor(){window.sse=this;this.handlers={};} addEventListener(type,handler){this.handlers[type]=handler;} close(){} };

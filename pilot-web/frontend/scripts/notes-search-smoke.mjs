@@ -12,7 +12,7 @@ import { createRoot } from 'react-dom/client';
 import { SessionNotes } from '/src/components/SessionNotes.jsx';
 import { useStore } from '/src/store.js';
 import { api } from '/src/api.js';
-import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css';
+import '/src/styles.css';
 window.store = useStore; window.calls = [];
 window.notes = [
   { id: 'n1', content: '登录失败路径要覆盖', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', source: null },

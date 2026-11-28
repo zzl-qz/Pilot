@@ -13,7 +13,7 @@ const output = await mkdtemp(join(artifactDirectory(), 'pilot-navigation-ui-'));
 const entry = `.navigation-fixture-${process.pid}.html`, file = join(root, entry);
 const fixture = `<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Pilot 对话导航</title><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module">
 import React from 'react';import {createRoot} from 'react-dom/client';import App from '/src/components/App.jsx';import {useStore} from '/src/store.js';import {api} from '/src/api.js';
-import '/src/styles.css';import '/src/shell-vanilla.css';import '/src/styles-addendum.css';import '/src/workbench.css';
+import '/src/styles.css';
 document.documentElement.dataset.theme='dark';window.store=useStore;window.api=api;window.cancelled=0;
 const bookmarkMethods=new Set(['bookmarks','saveBookmark','deleteBookmark','importBookmarks']);
 for(const name of Object.keys(api))if(typeof api[name]==='function'&&!bookmarkMethods.has(name))api[name]=async()=>({});api.schedules=async()=>[];api.worktreeInfo=async()=>({});api.queue=async()=>({});api.filesFlat=async()=>({files:[]});

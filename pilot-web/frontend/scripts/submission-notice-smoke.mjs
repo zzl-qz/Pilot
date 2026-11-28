@@ -13,7 +13,7 @@ import { createRoot } from 'react-dom/client';
 import { SubmissionNotice } from '/src/components/SubmissionNotice.jsx';
 import { Modals } from '/src/components/Modals.jsx';
 import { useStore } from '/src/store.js';
-import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css'; import '/src/workbench.css';
+import '/src/styles.css';
 window.store = useStore;
 createRoot(document.getElementById('root')).render(React.createElement('div', null,
   React.createElement(SubmissionNotice, { sessionId: '${sessionId}' }),

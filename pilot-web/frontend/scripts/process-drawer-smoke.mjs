@@ -19,9 +19,6 @@ import App from '/src/components/App.jsx';
 import { useStore } from '/src/store.js';
 import { api } from '/src/api.js';
 import '/src/styles.css';
-import '/src/shell-vanilla.css';
-import '/src/styles-addendum.css';
-import '/src/workbench.css';
 
 document.documentElement.dataset.theme = 'dark';
 window.store = useStore;

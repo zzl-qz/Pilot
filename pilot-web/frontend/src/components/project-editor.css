@@ -54,7 +54,7 @@
 .project-constraints textarea:focus {
   outline: none;
   border-color: var(--accent-line);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: var(--focus-shadow);
 }
 .modal .pilot-dialog-frame .project-constraints textarea:focus-visible { outline: none; }
 .project-no-folders { padding: 16px 0; margin: 0; color: var(--muted); font-size: 13px; }

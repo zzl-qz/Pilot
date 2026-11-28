@@ -12,7 +12,7 @@ import { createRoot } from 'react-dom/client';
 import { MessageQueue } from '/src/components/MessageQueue.jsx';
 import { useStore } from '/src/store.js';
 import { api } from '/src/api.js';
-import '/src/styles.css'; import '/src/shell-vanilla.css'; import '/src/styles-addendum.css'; import '/src/workbench.css'; import '/src/components/conversation.css';
+import '/src/styles.css'; import '/src/components/conversation.css';
 window.store = useStore; window.api = api; window.calls = []; window.notices = [];
 window.entries = [
   { content: '任务一', text: '任务一', attachments: [], imagePositions: [] },

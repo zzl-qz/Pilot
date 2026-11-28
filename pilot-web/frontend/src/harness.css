@@ -1,25 +1,4 @@
-/* 运行界面：轻量浅色工作台 + 底部运行指标，贴近 DSH 的信息密度。 */
-
-.runtime-footer {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 28px;
-  padding: 0 12px;
-  border-top: 1px solid var(--line-soft);
-  color: var(--muted);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  user-select: text;
-}
-.runtime-footer-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.runtime-footer-sep { color: var(--dim); opacity: 0.72; }
+/* 运行界面：轻量浅色工作台，贴近 DSH 的信息密度。 */
 
 html[data-theme="light"] .navigation-rail {
   background: #f7f8fa;
@@ -45,18 +24,5 @@ html[data-theme="light"] .app > .topbar {
   background: #fff;
   border-bottom: 1px solid #f0f2f6;
 }
-html[data-theme="light"] .runtime-footer {
-  background: #fff;
-  color: #8b93a3;
-  border-top-color: #eef2f7;
-}
 html[data-theme="light"] .thread .bubble-md { color: #2b303b; }
 html[data-theme="light"] .msg-assistant .who { color: #9aa2b1; }
-
-@media (max-width: 700px) {
-  .runtime-footer {
-    justify-content: flex-start;
-    overflow-x: auto;
-    white-space: nowrap;
-  }
-}
