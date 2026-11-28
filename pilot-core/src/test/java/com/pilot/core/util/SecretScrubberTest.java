@@ -107,4 +107,48 @@ class SecretScrubberTest {
         assertFalse(content.contains("user:pass"), content);
         assertTrue(content.contains("[REDACTED]"), content);
     }
+
+    @Test
+    void scrubsCliFlagSecretsAndStaysIdempotent() {
+        String raw =
+            "curl --token my-secret-token --password=superpass --api-key=ak_123456 -secret hidden https://example.com";
+        String scrubbed = SecretScrubber.scrub(raw);
+        for (String leaked : List.of("my-secret-token", "superpass", "ak_123456", "hidden")) {
+            assertFalse(scrubbed.contains(leaked), scrubbed);
+        }
+        assertTrue(scrubbed.contains("--token ***"), scrubbed);
+        assertTrue(scrubbed.contains("--password=***"), scrubbed);
+        assertTrue(scrubbed.contains("--api-key=***"), scrubbed);
+        assertTrue(SecretScrubber.containsSecretPattern(raw));
+        assertFalse(SecretScrubber.containsSecretPattern(scrubbed), "已脱敏文本不应重复触发敏感模式: " + scrubbed);
+    }
+
+    @Test
+    void cliFlagScrubbingPreservesValidJsonAndDoesNotCrossNewlines() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        String[] jsonCases = {"{\"cmd\":\"mysql --password=secret\"}",
+            "{\"cmd\":\"curl --token mysecret\",\"ok\":true}", "{\"summary\":\"ran curl --token ***\",\"ok\":true}",
+            "{\"cmd\":\"curl --token \\\"my secret\\\"\",\"ok\":true}",
+            "{\"cmd\":\"curl --token=\",\"other\":\"value\"}", "{\"cmd\":\"curl --token \",\"other\":\"value\"}"};
+        for (String json : jsonCases) {
+            String scrubbed = SecretScrubber.scrub(json);
+            mapper.readTree(scrubbed);
+            assertEquals(scrubbed, SecretScrubber.scrub(scrubbed), "二次脱敏应幂等: " + scrubbed);
+            assertFalse(SecretScrubber.containsSecretPattern(scrubbed), "脱敏后不应继续命中敏感模式: " + scrubbed);
+        }
+        assertFalse(SecretScrubber.scrub(jsonCases[0]).contains("secret"));
+        assertFalse(SecretScrubber.scrub(jsonCases[1]).contains("mysecret"));
+        assertEquals(jsonCases[2], SecretScrubber.scrub(jsonCases[2]));
+        assertFalse(SecretScrubber.scrub(jsonCases[3]).contains("my secret"));
+
+        String multiline = "Missing --token\nPlease pass one";
+        assertEquals(multiline, SecretScrubber.scrub(multiline));
+        assertFalse(SecretScrubber.containsSecretPattern(multiline));
+        assertFalse(SecretScrubber.containsSecretPattern("app --token-limit 100"));
+
+        String punctuated = SecretScrubber.scrub("curl --token \"abc\", done");
+        assertEquals("curl --token ***, done", punctuated);
+        assertEquals(punctuated, SecretScrubber.scrub(punctuated));
+        assertFalse(SecretScrubber.containsSecretPattern(punctuated));
+    }
 }

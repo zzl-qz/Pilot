@@ -22,6 +22,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
+import com.pilot.core.exec.ProcessSupport;
 import com.pilot.core.tool.Availability;
 
 import tools.jackson.databind.JsonNode;
@@ -496,7 +497,7 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
         try {
             handshake.get(START_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
         } catch (Exception e) {
-            started.destroyForcibly();
+            ProcessSupport.terminate(started);
             process = null;
             throw new BrowserException("浏览器 sidecar 启动失败：" + (e instanceof TimeoutException ? "握手超时" : e.getMessage()));
         }
@@ -600,12 +601,11 @@ public final class PlaywrightBackend implements BrowserBackend, AutoCloseable {
         // 先让 sidecar 自己收尾关掉 Chromium（stdin 关闭即退出），超时再强杀。
         try {
             if (!current.waitFor(3, TimeUnit.SECONDS)) {
-                current.descendants().forEach(ProcessHandle::destroyForcibly);
-                current.destroyForcibly();
+                ProcessSupport.terminate(current);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            current.destroyForcibly();
+            ProcessSupport.terminate(current);
         }
     }
 

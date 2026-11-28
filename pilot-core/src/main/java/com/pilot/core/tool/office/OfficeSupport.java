@@ -5,11 +5,14 @@ import java.awt.GraphicsEnvironment;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+
+import javax.imageio.ImageIO;
 
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -34,7 +37,10 @@ import org.apache.poi.xwpf.usermodel.XWPFTable;
 import org.apache.poi.xwpf.usermodel.XWPFTableCell;
 import org.apache.poi.xwpf.usermodel.XWPFTableRow;
 
+import com.pilot.core.message.Attachment;
+import com.pilot.core.tool.ToolArtifacts;
 import com.pilot.core.util.FileNames;
+import com.pilot.core.util.Sha256;
 
 import tools.jackson.databind.JsonNode;
 
@@ -124,6 +130,91 @@ public final class OfficeSupport {
         return renderer.renderImageWithDPI(pageIndex, boundedPdfDpi(page, requestedDpi), imageType);
     }
 
+    /** PDF 逐页渲染结果：输出目录、实际成功渲染的页数以及附带的图片附件。 */
+    public record RenderedPdf(Path directory, int renderedPages, List<Attachment> images) {
+    }
+
+    /**
+     * 基于绝对路径、文件大小、最后修改时间与总页数生成稳定的 PDF 渲染缓存键，
+     * 避免同名覆盖复用旧图或高页数截断碰撞。
+     */
+    public static String pdfCacheKey(Path file, int pages) throws IOException {
+        var sha = Sha256.newDigest();
+        sha.update(file.toAbsolutePath().toString().getBytes(StandardCharsets.UTF_8));
+        sha.update((byte)0);
+        sha.update(Long.toString(Files.size(file)).getBytes(StandardCharsets.UTF_8));
+        sha.update((byte)0);
+        sha.update(Long.toString(Files.getLastModifiedTime(file).toMillis()).getBytes(StandardCharsets.UTF_8));
+        sha.update((byte)0);
+        sha.update(Integer.toString(pages).getBytes(StandardCharsets.UTF_8));
+        return Sha256.finishHex(sha).substring(0, 32);
+    }
+
+    /**
+     * 解析 PDF 页码或范围（如 {@code "3"}、{@code "2-5"}）。
+     *
+     * @param defaultPages 入参为空时的默认最大页数
+     * @param maxPages     单次允许的最大页数
+     * @param clampUpper   {@code true} 时超出上限或总页数自动裁剪；{@code false} 时直接抛异常拒绝
+     */
+    public static int[] parsePageRange(Object rawValue, int total, int defaultPages, int maxPages, boolean clampUpper) {
+        if (rawValue == null || rawValue.toString().isBlank()) {
+            return new int[] {1, Math.min(total, defaultPages)};
+        }
+        String text = rawValue.toString().strip();
+        int start;
+        int end;
+        try {
+            int dash = text.indexOf('-');
+            if (dash < 0) {
+                start = end = Integer.parseInt(text);
+            } else {
+                start = Integer.parseInt(text.substring(0, dash).strip());
+                end = Integer.parseInt(text.substring(dash + 1).strip());
+            }
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("pages 必须是页码或范围，例如 \"3\" 或 \"2-5\"");
+        }
+        if (start < 1 || end < start || start > total) {
+            throw new IllegalArgumentException("pages 超出范围: " + text);
+        }
+        if (clampUpper) {
+            end = Math.min(end, Math.min(total, start + maxPages - 1));
+        } else if (end > total || end - start + 1 > maxPages) {
+            throw new IllegalArgumentException("pages 超出范围: " + text);
+        }
+        return new int[] {start, end};
+    }
+
+    public record PdfRenderOptions(String artifactPrefix, float dpi, long maxPngBytes, int maxImages,
+        boolean stopAtMaxImages) {
+    }
+
+    /** 按闭区间逐页渲染 PDF 到产物目录（按内容摘要去重），并按上限返回图片附件。 */
+    public static RenderedPdf renderPdfPages(PDDocument document, Path source, int[] range, PdfRenderOptions options)
+        throws IOException {
+        Path dir = ToolArtifacts.directory(options.artifactPrefix() + pdfCacheKey(source, document.getNumberOfPages()));
+        PDFRenderer renderer = new PDFRenderer(document);
+        List<Attachment> images = new ArrayList<>();
+        int rendered = 0;
+        for (int page = range[0]; page <= range[1]; page++) {
+            if (options.stopAtMaxImages() && images.size() >= options.maxImages()) {
+                break;
+            }
+            BufferedImage image = renderPdfPage(renderer, document.getPage(page - 1), page - 1, options.dpi());
+            Path png = dir.resolve("page-" + page + ".png");
+            if (!ImageIO.write(image, "png", png.toFile()) || Files.size(png) > options.maxPngBytes()) {
+                Files.deleteIfExists(png);
+                continue;
+            }
+            rendered++;
+            if (images.size() < options.maxImages()) {
+                images.add(new Attachment(source.getFileName() + " 第 " + page + " 页", "image/png", png.toString()));
+            }
+        }
+        return new RenderedPdf(dir, rendered, List.copyOf(images));
+    }
+
     static void bounded(Path file, long limit) throws IOException {
         if (!Files.isRegularFile(file) || Files.size(file) > limit) {
             throw new IllegalArgumentException("文件不存在或超过大小限制 " + limit);
@@ -156,7 +247,7 @@ public final class OfficeSupport {
     }
 
     static String extension(Path file) {
-        return FileNames.dotExtension(file.getFileName().toString());
+        return FileNames.dotExtension(file);
     }
 
     public static boolean isOoxml(Path file) {

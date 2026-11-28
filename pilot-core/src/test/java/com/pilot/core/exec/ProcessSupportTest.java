@@ -88,6 +88,40 @@ class ProcessSupportTest {
         Assertions.assertDoesNotThrow(() -> ProcessSupport.decode(new byte[] {(byte)0xC3, 0x28}));
     }
 
+    @Test
+    void capturesStdoutDiscardingStderrFeedsStdinAndTerminatesGracefully() throws Exception {
+        var stdoutOnly = ProcessSupport.captureStdoutUtf8(child("stderr-and-stdout"), Duration.ofSeconds(10), 1024);
+        assertEquals(0, stdoutOnly.exitCode());
+        assertEquals("out-only", stdoutOnly.output());
+
+        var echoed = ProcessSupport.captureUtf8WithStdin(child("echo-stdin"),
+            "hello-stdin".getBytes(StandardCharsets.UTF_8), Duration.ofSeconds(10), 1024);
+        assertEquals(0, echoed.exitCode());
+        assertEquals("hello-stdin", echoed.output());
+
+        Process sleeper = child("sleep").start();
+        ProcessSupport.terminateGracefully(sleeper, Duration.ofMillis(200));
+        Assertions.assertFalse(sleeper.isAlive());
+    }
+
+    @Test
+    void captureStdoutWithStdinDiscardsStderrAndHandlesLargeConcurrentPipesWithoutDeadlock() {
+        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+            byte[] nulInput = "a.log\0b.tmp\0".getBytes(StandardCharsets.UTF_8);
+            var clean = ProcessSupport.captureStdoutUtf8WithStdin(child("echo-stdin-with-stderr"), nulInput,
+                Duration.ofSeconds(10), 1024);
+            assertEquals(0, clean.exitCode());
+            assertEquals("a.log\0b.tmp\0", clean.output());
+
+            byte[] large = "0123456789abcdef".repeat(16_384).getBytes(StandardCharsets.UTF_8);
+            var echoed =
+                ProcessSupport.captureUtf8WithStdin(child("echo-stdin-streaming"), large, Duration.ofSeconds(10), 4096);
+            assertEquals(0, echoed.exitCode());
+            assertEquals(4096, echoed.output().length());
+            assertEquals("0123456789abcdef".repeat(256), echoed.output());
+        });
+    }
+
     private ProcessBuilder child(String mode) {
         Path java = Path.of(System.getProperty("java.home"), "bin", BootstrapPlatform.current().executable("java"));
         return new ProcessBuilder(java.toString(), "-cp", System.getProperty("java.class.path"), Child.class.getName(),
@@ -95,9 +129,30 @@ class ProcessSupportTest {
     }
 
     public static class Child {
-        public static void main(String[] args) throws InterruptedException {
+        public static void main(String[] args) throws Exception {
             if ("sleep".equals(args[0])) {
                 Thread.sleep(Duration.ofSeconds(30));
+            }
+            if ("stderr-and-stdout".equals(args[0])) {
+                System.err.print("noise-stderr");
+                System.out.print("out-only");
+                return;
+            }
+            if ("echo-stdin".equals(args[0])) {
+                System.out.write(System.in.readAllBytes());
+                System.out.flush();
+                return;
+            }
+            if ("echo-stdin-with-stderr".equals(args[0])) {
+                System.err.print("warning: noisy stderr\n");
+                System.out.write(System.in.readAllBytes());
+                System.out.flush();
+                return;
+            }
+            if ("echo-stdin-streaming".equals(args[0])) {
+                System.in.transferTo(System.out);
+                System.out.flush();
+                return;
             }
             System.out.print("x".repeat(1_000_000));
             System.exit(7);

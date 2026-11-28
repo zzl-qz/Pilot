@@ -405,10 +405,12 @@ class RunCommandToolTest {
 
     @Test
     void tokenizerKeepsQuotedArguments() {
-        assertEquals(List.of("git", "commit", "-m", "带 空格 的说明"), RunCommandTool.tokenize("git commit -m \"带 空格 的说明\""));
+        assertEquals(List.of("git", "commit", "-m", "带 空格 的说明"),
+            CommandChain.parse("git commit -m \"带 空格 的说明\"").segments().getFirst().tokens());
         assertEquals(List.of("grep", "-l", "failures=\"[1-9]\\|errors=\"[1-9]"),
-            RunCommandTool.tokenize("grep -l \"failures=\\\"[1-9]\\|errors=\\\"[1-9]\""));
-        assertEquals(List.of("mvn", "-q", "test"), RunCommandTool.tokenize("  mvn   -q  test  "));
+            CommandChain.parse("grep -l \"failures=\\\"[1-9]\\|errors=\\\"[1-9]\"").segments().getFirst().tokens());
+        assertEquals(List.of("mvn", "-q", "test"),
+            CommandChain.parse("  mvn   -q  test  ").segments().getFirst().tokens());
     }
 
     @Test

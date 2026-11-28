@@ -19,10 +19,12 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiConsumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import com.pilot.core.tool.file.SearchTool;
+import com.pilot.core.util.FileNames;
 import com.pilot.core.util.Texts;
 import com.pilot.core.workspace.PathValidator;
 
@@ -102,7 +104,7 @@ public final class FileOutline {
             }
             String display = paths.display(file);
             String[] lines = new String(bytes, StandardCharsets.UTF_8).split("\\R", -1);
-            List<Symbol> symbols = extract(extension(display), lines);
+            List<Symbol> symbols = extract(FileNames.extension(display), lines);
             if (symbols.isEmpty()) {
                 return "未在 " + display + " 中提取到结构符号（文件共 " + lines.length + " 行），可直接用 read_file 或 search_text。";
             }
@@ -245,7 +247,7 @@ public final class FileOutline {
     private void scanSingleFile(Path file, String needle, String needleLower, String kindFilter, GlobFilter globFilter,
         List<SearchHit> hits, AtomicInteger scannedFiles) {
         String display = paths.display(file);
-        String ext = extension(display);
+        String ext = FileNames.extension(display);
         if (globFilter != null) {
             if (!globFilter.matches(display, file.getFileName().toString())) {
                 return;
@@ -341,11 +343,9 @@ public final class FileOutline {
         if (symbolKind.equals(filter)) {
             return true;
         }
-        if ("func".equals(filter) || "fn".equals(filter) || "def".equals(filter) || "function".equals(filter)) {
+        if ("func".equals(filter) || "fn".equals(filter) || "def".equals(filter) || "function".equals(filter)
+            || "method".equals(filter)) {
             return "function".equals(symbolKind) || "method".equals(symbolKind);
-        }
-        if ("method".equals(filter)) {
-            return "method".equals(symbolKind) || "function".equals(symbolKind);
         }
         if ("type".equals(filter)) {
             return isTypeKind(symbolKind);
@@ -368,6 +368,28 @@ public final class FileOutline {
 
     private static List<Symbol> extractJava(String[] lines) {
         List<Symbol> symbols = new ArrayList<>();
+        scanCStyleLines(lines, (i, raw) -> {
+            String trimmed = raw.strip();
+            if (trimmed.startsWith("@") || trimmed.startsWith("import ") || trimmed.startsWith("package ")) {
+                return;
+            }
+            Matcher typeMatch = JAVA_TYPE.matcher(raw);
+            if (typeMatch.find()) {
+                String kind = typeMatch.group(1).replace("@", "");
+                String name = typeMatch.group(2);
+                symbols.add(new Symbol(i + 1, name, kind, clipSignature(trimmed), leadingSpaces(raw) >= 4));
+                return;
+            }
+            Symbol method = matchJavaMethod(lines, i, raw, trimmed);
+            if (method != null) {
+                symbols.add(method);
+            }
+        });
+        return symbols;
+    }
+
+    /** 跳过 C 风格块注释、单行注释与空白行，向回调传递非注释代码行的索引与原文。 */
+    private static void scanCStyleLines(String[] lines, BiConsumer<Integer, String> visitor) {
         boolean inBlockComment = false;
         for (int i = 0; i < lines.length; i++) {
             String raw = lines[i];
@@ -382,27 +404,11 @@ public final class FileOutline {
                 inBlockComment = !trimmed.contains("*/");
                 continue;
             }
-            if (isJavaIgnoredLine(trimmed)) {
+            if (trimmed.isEmpty() || trimmed.startsWith("//") || trimmed.startsWith("*")) {
                 continue;
             }
-            Matcher typeMatch = JAVA_TYPE.matcher(raw);
-            if (typeMatch.find()) {
-                String kind = typeMatch.group(1).replace("@", "");
-                String name = typeMatch.group(2);
-                symbols.add(new Symbol(i + 1, name, kind, clipSignature(trimmed), leadingSpaces(raw) >= 4));
-                continue;
-            }
-            Symbol method = matchJavaMethod(lines, i, raw, trimmed);
-            if (method != null) {
-                symbols.add(method);
-            }
+            visitor.accept(i, raw);
         }
-        return symbols;
-    }
-
-    private static boolean isJavaIgnoredLine(String trimmed) {
-        return trimmed.isEmpty() || trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("@")
-            || trimmed.startsWith("import ") || trimmed.startsWith("package ");
     }
 
     private static Symbol matchJavaMethod(String[] lines, int index, String raw, String trimmed) {
@@ -463,42 +469,25 @@ public final class FileOutline {
 
     private static List<Symbol> extractTypeScript(String[] lines) {
         List<Symbol> symbols = new ArrayList<>();
-        boolean inBlockComment = false;
-        for (int i = 0; i < lines.length; i++) {
-            String raw = lines[i];
+        scanCStyleLines(lines, (i, raw) -> {
             String trimmed = raw.strip();
-            if (inBlockComment) {
-                if (trimmed.contains("*/")) {
-                    inBlockComment = false;
-                }
-                continue;
-            }
-            if (trimmed.startsWith("/*")) {
-                if (!trimmed.contains("*/")) {
-                    inBlockComment = true;
-                }
-                continue;
-            }
-            if (trimmed.isEmpty() || trimmed.startsWith("//") || trimmed.startsWith("*")) {
-                continue;
-            }
             Matcher typeMatch = TS_TYPE.matcher(raw);
             if (typeMatch.find()) {
                 symbols.add(new Symbol(i + 1, typeMatch.group(2), typeMatch.group(1),
                     clipSignature(trimTrailingBrace(trimmed)), false));
-                continue;
+                return;
             }
             Matcher fnMatch = TS_FUNCTION.matcher(raw);
             if (fnMatch.find()) {
                 symbols.add(new Symbol(i + 1, fnMatch.group(1), "function", clipSignature(trimTrailingBrace(trimmed)),
                     leadingSpaces(raw) >= 2));
-                continue;
+                return;
             }
             Matcher arrowMatch = TS_ARROW.matcher(raw);
             if (arrowMatch.find()) {
                 symbols.add(new Symbol(i + 1, arrowMatch.group(1), "function",
                     clipSignature(trimTrailingBrace(trimmed)), leadingSpaces(raw) >= 2));
-                continue;
+                return;
             }
             Matcher method = TS_METHOD.matcher(raw);
             if (method.find()) {
@@ -507,7 +496,7 @@ public final class FileOutline {
                     symbols.add(new Symbol(i + 1, name, "method", clipSignature(trimTrailingBrace(trimmed)), true));
                 }
             }
-        }
+        });
         return symbols;
     }
 
@@ -602,15 +591,6 @@ public final class FileOutline {
         return symbols;
     }
 
-    private static String extension(String path) {
-        int slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
-        int dot = path.lastIndexOf('.');
-        if (dot <= slash || dot >= path.length() - 1) {
-            return "";
-        }
-        return path.substring(dot + 1).toLowerCase(Locale.ROOT);
-    }
-
     private static int leadingSpaces(String line) {
         int count = 0;
         while (count < line.length()) {
@@ -635,11 +615,7 @@ public final class FileOutline {
     }
 
     private static String clipSignature(String text) {
-        String singleLine = text.replaceAll("\\s+", " ").strip();
-        if (singleLine.length() <= MAX_SIGNATURE_CHARS) {
-            return singleLine;
-        }
-        return singleLine.substring(0, MAX_SIGNATURE_CHARS) + "…";
+        return Texts.oneLine(text, MAX_SIGNATURE_CHARS);
     }
 
     private record Symbol(int line, String name, String kind, String label, boolean nested) {
@@ -655,9 +631,7 @@ public final class FileOutline {
             }
             String normalized = rawGlob.strip().replace('\\', '/');
             PathMatcher full = FileSystems.getDefault().getPathMatcher("glob:" + normalized);
-            PathMatcher name =
-                normalized.contains("/") ? null : FileSystems.getDefault().getPathMatcher("glob:" + normalized);
-            return new GlobFilter(full, name);
+            return new GlobFilter(full, normalized.contains("/") ? null : full);
         }
 
         boolean matches(String relativePath, String fileName) {

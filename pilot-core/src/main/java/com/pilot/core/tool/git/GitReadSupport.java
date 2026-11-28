@@ -9,10 +9,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Function;
 
 import com.pilot.core.exec.EnvironmentSanitizer;
 import com.pilot.core.exec.ProcessSupport;
 import com.pilot.core.tool.Availability;
+import com.pilot.core.tool.ToolSupport;
 import com.pilot.core.workspace.AgentScope;
 import com.pilot.core.workspace.PathValidator;
 
@@ -65,18 +67,45 @@ final class GitReadSupport {
             }
             return null;
         }
-        String pathspec = resolvePathspec(paths, rawPath);
-        if (pathspec == null) {
+        Path resolved = paths.resolve(rawPath);
+        String relative = paths.display(resolved).replace('\\', '/');
+        if (relative.isEmpty() || ".".equals(relative)) {
             if (restricted) {
                 throw new IllegalArgumentException("AgentScope 路径受限时必须指定具体的允许路径");
             }
             return null;
         }
-        String relative = paths.display(paths.resolve(rawPath)).replace('\\', '/');
         if (!scope.allowsPath(relative)) {
             throw new IllegalArgumentException("路径不在 AgentScope 允许范围内");
         }
-        return pathspec;
+        return ":(literal)" + relative;
+    }
+
+    /** 统一处理仓库校验、受限路径解析、附加 pathspec、执行 git 与标准失败格式化。 */
+    static String runScoped(PathValidator paths, AgentScope scope, Map<String, Object> args, String commandLabel,
+        List<String> baseCommand, Function<RunResult, String> formatter) {
+        String repositoryError = repositoryError(paths);
+        if (repositoryError != null) {
+            return repositoryError;
+        }
+        String pathspec;
+        try {
+            pathspec = resolveScopedPathspec(paths, scope, ToolSupport.stringArg(args, "path"));
+        } catch (RuntimeException e) {
+            return "ERROR: " + e.getMessage();
+        }
+        List<String> command = new ArrayList<>(baseCommand);
+        if (pathspec != null) {
+            command.add("--");
+            command.add(pathspec);
+        }
+        RunResult result = run(paths.root(), command);
+        String formatted = formatter.apply(result);
+        if (formatted != null) {
+            return formatted;
+        }
+        String detail = result.error() != null ? result.error() : result.output().strip();
+        return "ERROR: git " + commandLabel + " 失败：" + detail;
     }
 
     static RunResult run(Path workspace, List<String> gitArgs) {
@@ -137,35 +166,6 @@ final class GitReadSupport {
         }
         out.append("）");
         return out.toString();
-    }
-
-    static int intArg(Map<String, Object> args, String key, int fallback, int min, int max) {
-        if (args == null || args.get(key) == null) {
-            return fallback;
-        }
-        Object raw = args.get(key);
-        int parsed;
-        if (raw instanceof Number number) {
-            parsed = number.intValue();
-        } else {
-            try {
-                parsed = Integer.parseInt(String.valueOf(raw).strip());
-            } catch (NumberFormatException e) {
-                return fallback;
-            }
-        }
-        return Math.max(min, Math.min(max, parsed));
-    }
-
-    static boolean boolArg(Map<String, Object> args, String key) {
-        if (args == null) {
-            return false;
-        }
-        Object raw = args.get(key);
-        if (raw instanceof Boolean b) {
-            return b;
-        }
-        return raw instanceof String s && "true".equalsIgnoreCase(s.strip());
     }
 
     record RunResult(int exitCode, String output, String error) {

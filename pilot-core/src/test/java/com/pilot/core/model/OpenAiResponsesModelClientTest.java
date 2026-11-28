@@ -115,6 +115,36 @@ class OpenAiResponsesModelClientTest {
     }
 
     @Test
+    void blankToolArgumentsDefaultToEmptyMapAndNonObjectArgumentsFailAsMalformed() throws Exception {
+        HttpServer blankServer = server(new AtomicReference<>(), """
+            {"status":"completed","output":[
+              {"type":"function_call","call_id":"fc_empty","name":"git_status","arguments":"   "}
+            ]}
+            """);
+        blankServer.start();
+        try {
+            ModelResponse response = client(blankServer).chat(List.of(Message.user("status")), List.of());
+            assertEquals(Map.of(), response.toolCalls().getFirst().args());
+        } finally {
+            blankServer.stop(0);
+        }
+
+        HttpServer arrayServer = server(new AtomicReference<>(), """
+            {"status":"completed","output":[
+              {"type":"function_call","call_id":"fc_arr","name":"edit_file","arguments":"[1,2]"}
+            ]}
+            """);
+        arrayServer.start();
+        try {
+            ModelClientException error = Assertions.assertThrows(ModelClientException.class,
+                () -> client(arrayServer).chat(List.of(Message.user("edit")), List.of()));
+            assertEquals(ModelFailureKind.MALFORMED_TOOL_CALL, error.kind());
+        } finally {
+            arrayServer.stop(0);
+        }
+    }
+
+    @Test
     void sendsStablePromptCacheKeyPreservesPrefixToolsDuringCompactionAndDowngradesOn400() throws Exception {
         ModelProfile openai = ModelProfile.resolve(URI.create("https://api.openai.com/v1"), "gpt-5.1", "auto", "auto",
             "", null, null, "short", null);

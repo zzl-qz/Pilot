@@ -164,6 +164,7 @@ public final class ApplyPatchTool extends PromptedTool implements WritesFiles {
                     }
                     plan.add(update);
                 }
+                default -> throw new IllegalStateException("不支持的补丁操作类型：" + op.kind());
             }
         }
         return plan;
@@ -382,6 +383,8 @@ public final class ApplyPatchTool extends PromptedTool implements WritesFiles {
             case DELETE -> {
                 snapshots.beforeWrite(step.file());
                 Files.delete(step.file());
+                snapshots.afterWrite(step.file());
+                reads.noteWrite();
             }
             case UPDATE -> {
                 if (step.target() == null) {
@@ -397,11 +400,13 @@ public final class ApplyPatchTool extends PromptedTool implements WritesFiles {
                     Files.writeString(step.target(), step.content(), StandardCharsets.UTF_8,
                         StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
                     Files.delete(step.file());
+                    snapshots.afterWrite(step.file());
                     snapshots.afterWrite(step.target());
                     reads.observed(step.target());
                     reads.noteWrite();
                 }
             }
+            default -> throw new IllegalStateException("不支持的补丁操作类型：" + step.kind());
         }
     }
 }

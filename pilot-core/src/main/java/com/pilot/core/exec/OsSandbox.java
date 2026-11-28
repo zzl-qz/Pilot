@@ -3,20 +3,18 @@ package com.pilot.core.exec;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFilePermissions;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
+import com.pilot.core.util.FileTrees;
 import com.pilot.core.util.HostOs;
+import com.pilot.core.util.Sha256;
 import com.pilot.core.workspace.RealPaths;
 
 /**
@@ -410,37 +408,18 @@ public final class OsSandbox {
         }
         Path file = dir.resolve("pilot-seatbelt-" + profileHash(profile) + ".sb");
         if (!Files.isRegularFile(file) || !profile.equals(Files.readString(file, StandardCharsets.UTF_8))) {
-            Path temp = Files.createTempFile(dir, ".pilot-seatbelt-", ".tmp");
+            FileTrees.writeAtomic(file, profile);
             try {
-                try {
-                    Files.setPosixFilePermissions(temp, privateFile);
-                } catch (UnsupportedOperationException ignored) {
-                    // POSIX permissions are unavailable on non-POSIX filesystems.
-                }
-                Files.writeString(temp, profile, StandardCharsets.UTF_8);
-                try {
-                    Files.move(temp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-                } catch (AtomicMoveNotSupportedException ignored) {
-                    Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING);
-                }
-            } finally {
-                Files.deleteIfExists(temp);
+                Files.setPosixFilePermissions(file, privateFile);
+            } catch (UnsupportedOperationException ignored) {
+                // POSIX permissions are unavailable on non-POSIX filesystems.
             }
         }
         return file;
     }
 
     private static String profileHash(String profile) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(profile.getBytes(StandardCharsets.UTF_8));
-            StringBuilder hex = new StringBuilder(16);
-            for (int i = 0; i < 8; i++) {
-                hex.append(String.format("%02x", digest[i]));
-            }
-            return hex.toString();
-        } catch (NoSuchAlgorithmException e) {
-            return Integer.toUnsignedString(profile.hashCode(), 16);
-        }
+        return Sha256.hex(profile).substring(0, 16);
     }
 
     static Path real(Path path) {

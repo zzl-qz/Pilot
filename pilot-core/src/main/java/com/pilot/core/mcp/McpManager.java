@@ -1,10 +1,8 @@
 package com.pilot.core.mcp;
 
 import java.io.IOException;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -13,6 +11,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
+
+import com.pilot.core.util.FileTrees;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -197,19 +197,7 @@ public final class McpManager implements AutoCloseable {
         if (bytes.length > McpJson.MAX_CONFIG_BYTES) {
             throw new McpException("MCP 用户级配置超过 1 MiB 上限，请精简后重试；本次未写入");
         }
-        Path parent = absolute.getParent() == null ? Path.of(".").toAbsolutePath() : absolute.getParent();
-        Files.createDirectories(parent);
-        Path tmp = Files.createTempFile(parent, "mcp-config-", ".tmp");
-        try {
-            Files.write(tmp, bytes);
-            try {
-                Files.move(tmp, absolute, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(tmp, absolute, StandardCopyOption.REPLACE_EXISTING);
-            }
-        } finally {
-            Files.deleteIfExists(tmp);
-        }
+        FileTrees.writeAtomic(absolute, bytes);
         retireChangedServers(before, load(userConfig));
     }
 

@@ -85,14 +85,10 @@ public final class AnthropicMessagesModelClient implements ModelClient {
 
     @Override
     public synchronized boolean disableRejectedCache(Throwable failure) {
-        if (!(failure instanceof ModelClientException) || failure.getMessage() == null) {
+        if (!ModelHttp.isRejectedCache400(failure)) {
             return false;
         }
-        String message = failure.getMessage().toLowerCase(java.util.Locale.ROOT);
-        if (!message.contains("http 400") || !message.matches(
-            "(?s).*(unknown|unsupported|unrecognized|unexpected|not allowed|not permitted|extra inputs|invalid|不支持).*")) {
-            return false;
-        }
+        String message = failure.getMessage().toLowerCase(Locale.ROOT);
         if (!cacheParametersDisabled && (message.contains("cache_control") || message.contains("ttl"))) {
             cacheParametersDisabled = true;
             return true;
@@ -125,13 +121,9 @@ public final class AnthropicMessagesModelClient implements ModelClient {
             }
             return readStream(response.body(), textDelta, reasoningDelta);
         } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new ModelClientException(ModelFailureKind.INTERRUPTED, "模型请求被中断", e);
+            throw ModelHttp.wrapInterrupted(e);
         } catch (IOException e) {
-            ModelFailureKind kind = Thread.currentThread().isInterrupted() ? ModelFailureKind.INTERRUPTED
-                : e instanceof BoundedHttp.ResponseLimitException ? ModelFailureKind.PERMANENT
-                    : ModelFailureKind.NETWORK;
-            throw new ModelClientException(kind, "模型请求失败：" + e.getMessage(), e);
+            throw ModelHttp.wrapIo(e);
         }
     }
 
@@ -183,31 +175,25 @@ public final class AnthropicMessagesModelClient implements ModelClient {
         String reasoning = parsed.reasoningContent();
         if (!reasoning.isEmpty()) {
             int split = reasoning.indexOf(THINKING_SPLIT);
-            emit(reasoningDelta, split > 0 ? reasoning.substring(0, split) : reasoning);
+            ModelHttp.emit(reasoningDelta, split > 0 ? reasoning.substring(0, split) : reasoning);
         } else {
             StringBuilder rawThinking = new StringBuilder();
             for (JsonNode block : root.path("content")) {
-                if ("thinking".equals(string(block.get("type")))) {
-                    rawThinking.append(string(block.get("thinking")));
+                if ("thinking".equals(ModelHttp.text(block.get("type")))) {
+                    rawThinking.append(ModelHttp.text(block.get("thinking")));
                 }
             }
             if (!rawThinking.isEmpty()) {
-                emit(reasoningDelta, rawThinking.toString());
+                ModelHttp.emit(reasoningDelta, rawThinking.toString());
             }
         }
-        emit(textDelta, parsed.content());
+        ModelHttp.emit(textDelta, parsed.content());
         return parsed;
     }
 
     private void throwHttpError(BoundedHttp.Exchange response) throws IOException {
-        String detail =
-            ModelHttp.snippet(new String(response.body().readNBytes(BoundedHttp.ERROR_BYTES), StandardCharsets.UTF_8));
-        int status = response.statusCode();
-        if (NativeToolRejectedException.rejected(status, detail)) {
-            throw new NativeToolRejectedException("服务端未接受原生工具或协议", status == 404 || status == 405);
-        }
-        throw ModelClientException.httpError(ModelFailureSignals.statusKind(status, detail), status,
-            ModelHttp.retryAfterMs(response.headers()), "模型接口返回 HTTP " + status + "：" + detail);
+        String raw = new String(response.body().readNBytes(BoundedHttp.ERROR_BYTES), StandardCharsets.UTF_8);
+        ModelHttp.throwNativeHttpError(response.statusCode(), response.headers(), raw);
     }
 
     private static boolean isJsonContentType(HttpHeaders headers) {
@@ -250,31 +236,31 @@ public final class AnthropicMessagesModelClient implements ModelClient {
         if ("pause_turn".equals(root.path("stop_reason").asString())) {
             throw new NativeToolRejectedException("原生工具需要分段续传，当前自动切回 Pilot 工具");
         }
-        ModelResponse.FinishReason reason = finishReason(string(root.get("stop_reason")));
+        ModelResponse.FinishReason reason = finishReason(ModelHttp.text(root.get("stop_reason")));
         StringBuilder text = new StringBuilder();
         StringBuilder thinking = new StringBuilder();
         String signature = "";
         List<ToolCall> calls = new ArrayList<>();
         LinkedHashMap<String, String> citations = new LinkedHashMap<>();
         for (JsonNode block : root.path("content")) {
-            String type = string(block.get("type"));
+            String type = ModelHttp.text(block.get("type"));
             if ("thinking".equals(type)) {
-                thinking.append(string(block.get("thinking")));
-                String signed = string(block.get("signature"));
+                thinking.append(ModelHttp.text(block.get("thinking")));
+                String signed = ModelHttp.text(block.get("signature"));
                 if (!signed.isBlank()) {
                     signature = signed;
                 }
             } else if ("text".equals(type)) {
-                text.append(string(block.get("text")));
+                text.append(ModelHttp.text(block.get("text")));
                 collectCitations(block.get("citations"), citations);
             } else if ("tool_use".equals(type)
                 && (reason == ModelResponse.FinishReason.STOP || reason == ModelResponse.FinishReason.TOOL_CALLS)) {
-                String id = string(block.get("id"));
-                String name = string(block.get("name"));
+                String id = ModelHttp.text(block.get("id"));
+                String name = ModelHttp.text(block.get("name"));
                 if (id.isBlank() || name.isBlank()) {
                     throw new ModelClientException(ModelFailureKind.PERMANENT, "模型返回的 tool_use 缺少 id 或 name");
                 }
-                calls.add(new ToolCall(id, name, objectMap(block.get("input"))));
+                calls.add(new ToolCall(id, name, ModelHttp.toObjectMap(mapper, block.get("input"))));
             } else if (type.startsWith("web_search") || type.startsWith("web_fetch")) {
                 handleServerToolBlock(block, text, citations);
             }
@@ -304,12 +290,6 @@ public final class AnthropicMessagesModelClient implements ModelClient {
             text.append("\n原生工具未成功完成：").append(code).append('\n');
         }
         collectCitations(block, citations);
-    }
-
-    private static void emit(Consumer<String> sink, String delta) {
-        if (sink != null && delta != null && !delta.isEmpty()) {
-            sink.accept(delta);
-        }
     }
 
     Map<String, Object> requestBody(List<Message> messages, List<ToolDefinition> definitions) {
@@ -587,38 +567,16 @@ public final class AnthropicMessagesModelClient implements ModelClient {
             stored.substring(split + THINKING_SPLIT.length()));
     }
 
-    private Object content(Message message) {
-        Object compatible = OpenAiCompatibleModelClient.contentFor(message);
-        if (!(compatible instanceof List<?> parts)) {
-            return compatible;
+    private static Object content(Message message) {
+        List<ModelHttp.ContentPart> parts = ModelHttp.contentParts(message);
+        if (parts.isEmpty()) {
+            return message.content();
         }
-        List<Map<String, Object>> blocks = new ArrayList<>();
-        for (Object value : parts) {
-            if (!(value instanceof Map<?, ?> part)) {
-                continue;
-            }
-            if ("text".equals(part.get("type"))) {
-                blocks.add(Map.of("type", "text", "text", part.get("text")));
-            } else if ("image_url".equals(part.get("type")) && part.get("image_url") instanceof Map<?, ?> image) {
-                String dataUrl = String.valueOf(image.get("url"));
-                int separator = dataUrl.indexOf(";base64,");
-                if (dataUrl.startsWith("data:") && separator > 5) {
-                    String mediaType = dataUrl.substring(5, separator);
-                    String data = dataUrl.substring(separator + ";base64,".length());
-                    blocks.add(Map.of("type", "image", "source",
-                        Map.of("type", "base64", "media_type", mediaType, "data", data)));
-                }
-            }
-        }
-        return blocks;
-    }
-
-    private Map<String, Object> objectMap(JsonNode node) {
-        if (node == null || !node.isObject()) {
-            return Map.of();
-        }
-        return mapper.convertValue(node,
-            mapper.getTypeFactory().constructMapType(LinkedHashMap.class, String.class, Object.class));
+        return parts.stream().map(part -> switch (part) {
+            case ModelHttp.TextPart text -> Map.<String, Object>of("type", "text", "text", text.text());
+            case ModelHttp.ImagePart image -> Map.<String, Object>of("type", "image", "source",
+                Map.of("type", "base64", "media_type", image.mimeType(), "data", image.base64()));
+        }).toList();
     }
 
     private static void collectCitations(JsonNode value, Map<String, String> citations) {
@@ -634,12 +592,8 @@ public final class AnthropicMessagesModelClient implements ModelClient {
         if (!value.isObject()) {
             return;
         }
-        NativeModelCitations.add(string(value.get("url")), string(value.get("title")), citations);
+        NativeModelCitations.add(ModelHttp.text(value.get("url")), ModelHttp.text(value.get("title")), citations);
         value.properties().forEach(entry -> collectCitations(entry.getValue(), citations));
-    }
-
-    private static String string(JsonNode node) {
-        return node == null || node.isNull() ? "" : node.asString();
     }
 
     private static final class StreamBlock {
@@ -685,7 +639,7 @@ public final class AnthropicMessagesModelClient implements ModelClient {
             }
             anyEvent = true;
             JsonNode root = ModelHttp.parseJson(mapper, payload);
-            String type = string(root.get("type"));
+            String type = ModelHttp.text(root.get("type"));
             if (type.isBlank()) {
                 type = eventName == null ? "" : eventName;
             }
@@ -703,7 +657,7 @@ public final class AnthropicMessagesModelClient implements ModelClient {
 
         private void onMessageStart(JsonNode root) {
             JsonNode message = root.path("message");
-            String reason = string(message.get("stop_reason"));
+            String reason = ModelHttp.text(message.get("stop_reason"));
             if (!reason.isBlank()) {
                 stopReason = reason;
             }
@@ -713,20 +667,20 @@ public final class AnthropicMessagesModelClient implements ModelClient {
         private void onBlockStart(JsonNode root) {
             int index = root.path("index").asInt(blocks.size());
             JsonNode block = root.path("content_block");
-            String type = string(block.get("type"));
-            StreamBlock entry =
-                new StreamBlock(type, string(block.get("id")), string(block.get("name")), block.get("input"));
+            String type = ModelHttp.text(block.get("type"));
+            StreamBlock entry = new StreamBlock(type, ModelHttp.text(block.get("id")),
+                ModelHttp.text(block.get("name")), block.get("input"));
             blocks.put(index, entry);
             if ("text".equals(type)) {
-                String piece = string(block.get("text"));
+                String piece = ModelHttp.text(block.get("text"));
                 text.append(piece);
-                emit(textDelta, piece);
+                ModelHttp.emit(textDelta, piece);
                 collectCitations(block.get("citations"), citations);
             } else if ("thinking".equals(type)) {
-                String piece = string(block.get("thinking"));
+                String piece = ModelHttp.text(block.get("thinking"));
                 thinking.append(piece);
-                emit(reasoningDelta, piece);
-                String sig = string(block.get("signature"));
+                ModelHttp.emit(reasoningDelta, piece);
+                String sig = ModelHttp.text(block.get("signature"));
                 if (!sig.isBlank()) {
                     signature.append(sig);
                 }
@@ -734,7 +688,7 @@ public final class AnthropicMessagesModelClient implements ModelClient {
                 int before = text.length();
                 handleServerToolBlock(block, text, citations);
                 if (text.length() > before) {
-                    emit(textDelta, text.substring(before));
+                    ModelHttp.emit(textDelta, text.substring(before));
                 }
             }
         }
@@ -743,26 +697,26 @@ public final class AnthropicMessagesModelClient implements ModelClient {
             int index = root.path("index").asInt(-1);
             StreamBlock block = blocks.get(index);
             JsonNode delta = root.path("delta");
-            String deltaType = string(delta.get("type"));
+            String deltaType = ModelHttp.text(delta.get("type"));
             if ("text_delta".equals(deltaType) || (deltaType.isBlank() && delta.hasNonNull("text"))) {
-                String piece = string(delta.get("text"));
+                String piece = ModelHttp.text(delta.get("text"));
                 text.append(piece);
-                emit(textDelta, piece);
+                ModelHttp.emit(textDelta, piece);
             } else if ("thinking_delta".equals(deltaType)) {
-                String piece = string(delta.get("thinking"));
+                String piece = ModelHttp.text(delta.get("thinking"));
                 thinking.append(piece);
-                emit(reasoningDelta, piece);
+                ModelHttp.emit(reasoningDelta, piece);
             } else if ("signature_delta".equals(deltaType)) {
-                signature.append(string(delta.get("signature")));
+                signature.append(ModelHttp.text(delta.get("signature")));
             } else if ("input_json_delta".equals(deltaType) && block != null) {
-                block.inputJson.append(string(delta.get("partial_json")));
+                block.inputJson.append(ModelHttp.text(delta.get("partial_json")));
             } else if ("citations_delta".equals(deltaType)) {
                 collectCitations(delta.get("citation"), citations);
             }
         }
 
         private void onMessageDelta(JsonNode root) {
-            String reason = string(root.path("delta").get("stop_reason"));
+            String reason = ModelHttp.text(root.path("delta").get("stop_reason"));
             if (!reason.isBlank()) {
                 stopReason = reason;
             }
@@ -772,8 +726,8 @@ public final class AnthropicMessagesModelClient implements ModelClient {
 
         private void onErrorEvent(JsonNode root) {
             JsonNode error = root.path("error");
-            String errType = string(error.get("type"));
-            String message = string(error.get("message"));
+            String errType = ModelHttp.text(error.get("type"));
+            String message = ModelHttp.text(error.get("message"));
             String detail = ModelHttp.snippet(errType.isBlank() ? root.toString() : errType + ": " + message);
             if (NativeToolRejectedException.rejected(400, detail)) {
                 throw new NativeToolRejectedException("服务端拒绝原生工具或协议");
@@ -812,7 +766,7 @@ public final class AnthropicMessagesModelClient implements ModelClient {
             int beforeCitations = text.length();
             NativeModelCitations.append(text, citations, url -> url.replace("(", "%28").replace(")", "%29"));
             if (text.length() > beforeCitations) {
-                emit(textDelta, text.substring(beforeCitations));
+                ModelHttp.emit(textDelta, text.substring(beforeCitations));
             }
             ModelUsage usage = mergedUsage.isEmpty() ? null : ModelUsageParser.parse(mapper.valueToTree(mergedUsage));
             String sig = signature.toString();
@@ -840,20 +794,9 @@ public final class AnthropicMessagesModelClient implements ModelClient {
         private Map<String, Object> parseBlockInput(StreamBlock block) {
             String raw = block.inputJson.toString();
             if (raw.isBlank()) {
-                return block.initialInput != null && block.initialInput.isObject() ? objectMap(block.initialInput)
-                    : Map.of();
+                return ModelHttp.toObjectMap(mapper, block.initialInput);
             }
-            try {
-                JsonNode parsed = mapper.readTree(raw);
-                if (parsed == null || !parsed.isObject()) {
-                    throw new ModelClientException(ModelFailureKind.MALFORMED_TOOL_CALL, "流式工具参数必须为 JSON 对象");
-                }
-                return objectMap(parsed);
-            } catch (ModelClientException e) {
-                throw e;
-            } catch (RuntimeException e) {
-                throw new ModelClientException(ModelFailureKind.MALFORMED_TOOL_CALL, "流式工具参数不是合法 JSON", e);
-            }
+            return ModelHttp.parseToolArgs(mapper, raw);
         }
     }
 

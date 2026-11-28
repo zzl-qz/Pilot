@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.util.List;
 import java.util.Map;
 
@@ -239,5 +240,19 @@ class OfficeToolTest {
         assertTrue(result.text().startsWith("ERROR"), result.text());
         assertFalse(Files.exists(root.resolve("bad-spec-output.docx")));
         assertEquals("not a zip", Files.readString(root.resolve("bad.docx")));
+    }
+
+    @Test
+    void pdfCacheKeyChangesOnModifiedTimeAndLargePageCounts() throws Exception {
+        Path pdf = root.resolve("cache.pdf");
+        Files.writeString(pdf, "same-size-content");
+        String initialKey = OfficeSupport.pdfCacheKey(pdf, 1);
+        String page257Key = OfficeSupport.pdfCacheKey(pdf, 257);
+        assertFalse(initialKey.equals(page257Key), "页数相差 256 不得发生 byte 截断冲突");
+
+        var current = Files.getLastModifiedTime(pdf).toInstant();
+        Files.setLastModifiedTime(pdf, FileTime.from(current.plusSeconds(10)));
+        String touchedKey = OfficeSupport.pdfCacheKey(pdf, 1);
+        assertFalse(initialKey.equals(touchedKey), "同大小同路径文件修改 mtime 后缓存键必须变化");
     }
 }

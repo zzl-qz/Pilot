@@ -213,4 +213,38 @@ class AgentProfileCatalogTest {
         assertTrue(overridden.find("explorer").isPresent());
         assertTrue(overridden.find("verifier").isPresent());
     }
+
+    @Test
+    void frontmatterHandlesAdversarialYamlEdgeCasesSafely() {
+        var colonAndComments = AgentFrontmatter.parse("\ufeff---\r\n" + "description: Frontend expert: React & Vite\r\n"
+            + "files: [\"a,b\", **/*.tsx] # inline comment\r\n" + "deny-files:\r\n" + "  - **/.env # secret\r\n"
+            + "commands: [yes, no]\r\n" + "writable: true\r\n" + "---\r\n" + "正文字段\r\n");
+        assertEquals("Frontend expert: React & Vite", colonAndComments.description());
+        assertEquals(List.of("a,b", "**/*.tsx"), colonAndComments.files());
+        assertEquals(List.of("**/.env"), colonAndComments.denyFiles());
+        assertEquals(List.of("yes", "no"), colonAndComments.commands());
+        assertTrue(colonAndComments.writable());
+
+        var blockDesc = AgentFrontmatter.parse("""
+            ---
+            description: |
+              审查规则：
+              - **bold** item
+              - *italic* item
+            ---
+            正文
+            """);
+        assertTrue(blockDesc.description().contains("- **bold** item"), blockDesc.description());
+        assertTrue(blockDesc.description().contains("- *italic* item"), blockDesc.description());
+        assertFalse(blockDesc.description().contains("'- **bold**"), blockDesc.description());
+
+        Assertions.assertThrows(IllegalArgumentException.class,
+            () -> AgentFrontmatter.parse("---\ndescription: ok\nwritable: on\n---\nbody"));
+        Assertions.assertThrows(IllegalArgumentException.class,
+            () -> AgentFrontmatter.parse("---\ndescription: ok\ntools: [[a, b]]\n---\nbody"));
+        Assertions.assertThrows(IllegalArgumentException.class,
+            () -> AgentFrontmatter.parse("---\ndescription: a\ndescription: b\n---\nbody"));
+        Assertions.assertThrows(IllegalArgumentException.class,
+            () -> AgentFrontmatter.parse("---\ndescription: &a [x, x]\ntools: [*a, *a]\n---\nbody"));
+    }
 }

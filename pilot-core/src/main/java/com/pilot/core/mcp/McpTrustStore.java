@@ -1,17 +1,11 @@
 package com.pilot.core.mcp;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +15,9 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.pilot.core.util.FileTrees;
+import com.pilot.core.util.Sha256;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -250,17 +247,7 @@ public final class McpTrustStore {
         root.put("version", FORMAT_VERSION);
         root.put("servers", serversJson);
         try {
-            Path absolute = file.toAbsolutePath();
-            if (absolute.getParent() != null) {
-                Files.createDirectories(absolute.getParent());
-            }
-            Path tmp = absolute.resolveSibling(absolute.getFileName() + ".tmp");
-            Files.writeString(tmp, mapper.writeValueAsString(root));
-            try {
-                Files.move(tmp, absolute, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(tmp, absolute, StandardCopyOption.REPLACE_EXISTING);
-            }
+            FileTrees.writeAtomic(file, mapper.writeValueAsString(root));
         } catch (IOException e) {
             throw new IllegalStateException("无法写入 MCP 信任记录 " + file + ": " + e.getMessage(), e);
         }
@@ -400,13 +387,6 @@ public final class McpTrustStore {
     }
 
     private static String sha256(String text) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            StringBuilder hex = new StringBuilder("sha256:")
-                .append(HexFormat.of().formatHex(digest.digest(text.getBytes(StandardCharsets.UTF_8))));
-            return hex.toString();
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 摘要不可用", e);
-        }
+        return "sha256:" + Sha256.hex(text);
     }
 }

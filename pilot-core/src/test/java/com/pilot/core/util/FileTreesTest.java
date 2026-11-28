@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
@@ -101,6 +102,20 @@ class FileTreesTest {
             assertFalse(Files.exists(sibling));
         } finally {
             Files.setPosixFilePermissions(blocked, permissions);
+        }
+    }
+
+    @Test
+    void writeAtomicAndSyncCreateParentsReplaceTargetAndLeaveNoTempFiles() throws IOException {
+        Path nested = directory.resolve("sub/dir/state.json");
+        FileTrees.writeAtomic(nested, "{\"v\":1}");
+        assertEquals("{\"v\":1}", Files.readString(nested));
+
+        FileTrees.writeAtomicSync(nested, "{\"v\":2}".getBytes(StandardCharsets.UTF_8));
+        assertEquals("{\"v\":2}", Files.readString(nested));
+
+        try (var entries = Files.list(nested.getParent())) {
+            assertEquals(List.of(nested), entries.toList());
         }
     }
 }

@@ -7,18 +7,14 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
 import com.pilot.core.http.BoundedHttp;
-import com.pilot.core.message.Attachment;
 import com.pilot.core.message.Message;
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.model.diagnostics.ModelRequestScope;
@@ -122,14 +118,10 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
 
     @Override
     public synchronized boolean disableRejectedCache(Throwable failure) {
-        if (!(failure instanceof ModelClientException) || failure.getMessage() == null) {
+        if (!ModelHttp.isRejectedCache400(failure)) {
             return false;
         }
         String message = failure.getMessage().toLowerCase(java.util.Locale.ROOT);
-        if (!message.contains("http 400") || !message.matches(
-            "(?s).*(unknown|unsupported|unrecognized|unexpected|not allowed|not permitted|extra inputs|不支持).*")) {
-            return false;
-        }
         if (!cacheParametersDisabled && (message.contains("cache_control") || message.contains("prompt_cache_key"))) {
             cacheParametersDisabled = true;
             return true;
@@ -186,8 +178,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             }
         }
         if (profile().cacheKey() && !ModelRequestScope.current().cacheGroup().isBlank()) {
-            body.put("prompt_cache_key",
-                "pilot-" + MeteredModelClient.hash(ModelRequestScope.current().cacheGroup()).substring(0, 32));
+            body.put("prompt_cache_key", ModelHttp.promptCacheKey(ModelRequestScope.current().cacheGroup()));
         }
         applyCacheMarkers(tools, items, messages);
         return body;
@@ -347,11 +338,9 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         try {
             response = BoundedHttp.text(httpClient, request, idleTimeout, BoundedHttp.JSON_BYTES);
         } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new ModelClientException(ModelFailureKind.INTERRUPTED, "模型请求被中断", e);
+            throw ModelHttp.wrapInterrupted(e);
         } catch (IOException e) {
-            throw new ModelClientException(httpFailure(e),
-                "模型请求失败（" + elapsedMs(startedAt) + " ms, model=" + model + "）：" + e.getMessage(), e);
+            throw ModelHttp.wrapIo(e, "模型请求失败（" + elapsedMs(startedAt) + " ms, model=" + model + "）：" + e.getMessage());
         }
 
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
@@ -386,9 +375,9 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             throw new ModelClientException(ModelFailureKind.PERMANENT,
                 "模型响应缺少 message：" + ModelHttp.snippet(response.body()));
         }
-        String content = text(message.get("content"));
+        String content = ModelHttp.text(message.get("content"));
         ModelResponse.FinishReason finishReason =
-            ModelResponse.FinishReason.fromWire(text(choices.get(0).get("finish_reason")));
+            ModelResponse.FinishReason.fromWire(ModelHttp.text(choices.get(0).get("finish_reason")));
         if (finishReason == ModelResponse.FinishReason.UNKNOWN) {
             throw new ModelClientException(ModelFailureKind.INCOMPLETE, "模型响应缺少有效 finish_reason，未提交本次输出");
         }
@@ -495,7 +484,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                     if (!choices.isArray() || choices.isEmpty()) {
                         continue;
                     }
-                    String finish = text(choices.get(0).get("finish_reason"));
+                    String finish = ModelHttp.text(choices.get(0).get("finish_reason"));
                     if (!finish.isBlank()) {
                         finishReason = ModelResponse.FinishReason.fromWire(finish);
                     }
@@ -503,24 +492,24 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                     String thought = reasoningText(delta);
                     if (!thought.isEmpty()) {
                         reasoning.append(thought);
-                        emit(reasoningDelta, thought);
+                        ModelHttp.emit(reasoningDelta, thought);
                     }
                     JsonNode textNode = delta.get("content");
                     if (textNode != null && textNode.isString()) {
                         thoughts.accept(textNode.asString(), piece -> {
                             content.append(piece);
-                            emit(textDelta, piece);
+                            ModelHttp.emit(textDelta, piece);
                         }, piece -> {
                             reasoning.append(piece);
-                            emit(reasoningDelta, piece);
+                            ModelHttp.emit(reasoningDelta, piece);
                         });
                     }
                     JsonNode calls = delta.path("tool_calls");
                     if (calls.isArray()) {
                         for (JsonNode call : calls) {
-                            String idPiece = text(call.get("id"));
+                            String idPiece = ModelHttp.text(call.get("id"));
                             JsonNode function = call.path("function");
-                            String namePiece = text(function.get("name"));
+                            String namePiece = ModelHttp.text(function.get("name"));
                             int fallbackIndex = !idPiece.isEmpty() || !namePiece.isEmpty() || toolParts.isEmpty()
                                 ? nextToolIndex : Math.max(0, nextToolIndex - 1);
                             int index = toolCallIndex(call, fallbackIndex);
@@ -548,10 +537,10 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             }
             thoughts.finish(piece -> {
                 content.append(piece);
-                emit(textDelta, piece);
+                ModelHttp.emit(textDelta, piece);
             }, piece -> {
                 reasoning.append(piece);
-                emit(reasoningDelta, piece);
+                ModelHttp.emit(reasoningDelta, piece);
             });
             List<ToolCall> calls = !usable(finishReason) ? List.of() : toolParts.values().stream().map(part -> {
                 String id = (String)part.getOrDefault("id", "");
@@ -560,19 +549,17 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                     throw new ModelClientException(ModelFailureKind.PERMANENT, "流式 tool_call 缺少 id 或 function.name");
                 }
                 String args = (String)part.getOrDefault("arguments", "");
-                return new ToolCall(id, name, parseArguments(args));
+                return new ToolCall(id, name, ModelHttp.parseToolArgs(objectMapper, args));
             }).toList();
             ModelUsage finalUsage =
                 reportedUsage != null ? reportedUsage : estimatedUsage(messages, content.toString(), calls);
             return new ModelResponse(content.toString(), calls, finalUsage, finishReason, reasoning.toString());
         } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new ModelClientException(ModelFailureKind.INTERRUPTED, "模型请求被中断", e);
+            throw ModelHttp.wrapInterrupted(e);
         } catch (IOException e) {
             // 流式响应读到一半断开（服务端重启、代理断连、本地网络抖动）也归网络类：
             // 上层会退避重连，而不是把这个任务判死。
-            throw new ModelClientException(httpFailure(e),
-                "流式模型请求失败（" + elapsedMs(startedAt) + " ms）：" + e.getMessage(), e);
+            throw ModelHttp.wrapIo(e, "流式模型请求失败（" + elapsedMs(startedAt) + " ms）：" + e.getMessage());
         }
     }
 
@@ -615,54 +602,15 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
      * 避免给不支持多模态的兼容端点发送数组。
      */
     static Object contentFor(Message message) {
-        List<Attachment> images = message.attachments().stream().filter(Attachment::image).toList();
-        if (images.isEmpty()) {
+        List<ModelHttp.ContentPart> parts = ModelHttp.contentParts(message);
+        if (parts.isEmpty()) {
             return message.content();
         }
-        ArrayList<Map<String, Object>> parts = new ArrayList<Map<String, Object>>();
-        List<Integer> positions = message.imagePositions();
-        if (positions.isEmpty()) {
-            if (!message.content().isBlank()) {
-                parts.add(Map.of("type", "text", "text", message.content()));
-            }
-            for (Attachment image : images) {
-                parts.add(imagePart(message, image));
-            }
-            return parts;
-        }
-        int cursor = 0;
-        for (int i = 0; i < images.size(); i++) {
-            int position = Math.max(cursor, Math.min(message.content().length(), positions.get(i)));
-            if (position > cursor) {
-                parts.add(Map.of("type", "text", "text", message.content().substring(cursor, position)));
-            }
-            parts.add(imagePart(message, images.get(i)));
-            cursor = position;
-        }
-        if (cursor < message.content().length()) {
-            parts.add(Map.of("type", "text", "text", message.content().substring(cursor)));
-        }
-        return parts;
-    }
-
-    /**
-     * 图片文件丢失时降级为文字占位：工具产出的截图是一次性观察，用户上传的图片也可能
-     * 被附件保留策略清理，都不能让整段历史再也发不出去。
-     */
-    private static Map<String, Object> imagePart(Message message, Attachment image) {
-        if (!Files.isRegularFile(Path.of(image.path()))) {
-            return Map.of("type", "text", "text", "[图片已不存在：" + image.name() + "]");
-        }
-        return Map.of("type", "image_url", "image_url", Map.of("url", dataUrl(image)));
-    }
-
-    private static String dataUrl(Attachment image) {
-        try {
-            byte[] bytes = Files.readAllBytes(Path.of(image.path()));
-            return "data:" + image.mimeType() + ";base64," + Base64.getEncoder().encodeToString(bytes);
-        } catch (IOException e) {
-            throw new ModelClientException(ModelFailureKind.PERMANENT, "读取图片附件失败：" + image.name(), e);
-        }
+        return parts.stream().map(part -> switch (part) {
+            case ModelHttp.TextPart text -> Map.<String, Object>of("type", "text", "text", text.text());
+            case ModelHttp.ImagePart image ->
+                Map.<String, Object>of("type", "image_url", "image_url", Map.of("url", image.dataUrl()));
+        }).toList();
     }
 
     private Map<String, Object> toolPayload(ToolDefinition tool) {
@@ -676,13 +624,13 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         }
         ArrayList<ToolCall> calls = new ArrayList<ToolCall>();
         for (JsonNode item : node) {
-            String callId = text(item.get("id"));
+            String callId = ModelHttp.text(item.get("id"));
             JsonNode function = item.get("function");
-            String name = function == null ? "" : text(function.get("name"));
+            String name = function == null ? "" : ModelHttp.text(function.get("name"));
             if (callId.isBlank() || name.isBlank()) {
                 throw new ModelClientException(ModelFailureKind.PERMANENT, "模型返回的 tool_call 缺少 id 或 function.name");
             }
-            calls.add(new ToolCall(callId, name, arguments(function.get("arguments"))));
+            calls.add(new ToolCall(callId, name, ModelHttp.parseToolArgs(objectMapper, function.get("arguments"))));
         }
         return List.copyOf(calls);
     }
@@ -706,34 +654,6 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         return new ModelUsage(TokenEstimate.of(messages), output, 0, false);
     }
 
-    private Map<String, Object> arguments(JsonNode node) {
-        if (node == null || node.isNull()) {
-            return Map.of();
-        }
-        String raw = node.isString() ? node.asString() : node.toString();
-        return parseArguments(raw);
-    }
-
-    private Map<String, Object> parseArguments(String raw) {
-        if (raw == null || raw.isBlank()) {
-            return Map.of();
-        }
-        try {
-            JsonNode parsed = objectMapper.readTree(raw);
-            if (parsed == null || !parsed.isObject()) {
-                throw new ModelClientException(ModelFailureKind.MALFORMED_TOOL_CALL,
-                    "工具调用参数必须为 JSON 对象：" + ModelHttp.snippet(raw));
-            }
-            return objectMapper.convertValue(parsed,
-                objectMapper.getTypeFactory().constructMapType(LinkedHashMap.class, String.class, Object.class));
-        } catch (ModelClientException e) {
-            throw e;
-        } catch (RuntimeException e) {
-            throw new ModelClientException(ModelFailureKind.MALFORMED_TOOL_CALL,
-                "工具调用参数不是合法 JSON：" + ModelHttp.snippet(raw), e);
-        }
-    }
-
     private void throwNonSseJsonError(String raw) {
         try {
             JsonNode root = objectMapper.readTree(raw);
@@ -750,9 +670,9 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
     }
 
     private static ModelClientException streamError(JsonNode error, String raw) {
-        String detail = error.isObject() ? text(error.get("message")) : text(error);
-        String errType = error.isObject() ? text(error.get("type")) : "";
-        String errCode = error.isObject() ? text(error.get("code")) : "";
+        String detail = error.isObject() ? ModelHttp.text(error.get("message")) : ModelHttp.text(error);
+        String errType = error.isObject() ? ModelHttp.text(error.get("type")) : "";
+        String errCode = error.isObject() ? ModelHttp.text(error.get("code")) : "";
         String summary = detail.isBlank() ? ModelHttp.snippet(raw) : ModelHttp.snippet(detail);
         String probe = (errType + " " + errCode + " " + summary).toLowerCase(java.util.Locale.ROOT);
         ModelFailureKind kind;
@@ -787,14 +707,6 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         return fallback;
     }
 
-    private static ModelFailureKind httpFailure(IOException error) {
-        if (Thread.currentThread().isInterrupted()) {
-            return ModelFailureKind.INTERRUPTED;
-        }
-        return error instanceof BoundedHttp.ResponseLimitException ? ModelFailureKind.PERMANENT
-            : ModelFailureKind.NETWORK;
-    }
-
     private static long elapsedMs(long startedAt) {
         return (System.nanoTime() - startedAt) / 1_000_000L;
     }
@@ -804,7 +716,7 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         if (delta == null) {
             return "";
         }
-        String direct = text(delta.get("reasoning_content"));
+        String direct = ModelHttp.text(delta.get("reasoning_content"));
         if (!direct.isEmpty()) {
             return direct;
         }
@@ -815,15 +727,8 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
         if (reasoning.isTextual()) {
             return reasoning.asString();
         }
-        String nested = text(reasoning.get("content"));
-        return nested.isEmpty() ? text(reasoning.get("text")) : nested;
-    }
-
-    private static void emit(Consumer<String> sink, String text) {
-        if (sink == null || text == null || text.isEmpty()) {
-            return;
-        }
-        sink.accept(text);
+        String nested = ModelHttp.text(reasoning.get("content"));
+        return nested.isEmpty() ? ModelHttp.text(reasoning.get("text")) : nested;
     }
 
     /** thinking 模式下历史思考的回传档位，按端点的拒绝反馈逐档升级。 */
@@ -863,11 +768,11 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                     int at = held.indexOf(CLOSE);
                     if (at < 0) {
                         int keep = unfinished(held, CLOSE);
-                        emit(reasoning, held.substring(0, held.length() - keep));
+                        ModelHttp.emit(reasoning, held.substring(0, held.length() - keep));
                         held = held.substring(held.length() - keep);
                         return;
                     }
-                    emit(reasoning, held.substring(0, at));
+                    ModelHttp.emit(reasoning, held.substring(0, at));
                     held = held.substring(at + CLOSE.length());
                     inside = false;
                     continue;
@@ -876,11 +781,11 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                     int fenceAt = held.indexOf(FENCE);
                     if (fenceAt < 0) {
                         int keep = unfinished(held, FENCE);
-                        emit(answer, held.substring(0, held.length() - keep));
+                        ModelHttp.emit(answer, held.substring(0, held.length() - keep));
                         held = held.substring(held.length() - keep);
                         return;
                     }
-                    emit(answer, held.substring(0, fenceAt + FENCE.length()));
+                    ModelHttp.emit(answer, held.substring(0, fenceAt + FENCE.length()));
                     held = held.substring(fenceAt + FENCE.length());
                     inFence = false;
                     continue;
@@ -889,29 +794,29 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
                 int openAt = held.indexOf(OPEN);
                 if (fenceAt < 0 && openAt < 0) {
                     int keep = Math.max(unfinished(held, OPEN), unfinished(held, FENCE));
-                    emit(answer, held.substring(0, held.length() - keep));
+                    ModelHttp.emit(answer, held.substring(0, held.length() - keep));
                     held = held.substring(held.length() - keep);
                     return;
                 }
                 if (fenceAt >= 0 && (openAt < 0 || fenceAt < openAt)) {
-                    emit(answer, held.substring(0, fenceAt + FENCE.length()));
+                    ModelHttp.emit(answer, held.substring(0, fenceAt + FENCE.length()));
                     held = held.substring(fenceAt + FENCE.length());
                     inFence = true;
                     continue;
                 }
                 if (openAt > 0 && held.charAt(openAt - 1) == '`') {
-                    emit(answer, held.substring(0, openAt + OPEN.length()));
+                    ModelHttp.emit(answer, held.substring(0, openAt + OPEN.length()));
                     held = held.substring(openAt + OPEN.length());
                     continue;
                 }
-                emit(answer, held.substring(0, openAt));
+                ModelHttp.emit(answer, held.substring(0, openAt));
                 held = held.substring(openAt + OPEN.length());
                 inside = true;
             }
         }
 
         private void finish(Consumer<String> answer, Consumer<String> reasoning) {
-            emit(inside ? reasoning : answer, held);
+            ModelHttp.emit(inside ? reasoning : answer, held);
             held = "";
         }
 
@@ -924,12 +829,5 @@ public final class OpenAiCompatibleModelClient implements ModelClient {
             }
             return 0;
         }
-    }
-
-    private static String text(JsonNode node) {
-        if (node == null || node.isNull() || node.isMissingNode()) {
-            return "";
-        }
-        return node.isString() ? node.asString() : node.toString();
     }
 }

@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 import com.pilot.core.exec.EnvironmentSanitizer;
+import com.pilot.core.exec.ProcessSupport;
 import com.pilot.core.runtime.ExecutablePath;
 import com.pilot.core.util.HostOs;
 
@@ -443,8 +444,7 @@ final class McpClient implements AutoCloseable {
         writer.shutdownNow();
         if (current != null) {
             // Process.destroy/OutputStream.close 可能等待正在阻塞写入的流锁，先通过进程句柄终止。
-            current.descendants().forEach(ProcessHandle::destroyForcibly);
-            current.toHandle().destroyForcibly();
+            ProcessSupport.terminate(current);
             Thread cleanup = new Thread(() -> {
                 try {
                     current.getOutputStream().close();

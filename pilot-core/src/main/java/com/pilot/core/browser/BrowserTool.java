@@ -6,6 +6,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -49,9 +50,8 @@ public final class BrowserTool extends PromptedTool implements LocalInteraction 
         Set.of("click", "dblclick", "right_click", "hover", "fill", "type", "press", "select", "check", "uncheck",
             "scroll", "drag", "dialog", "batch", "upload", "download", "switch_tab", "close_tab");
     /** 用户接管（paused）时拦截的动作：交互类 + 会打断用户的导航/新标签/关闭/脚本。观察类与 handoff 放行。 */
-    private static final Set<String> PAUSED_BLOCKS = Set.of("navigate", "new_tab", "reload", "back", "forward", "close",
-        "evaluate", "click", "dblclick", "right_click", "hover", "fill", "type", "press", "select", "check", "uncheck",
-        "scroll", "drag", "dialog", "batch", "upload", "download", "switch_tab", "close_tab", "resize");
+    private static final Set<String> PAUSED_BLOCKS =
+        union(INTERACTIONS, Set.of("navigate", "new_tab", "reload", "back", "forward", "close", "evaluate", "resize"));
     private static final List<String> ACTIONS = List.of("navigate", "new_tab", "handoff", "reload", "back", "forward",
         "snapshot", "click", "dblclick", "right_click", "hover", "fill", "type", "press", "select", "check", "uncheck",
         "scroll", "drag", "dialog", "batch", "upload", "download", "screenshot", "record", "console", "network", "text",
@@ -409,14 +409,12 @@ public final class BrowserTool extends PromptedTool implements LocalInteraction 
             };
         }
         String currentUrl = targetUrl(args);
-        try {
-            BrowserBackend.Reply current = backend.execute(sessionId, Map.of("op", "describe"), ACTION_TIMEOUT);
+        BrowserBackend.Reply current = describeQuietly();
+        if (current != null) {
             String describedUrl = str(current.metadata().get("url"));
             if (!describedUrl.isEmpty()) {
                 currentUrl = describedUrl;
             }
-        } catch (BrowserBackend.BrowserException ignored) {
-            // 尚未打开页面时保留已有 URL
         }
         backend.clearOverlay(sessionId);
         if (handoffBroker == null) {
@@ -442,14 +440,12 @@ public final class BrowserTool extends PromptedTool implements LocalInteraction 
             String afterUrl = currentUrl;
             String afterTitle = "";
             String afterGate = "";
-            try {
-                BrowserBackend.Reply after = backend.execute(sessionId, Map.of("op", "describe"), ACTION_TIMEOUT);
+            BrowserBackend.Reply after = describeQuietly();
+            if (after != null) {
                 describeText = after.text() == null ? "" : after.text();
                 afterUrl = str(after.metadata().get("url")).isEmpty() ? afterUrl : str(after.metadata().get("url"));
                 afterTitle = str(after.metadata().get("title"));
                 afterGate = gateKindOf(after.metadata().get("gate"));
-            } catch (BrowserBackend.BrowserException ignored) {
-                // 页面已关闭或尚无活动页
             }
             String resumed = "用户已完成浏览器接管" + (resolution.note().isBlank() ? "" : "（说明：" + resolution.note() + "）")
                 + "。旧页面引用（ref）已全部失效，请先重新 snapshot 验证当前页面与登录状态，再继续操作。"
@@ -533,21 +529,36 @@ public final class BrowserTool extends PromptedTool implements LocalInteraction 
         };
     }
 
+    private BrowserBackend.Reply describeQuietly() {
+        try {
+            return backend.execute(sessionId, Map.of("op", "describe"), ACTION_TIMEOUT);
+        } catch (BrowserBackend.BrowserException ignored) {
+            return null;
+        }
+    }
+
+    private static Set<String> union(Set<String> first, Set<String> second) {
+        Set<String> combined = new HashSet<>(first);
+        combined.addAll(second);
+        return Set.copyOf(combined);
+    }
+
+    private static String sessionBucket(String id) {
+        String clean = id == null || id.isBlank() ? "default" : id;
+        return "browser/" + clean.replaceAll("[^A-Za-z0-9._-]", "_");
+    }
+
     private Path nextScreenshot() {
-        String bucket = "browser/" + sessionId.replaceAll("[^A-Za-z0-9._-]", "_");
-        Path dir = ToolArtifacts.directory(bucket);
+        Path dir = ToolArtifacts.directory(sessionBucket(sessionId));
         return dir.resolve("shot-" + System.currentTimeMillis() + "-" + shots.incrementAndGet() + ".png");
     }
 
     private Path nextDownloadDir() {
-        String bucket = "browser/" + sessionId.replaceAll("[^A-Za-z0-9._-]", "_") + "/downloads";
-        return ToolArtifacts.directory(bucket);
+        return ToolArtifacts.directory(sessionBucket(sessionId) + "/downloads");
     }
 
     public static Path nextRecordingDir(String browserSessionId) {
-        String clean = browserSessionId == null || browserSessionId.isBlank() ? "default" : browserSessionId;
-        String bucket = "browser/" + clean.replaceAll("[^A-Za-z0-9._-]", "_") + "/recordings";
-        return ToolArtifacts.directory(bucket);
+        return ToolArtifacts.directory(sessionBucket(browserSessionId) + "/recordings");
     }
 
     public static Path nextRecordingFile(String browserSessionId) {

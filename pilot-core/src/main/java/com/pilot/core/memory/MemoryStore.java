@@ -4,11 +4,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -34,6 +32,7 @@ import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 import org.yaml.snakeyaml.error.YAMLException;
 
+import com.pilot.core.util.FileTrees;
 import com.pilot.core.util.HostOs;
 import com.pilot.core.util.Sha256;
 import com.pilot.core.workspace.RealPaths;
@@ -1000,17 +999,6 @@ public final class MemoryStore {
     }
 
     private static void writeAtomic(Path file, String content) throws IOException {
-        Files.createDirectories(file.getParent());
-        Path staging = Files.createTempFile(file.getParent(), ".memory-", ".tmp");
-        try {
-            Files.writeString(staging, content, StandardCharsets.UTF_8);
-            try {
-                Files.move(staging, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(staging, file, StandardCopyOption.REPLACE_EXISTING);
-            }
-        } finally {
-            Files.deleteIfExists(staging);
-        }
+        FileTrees.writeAtomic(file, content);
     }
 }

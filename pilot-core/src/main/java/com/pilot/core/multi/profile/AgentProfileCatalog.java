@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -28,6 +29,7 @@ public final class AgentProfileCatalog {
 
     public static final Pattern VALID_NAME = Pattern.compile("^[a-z][a-z0-9-]{0,63}$");
     private static final int MAX_PROFILES = 32;
+    private static final long MAX_FILE_BYTES = 192L * 1024;
     /** 角色提示词长度上限（对齐技能正文）：代理身份声明不该比技能指引更长。 */
     public static final int MAX_PROMPT_LINES = 300;
     private static final String BUILTIN_INDEX = "agents/index.txt";
@@ -90,7 +92,15 @@ public final class AgentProfileCatalog {
         if (includeBuiltins) {
             loadBuiltins(byName, problems);
         }
-        return new AgentProfileCatalog(Map.copyOf(byName), List.copyOf(problems));
+        return new AgentProfileCatalog(ordered(byName), List.copyOf(problems));
+    }
+
+    /** 按名排序固化顺序，避免 Map.copyOf 在重启间打乱工具描述而破坏提示词缓存。 */
+    private static Map<String, AgentProfile> ordered(Map<String, AgentProfile> byName) {
+        Map<String, AgentProfile> sorted = new LinkedHashMap<>();
+        byName.entrySet().stream().sorted(Map.Entry.comparingByKey())
+            .forEach(entry -> sorted.put(entry.getKey(), entry.getValue()));
+        return Collections.unmodifiableMap(sorted);
     }
 
     private static void loadBuiltins(Map<String, AgentProfile> byName, List<AgentProblem> problems) {
@@ -107,12 +117,15 @@ public final class AgentProfileCatalog {
             if (byName.containsKey(name)) {
                 continue;
             }
-            String resourcePath = BUILTIN_PREFIX + name + ".md";
-            String content = readResource(loader, resourcePath);
+            String source = "builtin/" + name + ".md";
+            if (!hasCapacity(name, source, byName, problems)) {
+                continue;
+            }
+            String content = readResource(loader, BUILTIN_PREFIX + name + ".md");
             if (content == null) {
                 continue;
             }
-            parseAndStore(name, "builtin/" + name + ".md", content, byName, problems);
+            parseAndStore(name, source, content, byName, problems);
         }
     }
 
@@ -140,8 +153,7 @@ public final class AgentProfileCatalog {
         if (byName.containsKey(name)) {
             return;
         }
-        if (byName.size() >= MAX_PROFILES) {
-            problems.add(new AgentProblem(name, file.toString(), "有效代理数已达上限 " + MAX_PROFILES + "，本代理被跳过"));
+        if (!hasCapacity(name, file.toString(), byName, problems)) {
             return;
         }
         if (!VALID_NAME.matcher(name).matches()) {
@@ -150,12 +162,25 @@ public final class AgentProfileCatalog {
         }
         String text;
         try {
+            if (Files.size(file) > MAX_FILE_BYTES) {
+                problems.add(new AgentProblem(name, file.toString(), "代理定义文件超过读取上限 192KB"));
+                return;
+            }
             text = Files.readString(file, StandardCharsets.UTF_8);
         } catch (IOException e) {
             problems.add(new AgentProblem(name, file.toString(), "读取失败：" + e.getClass().getSimpleName()));
             return;
         }
         parseAndStore(name, file.toString(), text, byName, problems);
+    }
+
+    private static boolean hasCapacity(String name, String source, Map<String, AgentProfile> byName,
+        List<AgentProblem> problems) {
+        if (byName.size() >= MAX_PROFILES) {
+            problems.add(new AgentProblem(name, source, "有效代理数已达上限 " + MAX_PROFILES + "，本代理被跳过"));
+            return false;
+        }
+        return true;
     }
 
     /** 解析并校验单个代理定义（名称、frontmatter、正文非空与行数上限），作为扫描与写接口的单一事实来源。 */
@@ -179,10 +204,6 @@ public final class AgentProfileCatalog {
 
     private static void parseAndStore(String name, String source, String text, Map<String, AgentProfile> byName,
         List<AgentProblem> problems) {
-        if (byName.size() >= MAX_PROFILES) {
-            problems.add(new AgentProblem(name, source, "有效代理数已达上限 " + MAX_PROFILES + "，本代理被跳过"));
-            return;
-        }
         try {
             byName.put(name, parseProfile(name, text));
         } catch (IllegalArgumentException e) {

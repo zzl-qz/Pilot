@@ -74,11 +74,11 @@ public final class LocalExecutionBackend implements ExecutionBackend {
             finished = timeout <= 0 || process.waitFor(timeout, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            killTree(process);
+            ProcessSupport.terminate(process);
             return ExecutionResult.failure(id(), isolation(), "命令执行被中断");
         }
         if (!finished) {
-            killTree(process);
+            ProcessSupport.terminate(process);
             Captured captured = await(output, process);
             return new ExecutionResult(-1, captured.text(), true, captured.truncated(), id(), isolation(), "");
         }
@@ -96,17 +96,6 @@ public final class LocalExecutionBackend implements ExecutionBackend {
         lines.add("输出上限：" + request.limits().maxOutputBytes() + " 字节");
         lines.add("网络：" + (request.network() ? "允许（继承宿主）" : "不限制（本机进程无法强制）"));
         return lines;
-    }
-
-    private static void killTree(Process process) {
-        process.descendants().forEach(handle -> {
-            try {
-                handle.destroyForcibly();
-            } catch (RuntimeException ignored) {
-                // 进程可能已经退出
-            }
-        });
-        process.destroyForcibly();
     }
 
     private static Captured await(CompletableFuture<Captured> future, Process process) {

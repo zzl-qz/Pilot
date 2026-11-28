@@ -643,7 +643,7 @@ public final class LocalCodeChecker {
             Thread drainer = Thread.ofVirtual().start(() -> drainBounded(stream, buffer));
             boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
             if (!finished) {
-                destroyTree(process);
+                ProcessSupport.terminate(process);
                 drainer.join(1000);
                 return new ProcessOutcome(-1, "", true);
             }
@@ -653,7 +653,7 @@ public final class LocalCodeChecker {
             return new ProcessOutcome(-1, "ERROR: 无法启动检查器进程: " + e.getMessage(), false);
         } catch (InterruptedException e) {
             if (process != null) {
-                destroyTree(process);
+                ProcessSupport.terminate(process);
                 try {
                     process.waitFor(2, TimeUnit.SECONDS);
                 } catch (InterruptedException cleanupInterrupted) {
@@ -666,29 +666,12 @@ public final class LocalCodeChecker {
     }
 
     private static void drainBounded(InputStream stream, ByteArrayOutputStream buffer) {
-        byte[] chunk = new byte[4096];
-        int remaining = MAX_CAPTURE_BYTES;
         try {
-            int read;
-            while ((read = stream.read(chunk)) != -1) {
-                if (remaining > 0) {
-                    int toWrite = Math.min(read, remaining);
-                    buffer.write(chunk, 0, toWrite);
-                    remaining -= toWrite;
-                }
-            }
+            byte[] bytes = ProcessSupport.readBoundedBytes(stream, MAX_CAPTURE_BYTES);
+            buffer.write(bytes);
         } catch (IOException ignored) {
             // 进程被终止时流会关闭，忽略即可
         }
-    }
-
-    private static void destroyTree(Process process) {
-        try {
-            process.descendants().forEach(ProcessHandle::destroyForcibly);
-        } catch (RuntimeException ignored) {
-            // 忽略不支持 descendants 的环境
-        }
-        process.destroyForcibly();
     }
 
     enum Kind {

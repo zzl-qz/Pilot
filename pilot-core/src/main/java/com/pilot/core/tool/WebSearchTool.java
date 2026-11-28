@@ -118,8 +118,8 @@ public final class WebSearchTool implements Tool {
             return new SearchReport(false, "", "", List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
                 "缺少参数 query", "ERROR: 缺少参数 query", elapsedMs(startNanos));
         }
-        int count = intArg(args, "count", 8);
-        int page = intArg(args, "page", 1);
+        int count = ToolSupport.clampedIntArg(args, "count", 8, Integer.MIN_VALUE, Integer.MAX_VALUE);
+        int page = ToolSupport.clampedIntArg(args, "page", 1, Integer.MIN_VALUE, Integer.MAX_VALUE);
         SearchRequest request = new SearchRequest(query, count, ToolSupport.stringArg(args, "category"),
             ToolSupport.stringArg(args, "time_range"), ToolSupport.stringArg(args, "language"),
             ToolSupport.stringArg(args, "site"), page);
@@ -398,21 +398,6 @@ public final class WebSearchTool implements Tool {
             return String.join("；", outcome.warnings());
         }
         return "";
-    }
-
-    private static int intArg(Map<String, Object> args, String name, int defaultValue) {
-        Object raw = args == null ? null : args.get(name);
-        if (raw instanceof Number number) {
-            return number.intValue();
-        }
-        if (raw instanceof String text && !text.isBlank()) {
-            try {
-                return Integer.parseInt(text.strip());
-            } catch (NumberFormatException ignored) {
-                return defaultValue;
-            }
-        }
-        return defaultValue;
     }
 
     private static long elapsedMs(long startNanos) {

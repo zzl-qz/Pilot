@@ -20,6 +20,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import com.pilot.core.message.ToolCall;
 import com.pilot.core.tool.ReadGuard;
+import com.pilot.core.tool.SnapshotSink;
 import com.pilot.core.tool.ToolResult;
 import com.pilot.core.workspace.PathValidator;
 
@@ -347,5 +348,55 @@ class ApplyPatchToolTest {
     void isNotReadOnlyAndExposesNoSinglePath() {
         assertFalse(tool.readOnly());
         assertEquals(null, tool.changedPath(new ToolCall("1", "apply_patch", Map.of())));
+    }
+
+    @Test
+    void notifiesAfterWriteAndNoteWriteForDeleteAndRenameSource() throws IOException {
+        write("gone.txt", "bye\n");
+        write("old.txt", "v1\n");
+        List<String> afterWrites = new ArrayList<>();
+        int[] writeEvents = {0};
+        ReadGuard trackingGuard = new ReadGuard() {
+            @Override
+            public void observed(Path file) {
+                observed.add(file.toAbsolutePath().normalize());
+            }
+
+            @Override
+            public boolean isObserved(Path file) {
+                return observed.contains(file.toAbsolutePath().normalize());
+            }
+
+            @Override
+            public void noteWrite() {
+                writeEvents[0]++;
+            }
+        };
+        SnapshotSink trackingSink = new SnapshotSink() {
+            @Override
+            public void beforeWrite(Path file) {
+                snapshots
+                    .add(realWorkspace.relativize(file.toAbsolutePath().normalize()).toString().replace('\\', '/'));
+            }
+
+            @Override
+            public void afterWrite(Path file) {
+                afterWrites
+                    .add(realWorkspace.relativize(file.toAbsolutePath().normalize()).toString().replace('\\', '/'));
+            }
+        };
+        tool = new ApplyPatchTool(new PathValidator(workspace), trackingSink, trackingGuard);
+        ToolResult result = apply("""
+            *** Begin Patch
+            *** Delete File: gone.txt
+            *** Update File: old.txt
+            *** Move to: moved.txt
+            -v1
+            +v2
+            *** End Patch
+            """);
+        assertTrue(result.text().startsWith("已应用补丁"), result.text());
+        assertTrue(afterWrites.containsAll(List.of("gone.txt", "old.txt", "moved.txt")), afterWrites.toString());
+        assertEquals(2, writeEvents[0]);
     }
 }

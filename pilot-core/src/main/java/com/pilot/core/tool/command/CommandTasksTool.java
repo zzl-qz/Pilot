@@ -6,6 +6,7 @@ import java.util.Objects;
 
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolSchemas;
+import com.pilot.core.tool.ToolSupport;
 
 /**
  * 列出本机所有会话的命令任务，运行中的排在前面。
@@ -41,8 +42,8 @@ public final class CommandTasksTool implements Tool.ParallelReadOnly {
 
     @Override
     public String execute(Map<String, Object> args) {
-        boolean includeFinished = !Boolean.FALSE.equals(args == null ? null : args.get("includeFinished"));
-        int limit = limit(args);
+        boolean includeFinished = ToolSupport.boolArg(args, "includeFinished", true);
+        int limit = ToolSupport.clampedIntArg(args, "limit", DEFAULT_LIMIT, 1, MAX_LIMIT);
         List<CommandTaskManager.Task> shown = tasks.listAll().stream()
             .filter(task -> includeFinished || CommandTaskStatus.active(task.status())).limit(limit).toList();
         if (shown.isEmpty()) {
@@ -64,20 +65,6 @@ public final class CommandTasksTool implements Tool.ParallelReadOnly {
         result.append("\n不属于当前会话的任务：查状态、读日志、停止时把该行的会话作为 ownerSessionId 传进去。")
             .append("服务重启后仍在运行的任务一律标为 INTERRUPTED，那是旧进程所有权已失效，不要按旧 PID 操作。");
         return result.toString();
-    }
-
-    private static int limit(Map<String, Object> args) {
-        Object value = args == null ? null : args.get("limit");
-        if (value == null) {
-            return DEFAULT_LIMIT;
-        }
-        try {
-            long parsed =
-                value instanceof Number number ? number.longValue() : Long.parseLong(value.toString().strip());
-            return (int)Math.min(MAX_LIMIT, Math.max(1, parsed));
-        } catch (NumberFormatException e) {
-            return DEFAULT_LIMIT;
-        }
     }
 
     private static String command(String command) {

@@ -88,26 +88,13 @@ public final class PathValidator {
      * @throws IllegalArgumentException    路径为空或格式非法
      */
     public Path resolve(String rawPath) {
-        if (rawPath == null || rawPath.isBlank()) {
-            throw new IllegalArgumentException("path must not be blank");
-        }
-        String value = rawPath.strip();
-        Path given;
-        try {
-            given = root.getFileSystem().getPath(value);
-        } catch (InvalidPathException e) {
-            throw new WorkspaceViolationException("非法路径: " + value);
-        }
-        Path candidate = (given.isAbsolute() ? given : root.resolve(given)).normalize();
-        Path resolved = canonical(candidate, value);
+        ParsedCandidate candidate = parseCandidate(rawPath);
+        Path resolved = canonical(candidate.path(), candidate.value());
         if (!resolved.startsWith(boundFor(resolved))) {
-            throw new WorkspaceViolationException("路径超出工作区: " + value);
+            throw new WorkspaceViolationException("路径超出工作区: " + candidate.value());
         }
         // 额外目录的展示形式是绝对路径，子 Agent 白名单里没有它，等于继续对子 Agent 关闭。
-        String relative = display(resolved);
-        if (scope != null && !".".equals(relative) && !scope.allowsPath(relative)) {
-            throw new WorkspaceViolationException(scope.denialHint(relative));
-        }
+        enforceScope(resolved);
         return resolved;
     }
 
@@ -122,6 +109,25 @@ public final class PathValidator {
      * 父目录仍按真实路径做边界检查，防止经目录软链逃逸。
      */
     public Path resolveWritableLeaf(String rawPath) {
+        ParsedCandidate candidate = parseCandidate(rawPath);
+        Path leaf = candidate.path().getFileName();
+        Path parent = candidate.path().getParent();
+        if (leaf == null || parent == null) {
+            return resolveWritable(candidate.value());
+        }
+        Path realParent = canonical(parent, candidate.value());
+        Path leafPath = realParent.resolve(leaf).normalize();
+        if (!realParent.startsWith(boundFor(realParent)) || !leafPath.startsWith(boundFor(leafPath))) {
+            throw new WorkspaceViolationException("路径超出工作区: " + candidate.value());
+        }
+        enforceScope(leafPath);
+        return checkWritable(leafPath);
+    }
+
+    private record ParsedCandidate(String value, Path path) {
+    }
+
+    private ParsedCandidate parseCandidate(String rawPath) {
         if (rawPath == null || rawPath.isBlank()) {
             throw new IllegalArgumentException("path must not be blank");
         }
@@ -132,22 +138,14 @@ public final class PathValidator {
         } catch (InvalidPathException e) {
             throw new WorkspaceViolationException("非法路径: " + value);
         }
-        Path candidate = (given.isAbsolute() ? given : root.resolve(given)).normalize();
-        Path leaf = candidate.getFileName();
-        Path parent = candidate.getParent();
-        if (leaf == null || parent == null) {
-            return resolveWritable(value);
-        }
-        Path realParent = canonical(parent, value);
-        Path leafPath = realParent.resolve(leaf).normalize();
-        if (!realParent.startsWith(boundFor(realParent)) || !leafPath.startsWith(boundFor(leafPath))) {
-            throw new WorkspaceViolationException("路径超出工作区: " + value);
-        }
-        String relative = display(leafPath);
+        return new ParsedCandidate(value, (given.isAbsolute() ? given : root.resolve(given)).normalize());
+    }
+
+    private void enforceScope(Path resolved) {
+        String relative = display(resolved);
         if (scope != null && !".".equals(relative) && !scope.allowsPath(relative)) {
             throw new WorkspaceViolationException(scope.denialHint(relative));
         }
-        return checkWritable(leafPath);
     }
 
     private Path checkWritable(Path resolved) {

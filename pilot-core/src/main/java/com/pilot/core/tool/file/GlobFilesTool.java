@@ -12,7 +12,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import com.pilot.core.message.ToolNames;
 import com.pilot.core.tool.Tool;
@@ -31,9 +30,6 @@ public final class GlobFilesTool implements Tool.ParallelReadOnly {
     private static final int DEFAULT_LIMIT = 200;
     private static final int MAX_LIMIT = 1000;
     private static final int MAX_VISITED = 8_000;
-    private static final Set<String> SKIPPED_DIRECTORIES =
-        Set.of(".git", ".idea", ".gradle", ".pilot", ".next", ".nuxt", ".turbo", ".cache", ".venv", "venv", "coverage",
-            "__pycache__", "target", "build", "node_modules", "out", "dist");
 
     private final PathValidator paths;
 
@@ -110,7 +106,8 @@ public final class GlobFilesTool implements Tool.ParallelReadOnly {
                 @Override
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attributes) {
                     if (!dir.equals(base) && (attributes.isSymbolicLink()
-                        || SKIPPED_DIRECTORIES.contains(dir.getFileName().toString()) || !paths.allowsDirectory(dir))) {
+                        || SearchTool.SKIPPED_DIRECTORIES.contains(dir.getFileName().toString())
+                        || !paths.allowsDirectory(dir))) {
                         return FileVisitResult.SKIP_SUBTREE;
                     }
                     return FileVisitResult.CONTINUE;

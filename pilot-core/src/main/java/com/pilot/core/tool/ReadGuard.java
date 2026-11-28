@@ -1,6 +1,7 @@
 package com.pilot.core.tool;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -37,6 +38,68 @@ public interface ReadGuard {
                 return "";
             }
             return ranges.stream().map(LineRange::format).collect(Collectors.joining(", "));
+        }
+
+        /** 将新区间合并进已按起点升序排列、互不重叠的区间列表，自动合并重叠或相邻闭区间。 */
+        public static List<LineRange> merge(List<LineRange> existing, LineRange added) {
+            if (added == null) {
+                return existing == null ? List.of() : List.copyOf(existing);
+            }
+            if (existing == null || existing.isEmpty()) {
+                return List.of(added);
+            }
+            ArrayList<LineRange> result = new ArrayList<>(existing.size() + 1);
+            int start = added.start();
+            int end = added.end();
+            boolean inserted = false;
+            for (LineRange range : existing) {
+                if (range.end() + 1 < start) {
+                    result.add(range);
+                } else if (end + 1 < range.start()) {
+                    if (!inserted) {
+                        result.add(new LineRange(start, end));
+                        inserted = true;
+                    }
+                    result.add(range);
+                } else {
+                    start = Math.min(start, range.start());
+                    end = Math.max(end, range.end());
+                }
+            }
+            if (!inserted) {
+                result.add(new LineRange(start, end));
+            }
+            return List.copyOf(result);
+        }
+
+        /** 计算升序不重叠区间列表对闭区间 {@code [start, end]} 的覆盖行数。 */
+        public static int coveredLines(List<LineRange> ranges, int start, int end) {
+            if (ranges == null || ranges.isEmpty() || end < start) {
+                return 0;
+            }
+            int total = 0;
+            for (LineRange range : ranges) {
+                if (range.end() < start) {
+                    continue;
+                }
+                if (range.start() > end) {
+                    break;
+                }
+                int lo = Math.max(start, range.start());
+                int hi = Math.min(end, range.end());
+                if (hi >= lo) {
+                    total += hi - lo + 1;
+                }
+            }
+            return total;
+        }
+
+        /** 计算升序不重叠区间列表对闭区间 {@code [start, end]} 的覆盖比例（0.0–1.0）。 */
+        public static double overlapRatio(List<LineRange> ranges, int start, int end) {
+            if (end < start) {
+                return 0.0;
+            }
+            return coveredLines(ranges, start, end) / (double)(end - start + 1);
         }
     }
 

@@ -1,19 +1,16 @@
 package com.pilot.core.tool;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.ArrayList;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
+
+import com.pilot.core.util.Sha256;
 
 /**
  * {@link ReadGuard} 的进程内实现：一次 Agent 运行一份。
@@ -76,8 +73,7 @@ public final class ReadTracker implements ReadGuard {
         if (resolvedEnd < resolvedStart) {
             return new ReadCoverage(0.0, 0, 0, state.ranges(), state.tinyReads());
         }
-        int covered = coveredLines(state.ranges(), resolvedStart, resolvedEnd);
-        double ratio = covered / (double)(resolvedEnd - resolvedStart + 1);
+        double ratio = LineRange.overlapRatio(state.ranges(), resolvedStart, resolvedEnd);
         return new ReadCoverage(ratio, resolvedStart, resolvedEnd, state.ranges(), state.tinyReads());
     }
 
@@ -93,7 +89,7 @@ public final class ReadTracker implements ReadGuard {
             if (current == null || !stamp.equals(current.stamp())) {
                 return new DeliveredState(stamp, totalLines, List.of(added), tiny ? 1 : 0);
             }
-            List<LineRange> merged = merge(current.ranges(), added);
+            List<LineRange> merged = LineRange.merge(current.ranges(), added);
             int nextTiny = tiny ? current.tinyReads() + 1 : current.tinyReads();
             return new DeliveredState(stamp, totalLines, merged, nextTiny);
         });
@@ -181,73 +177,13 @@ public final class ReadTracker implements ReadGuard {
         return file.toAbsolutePath().normalize();
     }
 
-    private static int coveredLines(List<LineRange> ranges, int start, int end) {
-        int total = 0;
-        for (LineRange range : ranges) {
-            if (range.end() < start) {
-                continue;
-            }
-            if (range.start() > end) {
-                break;
-            }
-            int lo = Math.max(start, range.start());
-            int hi = Math.min(end, range.end());
-            if (hi >= lo) {
-                total += hi - lo + 1;
-            }
-        }
-        return total;
-    }
-
-    private static List<LineRange> merge(List<LineRange> existing, LineRange added) {
-        ArrayList<LineRange> result = new ArrayList<>(existing.size() + 1);
-        int start = added.start();
-        int end = added.end();
-        boolean inserted = false;
-        for (LineRange range : existing) {
-            if (range.end() + 1 < start) {
-                result.add(range);
-            } else if (end + 1 < range.start()) {
-                if (!inserted) {
-                    result.add(new LineRange(start, end));
-                    inserted = true;
-                }
-                result.add(range);
-            } else {
-                start = Math.min(start, range.start());
-                end = Math.max(end, range.end());
-            }
-        }
-        if (!inserted) {
-            result.add(new LineRange(start, end));
-        }
-        return List.copyOf(result);
-    }
-
     private static FileStamp stamp(Path file) {
         try {
             BasicFileAttributes attributes =
                 Files.readAttributes(file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-            return new FileStamp(attributes.lastModifiedTime().toMillis(), attributes.size(), digest(file));
+            return new FileStamp(attributes.lastModifiedTime().toMillis(), attributes.size(), Sha256.hex(file));
         } catch (IOException e) {
             return new FileStamp(-1, -1, "");
-        }
-    }
-
-    /** 同样长度的替换不会改变大小，必须比较内容。 */
-    private static String digest(Path file) throws IOException {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            try (InputStream input = Files.newInputStream(file)) {
-                byte[] buffer = new byte[8192];
-                int read;
-                while ((read = input.read(buffer)) >= 0) {
-                    digest.update(buffer, 0, read);
-                }
-            }
-            return HexFormat.of().formatHex(digest.digest());
-        } catch (NoSuchAlgorithmException e) {
-            throw new IOException("SHA-256 不可用", e);
         }
     }
 }

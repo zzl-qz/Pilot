@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import com.pilot.core.lint.LintGate;
@@ -200,131 +201,219 @@ final class CompletionGate {
             codeReviewer, "");
     }
 
+    private record GateContext(Set<String> changedFiles, List<String> checks, List<PlanItem> plan,
+        List<String> openSteps, Path workspace, ReviewScope review) {
+        boolean changed() {
+            return !changedFiles.isEmpty();
+        }
+    }
+
+    private record ReviewScope(boolean independentReview, Map<String, TextChange> qualityChanges,
+        IndependentCodeReviewer codeReviewer, String candidateAnswer) {
+    }
+
     Nudge evaluate(Set<String> changedFiles, List<String> checks, List<PlanItem> plan, List<String> openSteps,
         boolean independentReview, Map<String, TextChange> qualityChanges, Path workspaceRoot,
         IndependentCodeReviewer codeReviewer, String candidateAnswer) {
         if (!enabled) {
             return null;
         }
-        boolean readOnlyTask = readOnlySession || GoalIntent.isExplicitReadOnly(goal);
-        if (!readOnlyTask && !openSteps.isEmpty() && planPrompts < 2) {
-            planPrompts++;
-            return new Nudge("原始用户目标：" + (goal == null ? "见持久任务上下文" : goal) + "\n计划进度："
-                + plan.stream().filter(PlanItem::done).count() + "/" + plan.size() + "\n仍未完成的计划：\n" + bullets(openSteps)
-                + "\n若上述步骤已实际完成且具备验证证据，请直接调用 update_plan 将对应项标记为 completed（切勿仅在正文中口头总结，否则系统仍判定为 TASK_INCOMPLETE）；"
-                + "若尚有可执行工作，请继续完成后再调用 update_plan 更新。不要删除或缩小要求来通过完成检查；"
-                + "确实无法执行的步骤标 blocked 并写明原因，用户同意跳过的标 skipped；不要假装完成。", "计划仍有未完成项，继续执行并核对原始目标", planPrompts, 2);
-        }
-        boolean changed = !changedFiles.isEmpty();
-        // 只读任务没有改动，但「目标像调研、工具却只用了两三次」同样要核对覆盖范围
-        boolean researching = !changed && toolCalls >= 2 && (readOnlyTask || GoalIntent.looksLikeResearch(goal));
-        // 实现类目标却一个文件都没改就想收尾，多半是只给了方案或反问了一句，而不是真的做完
-        if (!readOnlyTask && !changed && !researching && GoalIntent.looksLikeAction(goal)
-            && !GoalIntent.looksLikeResearch(goal)) {
-            if (actionPrompts < MAX_ACTION_PROMPTS) {
-                actionPrompts++;
-                String prompt =
-                    LoopPromptCatalog.render("completion/act", Map.of("goal", Texts.oneLine(goal, 500))).strip();
-                return new Nudge(prompt, "实现类目标尚无任何改动，已要求直接动手", actionPrompts, MAX_ACTION_PROMPTS);
-            }
-            return new Nudge("目标要求实际改动，但本轮仍没有文件改动。停止并如实报告未完成原因。", "实现类目标提醒后仍无改动，已停止", MAX_ACTION_PROMPTS,
-                MAX_ACTION_PROMPTS, true);
-        }
-        if (!changed && !researching) {
-            return null;
-        }
         Path workspace =
             workspaceRoot != null ? workspaceRoot : codeReviewer == null ? null : codeReviewer.workspaceRoot();
-        if (changed && scratchPrompts < MAX_SCRATCH_PROMPTS) {
-            List<String> scratchFiles = remainingScratchFiles(changedFiles, workspace);
-            if (!scratchFiles.isEmpty()) {
-                scratchPrompts++;
-                String prompt = "本轮改动中仍残留以下临时/备份文件：\n" + bullets(scratchFiles)
-                    + "\n若它们仅用于中途暂存或验证，请先删除清理并确认工作区干净后再交付；若确为任务要求的产物，请说明用途。";
-                return new Nudge(prompt, "工作区残留本轮产生的临时文件，已要求清理", scratchPrompts, MAX_SCRATCH_PROMPTS);
-            }
+        return evaluate(new GateContext(changedFiles, checks, plan, openSteps, workspace,
+            new ReviewScope(independentReview, qualityChanges, codeReviewer, candidateAnswer)));
+    }
+
+    private Nudge evaluate(GateContext ctx) {
+        boolean readOnlyTask = readOnlySession || GoalIntent.isExplicitReadOnly(goal);
+        Nudge openPlan = checkOpenPlan(ctx, readOnlyTask);
+        if (openPlan != null) {
+            return openPlan;
         }
-        if (changed) {
-            boolean verified = hasPassingCheck(checks) && !codeDirtySincePassingCheck;
-            boolean countStyleRound = !lintGate.retriesOnFailure() || verified;
-            LintGate.LintAssessment lint = lintGate.assess(workspace, changedFiles, countStyleRound);
-            if (lint.kind() == LintGate.LintAssessment.Kind.BLOCKED) {
-                return new Nudge(lint.prompt(), lint.reason(), 1, 1, true);
-            }
-            if (lintGate.stopsOnFailure() && (lint.kind() == LintGate.LintAssessment.Kind.FAILED
-                || lint.kind() == LintGate.LintAssessment.Kind.FINDINGS)) {
-                return new Nudge(lint.prompt(), lint.reason(), 1, 1, true);
-            }
-            if (lintGate.retriesOnFailure() && lint.kind() == LintGate.LintAssessment.Kind.FINDINGS && verified
-                && !lint.exhausted()) {
-                return new Nudge(lint.prompt(), lint.reason(), 1, LintGate.SAME_FAILURE_LIMIT, false);
-            }
-            if (lintGate.retriesOnFailure() && !verified && (lint.kind() == LintGate.LintAssessment.Kind.FINDINGS
-                || lint.kind() == LintGate.LintAssessment.Kind.FAILED)) {
-                if (!touchesCode(changedFiles) || verifyPrompts >= MAX_VERIFY_PROMPTS) {
-                    return new Nudge(lint.prompt() + "\n功能还没验证通过，不能放行。", "规范未过且功能未验证，不能放行", 1, 1, true);
-                }
-            }
+        // 只读任务没有改动，但「目标像调研、工具却只用了两三次」同样要核对覆盖范围
+        boolean researching = !ctx.changed() && toolCalls >= 2 && (readOnlyTask || GoalIntent.looksLikeResearch(goal));
+        Nudge noAction = checkNoAction(ctx, readOnlyTask, researching);
+        if (noAction != null) {
+            return noAction;
         }
-        boolean needsVerify = codeDirtySincePassingCheck || (!hasPassingCheck(checks) && !sameAsBaseline(checks));
-        if (changed && touchesCode(changedFiles) && needsVerify) {
-            if (verifyPrompts < MAX_VERIFY_PROMPTS) {
-                verifyPrompts++;
-                String checkDesc = checks.isEmpty() ? "（本轮没有跑过构建或测试）" : codeDirtySincePassingCheck
-                    ? bullets(checks) + "\n（注意：上述验证早于最近一次代码修改，请对最新代码重跑验证）" : bullets(checks);
-                String prompt = LoopPromptCatalog
-                    .render("completion/verify", Map.of("changedFiles", bullets(changedFiles), "checks", checkDesc))
-                    .strip();
-                String reason = codeDirtySincePassingCheck && hasPassingCheck(checks) ? "最近一次代码整理后尚未重新验证，已要求重跑测试"
-                    : "改动未验证，已要求先跑构建或测试";
-                return new Nudge(prompt, reason, verifyPrompts, MAX_VERIFY_PROMPTS);
-            }
-            return new Nudge("代码改动仍没有当前版本的通过验证。停止并如实报告未完成项及验证阻碍。", "达到验证提醒上限仍未验证，已停止", MAX_VERIFY_PROMPTS,
-                MAX_VERIFY_PROMPTS, true);
+        if (!ctx.changed() && !researching) {
+            return null;
         }
-        if (!readOnlyTask && evidencePrompts < MAX_EVIDENCE_PROMPTS) {
-            String evidenceIssue =
-                evidenceGate.evaluate(workspace, changedFiles, qualityChanges, !needsVerify, candidateAnswer);
-            if (evidenceIssue != null && !evidenceIssue.isBlank()) {
-                evidencePrompts++;
-                return new Nudge(evidenceIssue, "重构/性能/边界硬证据不足，已要求补齐可核验证据", evidencePrompts, MAX_EVIDENCE_PROMPTS);
+        boolean needsVerify =
+            codeDirtySincePassingCheck || (!hasPassingCheck(ctx.checks()) && !sameAsBaseline(ctx.checks()));
+        return firstNudge(List.of(() -> checkScratchFiles(ctx), () -> checkLint(ctx),
+            () -> checkVerification(ctx, needsVerify), () -> checkEvidence(ctx, readOnlyTask, needsVerify),
+            () -> checkIndependentReview(ctx, needsVerify), () -> checkSelfReview(ctx)));
+    }
+
+    private static Nudge firstNudge(List<Supplier<Nudge>> checks) {
+        for (Supplier<Nudge> check : checks) {
+            Nudge nudge = check.get();
+            if (nudge != null) {
+                return nudge;
             }
-        }
-        if (!independentReview && changed && codeReviewer != null && !independentCodeReviewed) {
-            independentCodeReviewed = true;
-            boolean reviewedDiff = IndependentCodeReviewer.shouldReview(qualityChanges);
-            String refactorGuidance = codeReviewer.review(goal, qualityChanges);
-            if (refactorGuidance != null && !refactorGuidance.isBlank()) {
-                reviewPrompts = MAX_REVIEW_PROMPTS;
-                return new Nudge(refactorGuidance, "独立代码精简审查发现可安全收敛的重复逻辑或魔法值", 1, 1);
-            }
-            // 独立代码审查已审阅本次变更并放行，且测试已通过、计划无剩余步骤时，不再追加冗余自审轮次打断最终答复。
-            if (reviewedDiff && !needsVerify && openSteps.isEmpty()) {
-                reviewPrompts = MAX_REVIEW_PROMPTS;
-            }
-        }
-        if (!independentReview && reviewPrompts < MAX_REVIEW_PROMPTS) {
-            reviewPrompts++;
-            String goalText = goal == null ? "（续跑，无原始输入）" : Texts.oneLine(goal, 500);
-            String prompt;
-            if (changed) {
-                int done = (int)plan.stream().filter(PlanItem::done).count();
-                prompt = LoopPromptCatalog.render("completion/review",
-                    Map.of("goal", goalText, "toolCalls", String.valueOf(toolCalls), "changedFiles",
-                        bullets(changedFiles), "planProgress",
-                        plan.isEmpty() ? "（本轮没有维护计划）" : done + "/" + plan.size() + " 已完成", "openSteps",
-                        openSteps.isEmpty() ? "（无）" : bullets(openSteps), "checks",
-                        checks.isEmpty() ? "（未执行验证）" : bullets(checks), "constraints", constraintBlock()));
-            } else {
-                prompt = LoopPromptCatalog.render("completion/review-readonly", Map.of("goal", goalText, "toolCalls",
-                    String.valueOf(toolCalls), "inspected", inspected.isEmpty() ? "（未记录具体路径）" : bullets(inspected)));
-                if (!projectConstraints.isBlank()) {
-                    prompt = prompt + constraintBlock();
-                }
-            }
-            return new Nudge(prompt.strip(), "收尾前自审：核对目标与结论是否真的覆盖完整", reviewPrompts, MAX_REVIEW_PROMPTS);
         }
         return null;
+    }
+
+    private Nudge checkOpenPlan(GateContext ctx, boolean readOnlyTask) {
+        if (readOnlyTask || ctx.openSteps().isEmpty() || planPrompts >= 2) {
+            return null;
+        }
+        planPrompts++;
+        return new Nudge("原始用户目标：" + (goal == null ? "见持久任务上下文" : goal) + "\n计划进度："
+            + ctx.plan().stream().filter(PlanItem::done).count() + "/" + ctx.plan().size() + "\n仍未完成的计划：\n"
+            + bullets(ctx.openSteps())
+            + "\n若上述步骤已实际完成且具备验证证据，请直接调用 update_plan 将对应项标记为 completed（切勿仅在正文中口头总结，否则系统仍判定为 TASK_INCOMPLETE）；"
+            + "若尚有可执行工作，请继续完成后再调用 update_plan 更新。不要删除或缩小要求来通过完成检查；"
+            + "确实无法执行的步骤标 blocked 并写明原因，用户同意跳过的标 skipped；不要假装完成。", "计划仍有未完成项，继续执行并核对原始目标", planPrompts, 2);
+    }
+
+    private Nudge checkNoAction(GateContext ctx, boolean readOnlyTask, boolean researching) {
+        // 实现类目标却一个文件都没改就想收尾，多半是只给了方案或反问了一句，而不是真的做完
+        if (readOnlyTask || ctx.changed() || researching || !GoalIntent.looksLikeAction(goal)
+            || GoalIntent.looksLikeResearch(goal)) {
+            return null;
+        }
+        if (actionPrompts < MAX_ACTION_PROMPTS) {
+            actionPrompts++;
+            String prompt =
+                LoopPromptCatalog.render("completion/act", Map.of("goal", Texts.oneLine(goal, 500))).strip();
+            return new Nudge(prompt, "实现类目标尚无任何改动，已要求直接动手", actionPrompts, MAX_ACTION_PROMPTS);
+        }
+        return new Nudge("目标要求实际改动，但本轮仍没有文件改动。停止并如实报告未完成原因。", "实现类目标提醒后仍无改动，已停止", MAX_ACTION_PROMPTS,
+            MAX_ACTION_PROMPTS, true);
+    }
+
+    private Nudge checkScratchFiles(GateContext ctx) {
+        if (!ctx.changed() || scratchPrompts >= MAX_SCRATCH_PROMPTS) {
+            return null;
+        }
+        List<String> scratchFiles = remainingScratchFiles(ctx.changedFiles(), ctx.workspace());
+        if (scratchFiles.isEmpty()) {
+            return null;
+        }
+        scratchPrompts++;
+        String prompt =
+            "本轮改动中仍残留以下临时/备份文件：\n" + bullets(scratchFiles) + "\n若它们仅用于中途暂存或验证，请先删除清理并确认工作区干净后再交付；若确为任务要求的产物，请说明用途。";
+        return new Nudge(prompt, "工作区残留本轮产生的临时文件，已要求清理", scratchPrompts, MAX_SCRATCH_PROMPTS);
+    }
+
+    private Nudge checkLint(GateContext ctx) {
+        if (!ctx.changed()) {
+            return null;
+        }
+        boolean verified = hasPassingCheck(ctx.checks()) && !codeDirtySincePassingCheck;
+        boolean countStyleRound = !lintGate.retriesOnFailure() || verified;
+        LintGate.LintAssessment lint = lintGate.assess(ctx.workspace(), ctx.changedFiles(), countStyleRound);
+        LintGate.LintAssessment.Kind kind = lint.kind();
+        if (kind == LintGate.LintAssessment.Kind.BLOCKED) {
+            return new Nudge(lint.prompt(), lint.reason(), 1, 1, true);
+        }
+        if (kind != LintGate.LintAssessment.Kind.FAILED && kind != LintGate.LintAssessment.Kind.FINDINGS) {
+            return null;
+        }
+        if (lintGate.stopsOnFailure()) {
+            return new Nudge(lint.prompt(), lint.reason(), 1, 1, true);
+        }
+        if (!lintGate.retriesOnFailure()) {
+            return null;
+        }
+        if (verified) {
+            if (kind == LintGate.LintAssessment.Kind.FINDINGS && !lint.exhausted()) {
+                return new Nudge(lint.prompt(), lint.reason(), 1, LintGate.SAME_FAILURE_LIMIT, false);
+            }
+            return null;
+        }
+        if (!touchesCode(ctx.changedFiles()) || verifyPrompts >= MAX_VERIFY_PROMPTS) {
+            return new Nudge(lint.prompt() + "\n功能还没验证通过，不能放行。", "规范未过且功能未验证，不能放行", 1, 1, true);
+        }
+        return null;
+    }
+
+    private Nudge checkVerification(GateContext ctx, boolean needsVerify) {
+        if (!ctx.changed() || !touchesCode(ctx.changedFiles()) || !needsVerify) {
+            return null;
+        }
+        if (verifyPrompts < MAX_VERIFY_PROMPTS) {
+            verifyPrompts++;
+            String checkDesc = describeChecksForVerify(ctx.checks());
+            String prompt = LoopPromptCatalog
+                .render("completion/verify", Map.of("changedFiles", bullets(ctx.changedFiles()), "checks", checkDesc))
+                .strip();
+            String reason = codeDirtySincePassingCheck && hasPassingCheck(ctx.checks()) ? "最近一次代码整理后尚未重新验证，已要求重跑测试"
+                : "改动未验证，已要求先跑构建或测试";
+            return new Nudge(prompt, reason, verifyPrompts, MAX_VERIFY_PROMPTS);
+        }
+        return new Nudge("代码改动仍没有当前版本的通过验证。停止并如实报告未完成项及验证阻碍。", "达到验证提醒上限仍未验证，已停止", MAX_VERIFY_PROMPTS,
+            MAX_VERIFY_PROMPTS, true);
+    }
+
+    private String describeChecksForVerify(List<String> checks) {
+        if (checks.isEmpty()) {
+            return "（本轮没有跑过构建或测试）";
+        }
+        if (codeDirtySincePassingCheck) {
+            return bullets(checks) + "\n（注意：上述验证早于最近一次代码修改，请对最新代码重跑验证）";
+        }
+        return bullets(checks);
+    }
+
+    private Nudge checkEvidence(GateContext ctx, boolean readOnlyTask, boolean needsVerify) {
+        if (readOnlyTask || evidencePrompts >= MAX_EVIDENCE_PROMPTS) {
+            return null;
+        }
+        String evidenceIssue = evidenceGate.evaluate(ctx.workspace(), ctx.changedFiles(), ctx.review().qualityChanges(),
+            !needsVerify, ctx.review().candidateAnswer());
+        if (evidenceIssue == null || evidenceIssue.isBlank()) {
+            return null;
+        }
+        evidencePrompts++;
+        return new Nudge(evidenceIssue, "重构/性能/边界硬证据不足，已要求补齐可核验证据", evidencePrompts, MAX_EVIDENCE_PROMPTS);
+    }
+
+    private Nudge checkIndependentReview(GateContext ctx, boolean needsVerify) {
+        ReviewScope review = ctx.review();
+        if (review.independentReview() || !ctx.changed() || review.codeReviewer() == null || independentCodeReviewed) {
+            return null;
+        }
+        independentCodeReviewed = true;
+        boolean reviewedDiff = IndependentCodeReviewer.shouldReview(review.qualityChanges());
+        String refactorGuidance = review.codeReviewer().review(goal, review.qualityChanges());
+        if (refactorGuidance != null && !refactorGuidance.isBlank()) {
+            reviewPrompts = MAX_REVIEW_PROMPTS;
+            return new Nudge(refactorGuidance, "独立代码精简审查发现可安全收敛的重复逻辑或魔法值", 1, 1);
+        }
+        // 独立代码审查已审阅本次变更并放行，且测试已通过、计划无剩余步骤时，不再追加冗余自审轮次打断最终答复。
+        if (reviewedDiff && !needsVerify && ctx.openSteps().isEmpty()) {
+            reviewPrompts = MAX_REVIEW_PROMPTS;
+        }
+        return null;
+    }
+
+    private Nudge checkSelfReview(GateContext ctx) {
+        if (ctx.review().independentReview() || reviewPrompts >= MAX_REVIEW_PROMPTS) {
+            return null;
+        }
+        reviewPrompts++;
+        String goalText = goal == null ? "（续跑，无原始输入）" : Texts.oneLine(goal, 500);
+        String prompt;
+        if (ctx.changed()) {
+            int done = (int)ctx.plan().stream().filter(PlanItem::done).count();
+            prompt = LoopPromptCatalog.render("completion/review",
+                Map.of("goal", goalText, "toolCalls", String.valueOf(toolCalls), "changedFiles",
+                    bullets(ctx.changedFiles()), "planProgress",
+                    ctx.plan().isEmpty() ? "（本轮没有维护计划）" : done + "/" + ctx.plan().size() + " 已完成", "openSteps",
+                    ctx.openSteps().isEmpty() ? "（无）" : bullets(ctx.openSteps()), "checks",
+                    ctx.checks().isEmpty() ? "（未执行验证）" : bullets(ctx.checks()), "constraints", constraintBlock()));
+        } else {
+            prompt = LoopPromptCatalog.render("completion/review-readonly", Map.of("goal", goalText, "toolCalls",
+                String.valueOf(toolCalls), "inspected", inspected.isEmpty() ? "（未记录具体路径）" : bullets(inspected)));
+            if (!projectConstraints.isBlank()) {
+                prompt = prompt + constraintBlock();
+            }
+        }
+        return new Nudge(prompt.strip(), "收尾前自审：核对目标与结论是否真的覆盖完整", reviewPrompts, MAX_REVIEW_PROMPTS);
     }
 
     private String constraintBlock() {

@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -21,6 +22,7 @@ import com.pilot.core.util.WireEnum;
 
 /** 命令工具共用的状态表示；日志内容不参与判断验证是否通过。 */
 final class CommandToolSupport {
+    static final Pattern SECRET_KEY = Pattern.compile("(?i)(key|token|secret|password|credential|passwd)");
     private static final Pattern TASK_ID = Pattern.compile("(?m)^任务ID: ([A-Za-z0-9_-]+)$");
     private static final Pattern STATUS = Pattern.compile("(?m)^状态: ([A-Z_]+)$");
     /** 命令摘要保留上限；超长时保留首尾 token，防止把末尾 test/verify 等验证目标截掉导致收尾门误判。 */
@@ -169,18 +171,22 @@ final class CommandToolSupport {
         return nestedSandboxHint(tasks, task, null);
     }
 
+    /** 收集敏感环境变量值（按长度降序去重），供流式与同步输出脱敏共享。 */
+    static List<String> secretEnvValues(Map<String, String> env, int minLength) {
+        if (env == null || env.isEmpty()) {
+            return List.of();
+        }
+        return env.entrySet().stream().filter(entry -> SECRET_KEY.matcher(entry.getKey()).find())
+            .map(Map.Entry::getValue).filter(value -> value != null && value.length() >= minLength).distinct()
+            .sorted(Comparator.comparingInt(String::length).reversed()).toList();
+    }
+
     /** 仍在运行的后台/前台命令若日志已明确命中嵌套 OS 沙箱失败，立即提前提示，避免死等 Playwright/Electron 180s 超时。 */
     static String liveNestedSandboxHint(CommandTaskManager tasks, CommandTaskManager.Task task, String ownerSessionId) {
         if (tasks == null || task == null || !running(task)) {
             return "";
         }
-        String session = ownerSessionId == null ? task.sessionId() : ownerSessionId;
-        long total = tasks.logLength(session, task.taskId());
-        if (total <= 0L) {
-            return "";
-        }
-        long offset = Math.max(0L, total - SANDBOX_LOG_TAIL_CHARS);
-        CommandTaskManager.LogChunk tail = tasks.logs(session, task.taskId(), offset, SANDBOX_LOG_TAIL_CHARS + 200);
+        LogTail tail = readLogTail(tasks, task, ownerSessionId, SANDBOX_LOG_TAIL_CHARS);
         if (tail == null) {
             return "";
         }
@@ -193,13 +199,7 @@ final class CommandToolSupport {
         if (tasks == null || task == null || running(task) || CommandTaskStatus.COMPLETED.is(task.status())) {
             return "";
         }
-        String session = ownerSessionId == null ? task.sessionId() : ownerSessionId;
-        long total = tasks.logLength(session, task.taskId());
-        if (total <= 0L) {
-            return "";
-        }
-        long offset = Math.max(0L, total - SANDBOX_LOG_TAIL_CHARS);
-        CommandTaskManager.LogChunk tail = tasks.logs(session, task.taskId(), offset, SANDBOX_LOG_TAIL_CHARS + 200);
+        LogTail tail = readLogTail(tasks, task, ownerSessionId, SANDBOX_LOG_TAIL_CHARS);
         if (tail == null) {
             return "";
         }
@@ -217,22 +217,31 @@ final class CommandToolSupport {
         if (tasks == null || task == null || running(task) || CommandTaskStatus.COMPLETED.is(task.status())) {
             return "";
         }
-        String session = ownerSessionId == null ? task.sessionId() : ownerSessionId;
-        long total = tasks.logLength(session, task.taskId());
-        if (total <= 0L) {
+        LogTail tail = readLogTail(tasks, task, ownerSessionId, FAILURE_LOG_TAIL_CHARS);
+        if (tail == null) {
             return "";
         }
-        long offset = Math.max(0L, total - FAILURE_LOG_TAIL_CHARS);
-        CommandTaskManager.LogChunk chunk = tasks.logs(session, task.taskId(), offset, FAILURE_LOG_TAIL_CHARS + 200);
-        if (chunk == null) {
-            return "";
-        }
-        String text = chunk.text().replace("\r\n", "\n").replace('\r', '\n').strip();
+        String text = tail.text().replace("\r\n", "\n").replace('\r', '\n').strip();
         if (text.isEmpty()) {
             return "";
         }
-        String prefix = offset > 0L ? "…（已省略前 " + offset + " 字符，完整日志见上方 command_logs）\n" : "";
+        String prefix = tail.offset() > 0L ? "…（已省略前 " + tail.offset() + " 字符，完整日志见上方 command_logs）\n" : "";
         return "\n输出:\n" + prefix + text;
+    }
+
+    private record LogTail(long offset, String text) {
+    }
+
+    private static LogTail readLogTail(CommandTaskManager tasks, CommandTaskManager.Task task, String ownerSessionId,
+        int tailChars) {
+        String session = ownerSessionId == null ? task.sessionId() : ownerSessionId;
+        long total = tasks.logLength(session, task.taskId());
+        if (total <= 0L) {
+            return null;
+        }
+        long offset = Math.max(0L, total - tailChars);
+        CommandTaskManager.LogChunk chunk = tasks.logs(session, task.taskId(), offset, tailChars + 200);
+        return chunk == null ? null : new LogTail(offset, chunk.text());
     }
 
     /**

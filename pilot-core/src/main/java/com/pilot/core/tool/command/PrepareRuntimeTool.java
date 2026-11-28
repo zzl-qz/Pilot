@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
+import com.pilot.core.exec.ProcessSupport;
 import com.pilot.core.runtime.ExecutablePath;
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolSchemas;
@@ -21,6 +22,7 @@ import tools.jackson.databind.ObjectMapper;
 
 /** 在明确批准后准备工作区私有 Python 环境；固定来源/配方，不接受任意安装命令。 */
 public final class PrepareRuntimeTool implements Tool {
+    private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String STATUS_FILE = "status.txt";
     /** 写进状态文件的标记，只给人排查环境问题用，程序不回读。 */
     private static final String STATUS_PREPARING = "PREPARING";
@@ -141,7 +143,7 @@ public final class PrepareRuntimeTool implements Tool {
             bucket = managedBucket(id);
             Files.createDirectories(bucket);
             Files.writeString(bucket.resolve("manifest.json"),
-                new ObjectMapper().writeValueAsString(Map.of("env_id", id, "recipe", recipe, "plan", details)));
+                MAPPER.writeValueAsString(Map.of("env_id", id, "recipe", recipe, "plan", details)));
             mark(bucket, STATUS_PREPARING);
             Path environment = bucket.resolve("venv");
             List<String> create = new ArrayList<>(python);
@@ -218,8 +220,7 @@ public final class PrepareRuntimeTool implements Tool {
             return process.exitValue();
         } finally {
             if (process.isAlive()) {
-                process.descendants().forEach(ProcessHandle::destroyForcibly);
-                process.destroyForcibly();
+                ProcessSupport.terminate(process);
                 process.waitFor(5, TimeUnit.SECONDS);
             }
         }

@@ -1,13 +1,13 @@
 package com.pilot.core.tool.file;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -16,12 +16,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
+import com.pilot.core.exec.ProcessSupport;
 import com.pilot.core.message.ToolNames;
 import com.pilot.core.tool.ReadGuard;
 import com.pilot.core.tool.Tool;
@@ -39,6 +41,7 @@ public final class SearchTool implements Tool.ParallelReadOnly {
     private static final int MAX_CONTEXT_LINES = 5;
     private static final int MAX_CONTEXT_OUTPUT_LINES = 300;
     private static final long MAX_FILE_BYTES = 1024 * 1024;
+    private static final int MAX_RG_OUTPUT_BYTES = 4 * 1024 * 1024;
     private static final int MAX_LINE_CHARS = 300;
     /** 兜底扫描的时间预算：到点就交出手上已有的匹配，别把整轮对话吊死。 */
     private static final int FALLBACK_BUDGET_SECONDS = 8;
@@ -50,11 +53,10 @@ public final class SearchTool implements Tool.ParallelReadOnly {
             "__pycache__", "target", "build", "node_modules", "out", "dist");
 
     private final PathValidator paths;
-    private final ReadGuard reads;
     private final boolean allowRipgrep;
 
     public SearchTool(PathValidator paths) {
-        this(paths, ReadGuard.allowAll(), true);
+        this(paths, null, true);
     }
 
     public SearchTool(PathValidator paths, ReadGuard reads) {
@@ -64,7 +66,6 @@ public final class SearchTool implements Tool.ParallelReadOnly {
     /** 包级构造：测试可关闭 rg，强制验证无 rg 环境下的 Java 兜底路径。 */
     SearchTool(PathValidator paths, ReadGuard reads, boolean allowRipgrep) {
         this.paths = paths;
-        this.reads = reads == null ? ReadGuard.allowAll() : reads;
         this.allowRipgrep = allowRipgrep;
     }
 
@@ -272,40 +273,15 @@ public final class SearchTool implements Tool.ParallelReadOnly {
     }
 
     private String execRipgrep(Path base, List<String> command) {
-        Process process = null;
         try {
             Path directory = Files.isDirectory(base) ? base : base.getParent();
-            process = new ProcessBuilder(command).directory(directory.toFile())
-                .redirectError(ProcessBuilder.Redirect.DISCARD).start();
-            Process running = process;
-            CompletableFuture<byte[]> output =
-                CompletableFuture.supplyAsync(() -> readLimited(running.getInputStream()));
-            if (!process.waitFor(10, TimeUnit.SECONDS)) {
-                process.destroyForcibly();
-                output.cancel(true);
-                return null;
-            }
-            byte[] bytes = output.get(2, TimeUnit.SECONDS);
-            int status = process.exitValue();
-            if (status > 1) {
-                return null;
-            }
-            return new String(bytes, StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            if (process != null) {
-                process.destroyForcibly();
-            }
-            return null;
+            ProcessSupport.CapturedOutput captured = ProcessSupport.captureStdoutUtf8(
+                new ProcessBuilder(command).directory(directory.toFile()), Duration.ofSeconds(10), MAX_RG_OUTPUT_BYTES);
+            return captured.exitCode() > 1 ? null : captured.output();
         } catch (InterruptedException e) {
-            if (process != null) {
-                process.destroyForcibly();
-            }
             Thread.currentThread().interrupt();
             return null;
-        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException e) {
-            if (process != null) {
-                process.destroyForcibly();
-            }
+        } catch (IOException | TimeoutException e) {
             return null;
         }
     }
@@ -381,24 +357,35 @@ public final class SearchTool implements Tool.ParallelReadOnly {
         return true;
     }
 
-    private static byte[] readLimited(InputStream input) {
-        try (input) {
-            return input.readNBytes(4 * 1024 * 1024 + 1);
-        } catch (IOException e) {
-            throw new java.util.concurrent.CompletionException(e);
-        }
-    }
-
     private Map<String, Integer> fallbackCounts(Path base, Pattern pattern, String glob) {
         Map<String, Integer> counts = new LinkedHashMap<>();
+        walkFiles(base, glob, file -> {
+            int count = countFileMatches(file, pattern);
+            if (count > 0) {
+                counts.put(paths.display(file), count);
+            }
+            return false;
+        });
+        return counts;
+    }
+
+    /**
+     * rg 不可用（或超时）时的兜底扫描。边遍历边匹配，到时间或文件预算即返回已有结果。
+     */
+    private List<String> fallback(Path base, Pattern pattern, String glob, int contextLines, int limit) {
+        ArrayList<String> matches = new ArrayList<>();
+        walkFiles(base, glob,
+            file -> matches.size() > limit || searchFile(file, pattern, contextLines, limit, matches));
+        return matches;
+    }
+
+    /** 遍历匹配 {@code glob} 与白名单的普通文件；{@code stopAfter} 返回 {@code true} 时立即终止遍历。 */
+    private void walkFiles(Path base, String glob, Predicate<Path> stopAfter) {
         if (Files.isRegularFile(base)) {
             if (glob == null || matchesGlob(base.getFileName().toString(), glob)) {
-                int count = countFileMatches(base, pattern);
-                if (count > 0) {
-                    counts.put(paths.display(base), count);
-                }
+                stopAfter.test(base);
             }
-            return counts;
+            return;
         }
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(FALLBACK_BUDGET_SECONDS);
         int[] seen = {0};
@@ -430,11 +417,7 @@ public final class SearchTool implements Tool.ParallelReadOnly {
                     if (glob != null && !matchesGlob(base.relativize(file).toString().replace('\\', '/'), glob)) {
                         return FileVisitResult.CONTINUE;
                     }
-                    int count = countFileMatches(file, pattern);
-                    if (count > 0) {
-                        counts.put(paths.display(file), count);
-                    }
-                    return FileVisitResult.CONTINUE;
+                    return stopAfter.test(file) ? FileVisitResult.TERMINATE : FileVisitResult.CONTINUE;
                 }
 
                 @Override
@@ -442,66 +425,9 @@ public final class SearchTool implements Tool.ParallelReadOnly {
                     return FileVisitResult.CONTINUE;
                 }
             });
-        } catch (IOException e) {
-            return counts;
+        } catch (IOException ignored) {
+            // 保留已扫描到的匹配结果
         }
-        return counts;
-    }
-
-    /**
-     * rg 不可用（或超时）时的兜底扫描。边遍历边匹配，到时间或文件预算即返回已有结果。
-     */
-    private List<String> fallback(Path base, Pattern pattern, String glob, int contextLines, int limit) {
-        ArrayList<String> matches = new ArrayList<>();
-        if (Files.isRegularFile(base)) {
-            if (glob == null || matchesGlob(base.getFileName().toString(), glob)) {
-                searchFile(base, pattern, contextLines, limit, matches);
-            }
-            return matches;
-        }
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(FALLBACK_BUDGET_SECONDS);
-        int[] seen = {0};
-        try {
-            Files.walkFileTree(base, new SimpleFileVisitor<>() {
-                @Override
-                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attributes) {
-                    if (System.nanoTime() > deadline || seen[0] > FALLBACK_MAX_FILES) {
-                        return FileVisitResult.TERMINATE;
-                    }
-                    if (attributes.isSymbolicLink()) {
-                        return FileVisitResult.SKIP_SUBTREE;
-                    }
-                    if (!dir.equals(base) && (SKIPPED_DIRECTORIES.contains(dir.getFileName().toString())
-                        || !paths.allowsDirectory(dir))) {
-                        return FileVisitResult.SKIP_SUBTREE;
-                    }
-                    return FileVisitResult.CONTINUE;
-                }
-
-                @Override
-                public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) {
-                    if (System.nanoTime() > deadline || matches.size() > limit || seen[0]++ > FALLBACK_MAX_FILES) {
-                        return FileVisitResult.TERMINATE;
-                    }
-                    if (attributes.isSymbolicLink() || !paths.allows(file)) {
-                        return FileVisitResult.CONTINUE;
-                    }
-                    if (glob != null && !matchesGlob(base.relativize(file).toString().replace('\\', '/'), glob)) {
-                        return FileVisitResult.CONTINUE;
-                    }
-                    return searchFile(file, pattern, contextLines, limit, matches) ? FileVisitResult.TERMINATE
-                        : FileVisitResult.CONTINUE;
-                }
-
-                @Override
-                public FileVisitResult visitFileFailed(Path file, IOException exception) {
-                    return FileVisitResult.CONTINUE;
-                }
-            });
-        } catch (IOException e) {
-            return matches;
-        }
-        return matches;
     }
 
     private static boolean matchesGlob(String path, String glob) {
@@ -524,90 +450,89 @@ public final class SearchTool implements Tool.ParallelReadOnly {
         return path.matches(regex.toString());
     }
 
-    private int countFileMatches(Path file, Pattern pattern) {
+    private static String[] readTextLines(Path file) {
         try {
             if (Files.size(file) > MAX_FILE_BYTES) {
-                return 0;
+                return null;
             }
             byte[] bytes = Files.readAllBytes(file);
             if (Texts.isBinary(bytes)) {
-                return 0;
+                return null;
             }
-            String[] lines = new String(bytes, StandardCharsets.UTF_8).split("\\R", -1);
-            int count = 0;
-            for (String line : lines) {
-                if (pattern.matcher(line).find()) {
-                    count++;
-                }
-            }
-            return count;
+            return new String(bytes, StandardCharsets.UTF_8).split("\\R", -1);
         } catch (IOException ignored) {
+            return null;
+        }
+    }
+
+    private int countFileMatches(Path file, Pattern pattern) {
+        String[] lines = readTextLines(file);
+        if (lines == null) {
             return 0;
         }
+        int count = 0;
+        for (String line : lines) {
+            if (pattern.matcher(line).find()) {
+                count++;
+            }
+        }
+        return count;
     }
 
     /** @return 是否因达到上限而提前结束 */
     private boolean searchFile(Path file, Pattern pattern, int contextLines, int limit, List<String> matches) {
-        try {
-            if (Files.size(file) > MAX_FILE_BYTES) {
-                return false;
-            }
-            byte[] bytes = Files.readAllBytes(file);
-            if (Texts.isBinary(bytes)) {
-                return false;
-            }
-            String[] lines = new String(bytes, StandardCharsets.UTF_8).split("\\R", -1);
-            String display = paths.display(file);
-            if (contextLines <= 0) {
-                for (int i = 0; i < lines.length; i++) {
-                    if (pattern.matcher(lines[i]).find()) {
-                        matches.add(formatMatch(display, Integer.toString(i + 1), lines[i]));
-                        if (matches.size() > limit) {
-                            return true;
-                        }
-                    }
-                }
-                return false;
-            }
-            List<Integer> hits = new ArrayList<>();
-            Set<Integer> hitSet = new HashSet<>();
+        String[] lines = readTextLines(file);
+        if (lines == null) {
+            return false;
+        }
+        String display = paths.display(file);
+        if (contextLines <= 0) {
             for (int i = 0; i < lines.length; i++) {
                 if (pattern.matcher(lines[i]).find()) {
-                    hits.add(i);
-                    hitSet.add(i);
-                }
-            }
-            if (hits.isEmpty()) {
-                return false;
-            }
-            List<int[]> blocks = new ArrayList<>();
-            for (int hit : hits) {
-                int lo = Math.max(0, hit - contextLines);
-                int hi = Math.min(lines.length - 1, hit + contextLines);
-                if (!blocks.isEmpty() && lo <= blocks.getLast()[1] + 1) {
-                    blocks.getLast()[1] = Math.max(blocks.getLast()[1], hi);
-                } else {
-                    blocks.add(new int[] {lo, hi});
-                }
-            }
-            for (int[] block : blocks) {
-                if (!matches.isEmpty()) {
-                    matches.add("--");
-                    if (matches.size() > limit) {
-                        return true;
-                    }
-                }
-                for (int idx = block[0]; idx <= block[1]; idx++) {
-                    String num = Integer.toString(idx + 1);
-                    matches.add(hitSet.contains(idx) ? formatMatch(display, num, lines[idx])
-                        : formatContext(display, num, lines[idx]));
+                    matches.add(formatMatch(display, Integer.toString(i + 1), lines[i]));
                     if (matches.size() > limit) {
                         return true;
                     }
                 }
             }
-        } catch (IOException ignored) {
             return false;
+        }
+        List<Integer> hits = new ArrayList<>();
+        Set<Integer> hitSet = new HashSet<>();
+        for (int i = 0; i < lines.length; i++) {
+            if (pattern.matcher(lines[i]).find()) {
+                hits.add(i);
+                hitSet.add(i);
+            }
+        }
+        if (hits.isEmpty()) {
+            return false;
+        }
+        List<int[]> blocks = new ArrayList<>();
+        for (int hit : hits) {
+            int lo = Math.max(0, hit - contextLines);
+            int hi = Math.min(lines.length - 1, hit + contextLines);
+            if (!blocks.isEmpty() && lo <= blocks.getLast()[1] + 1) {
+                blocks.getLast()[1] = Math.max(blocks.getLast()[1], hi);
+            } else {
+                blocks.add(new int[] {lo, hi});
+            }
+        }
+        for (int[] block : blocks) {
+            if (!matches.isEmpty()) {
+                matches.add("--");
+                if (matches.size() > limit) {
+                    return true;
+                }
+            }
+            for (int idx = block[0]; idx <= block[1]; idx++) {
+                String num = Integer.toString(idx + 1);
+                matches.add(hitSet.contains(idx) ? formatMatch(display, num, lines[idx])
+                    : formatContext(display, num, lines[idx]));
+                if (matches.size() > limit) {
+                    return true;
+                }
+            }
         }
         return false;
     }

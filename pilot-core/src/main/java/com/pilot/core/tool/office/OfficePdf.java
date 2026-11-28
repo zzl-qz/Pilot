@@ -1,16 +1,12 @@
 package com.pilot.core.tool.office;
 
-import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-
-import javax.imageio.ImageIO;
 
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -19,13 +15,9 @@ import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.font.PDFont;
 import org.apache.pdfbox.pdmodel.font.PDType0Font;
-import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
 
-import com.pilot.core.message.Attachment;
-import com.pilot.core.tool.ToolArtifacts;
 import com.pilot.core.tool.ToolResult;
-import com.pilot.core.util.Sha256;
 import com.pilot.core.workspace.PathValidator;
 
 import tools.jackson.databind.JsonNode;
@@ -131,61 +123,15 @@ final class OfficePdf {
             if (total < 1 || total > MAX_PAGES) {
                 throw new IllegalArgumentException("PDF 页数须为 1–" + MAX_PAGES + "，当前 " + total);
             }
-            int[] range = pageRange(pagesArg, total);
-            Path dir = ToolArtifacts.directory("office-pdf/" + digest(file, total));
-            PDFRenderer renderer = new PDFRenderer(document);
-            List<Attachment> images = new ArrayList<>();
-            int rendered = 0;
-            for (int page = range[0]; page <= range[1]; page++) {
-                BufferedImage image = OfficeSupport.renderPdfPage(renderer, document.getPage(page - 1), page - 1, DPI);
-                Path png = dir.resolve("page-" + page + ".png");
-                if (!ImageIO.write(image, "png", png.toFile()) || Files.size(png) > MAX_PNG_BYTES) {
-                    Files.deleteIfExists(png);
-                    continue;
-                }
-                rendered++;
-                if (images.size() < 4) {
-                    images.add(new Attachment(file.getFileName() + " 第 " + page + " 页", "image/png", png.toString()));
-                }
-            }
-            String text = "已渲染 " + rendered + " 页，图片目录：" + dir
+            int[] range = OfficeSupport.parsePageRange(pagesArg, total, total, MAX_PAGES, false);
+            OfficeSupport.RenderedPdf result = OfficeSupport.renderPdfPages(document, file, range,
+                new OfficeSupport.PdfRenderOptions("office-pdf/", DPI, MAX_PNG_BYTES, 4, false));
+            String text = "已渲染 " + result.renderedPages() + " 页，图片目录：" + result.directory()
                 + "。每次只附前四页，其余页用 pages 指定范围分段渲染；图片在产物目录，不能用 read_file 读取。" + "PDF 渲染不检验 Word 排版。";
             return new ToolResult(text, List.of(),
-                List.of("office render_pdf " + file.getFileName() + " → " + rendered + " 页"), images);
+                List.of("office render_pdf " + file.getFileName() + " → " + result.renderedPages() + " 页"),
+                result.images());
         }
-    }
-
-    private static int[] pageRange(Object pagesArg, int total) {
-        if (pagesArg == null || pagesArg.toString().isBlank()) {
-            return new int[] {1, total};
-        }
-        String raw = pagesArg.toString().strip();
-        try {
-            if (raw.contains("-")) {
-                String[] parts = raw.split("-", 2);
-                int from = Integer.parseInt(parts[0].strip());
-                int to = Integer.parseInt(parts[1].strip());
-                if (from < 1 || to > total || from > to || to - from + 1 > MAX_PAGES) {
-                    throw new IllegalArgumentException("页码范围无效");
-                }
-                return new int[] {from, to};
-            }
-            int page = Integer.parseInt(raw);
-            if (page < 1 || page > total) {
-                throw new IllegalArgumentException("页码超出范围");
-            }
-            return new int[] {page, page};
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException("pages 须为页码或范围，例如 3 或 2-5");
-        }
-    }
-
-    private static String digest(Path file, int pages) throws IOException {
-        var sha = Sha256.newDigest();
-        sha.update(file.toAbsolutePath().toString().getBytes(StandardCharsets.UTF_8));
-        sha.update(Long.toString(Files.size(file)).getBytes(StandardCharsets.UTF_8));
-        sha.update(Integer.toString(pages).getBytes(StandardCharsets.UTF_8));
-        return Sha256.finishHex(sha);
     }
 
     /** 简单 A4 垂直排版：按字体实际宽度折行，超出下边距自动翻页。 */

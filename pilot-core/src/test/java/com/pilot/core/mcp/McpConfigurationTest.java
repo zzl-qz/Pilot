@@ -187,4 +187,19 @@ class McpConfigurationTest {
             assertThrows(McpException.class, () -> manager.call(workspace, "fake", "first", Map.of()));
         }
     }
+
+    @Test
+    void serverConfigDisplayCommandFormatsStdioAndRemote() {
+        var stdioNoArgs = new McpServerConfig("s1", "npx", List.of(), Map.of(), null);
+        var stdioArgs = new McpServerConfig("s2", "npx", List.of("-y", "@demo/mcp"), Map.of(), null);
+        var remoteHttp = McpServerConfig.remote("r1", "http", "https://mcp.example/v1", Map.of(), null);
+        var remoteSse = McpServerConfig.remote("r2", "sse", "https://mcp.example/sse", Map.of(), null);
+        var missingCmd = new McpServerConfig("s3", null, List.of(), Map.of(), "missing");
+
+        assertEquals("npx", stdioNoArgs.displayCommand());
+        assertEquals("npx -y @demo/mcp", stdioArgs.displayCommand());
+        assertEquals("HTTP https://mcp.example/v1", remoteHttp.displayCommand());
+        assertEquals("SSE https://mcp.example/sse", remoteSse.displayCommand());
+        assertEquals("", missingCmd.displayCommand());
+    }
 }

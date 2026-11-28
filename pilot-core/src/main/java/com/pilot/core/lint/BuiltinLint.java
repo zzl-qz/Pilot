@@ -6,6 +6,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiConsumer;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -46,8 +48,9 @@ final class BuiltinLint {
         while (strings.find()) {
             counts.merge(strings.group(), 1, Integer::sum);
         }
+        String addedBlock = String.join("\n", added);
         for (Map.Entry<String, Integer> entry : counts.entrySet()) {
-            if (entry.getValue() < REPEAT_LIMIT || !addedText(added).contains(entry.getKey())) {
+            if (entry.getValue() < REPEAT_LIMIT || !addedBlock.contains(entry.getKey())) {
                 continue;
             }
             out.add(path + ": 字符串 " + entry.getKey() + " 出现 " + entry.getValue() + " 次。同一概念建议提成常量");
@@ -59,47 +62,40 @@ final class BuiltinLint {
     }
 
     static List<String> addedLines(String before, String after) {
-        Map<String, Integer> existing = new LinkedHashMap<>();
-        for (String line : lines(before)) {
-            existing.merge(line.strip(), 1, Integer::sum);
-        }
         List<String> added = new ArrayList<>();
-        for (String line : lines(after)) {
-            String key = line.strip();
-            if (key.isEmpty()) {
-                continue;
-            }
-            int left = existing.getOrDefault(key, 0);
-            if (left > 0) {
-                existing.put(key, left - 1);
-            } else {
-                added.add(key);
-            }
-        }
+        diffAdded(before, after, key -> !key.isEmpty(), (number, key) -> added.add(key));
         return added;
     }
 
     static Set<Integer> addedLineNumbers(String before, String after) {
+        Set<Integer> numbers = new LinkedHashSet<>();
+        diffAdded(before, after, key -> !key.isEmpty(), (number, key) -> numbers.add(number));
+        return numbers;
+    }
+
+    /** 按多重集差集遍历本次新增行（1-based 行号 + 去首尾空白文本），过滤条件由调用方决定。 */
+    static void diffAdded(String before, String after, Predicate<String> include, BiConsumer<Integer, String> onAdded) {
         Map<String, Integer> existing = new LinkedHashMap<>();
         for (String line : lines(before)) {
-            existing.merge(line.strip(), 1, Integer::sum);
+            String key = line.strip();
+            if (include.test(key)) {
+                existing.merge(key, 1, Integer::sum);
+            }
         }
-        Set<Integer> numbers = new LinkedHashSet<>();
         int number = 0;
         for (String line : lines(after)) {
             number++;
             String key = line.strip();
-            if (key.isEmpty()) {
+            if (!include.test(key)) {
                 continue;
             }
             int left = existing.getOrDefault(key, 0);
             if (left > 0) {
                 existing.put(key, left - 1);
             } else {
-                numbers.add(number);
+                onAdded.accept(number, key);
             }
         }
-        return numbers;
     }
 
     private static boolean isComment(String line) {
@@ -108,11 +104,7 @@ final class BuiltinLint {
             || trimmed.startsWith("/*");
     }
 
-    private static String addedText(List<String> added) {
-        return String.join("\n", added);
-    }
-
-    private static List<String> lines(String text) {
+    static List<String> lines(String text) {
         if (text == null || text.isEmpty()) {
             return List.of();
         }

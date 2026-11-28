@@ -13,11 +13,9 @@ import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CoderResult;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -32,8 +30,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Pattern;
 
+import com.pilot.core.util.FileTrees;
 import com.pilot.core.util.HostOs;
 import com.pilot.core.util.SecretScrubber;
 import com.pilot.core.util.WireEnum;
@@ -64,7 +62,6 @@ public final class CommandTaskManager implements AutoCloseable {
     public record LogChunk(String taskId, long offset, long nextOffset, String text, boolean eof, boolean truncated) {
     }
 
-    private static final Pattern SECRET_KEY = Pattern.compile("(?i)(key|token|secret|password|credential|passwd)");
     private static final String REDACTED = "[REDACTED]";
     private static final long DEFAULT_OUTPUT_LIMIT = 10L * 1024 * 1024;
     /** 单次写入标准输入的字符上限；一次写太多会挤满管道缓冲让写线程挂住。 */
@@ -125,10 +122,7 @@ public final class CommandTaskManager implements AutoCloseable {
             throw new IllegalStateException("后台命令并发数已达上限 " + concurrencyLimit);
         }
         prune(retainedLimit - 1);
-        List<String> secrets =
-            builder.environment().entrySet().stream().filter(value -> SECRET_KEY.matcher(value.getKey()).find())
-                .map(Map.Entry::getValue).filter(value -> value != null && !value.isEmpty()).distinct()
-                .sorted(Comparator.comparingInt(String::length).reversed()).toList();
+        List<String> secrets = CommandToolSupport.secretEnvValues(builder.environment(), 1);
         Path workdir = canonical(builder.directory() == null ? Path.of("") : builder.directory().toPath());
         String id = "cmd_" + UUID.randomUUID();
         Task task = new Task(id, sessionId, redact(displayCommand, secrets), workdir.toString(),
@@ -671,16 +665,8 @@ public final class CommandTaskManager implements AutoCloseable {
         Path target = metadata(task);
         IOException failure = null;
         for (int attempt = 0; attempt < 4; attempt++) {
-            Path temp = null;
             try {
-                Files.createDirectories(target.getParent());
-                temp = Files.createTempFile(target.getParent(), "command-", ".tmp");
-                Files.writeString(temp, mapper.writeValueAsString(task));
-                try {
-                    Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-                } catch (AtomicMoveNotSupportedException unsupported) {
-                    Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
-                }
+                FileTrees.writeAtomic(target, mapper.writeValueAsString(task));
                 return;
             } catch (java.nio.file.FileSystemException e) {
                 failure = e;
@@ -695,14 +681,6 @@ public final class CommandTaskManager implements AutoCloseable {
             } catch (IOException e) {
                 failure = e;
                 break;
-            } finally {
-                if (temp != null) {
-                    try {
-                        Files.deleteIfExists(temp);
-                    } catch (IOException cleanupFailure) {
-                        log.debug("无法清理命令状态临时文件 {}：{}", temp, cleanupFailure.toString());
-                    }
-                }
             }
         }
         log.warn("命令状态持久化失败，继续保持进程生命周期：{}（{}）", task.taskId(), failure == null ? "interrupted" : failure.toString());

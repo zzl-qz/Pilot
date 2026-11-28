@@ -354,6 +354,4 @@ public final class SkillCatalog {
         }
         return text;
     }
-
-    /** 采样前 8KB 是否含 NUL 字节，与 read_file 的二进制判断同款。 */
 }

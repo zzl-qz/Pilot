@@ -22,6 +22,10 @@ public final class SecretScrubber {
         .compile("(?i)((?:'|\")?(?:api[_-]?key|apikey|secret|token|password)(?:'|\")?\\s*:\\s*)(['\"])([^'\"]{4,})\\2");
     private static final Pattern ESCAPED_JSON_SECRET = Pattern.compile(
         "(?i)(\\\\\\\"(?:api[_-]?key|apikey|secret|token|password)\\\\\\\"\\s*:\\s*\\\\\\\")([^\\\\\\\"]{4,})(\\\\\\\")");
+    private static final Pattern CLI_FLAG =
+        Pattern.compile("(?i)(?<![A-Za-z0-9_-])(--?(?:password|passwd|token|secret|api[-_]?key|access[-_]?key)[= \\t]+)"
+            + "(?!\\\\?[\"']?\\*{3}\\\\?[\"']?(?=[\\s\"',;&}\\]（）()]|$))"
+            + "(\\\\\"[^\\\\\"\\r\\n]+\\\\\"|\"(?!\\s*[,}\\]])[^\"\\r\\n]+\"|'[^'\\r\\n]+'|[^\\s\"',;&}\\]（）()]+)");
     private static final Pattern KEY_VALUE = Pattern
         .compile("(?i)((?:api[_-]?key|apikey|x-api-key|x_api_key|access[_-]?token|refresh[_-]?token|token|secret|"
             + "client[_-]?secret|private[_-]?key|password|passwd|authorization|aws_secret_access_key)\\s*[=:]\\s*)([\\\"']?)([^\\s\\\"',;&}（）()]{4,})");
@@ -50,6 +54,7 @@ public final class SecretScrubber {
         result = JSON_SECRET.matcher(result).replaceAll("$1" + MASK + "$3");
         result = ESCAPED_JSON_SECRET.matcher(result).replaceAll("$1" + MASK + "$3");
         result = QUOTED_SECRET.matcher(result).replaceAll("$1$2" + MASK + "$2");
+        result = CLI_FLAG.matcher(result).replaceAll("$1" + MASK);
         result = KEY_VALUE.matcher(result).replaceAll("$1$2" + MASK);
         result = AZURE_ACCOUNT_KEY.matcher(result).replaceAll("$1$2" + MASK);
         result = SAS_SIGNATURE.matcher(result).replaceAll("$1$2" + MASK);
@@ -66,7 +71,7 @@ public final class SecretScrubber {
         return PEM_PRIVATE_KEY.matcher(value).find() || AUTH_SCHEME.matcher(value).find()
             || URL_CREDENTIALS.matcher(value).find() || KNOWN_PREFIX.matcher(value).find()
             || JSON_SECRET.matcher(value).find() || ESCAPED_JSON_SECRET.matcher(value).find()
-            || QUOTED_SECRET.matcher(value).find() || KEY_VALUE.matcher(value).find()
+            || QUOTED_SECRET.matcher(value).find() || CLI_FLAG.matcher(value).find() || KEY_VALUE.matcher(value).find()
             || AZURE_ACCOUNT_KEY.matcher(value).find() || SAS_SIGNATURE.matcher(value).find()
             || JWT.matcher(value).find();
     }

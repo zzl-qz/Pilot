@@ -52,7 +52,6 @@ import com.pilot.core.workspace.PathValidator;
  * {@code ASK} 档位直接放行；其余沿用「READ_ONLY 拒绝、ASK/AUTO_EDIT 逐次审批」。
  */
 public final class RunCommandTool implements Tool, ProducesCheck {
-    private static final Pattern SECRET_KEY = Pattern.compile("(?i)(key|token|secret|password|credential|passwd)");
     private static final Pattern EXIT_CODE = Pattern.compile("^退出码: (-?\\d+)", Pattern.MULTILINE);
 
     private static final boolean WINDOWS = HostOs.isWindows();
@@ -704,7 +703,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             String sub = subIndex > 0 ? tokens.get(subIndex).toLowerCase(Locale.ROOT) : "";
             if (CommandPolicy.GIT_READONLY.contains(sub)) {
                 trackChanges = false;
-            } else if (CommandPolicy.GIT_WRITE.contains(sub) || CommandPolicy.GIT_MUTATING.contains(sub)) {
+            } else {
                 if (scope != null && !scope.writable()) {
                     return SegmentCheck.error("只读任务不允许 git " + sub + "，改动请通过沙箱写工具提交");
                 }
@@ -714,8 +713,6 @@ public final class RunCommandTool implements Tool, ProducesCheck {
                         return SegmentCheck.error(problem);
                     }
                 }
-            } else if (scope != null && !scope.writable()) {
-                return SegmentCheck.error("只读任务不允许 git " + sub + "，改动请通过沙箱写工具提交");
             }
         }
         if (scope != null && !scope.writable() && (CommandPolicy.FILE_MUTATORS.contains(executable)
@@ -1076,12 +1073,12 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            destroyTree(process);
+            ProcessSupport.terminate(process);
             closeQuietly(process.getInputStream());
             return "ERROR: 命令执行被中断";
         }
         if (!finished) {
-            destroyTree(process);
+            ProcessSupport.terminate(process);
             try {
                 process.waitFor(2, TimeUnit.SECONDS);
             } catch (InterruptedException e) {
@@ -1156,17 +1153,9 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         // mvnw/gradlew 本身也映射到工作区 wrapper；若调用的是 mvn/gradle 且本地 wrapper 缺失配套 jar、
         // 同时系统 PATH 上已有可用的 mvn/gradle，则保留系统命令避免离线环境因 ClassNotFoundException 崩溃。
         if ("mvn".equals(head) || "mvnw".equals(head)) {
-            wrapper = CommandRuntimeEnvironment.findWrapper(paths.root(), "mvnw", WINDOWS);
-            if ("mvn".equals(head) && CommandRuntimeEnvironment.isWrapperMissingJar(paths.root(), wrapper, "mvnw")
-                && CommandRuntimeEnvironment.resolveOnPath("mvn", pathEnv, WINDOWS) != null) {
-                wrapper = null;
-            }
+            wrapper = resolveBuildWrapper(head, "mvn", "mvnw", pathEnv);
         } else if ("gradle".equals(head) || "gradlew".equals(head)) {
-            wrapper = CommandRuntimeEnvironment.findWrapper(paths.root(), "gradlew", WINDOWS);
-            if ("gradle".equals(head) && CommandRuntimeEnvironment.isWrapperMissingJar(paths.root(), wrapper, "gradlew")
-                && CommandRuntimeEnvironment.resolveOnPath("gradle", pathEnv, WINDOWS) != null) {
-                wrapper = null;
-            }
+            wrapper = resolveBuildWrapper(head, "gradle", "gradlew", pathEnv);
         }
         if (wrapper != null) {
             // Git 检出或打包可能丢失执行位；只为已识别的构建 wrapper 加解释器，绝不执行 shell -c。
@@ -1181,6 +1170,15 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         }
         command.addAll(tokens.subList(1, tokens.size()));
         return needsShell(command.get(0)) ? withShell(command) : command;
+    }
+
+    private Path resolveBuildWrapper(String head, String tool, String wrapperName, String pathEnv) {
+        Path wrapper = CommandRuntimeEnvironment.findWrapper(paths.root(), wrapperName, WINDOWS);
+        if (tool.equals(head) && CommandRuntimeEnvironment.isWrapperMissingJar(paths.root(), wrapper, wrapperName)
+            && CommandRuntimeEnvironment.resolveOnPath(tool, pathEnv, WINDOWS) != null) {
+            return null;
+        }
+        return wrapper;
     }
 
     private static boolean needsShell(String executable) {
@@ -1246,46 +1244,6 @@ public final class RunCommandTool implements Tool, ProducesCheck {
     private record ManagedRun(String text, boolean terminal) {
     }
 
-    /** 支持单双引号的最小分词器：不展开变量，不做通配符。 */
-    static List<String> tokenize(String raw) {
-        List<String> tokens = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        char quote = 0;
-        boolean hasToken = false;
-        for (int i = 0; i < raw.length(); i++) {
-            char ch = raw.charAt(i);
-            if (quote != 0) {
-                if (CommandChain.isDoubleQuoteEscape(quote, raw, i)) {
-                    current.append(raw.charAt(++i));
-                } else if (ch == quote) {
-                    quote = 0;
-                } else {
-                    current.append(ch);
-                }
-                continue;
-            }
-            if (ch == '"' || ch == '\'') {
-                quote = ch;
-                hasToken = true;
-                continue;
-            }
-            if (Character.isWhitespace(ch)) {
-                if (hasToken) {
-                    tokens.add(current.toString());
-                    current.setLength(0);
-                    hasToken = false;
-                }
-                continue;
-            }
-            current.append(ch);
-            hasToken = true;
-        }
-        if (hasToken) {
-            tokens.add(current.toString());
-        }
-        return tokens;
-    }
-
     private static CapturedOutput readLimited(Process process) {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         boolean truncated = false;
@@ -1325,17 +1283,6 @@ public final class RunCommandTool implements Tool, ProducesCheck {
         }
     }
 
-    private static void destroyTree(Process process) {
-        process.descendants().forEach(handle -> {
-            try {
-                handle.destroyForcibly();
-            } catch (RuntimeException ignored) {
-                // 子进程可能已退出
-            }
-        });
-        process.destroyForcibly();
-    }
-
     private record CapturedOutput(byte[] bytes, boolean truncated) {
     }
 
@@ -1357,11 +1304,7 @@ public final class RunCommandTool implements Tool, ProducesCheck {
             return text == null ? "" : text;
         }
         String result = text;
-        for (Map.Entry<String, String> entry : System.getenv().entrySet()) {
-            String value = entry.getValue();
-            if (value == null || value.length() < 8 || !SECRET_KEY.matcher(entry.getKey()).find()) {
-                continue;
-            }
+        for (String value : CommandToolSupport.secretEnvValues(System.getenv(), 8)) {
             if (result.contains(value)) {
                 result = result.replace(value, "***");
             }

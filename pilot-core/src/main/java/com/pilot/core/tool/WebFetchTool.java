@@ -426,18 +426,7 @@ public final class WebFetchTool implements Tool {
     }
 
     private static int parseMaxChars(Map<String, Object> args) {
-        Object raw = args == null ? null : args.get("max_chars");
-        int value = DEFAULT_MAX_CHARS;
-        if (raw instanceof Number number) {
-            value = number.intValue();
-        } else if (raw instanceof String text && !text.isBlank()) {
-            try {
-                value = Integer.parseInt(text.strip());
-            } catch (NumberFormatException ignored) {
-                value = DEFAULT_MAX_CHARS;
-            }
-        }
-        return Math.max(MIN_MAX_CHARS, Math.min(MAX_MAX_CHARS, value));
+        return ToolSupport.clampedIntArg(args, "max_chars", DEFAULT_MAX_CHARS, MIN_MAX_CHARS, MAX_MAX_CHARS);
     }
 
     static void validate(URI uri) throws IOException {

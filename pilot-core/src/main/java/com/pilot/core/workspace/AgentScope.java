@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
 
 /**
@@ -39,12 +40,12 @@ public final class AgentScope {
     private AgentScope(Collection<String> allowFiles, Collection<String> denyFiles, Collection<String> allowTools,
         Collection<String> denyTools, Collection<String> allowCommands, Collection<String> denyCommands,
         boolean writable) {
-        this.allowFiles = clean(allowFiles);
-        this.denyFiles = clean(denyFiles);
-        this.allowTools = cleanTools(allowTools);
-        this.denyTools = cleanTools(denyTools);
-        this.allowCommands = cleanCommands(allowCommands);
-        this.denyCommands = cleanCommands(denyCommands);
+        this.allowFiles = clean(allowFiles, AgentScope::normalizePath);
+        this.denyFiles = clean(denyFiles, AgentScope::normalizePath);
+        this.allowTools = Set.copyOf(clean(allowTools, value -> value.strip().toLowerCase(Locale.ROOT)));
+        this.denyTools = Set.copyOf(clean(denyTools, value -> value.strip().toLowerCase(Locale.ROOT)));
+        this.allowCommands = clean(allowCommands, value -> String.join(" ", commandTokens(value)));
+        this.denyCommands = clean(denyCommands, value -> String.join(" ", commandTokens(value)));
         this.writable = writable;
     }
 
@@ -136,7 +137,7 @@ public final class AgentScope {
             if (glob.startsWith("**")) {
                 return true;
             }
-            String literal = literalPrefix(glob);
+            String literal = literalPrefix(glob, false);
             if (!literal.isEmpty() && (literal.equals(path) || literal.startsWith(path + "/"))) {
                 return true;
             }
@@ -144,17 +145,22 @@ public final class AgentScope {
         return false;
     }
 
-    /** 通配符之前的字面前缀，例如 {@code pilot-core/src/**}{@code /*.java} → {@code pilot-core/src}。 */
-    private static String literalPrefix(String glob) {
-        int wildcard = glob.length();
-        for (int i = 0; i < glob.length(); i++) {
-            char ch = glob.charAt(i);
-            if (ch == '*' || ch == '?') {
+    /**
+     * 通配符之前的字面前缀，例如 {@code pilot-core/src/**}{@code /*.java} → {@code pilot-core/src}。
+     *
+     * @param includeCharClasses 为 {@code true} 时同时在 {@code {}} / {@code []} 处截断
+     */
+    public static String literalPrefix(String glob, boolean includeCharClasses) {
+        String text = glob == null ? "" : glob.replace('\\', '/').strip();
+        int wildcard = text.length();
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '*' || ch == '?' || (includeCharClasses && (ch == '{' || ch == '['))) {
                 wildcard = i;
                 break;
             }
         }
-        String prefix = glob.substring(0, wildcard);
+        String prefix = text.substring(0, wildcard);
         while (prefix.endsWith("/")) {
             prefix = prefix.substring(0, prefix.length() - 1);
         }
@@ -167,10 +173,10 @@ public final class AgentScope {
             return false;
         }
         String name = toolName.strip().toLowerCase(Locale.ROOT);
-        if (matchesAnyTool(denyTools, name)) {
+        if (matchesAny(denyTools, name)) {
             return false;
         }
-        return allowTools.isEmpty() || matchesAnyTool(allowTools, name);
+        return allowTools.isEmpty() || matchesAny(allowTools, name);
     }
 
     /**
@@ -197,10 +203,10 @@ public final class AgentScope {
         if (tokens.isEmpty()) {
             return false;
         }
-        if (matchesAnyCommand(denyCommands, tokens)) {
+        if (denyCommands.stream().anyMatch(pattern -> commandMatches(pattern, tokens))) {
             return false;
         }
-        return allowCommands.isEmpty() || matchesAnyCommand(allowCommands, tokens);
+        return allowCommands.isEmpty() || allowCommands.stream().anyMatch(pattern -> commandMatches(pattern, tokens));
     }
 
     /** 给子 Agent 看的权限说明，写进系统提示词；真正的拦截在后端。 */
@@ -255,24 +261,6 @@ public final class AgentScope {
         return path;
     }
 
-    private static boolean matchesAnyTool(Set<String> patterns, String name) {
-        for (String pattern : patterns) {
-            if (matches(pattern, name)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean matchesAnyCommand(List<String> patterns, List<String> tokens) {
-        for (String pattern : patterns) {
-            if (commandMatches(pattern, tokens)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     /** 白名单项是命令的前缀；{@code *} 占一个参数，{@code **} 吞掉剩余参数。 */
     static boolean commandMatches(String pattern, List<String> tokens) {
         List<String> expected = commandTokens(pattern);
@@ -301,26 +289,17 @@ public final class AgentScope {
         return List.of(command.strip().toLowerCase(Locale.ROOT).split("\\s+"));
     }
 
-    private static boolean matchesAny(List<String> globs, String path) {
-        for (String glob : globs) {
-            if (matches(glob, path)) {
-                return true;
-            }
-        }
-        return false;
+    private static boolean matchesAny(Collection<String> globs, String target) {
+        return globs.stream().anyMatch(glob -> matches(glob, target));
     }
 
     static boolean matches(String rawGlob, String rawPath) {
         String glob = normalizePath(rawGlob);
         String path = normalizePath(rawPath);
-        boolean dirOnly = rawGlob != null && rawGlob.strip().replace('\\', '/').endsWith("/");
         if (glob.isEmpty()) {
             return false;
         }
         if (!glob.contains("*") && !glob.contains("?")) {
-            if (dirOnly) {
-                return path.equals(glob) || path.startsWith(glob + "/");
-            }
             return path.equals(glob) || path.startsWith(glob + "/");
         }
         return compile(glob).matcher(path).matches();
@@ -358,47 +337,21 @@ public final class AgentScope {
         return Pattern.compile(regex.append('$').toString());
     }
 
-    private static List<String> clean(Collection<String> values) {
+    private static List<String> clean(Collection<String> values, UnaryOperator<String> normalizer) {
         if (values == null) {
             return List.of();
         }
-        LinkedHashSet<String> seen = new LinkedHashSet<String>();
+        LinkedHashSet<String> seen = new LinkedHashSet<>();
         for (String value : values) {
             if (value == null || value.isBlank()) {
                 continue;
             }
-            seen.add(normalizePath(value));
+            String normalized = normalizer.apply(value);
+            if (!normalized.isEmpty()) {
+                seen.add(normalized);
+            }
         }
         return List.copyOf(seen);
-    }
-
-    private static List<String> cleanCommands(Collection<String> values) {
-        if (values == null) {
-            return List.of();
-        }
-        LinkedHashSet<String> seen = new LinkedHashSet<String>();
-        for (String value : values) {
-            if (value == null || value.isBlank()) {
-                continue;
-            }
-            seen.add(String.join(" ", commandTokens(value)));
-        }
-        seen.remove("");
-        return List.copyOf(seen);
-    }
-
-    private static Set<String> cleanTools(Collection<String> values) {
-        if (values == null) {
-            return Set.of();
-        }
-        LinkedHashSet<String> seen = new LinkedHashSet<String>();
-        for (String value : values) {
-            if (value == null || value.isBlank()) {
-                continue;
-            }
-            seen.add(value.strip().toLowerCase(Locale.ROOT));
-        }
-        return Set.copyOf(seen);
     }
 
     @Override
@@ -427,25 +380,23 @@ public final class AgentScope {
 
     /** 用于拼错误信息：把白名单说清楚，模型才知道下一步怎么绕。 */
     public String denialHint(String path) {
-        List<String> parts = new ArrayList<>();
-        if (!allowFiles.isEmpty()) {
-            parts.add("允许范围 " + allowFiles);
-        }
-        if (!denyFiles.isEmpty()) {
-            parts.add("禁止范围 " + denyFiles);
-        }
-        return "路径 " + path + " 不在你的文件白名单内（" + String.join("；", parts) + "）";
+        return rangeHint("路径 " + path, "文件白名单", "允许范围 ", allowFiles, "禁止范围 ", denyFiles);
     }
 
     /** 命令越界时的错误信息。 */
     public String commandHint(String command) {
-        List<String> parts = new ArrayList<>();
-        if (!allowCommands.isEmpty()) {
-            parts.add("允许 " + allowCommands);
+        return rangeHint("命令 " + command, "命令白名单", "允许 ", allowCommands, "禁止 ", denyCommands);
+    }
+
+    private static String rangeHint(String subject, String scopeLabel, String allowLabel, List<String> allow,
+        String denyLabel, List<String> deny) {
+        List<String> parts = new ArrayList<>(2);
+        if (!allow.isEmpty()) {
+            parts.add(allowLabel + allow);
         }
-        if (!denyCommands.isEmpty()) {
-            parts.add("禁止 " + denyCommands);
+        if (!deny.isEmpty()) {
+            parts.add(denyLabel + deny);
         }
-        return "命令 " + command + " 不在你的命令白名单内（" + String.join("；", parts) + "）";
+        return subject + " 不在你的" + scopeLabel + "内（" + String.join("；", parts) + "）";
     }
 }

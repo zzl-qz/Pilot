@@ -52,18 +52,8 @@ public final class GitLogTool implements Tool.ParallelReadOnly {
 
     @Override
     public String execute(Map<String, Object> args) {
-        String repositoryError = GitReadSupport.repositoryError(paths);
-        if (repositoryError != null) {
-            return repositoryError;
-        }
-        String pathspec;
-        try {
-            pathspec = GitReadSupport.resolveScopedPathspec(paths, scope, ToolSupport.stringArg(args, "path"));
-        } catch (RuntimeException e) {
-            return "ERROR: " + e.getMessage();
-        }
-        int limit = GitReadSupport.intArg(args, "limit", DEFAULT_LIMIT, 1, 50);
-        boolean stat = GitReadSupport.boolArg(args, "stat");
+        int limit = ToolSupport.clampedIntArg(args, "limit", DEFAULT_LIMIT, 1, 50);
+        boolean stat = ToolSupport.boolArg(args, "stat", false);
 
         List<String> command = new ArrayList<>();
         command.add("log");
@@ -74,22 +64,15 @@ public final class GitLogTool implements Tool.ParallelReadOnly {
         if (stat) {
             command.add("--stat");
         }
-        if (pathspec != null) {
-            command.add("--");
-            command.add(pathspec);
-        }
-        GitReadSupport.RunResult result = GitReadSupport.run(paths.root(), command);
-        if (!result.ok()) {
-            String detail = result.error() != null ? result.error() : result.output().strip();
-            if (detail.contains("does not have any commits yet")) {
-                return "当前仓库尚无提交记录。";
+        return GitReadSupport.runScoped(paths, scope, args, "log", command, result -> {
+            if (!result.ok()) {
+                String detail = result.error() != null ? result.error() : result.output().strip();
+                return detail.contains("does not have any commits yet") ? "当前仓库尚无提交记录。" : null;
             }
-            return "ERROR: git log 失败：" + detail;
-        }
-        String text = result.output().strip();
-        if (text.isEmpty()) {
-            return "未找到匹配的提交记录。";
-        }
-        return GitReadSupport.truncateLines(result.output(), MAX_LINES, "可调小 limit 或关闭 stat");
+            if (result.output().strip().isEmpty()) {
+                return "未找到匹配的提交记录。";
+            }
+            return GitReadSupport.truncateLines(result.output(), MAX_LINES, "可调小 limit 或关闭 stat");
+        });
     }
 }

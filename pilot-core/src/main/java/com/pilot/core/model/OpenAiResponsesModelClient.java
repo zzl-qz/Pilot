@@ -81,14 +81,10 @@ public final class OpenAiResponsesModelClient implements ModelClient {
 
     @Override
     public synchronized boolean disableRejectedCache(Throwable failure) {
-        if (!(failure instanceof ModelClientException) || failure.getMessage() == null) {
+        if (!ModelHttp.isRejectedCache400(failure)) {
             return false;
         }
         String message = failure.getMessage().toLowerCase(java.util.Locale.ROOT);
-        if (!message.contains("http 400") || !message.matches(
-            "(?s).*(unknown|unsupported|unrecognized|unexpected|not allowed|not permitted|extra inputs|invalid|不支持).*")) {
-            return false;
-        }
         if (!cacheParametersDisabled && message.contains("prompt_cache_key")) {
             cacheParametersDisabled = true;
             return true;
@@ -121,9 +117,9 @@ public final class OpenAiResponsesModelClient implements ModelClient {
             throw new ModelClientException(ModelFailureKind.PERMANENT,
                 "模型响应缺少 output：" + ModelHttp.snippet(response.body()));
         }
-        ModelResponse.FinishReason reason = switch (string(root.get("status"))) {
+        ModelResponse.FinishReason reason = switch (ModelHttp.text(root.get("status"))) {
             case "completed" -> ModelResponse.FinishReason.STOP;
-            case "incomplete" -> switch (string(root.path("incomplete_details").get("reason"))) {
+            case "incomplete" -> switch (ModelHttp.text(root.path("incomplete_details").get("reason"))) {
                 case "max_output_tokens" -> ModelResponse.FinishReason.LENGTH;
                 case "content_filter" -> ModelResponse.FinishReason.CONTENT_FILTER;
                 default -> ModelResponse.FinishReason.ERROR;
@@ -135,21 +131,21 @@ public final class OpenAiResponsesModelClient implements ModelClient {
         List<ToolCall> calls = new ArrayList<>();
         LinkedHashMap<String, String> citations = new LinkedHashMap<>();
         for (JsonNode item : root.path("output")) {
-            String type = string(item.get("type"));
+            String type = ModelHttp.text(item.get("type"));
             if ("message".equals(type)) {
                 for (JsonNode part : item.path("content")) {
-                    if ("output_text".equals(string(part.get("type")))) {
-                        text.append(string(part.get("text")));
+                    if ("output_text".equals(ModelHttp.text(part.get("type")))) {
+                        text.append(ModelHttp.text(part.get("text")));
                         collectCitations(part.path("annotations"), citations);
                     }
                 }
             } else if ("function_call".equals(type) && reason == ModelResponse.FinishReason.STOP) {
-                String id = string(item.get("call_id"));
-                String name = string(item.get("name"));
+                String id = ModelHttp.text(item.get("call_id"));
+                String name = ModelHttp.text(item.get("name"));
                 if (id.isBlank() || name.isBlank()) {
                     throw new ModelClientException(ModelFailureKind.PERMANENT, "模型返回的 function_call 缺少 call_id 或 name");
                 }
-                calls.add(new ToolCall(id, name, arguments(item.get("arguments"))));
+                calls.add(new ToolCall(id, name, ModelHttp.parseToolArgs(mapper, item.get("arguments"))));
             }
         }
         NativeModelCitations.append(text, citations, UnaryOperator.identity());
@@ -199,7 +195,7 @@ public final class OpenAiResponsesModelClient implements ModelClient {
         body.put("store", false);
         body.put("input", input);
         if (!cacheParametersDisabled && profile.cacheKey() && !scope.cacheGroup().isBlank()) {
-            body.put("prompt_cache_key", "pilot-" + MeteredModelClient.hash(scope.cacheGroup()).substring(0, 32));
+            body.put("prompt_cache_key", ModelHttp.promptCacheKey(scope.cacheGroup()));
         }
         if (!toolsDisabled) {
             body.put("tools", requestTools);
@@ -213,34 +209,16 @@ public final class OpenAiResponsesModelClient implements ModelClient {
         return body;
     }
 
-    private Object content(Message message) {
-        Object compatible = OpenAiCompatibleModelClient.contentFor(message);
-        if (!(compatible instanceof List<?> parts)) {
-            return compatible;
+    private static Object content(Message message) {
+        List<ModelHttp.ContentPart> parts = ModelHttp.contentParts(message);
+        if (parts.isEmpty()) {
+            return message.content();
         }
-        List<Map<String, Object>> input = new ArrayList<>();
-        for (Object value : parts) {
-            if (!(value instanceof Map<?, ?> part)) {
-                continue;
-            }
-            if ("text".equals(part.get("type"))) {
-                input.add(Map.of("type", "input_text", "text", part.get("text")));
-            } else if ("image_url".equals(part.get("type")) && part.get("image_url") instanceof Map<?, ?> image) {
-                input.add(Map.of("type", "input_image", "image_url", image.get("url")));
-            }
-        }
-        return input;
-    }
-
-    private Map<String, Object> arguments(JsonNode value) {
-        String json = value == null || value.isNull() ? "{}" : value.isString() ? value.asString() : value.toString();
-        try {
-            return mapper.readValue(json,
-                mapper.getTypeFactory().constructMapType(LinkedHashMap.class, String.class, Object.class));
-        } catch (RuntimeException e) {
-            throw new ModelClientException(ModelFailureKind.MALFORMED_TOOL_CALL,
-                "工具调用参数不是合法 JSON：" + ModelHttp.snippet(json), e);
-        }
+        return parts.stream().map(part -> switch (part) {
+            case ModelHttp.TextPart text -> Map.<String, Object>of("type", "input_text", "text", text.text());
+            case ModelHttp.ImagePart image ->
+                Map.<String, Object>of("type", "input_image", "image_url", image.dataUrl());
+        }).toList();
     }
 
     private static void collectCitations(JsonNode annotations, Map<String, String> citations) {
@@ -248,15 +226,12 @@ public final class OpenAiResponsesModelClient implements ModelClient {
             return;
         }
         for (JsonNode annotation : annotations) {
-            if (!"url_citation".equals(string(annotation.get("type")))) {
+            if (!"url_citation".equals(ModelHttp.text(annotation.get("type")))) {
                 continue;
             }
-            NativeModelCitations.add(string(annotation.get("url")), string(annotation.get("title")), citations);
+            NativeModelCitations.add(ModelHttp.text(annotation.get("url")), ModelHttp.text(annotation.get("title")),
+                citations);
         }
-    }
-
-    private static String string(JsonNode node) {
-        return node == null || node.isNull() ? "" : node.asString();
     }
 
 }

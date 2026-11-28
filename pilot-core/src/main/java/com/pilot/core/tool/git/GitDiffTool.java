@@ -52,19 +52,9 @@ public final class GitDiffTool implements Tool.ParallelReadOnly {
 
     @Override
     public String execute(Map<String, Object> args) {
-        String repositoryError = GitReadSupport.repositoryError(paths);
-        if (repositoryError != null) {
-            return repositoryError;
-        }
-        String pathspec;
-        try {
-            pathspec = GitReadSupport.resolveScopedPathspec(paths, scope, ToolSupport.stringArg(args, "path"));
-        } catch (RuntimeException e) {
-            return "ERROR: " + e.getMessage();
-        }
-        boolean staged = GitReadSupport.boolArg(args, "staged");
-        boolean statOnly = GitReadSupport.boolArg(args, "stat_only");
-        int maxLines = GitReadSupport.intArg(args, "max_lines", DEFAULT_MAX_LINES, 20, 800);
+        boolean staged = ToolSupport.boolArg(args, "staged", false);
+        boolean statOnly = ToolSupport.boolArg(args, "stat_only", false);
+        int maxLines = ToolSupport.clampedIntArg(args, "max_lines", DEFAULT_MAX_LINES, 20, 800);
 
         List<String> command = new ArrayList<>();
         command.add("diff");
@@ -75,19 +65,14 @@ public final class GitDiffTool implements Tool.ParallelReadOnly {
         if (statOnly) {
             command.add("--stat");
         }
-        if (pathspec != null) {
-            command.add("--");
-            command.add(pathspec);
-        }
-        GitReadSupport.RunResult result = GitReadSupport.run(paths.root(), command);
-        if (!result.ok()) {
-            String detail = result.error() != null ? result.error() : result.output().strip();
-            return "ERROR: git diff 失败：" + detail;
-        }
-        String text = result.output().strip();
-        if (text.isEmpty()) {
-            return staged ? "暂存区无差异改动。" : "工作区无未暂存差异改动。";
-        }
-        return GitReadSupport.truncateLines(result.output(), maxLines, "可传 path 或 stat_only=true 缩小范围");
+        return GitReadSupport.runScoped(paths, scope, args, "diff", command, result -> {
+            if (!result.ok()) {
+                return null;
+            }
+            if (result.output().strip().isEmpty()) {
+                return staged ? "暂存区无差异改动。" : "工作区无未暂存差异改动。";
+            }
+            return GitReadSupport.truncateLines(result.output(), maxLines, "可传 path 或 stat_only=true 缩小范围");
+        });
     }
 }

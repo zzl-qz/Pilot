@@ -6,11 +6,11 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.regex.Pattern;
 
 import com.pilot.core.tool.Tool;
 import com.pilot.core.tool.ToolSchemas;
 import com.pilot.core.tool.ToolSupport;
+import com.pilot.core.util.SecretScrubber;
 
 /**
  * 结构化进程视图：把本机正在运行的进程列成稳定字段，供模型观察端口占用、确认残留进程。
@@ -23,9 +23,6 @@ public final class ProcessListTool implements Tool.ParallelReadOnly {
     private static final int DEFAULT_LIMIT = 50;
     private static final int MAX_LIMIT = 200;
     private static final int COMMAND_MAX_CHARS = 160;
-    /** 命令行里常见的密码类参数，值一律遮盖，避免把凭据带进上下文。 */
-    private static final Pattern SENSITIVE = Pattern.compile(
-        "(?i)(--?(?:password|passwd|token|secret|api[-_]?key|access[-_]?key)[=\\s]+)(\"[^\"]*\"|'[^']*'|\\S+)");
 
     @Override
     public String name() {
@@ -42,7 +39,7 @@ public final class ProcessListTool implements Tool.ParallelReadOnly {
 
     @Override
     public String execute(Map<String, Object> args) {
-        int limit = limit(args);
+        int limit = ToolSupport.clampedIntArg(args, "limit", DEFAULT_LIMIT, 1, MAX_LIMIT);
         String filter = filter(args);
         List<String[]> rows = new ArrayList<>();
         ProcessHandle.allProcesses().forEach(handle -> {
@@ -68,20 +65,6 @@ public final class ProcessListTool implements Tool.ParallelReadOnly {
             result.append("没有匹配的进程。\n");
         }
         return result.toString();
-    }
-
-    private static int limit(Map<String, Object> args) {
-        Object value = args == null ? null : args.get("limit");
-        if (value == null) {
-            return DEFAULT_LIMIT;
-        }
-        try {
-            long parsed =
-                value instanceof Number number ? number.longValue() : Long.parseLong(value.toString().strip());
-            return (int)Math.min(MAX_LIMIT, Math.max(1, parsed));
-        } catch (NumberFormatException e) {
-            return DEFAULT_LIMIT;
-        }
     }
 
     private static String filter(Map<String, Object> args) {
@@ -113,7 +96,7 @@ public final class ProcessListTool implements Tool.ParallelReadOnly {
     }
 
     static String redact(String command) {
-        return SENSITIVE.matcher(command).replaceAll(match -> match.group(1) + "***");
+        return SecretScrubber.scrub(command);
     }
 
     private static String truncate(String command) {

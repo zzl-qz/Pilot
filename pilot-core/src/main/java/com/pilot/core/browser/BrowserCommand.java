@@ -87,8 +87,8 @@ public final class BrowserCommand {
     private static String dispatch(String action, Map<String, Object> args, Map<String, Object> command,
         PathValidator paths) {
         return switch (action) {
-            case "navigate" -> navigate(args, command);
-            case "new_tab" -> newTab(args, command);
+            case "navigate" -> navigateUrl(args, command, true);
+            case "new_tab" -> navigateUrl(args, command, false);
             case "click", "dblclick", "right_click" -> click(action, args, command);
             case "hover" -> targetOrCoords(args, command, "x", "y");
             case "switch_tab", "close_tab", "press", "evaluate" -> requiredArgument(action, args, command);
@@ -115,23 +115,10 @@ public final class BrowserCommand {
         };
     }
 
-    private static String navigate(Map<String, Object> args, Map<String, Object> command) {
+    private static String navigateUrl(Map<String, Object> args, Map<String, Object> command, boolean required) {
         String url = ToolSupport.stringArg(args, "url");
         if (url == null) {
-            return "navigate 需要 url";
-        }
-        String problem = Boolean.TRUE.equals(args.get("external")) ? checkExternalUrl(url) : checkUrl(url);
-        if (problem != null) {
-            return problem;
-        }
-        command.put("url", url);
-        return null;
-    }
-
-    private static String newTab(Map<String, Object> args, Map<String, Object> command) {
-        String url = ToolSupport.stringArg(args, "url");
-        if (url == null) {
-            return null;
+            return required ? "navigate 需要 url" : null;
         }
         String problem = Boolean.TRUE.equals(args.get("external")) ? checkExternalUrl(url) : checkUrl(url);
         if (problem != null) {
@@ -199,11 +186,11 @@ public final class BrowserCommand {
         }
         Object rawAmount = args.get("amount");
         if (rawAmount != null) {
-            if (!(rawAmount instanceof Number n) || !Double.isFinite(n.doubleValue())
-                || n.doubleValue() != Math.rint(n.doubleValue()) || n.intValue() < 1 || n.intValue() > 5000) {
+            Integer amount = intInRange(rawAmount, 1, 5000);
+            if (amount == null) {
                 return "scroll 的 amount 必须是 1–5000 的整数";
             }
-            command.put("amount", n.intValue());
+            command.put("amount", amount);
         }
         if (args.get("x") != null || args.get("y") != null) {
             return coords(args, command, "x", "y", "scroll");
@@ -235,11 +222,11 @@ public final class BrowserCommand {
         }
         Object rawSteps = args.get("dragSteps");
         if (rawSteps != null) {
-            if (!(rawSteps instanceof Number n) || !Double.isFinite(n.doubleValue())
-                || n.doubleValue() != Math.rint(n.doubleValue()) || n.intValue() < 2 || n.intValue() > 40) {
+            Integer steps = intInRange(rawSteps, 2, 40);
+            if (steps == null) {
                 return "drag 的 dragSteps 必须是 2–40 的整数";
             }
-            command.put("steps", n.intValue());
+            command.put("steps", steps);
         }
         return null;
     }
@@ -407,12 +394,23 @@ public final class BrowserCommand {
 
     private static String dimension(Map<String, Object> args, Map<String, Object> command, String key, int min,
         int max) {
-        if (!(args.get(key) instanceof Number n) || !Double.isFinite(n.doubleValue())
-            || n.doubleValue() != Math.rint(n.doubleValue()) || n.doubleValue() < min || n.doubleValue() > max) {
+        Integer value = intInRange(args.get(key), min, max);
+        if (value == null) {
             return "resize 的 " + key + " 必须是 " + min + "–" + max + " 的整数";
         }
-        command.put(key, n.intValue());
+        command.put(key, value);
         return null;
+    }
+
+    private static Integer intInRange(Object raw, int min, int max) {
+        if (!(raw instanceof Number n)) {
+            return null;
+        }
+        double value = n.doubleValue();
+        if (!Double.isFinite(value) || value != Math.rint(value) || value < min || value > max) {
+            return null;
+        }
+        return n.intValue();
     }
 
     /** console / network：过滤条件随动作不同，clear 两者通用。 */
@@ -561,25 +559,15 @@ public final class BrowserCommand {
     }
 
     public static boolean isPaymentUrl(String raw) {
-        if (raw == null || raw.isBlank()) {
-            return false;
-        }
-        try {
-            URI uri = new URI(raw.strip());
-            String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
-            if (!scheme.equals("http") && !scheme.equals("https")) {
-                return false;
-            }
-            String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase(Locale.ROOT);
-            String path = uri.getRawPath() == null ? "" : uri.getRawPath();
-            return PAYMENT_HOSTS.contains(host) || PAYMENT_HOST_PATTERN.matcher(host).find()
-                || PAYMENT_PATH_PATTERN.matcher(path).find();
-        } catch (URISyntaxException e) {
-            return false;
-        }
+        return matchesSensitiveUrl(raw, PAYMENT_HOSTS, PAYMENT_HOST_PATTERN, PAYMENT_PATH_PATTERN);
     }
 
     public static boolean isAuthUrl(String raw) {
+        return matchesSensitiveUrl(raw, AUTH_HOSTS, AUTH_HOST_PATTERN, AUTH_PATH_PATTERN);
+    }
+
+    private static boolean matchesSensitiveUrl(String raw, Set<String> hosts, Pattern hostPattern,
+        Pattern pathPattern) {
         if (raw == null || raw.isBlank()) {
             return false;
         }
@@ -591,8 +579,7 @@ public final class BrowserCommand {
             }
             String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase(Locale.ROOT);
             String path = uri.getRawPath() == null ? "" : uri.getRawPath();
-            return AUTH_HOSTS.contains(host) || AUTH_HOST_PATTERN.matcher(host).find()
-                || AUTH_PATH_PATTERN.matcher(path).find();
+            return hosts.contains(host) || hostPattern.matcher(host).find() || pathPattern.matcher(path).find();
         } catch (URISyntaxException e) {
             return false;
         }
@@ -609,10 +596,7 @@ public final class BrowserCommand {
         if (!scheme.equals("http") && !scheme.equals("https")) {
             return "url 只支持 http / https: " + url;
         }
-        String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase(Locale.ROOT);
-        boolean loopback = host.equals("localhost") || host.endsWith(".localhost") || host.equals("127.0.0.1")
-            || host.equals("[::1]") || host.equals("::1") || host.matches("127\\.\\d+\\.\\d+\\.\\d+");
-        if (!loopback) {
+        if (!isLoopbackHost(uri.getHost())) {
             return "browser 只能打开本机地址（localhost / 127.0.0.1 / [::1]）: " + url + "；外部网页内容请用 web_fetch";
         }
         return null;

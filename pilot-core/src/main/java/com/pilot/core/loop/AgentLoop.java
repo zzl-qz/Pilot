@@ -2,6 +2,7 @@ package com.pilot.core.loop;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -102,12 +103,6 @@ public final class AgentLoop {
             int maxPlanContinues, int contextLimit, boolean completionChecks) {
             this(maxSteps, 0, repeatedToolCallLimit, systemPrompt, plan, maxPlanContinues, contextLimit,
                 completionChecks);
-        }
-
-        /** 兼容旧调用：收尾门默认开启。 */
-        public Config(int maxSteps, int repeatedToolCallLimit, String systemPrompt, Supplier<List<PlanItem>> plan,
-            int maxPlanContinues, int contextLimit) {
-            this(maxSteps, 0, repeatedToolCallLimit, systemPrompt, plan, maxPlanContinues, contextLimit, true);
         }
 
         public Config {
@@ -433,10 +428,6 @@ public final class AgentLoop {
         return this;
     }
 
-    public AgentLoop(ModelClient client, ToolRegistry tools, PermissionGate permissionGate) {
-        this(client, tools, permissionGate, ApprovalBroker.denyAll(), Config.defaults(), Cancellation.none());
-    }
-
     public AgentLoop(ModelClient client, ToolRegistry tools, PermissionGate permissionGate, Config config) {
         this(client, tools, permissionGate, ApprovalBroker.denyAll(), config, Cancellation.none());
     }
@@ -598,113 +589,48 @@ public final class AgentLoop {
     private record ParallelBatch(List<ToolExecutor.Outcome> outcomes, Message correction) {
     }
 
+    private record ToolBatchResult(List<ToolExecutor.Outcome> outcomes, boolean interrupted, Result cancelled) {
+    }
+
+    private record PlanSummary(List<PlanItem> plan, int done, List<String> openSteps, List<String> blockedSteps) {
+    }
+
     private Result loop(List<Message> messages, Consumer<SessionEvent> events, Consumer<List<Message>> checkpoint) {
-        String lastSignature = null;
-        List<String> lastOutcomes = List.of();
-        int repeated = 0;
+        RepeatState repeatState = new RepeatState();
         int outputLimitStreak = 0;
-        LinkedHashSet<String> changedFiles = new LinkedHashSet<String>();
-        ArrayList<String> checks = new ArrayList<String>();
-        if (executionPolicy != null) {
-            Set<String> priorPaths = executionPolicy.priorChangedPaths();
-            if (priorPaths != null) {
-                priorPaths.stream().filter(Objects::nonNull).map(String::strip).filter(path -> !path.isBlank())
-                    .forEach(changedFiles::add);
-            }
-            List<String> priorChecks = executionPolicy.priorChecks();
-            if (priorChecks != null) {
-                priorChecks.stream().filter(Objects::nonNull).map(String::strip).filter(check -> !check.isBlank())
-                    .forEach(checks::add);
-            }
-            completionGate.baseline(List.copyOf(checks));
-        }
         UsageTracker usage = new UsageTracker(events, this::noteUsage, client::capacity);
         DynamicPollTracker dynamicPolls = new DynamicPollTracker(config.repeatRemindAt(), config.repeatAbortAt());
-        planGate.reset();
-        RuntimeGuidance runtimeGuidance = new RuntimeGuidance();
-        LoopContext context = new LoopContext(messages, events, checkpoint, changedFiles, checks, runtimeGuidance,
-            Set.copyOf(changedFiles));
+        LoopContext context = initLoopContext(messages, events, checkpoint);
 
         try {
             for (int step = 1; step <= config.maxSteps(); step++) {
                 if (cancellation.cancelled()) {
                     return stopForCancellation(messages, events);
                 }
-                int beforeCompression = messages.size();
-                int beforeChars = ContextCompactor.totalChars(messages);
-                ContextCompactor.dropStaleToolImages(messages, MAX_TOOL_IMAGE_MESSAGES_HARD, observedThroughIndex);
-                budget.apply(messages, admissionLimit(), contextLimit(), fixedOverheadTokens(messages), events,
-                    observedThroughIndex);
-                observedThroughIndex = Math.max(0, observedThroughIndex - (beforeCompression - messages.size()));
-                if (ContextCompactor.totalChars(messages) < beforeChars) {
-                    notifyContextShrink();
-                }
+                prepareStep(step, context);
 
-                if (applySteering(messages, events, pendingInput.get())) {
-                    // 真实用户纠正优先，上一状态推导出的内部催办可能已经过期。
-                    runtimeGuidance.clear();
-                }
-
-                int remainingSteps = config.maxSteps() - step + 1;
-                if (remainingSteps <= Math.min(2, Math.max(1, config.maxSteps() / 4))) {
-                    runtimeGuidance.add(LoopPromptCatalog.render("loop/budget-approaching", Map.of()));
-                }
-
-                ModelTurn turn = callModel(messages, events, usage, runtimeGuidance);
+                ModelTurn turn = callModel(messages, events, usage, context.runtimeGuidance());
                 if (turn.stop() != null) {
-                    if (RunFailureCode.CANCELLED.is(turn.stop().failureCode())
-                        || RunFailureCode.BUDGET_EXHAUSTED.is(turn.stop().failureCode())) {
-                        return turn.stop();
-                    }
-                    if (RunFailureCode.CONTEXT_TOO_LARGE.is(turn.stop().failureCode())) {
-                        messages.add(Message.assistant(turn.stop().finalText(), List.of()));
-                        events.accept(new AssistantDelta(turn.stop().finalText()));
-                        events.accept(new RunFailed(RunFailureCode.CONTEXT_TOO_LARGE, turn.stop().finalText(), false));
-                        return new Result(turn.stop().finalText(), turn.stop().failureCode(), conversation(messages),
-                            List.copyOf(changedFiles), List.copyOf(checks), planSnapshot());
-                    }
-                    return finalizeFailure(messages, events, usage, turn.stop().failureCode(), "模型请求未能完成；已有进度保留。",
-                        false, changedFiles, checks);
+                    return handleModelStop(turn.stop(), context, usage);
                 }
                 ModelResponse response = turn.response();
                 if (cancellation.cancelled()) {
                     return stopForCancellation(messages, events);
                 }
+                requireValidFinishReason(response);
 
-                if (response.finishReason() == ModelResponse.FinishReason.CONTENT_FILTER
-                    || response.finishReason() == ModelResponse.FinishReason.ERROR
-                    || response.finishReason() == ModelResponse.FinishReason.UNKNOWN) {
-                    throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_INCOMPLETE,
-                        "模型未正常结束（" + response.finishReason() + "），现有进度已保留。");
-                }
                 String content = response.content() == null ? "" : response.content();
                 String reasoning = response.reasoningContent() == null ? "" : response.reasoningContent();
                 List<ToolCall> calls = response.toolCalls() == null ? List.of() : response.toolCalls();
                 planGate.observeToolCalls(calls.size());
+
                 Message correction = pendingInput.get();
                 if (hasInput(correction)) {
-                    // 模型返回时已经有纠正：旧方案的工具都不执行，补齐协议结果后重新规划。
-                    messages.add(Message.assistant(content, calls, reasoning));
-                    skipCalls(messages, calls, 0, "用户已纠正当前任务，请根据新指令重新规划。");
-                    applySteering(messages, events, correction);
-                    safeCheckpoint(checkpoint, messages);
-                    lastSignature = null;
-                    lastOutcomes = List.of();
-                    repeated = 0;
+                    handlePostResponseSteering(content, calls, reasoning, correction, context, repeatState);
                     continue;
                 }
                 if (response.finishReason() == ModelResponse.FinishReason.LENGTH) {
-                    outputLimitStreak++;
-                    messages.add(Message.assistant(content, calls, reasoning));
-                    skipCalls(messages, calls, 0, "模型输出在工具参数完整返回前达到长度上限，本次调用未执行。");
-                    if (outputLimitStreak >= 3) {
-                        throw new ExecutionPolicy.Stop(RunFailureCode.OUTPUT_LIMIT, "模型连续 3 次达到输出长度上限，已停止自动续写以避免重复消耗。");
-                    }
-                    // 被截断的中间稿作废：留着会和下一轮重新生成的内容拼成重复段落。
-                    events.accept(AssistantPreview.discarded());
-                    runtimeGuidance.add("上一条响应因输出长度上限被截断。不要重复已经完成的内容；把剩余工作拆小，" + "优先完成当前最小可验证步骤。若工作已完成，直接给出简洁最终答复。");
-                    events.accept(new RunContinued(outputLimitStreak, 3, "模型输出被截断，按剩余工作继续"));
-                    safeCheckpoint(checkpoint, messages);
+                    handleOutputLimit(content, calls, reasoning, ++outputLimitStreak, context);
                     continue;
                 }
                 outputLimitStreak = 0;
@@ -718,104 +644,9 @@ public final class AgentLoop {
                 }
 
                 messages.add(Message.assistant(content, calls, reasoning));
-
-                String signature = signature(calls);
-                boolean awaitingDynamicObservation = dynamicPolls.canObserveAgain(signature, calls);
-
-                ArrayList<ToolExecutor.Outcome> stepOutcomes = new ArrayList<ToolExecutor.Outcome>();
-                boolean batchInterrupted = false;
-                int index = 0;
-                while (index < calls.size() && !batchInterrupted) {
-                    if (cancellation.cancelledBeforeTool()) {
-                        skipCalls(messages, calls, index, "运行已暂停或取消，本次调用未执行。");
-                        return stopForCancellation(messages, events);
-                    }
-                    Message nextCorrection = pendingInput.get();
-                    if (hasInput(nextCorrection)) {
-                        skipCalls(messages, calls, index, "用户已纠正当前任务，本次调用未执行，请重新规划。");
-                        applySteering(messages, events, nextCorrection);
-                        lastSignature = null;
-                        lastOutcomes = List.of();
-                        repeated = 0;
-                        batchInterrupted = true;
-                        break;
-                    }
-                    int group = parallelRun(calls, index);
-                    if (group > 1) {
-                        ParallelBatch batch = executeParallelReads(calls.subList(index, index + group), context);
-                        stepOutcomes.addAll(batch.outcomes());
-                        if (hasInput(batch.correction())) {
-                            skipCalls(messages, calls, index + group, "用户已纠正当前任务，本次调用未执行，请重新规划。");
-                            applySteering(messages, events, batch.correction());
-                            lastSignature = null;
-                            lastOutcomes = List.of();
-                            repeated = 0;
-                            batchInterrupted = true;
-                        }
-                        index += group;
-                        continue;
-                    }
-                    {
-                        ToolCall call = calls.get(index);
-                        ToolStartGuard startGuard = new ToolStartGuard();
-                        ToolExecutor.Outcome outcome;
-                        if (executionPolicy != null && !executionPolicy.permits(call)) {
-                            outcome = new ToolExecutor.Outcome(call.name(),
-                                ToolResults.skipped(executionPolicy.denialReason(call)), null, null);
-                        } else {
-                            if (executionPolicy != null) {
-                                executionPolicy.beforeTool(call);
-                            }
-                            try {
-                                outcome = toolExecutor.execute(call, events, startGuard);
-                            } catch (RuntimeException e) {
-                                outcome = new ToolExecutor.Outcome(call.name(), ToolResults.skipped("工具执行被中断，没有写回结果。"),
-                                    null, null);
-                            }
-                        }
-                        stepOutcomes.add(outcome);
-                        recordToolOutcome(call, outcome, changedFiles, checks, messages);
-                        if (hasInput(startGuard.correction)) {
-                            // 审批期间的纠正也要先补齐整批 tool 结果，再追加 user 消息。
-                            skipCalls(messages, calls, index + 1, "用户已纠正当前任务，本次调用未执行，请重新规划。");
-                            applySteering(messages, events, startGuard.correction);
-                            lastSignature = null;
-                            lastOutcomes = List.of();
-                            repeated = 0;
-                            batchInterrupted = true;
-                            break;
-                        }
-                        index++;
-                    }
-                }
-                flushToolImages(messages);
-                stopIfObservationWentIdle(stepOutcomes);
-                if (!batchInterrupted) {
-                    if (!awaitingDynamicObservation) {
-                        List<String> observedResults = stepOutcomes.stream().map(ToolExecutor.Outcome::result).toList();
-                        repeated =
-                            signature.equals(lastSignature) && observedResults.equals(lastOutcomes) ? repeated + 1 : 1;
-                        lastSignature = signature;
-                        lastOutcomes = observedResults;
-                        // 重复调用只提醒、不中断：是否换理由模型自己判断，运行不再因此失败。
-                        if (config.repeatRemindAt() > 0 && repeated >= config.repeatRemindAt()) {
-                            runtimeGuidance.add(repeatReminder(calls, repeated));
-                            events.accept(new RunContinued(1, 1, "重复调用提醒：连续第 " + repeated + " 次无新结果"));
-                        }
-                    } else {
-                        lastSignature = null;
-                        lastOutcomes = List.of();
-                        repeated = 0;
-                    }
-                    DynamicPollTracker.Decision decision = dynamicPolls.observe(signature, calls, stepOutcomes);
-                    if (decision.remind()) {
-                        runtimeGuidance.add(stuckReminder(calls, decision.unchangedCount(), "后台任务仍处于运行中，状态与日志没有产生新观察"));
-                        events.accept(new RunContinued(1, 1, "后台状态连续 " + decision.unchangedCount() + " 次未变化，提示换路或等待"));
-                    }
-                    if (decision.abort()) {
-                        throw new ExecutionPolicy.Stop(RunFailureCode.WAITING, "后台任务连续 " + decision.unchangedCount()
-                            + " 次有界观察都没有新状态，已暂停高频轮询；稍后使用原 taskId 继续查询，" + "观察状态或日志是否发生变化。");
-                    }
+                Result cancelled = handleToolCalls(calls, context, repeatState, dynamicPolls);
+                if (cancelled != null) {
+                    return cancelled;
                 }
                 // 每步落盘，进程被打断时最多丢当前这一步
                 safeCheckpoint(checkpoint, messages);
@@ -824,15 +655,213 @@ public final class AgentLoop {
                 }
             }
 
-            return finalizeFailure(messages, events, usage, RunFailureCode.MAX_STEPS.name(),
-                "已达到本轮步数上限 " + config.maxSteps() + "，历史已保留，可以继续执行。", true, changedFiles, checks);
+            return finalizeFailure(context, usage, RunFailureCode.MAX_STEPS.name(),
+                "已达到本轮步数上限 " + config.maxSteps() + "，历史已保留，可以继续执行。", true);
         } catch (ExecutionPolicy.Stop stop) {
             if (cancellation.cancelled()) {
                 return stopForCancellation(messages, events);
             }
-            return finalizeFailure(messages, events, usage, stop.code(), stop.getMessage(), true, changedFiles, checks);
+            return finalizeFailure(context, usage, stop.code(), stop.getMessage(), true);
         } finally {
             safeCheckpoint(checkpoint, messages);
+        }
+    }
+
+    private LoopContext initLoopContext(List<Message> messages, Consumer<SessionEvent> events,
+        Consumer<List<Message>> checkpoint) {
+        LinkedHashSet<String> changedFiles = new LinkedHashSet<>();
+        ArrayList<String> checks = new ArrayList<>();
+        if (executionPolicy != null) {
+            addNonBlank(executionPolicy.priorChangedPaths(), changedFiles);
+            addNonBlank(executionPolicy.priorChecks(), checks);
+            completionGate.baseline(List.copyOf(checks));
+        }
+        planGate.reset();
+        return new LoopContext(messages, events, checkpoint, changedFiles, checks, new RuntimeGuidance(),
+            Set.copyOf(changedFiles));
+    }
+
+    private static void addNonBlank(Collection<String> source, Collection<String> target) {
+        if (source == null) {
+            return;
+        }
+        source.stream().filter(Objects::nonNull).map(String::strip).filter(item -> !item.isBlank())
+            .forEach(target::add);
+    }
+
+    private void prepareStep(int step, LoopContext context) {
+        List<Message> messages = context.messages();
+        int beforeCompression = messages.size();
+        int beforeChars = ContextCompactor.totalChars(messages);
+        ContextCompactor.dropStaleToolImages(messages, MAX_TOOL_IMAGE_MESSAGES_HARD, observedThroughIndex);
+        budget.apply(messages, admissionLimit(), contextLimit(), fixedOverheadTokens(messages), context.events(),
+            observedThroughIndex);
+        observedThroughIndex = Math.max(0, observedThroughIndex - (beforeCompression - messages.size()));
+        if (ContextCompactor.totalChars(messages) < beforeChars) {
+            notifyContextShrink();
+        }
+        if (applySteering(messages, context.events(), pendingInput.get())) {
+            // 真实用户纠正优先，上一状态推导出的内部催办可能已经过期。
+            context.runtimeGuidance().clear();
+        }
+        int remainingSteps = config.maxSteps() - step + 1;
+        if (remainingSteps <= Math.min(2, Math.max(1, config.maxSteps() / 4))) {
+            context.runtimeGuidance().add(LoopPromptCatalog.render("loop/budget-approaching", Map.of()));
+        }
+    }
+
+    private Result handleModelStop(Result stop, LoopContext context, UsageTracker usage) {
+        if (RunFailureCode.CANCELLED.is(stop.failureCode()) || RunFailureCode.BUDGET_EXHAUSTED.is(stop.failureCode())) {
+            return stop;
+        }
+        if (RunFailureCode.CONTEXT_TOO_LARGE.is(stop.failureCode())) {
+            List<Message> messages = context.messages();
+            messages.add(Message.assistant(stop.finalText(), List.of()));
+            context.events().accept(new AssistantDelta(stop.finalText()));
+            context.events().accept(new RunFailed(RunFailureCode.CONTEXT_TOO_LARGE, stop.finalText(), false));
+            return new Result(stop.finalText(), stop.failureCode(), conversation(messages),
+                List.copyOf(context.changedFiles()), List.copyOf(context.checks()), planSnapshot());
+        }
+        return finalizeFailure(context, usage, stop.failureCode(), "模型请求未能完成；已有进度保留。", false);
+    }
+
+    private static void requireValidFinishReason(ModelResponse response) {
+        ModelResponse.FinishReason reason = response.finishReason();
+        if (reason == ModelResponse.FinishReason.CONTENT_FILTER || reason == ModelResponse.FinishReason.ERROR
+            || reason == ModelResponse.FinishReason.UNKNOWN) {
+            throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_INCOMPLETE, "模型未正常结束（" + reason + "），现有进度已保留。");
+        }
+    }
+
+    private void handlePostResponseSteering(String content, List<ToolCall> calls, String reasoning, Message correction,
+        LoopContext context, RepeatState repeatState) {
+        // 模型返回时已经有纠正：旧方案的工具都不执行，补齐协议结果后重新规划。
+        List<Message> messages = context.messages();
+        messages.add(Message.assistant(content, calls, reasoning));
+        skipCalls(messages, calls, 0, "用户已纠正当前任务，请根据新指令重新规划。");
+        applySteering(messages, context.events(), correction);
+        safeCheckpoint(context.checkpoint(), messages);
+        repeatState.reset();
+    }
+
+    private void handleOutputLimit(String content, List<ToolCall> calls, String reasoning, int outputLimitStreak,
+        LoopContext context) {
+        List<Message> messages = context.messages();
+        messages.add(Message.assistant(content, calls, reasoning));
+        skipCalls(messages, calls, 0, "模型输出在工具参数完整返回前达到长度上限，本次调用未执行。");
+        if (outputLimitStreak >= 3) {
+            throw new ExecutionPolicy.Stop(RunFailureCode.OUTPUT_LIMIT, "模型连续 3 次达到输出长度上限，已停止自动续写以避免重复消耗。");
+        }
+        // 被截断的中间稿作废：留着会和下一轮重新生成的内容拼成重复段落。
+        context.events().accept(AssistantPreview.discarded());
+        context.runtimeGuidance().add("上一条响应因输出长度上限被截断。不要重复已经完成的内容；把剩余工作拆小，" + "优先完成当前最小可验证步骤。若工作已完成，直接给出简洁最终答复。");
+        context.events().accept(new RunContinued(outputLimitStreak, 3, "模型输出被截断，按剩余工作继续"));
+        safeCheckpoint(context.checkpoint(), messages);
+    }
+
+    private Result handleToolCalls(List<ToolCall> calls, LoopContext context, RepeatState repeatState,
+        DynamicPollTracker dynamicPolls) {
+        String signature = signature(calls);
+        boolean awaitingDynamicObservation = dynamicPolls.canObserveAgain(signature, calls);
+        ToolBatchResult batch = executeToolBatch(calls, context, repeatState);
+        if (batch.cancelled() != null) {
+            return batch.cancelled();
+        }
+        if (!batch.interrupted()) {
+            if (!awaitingDynamicObservation) {
+                int repeated = repeatState.record(signature, batch.outcomes());
+                // 重复调用只提醒、不中断：是否换理由模型自己判断，运行不再因此失败。
+                if (config.repeatRemindAt() > 0 && repeated >= config.repeatRemindAt()) {
+                    context.runtimeGuidance().add(repeatReminder(calls, repeated));
+                    context.events().accept(new RunContinued(1, 1, "重复调用提醒：连续第 " + repeated + " 次无新结果"));
+                }
+            } else {
+                repeatState.reset();
+            }
+            checkDynamicPolls(dynamicPolls, signature, calls, batch.outcomes(), context);
+        }
+        return null;
+    }
+
+    private ToolBatchResult executeToolBatch(List<ToolCall> calls, LoopContext context, RepeatState repeatState) {
+        List<Message> messages = context.messages();
+        Consumer<SessionEvent> events = context.events();
+        ArrayList<ToolExecutor.Outcome> stepOutcomes = new ArrayList<>();
+        boolean interrupted = false;
+        int index = 0;
+        while (index < calls.size() && !interrupted) {
+            if (cancellation.cancelledBeforeTool()) {
+                skipCalls(messages, calls, index, "运行已暂停或取消，本次调用未执行。");
+                return new ToolBatchResult(stepOutcomes, true, stopForCancellation(messages, events));
+            }
+            Message nextCorrection = pendingInput.get();
+            if (hasInput(nextCorrection)) {
+                interruptBatchForSteering(calls, index, nextCorrection, context, repeatState);
+                interrupted = true;
+                break;
+            }
+            int group = parallelRun(calls, index);
+            if (group > 1) {
+                ParallelBatch batch = executeParallelReads(calls.subList(index, index + group), context);
+                stepOutcomes.addAll(batch.outcomes());
+                if (hasInput(batch.correction())) {
+                    interruptBatchForSteering(calls, index + group, batch.correction(), context, repeatState);
+                    interrupted = true;
+                }
+                index += group;
+                continue;
+            }
+            ToolCall call = calls.get(index);
+            ToolStartGuard startGuard = new ToolStartGuard();
+            ToolExecutor.Outcome outcome = executeSingleTool(call, events, startGuard);
+            stepOutcomes.add(outcome);
+            recordToolOutcome(call, outcome, context.changedFiles(), context.checks(), messages);
+            if (hasInput(startGuard.correction)) {
+                // 审批期间的纠正也要先补齐整批 tool 结果，再追加 user 消息。
+                interruptBatchForSteering(calls, index + 1, startGuard.correction, context, repeatState);
+                interrupted = true;
+                break;
+            }
+            index++;
+        }
+        flushToolImages(messages);
+        stopIfObservationWentIdle(stepOutcomes);
+        return new ToolBatchResult(stepOutcomes, interrupted, null);
+    }
+
+    private void interruptBatchForSteering(List<ToolCall> calls, int skipFrom, Message correction, LoopContext context,
+        RepeatState repeatState) {
+        skipCalls(context.messages(), calls, skipFrom, "用户已纠正当前任务，本次调用未执行，请重新规划。");
+        applySteering(context.messages(), context.events(), correction);
+        repeatState.reset();
+    }
+
+    private ToolExecutor.Outcome executeSingleTool(ToolCall call, Consumer<SessionEvent> events,
+        ToolStartGuard startGuard) {
+        if (executionPolicy != null && !executionPolicy.permits(call)) {
+            return new ToolExecutor.Outcome(call.name(), ToolResults.skipped(executionPolicy.denialReason(call)), null,
+                null);
+        }
+        if (executionPolicy != null) {
+            executionPolicy.beforeTool(call);
+        }
+        try {
+            return toolExecutor.execute(call, events, startGuard);
+        } catch (RuntimeException e) {
+            return new ToolExecutor.Outcome(call.name(), ToolResults.skipped("工具执行被中断，没有写回结果。"), null, null);
+        }
+    }
+
+    private static void checkDynamicPolls(DynamicPollTracker dynamicPolls, String signature, List<ToolCall> calls,
+        List<ToolExecutor.Outcome> outcomes, LoopContext context) {
+        DynamicPollTracker.Decision decision = dynamicPolls.observe(signature, calls, outcomes);
+        if (decision.remind()) {
+            context.runtimeGuidance().add(stuckReminder(calls, decision.unchangedCount(), "后台任务仍处于运行中，状态与日志没有产生新观察"));
+            context.events().accept(new RunContinued(1, 1, "后台状态连续 " + decision.unchangedCount() + " 次未变化，提示换路或等待"));
+        }
+        if (decision.abort()) {
+            throw new ExecutionPolicy.Stop(RunFailureCode.WAITING,
+                "后台任务连续 " + decision.unchangedCount() + " 次有界观察都没有新状态，已暂停高频轮询；稍后使用原 taskId 继续查询，" + "观察状态或日志是否发生变化。");
         }
     }
 
@@ -840,16 +869,9 @@ public final class AgentLoop {
     private Result completeTurn(String content, String reasoning, LoopContext context) {
         List<Message> messages = context.messages();
         Consumer<SessionEvent> events = context.events();
-        Consumer<List<Message>> checkpoint = context.checkpoint();
-        Set<String> changedFiles = context.changedFiles();
-        List<String> checks = context.checks();
-        RuntimeGuidance runtimeGuidance = context.runtimeGuidance();
         messages.add(Message.assistant(content, List.of(), reasoning));
         String summary = content.isBlank() ? "任务完成（模型未返回文本）" : content;
-        List<PlanItem> plan = planSnapshot();
-        int done = (int)plan.stream().filter(PlanItem::done).count();
-        List<String> openSteps = plan.stream().filter(PlanItem::open).map(PlanItem::step).toList();
-        List<String> blockedSteps = plan.stream().filter(PlanItem::blocked).map(PlanItem::step).toList();
+        PlanSummary planSummary = currentPlanSummary();
         // 启用完成检查时，未完成计划必须继续或明确交付部分结果。
         // 旧版本成功的定向检查不能证明当前源码；仅复跑策略明确选出的受限命令。
         // 仍由 ToolExecutor 走权限审批、工作区边界、超时及变更追踪。
@@ -857,57 +879,32 @@ public final class AgentLoop {
         if (reverification != null) {
             return reverifyCandidate(reverification, context);
         }
-        // 只能用写前快照排除本轮已经还原的文件，不能相信模型声称撤销或 git status 为空。
-        // 续跑继承的修改无法由本轮基线证明还原，仍保留并要求验证。
-        try {
-            Set<String> restored = restoredPaths.get();
-            if (restored != null) {
-                changedFiles.removeIf(path -> restored.contains(path) && !context.inheritedPaths().contains(path));
-            }
-        } catch (RuntimeException ignored) {
-            // 无法核验时保守保留改动，继续走验证门。
-        }
+        pruneRestoredPaths(context);
         // 通用验证先于模式级 reviewer；有独立审查时跳过重复的模型自审。
-        List<String> changed = List.copyOf(changedFiles);
-        List<String> checksOut = List.copyOf(checks);
-        CompletionGate.Nudge nudge = completionGate.evaluate(changedFiles, checks, plan, openSteps,
-            executionPolicy != null && executionPolicy.independentCompletionReview(changedFiles),
-            qualityChanges(changedFiles), qualityWorkspace, independentCodeReviewer, content);
-        if (nudge != null && !nudge.halt()
-            && CompletionPressure.tooFull(messages, tools.definitions(), contextLimit(), client.capacity())) {
-            fitHistoryToInputBudget(messages, events, null);
-            if (CompletionPressure.tooFull(messages, tools.definitions(), contextLimit(), client.capacity())) {
-                content = content + "\n\n上下文接近上限，已跳过非阻断收尾催办。";
-                messages.set(messages.size() - 1, Message.assistant(content, List.of(), reasoning));
-                events.accept(new RunContinued(1, 1, "上下文接近上限，已跳过非阻断收尾催办"));
-                nudge = null;
-            }
+        CompletionGate.Nudge nudge = completionGate.evaluate(context.changedFiles(), context.checks(),
+            planSummary.plan(), planSummary.openSteps(),
+            executionPolicy != null && executionPolicy.independentCompletionReview(context.changedFiles()),
+            qualityChanges(context.changedFiles()), qualityWorkspace, independentCodeReviewer, content);
+        if (nudge != null && !nudge.halt() && shouldSkipNudgeUnderPressure(context)) {
+            content = content + "\n\n上下文接近上限，已跳过非阻断收尾催办。";
+            messages.set(messages.size() - 1, Message.assistant(content, List.of(), reasoning));
+            events.accept(new RunContinued(1, 1, "上下文接近上限，已跳过非阻断收尾催办"));
+            nudge = null;
         }
         if (nudge != null) {
-            if (nudge.halt()) {
-                String partial = content + "\n\n收尾门禁未通过，已停止：" + nudge.reason();
-                messages.set(messages.size() - 1, Message.assistant(partial, List.of(), reasoning));
-                events.accept(RunEnded.of(RunOutcome.BLOCKED, RunFailureCode.TASK_INCOMPLETE.name(), partial, changed,
-                    checksOut, plan, List.of("修复规范检查问题后继续")));
-                return new Result(partial, RunFailureCode.TASK_INCOMPLETE.name(), conversation(messages), changed,
-                    checksOut, plan);
-            }
-            runtimeGuidance.add(nudge.prompt());
-            events.accept(new RunContinued(nudge.attempt(), nudge.max(), nudge.reason()));
-            safeCheckpoint(checkpoint, messages);
-            return null;
+            return handleCompletionNudge(nudge, content, reasoning, planSummary.plan(), context);
         }
         // 模式级核验只在共同完成门之后运行；Goal 可继续跨轮，Direct 可增加
         // 针对性缺口，但都不得篡改上面的计划快照。
         if (executionPolicy != null) {
-            String remaining = executionPolicy.review(List.copyOf(messages), changedFiles, checks);
+            String remaining = executionPolicy.review(List.copyOf(messages), context.changedFiles(), context.checks());
             if (cancellation.cancelled()) {
                 return stopForCancellation(messages, events);
             }
             if (remaining != null) {
-                runtimeGuidance.add(remaining);
+                context.runtimeGuidance().add(remaining);
                 events.accept(new RunContinued(1, 1, "核对目标后继续：" + Texts.oneLine(remaining, 120)));
-                safeCheckpoint(checkpoint, messages);
+                safeCheckpoint(context.checkpoint(), messages);
                 return null;
             }
         }
@@ -916,36 +913,104 @@ public final class AgentLoop {
             return stopForCancellation(messages, events);
         }
         if (applySteering(messages, events, pendingInput.get()) || !completionClaim.getAsBoolean()) {
-            safeCheckpoint(checkpoint, messages);
+            safeCheckpoint(context.checkpoint(), messages);
             return null;
         }
+        return finishAcceptedTurn(content, reasoning, summary, planSummary, context);
+    }
+
+    private PlanSummary currentPlanSummary() {
+        List<PlanItem> plan = planSnapshot();
+        int done = (int)plan.stream().filter(PlanItem::done).count();
+        List<String> openSteps = plan.stream().filter(PlanItem::open).map(PlanItem::step).toList();
+        List<String> blockedSteps = plan.stream().filter(PlanItem::blocked).map(PlanItem::step).toList();
+        return new PlanSummary(plan, done, openSteps, blockedSteps);
+    }
+
+    private void pruneRestoredPaths(LoopContext context) {
+        // 只能用写前快照排除本轮已经还原的文件，不能相信模型声称撤销或 git status 为空。
+        // 续跑继承的修改无法由本轮基线证明还原，仍保留并要求验证。
+        try {
+            Set<String> restored = restoredPaths.get();
+            if (restored != null) {
+                context.changedFiles()
+                    .removeIf(path -> restored.contains(path) && !context.inheritedPaths().contains(path));
+            }
+        } catch (RuntimeException ignored) {
+            // 无法核验时保守保留改动，继续走验证门。
+        }
+    }
+
+    private boolean shouldSkipNudgeUnderPressure(LoopContext context) {
+        List<Message> messages = context.messages();
+        if (!CompletionPressure.tooFull(messages, tools.definitions(), contextLimit(), client.capacity())) {
+            return false;
+        }
+        fitHistoryToInputBudget(messages, context.events(), null);
+        return CompletionPressure.tooFull(messages, tools.definitions(), contextLimit(), client.capacity());
+    }
+
+    private Result handleCompletionNudge(CompletionGate.Nudge nudge, String content, String reasoning,
+        List<PlanItem> plan, LoopContext context) {
+        List<Message> messages = context.messages();
+        Consumer<SessionEvent> events = context.events();
+        if (nudge.halt()) {
+            List<String> changed = List.copyOf(context.changedFiles());
+            List<String> checksOut = List.copyOf(context.checks());
+            String partial = content + "\n\n收尾门禁未通过，已停止：" + nudge.reason();
+            messages.set(messages.size() - 1, Message.assistant(partial, List.of(), reasoning));
+            events.accept(RunEnded.of(RunOutcome.BLOCKED, RunFailureCode.TASK_INCOMPLETE.name(), partial, changed,
+                checksOut, plan, List.of("修复规范检查问题后继续")));
+            return new Result(partial, RunFailureCode.TASK_INCOMPLETE.name(), conversation(messages), changed,
+                checksOut, plan);
+        }
+        context.runtimeGuidance().add(nudge.prompt());
+        events.accept(new RunContinued(nudge.attempt(), nudge.max(), nudge.reason()));
+        safeCheckpoint(context.checkpoint(), messages);
+        return null;
+    }
+
+    private Result finishAcceptedTurn(String content, String reasoning, String summary, PlanSummary planSummary,
+        LoopContext context) {
+        List<Message> messages = context.messages();
+        Consumer<SessionEvent> events = context.events();
+        List<String> changed = List.copyOf(context.changedFiles());
+        List<String> checksOut = List.copyOf(context.checks());
         String lintNote = lintGate.releaseNote();
-        if (lintNote != null && !lintNote.isBlank() && !lintGate.stopsOnFailure()) {
+        if (hasText(lintNote) && !lintGate.stopsOnFailure()) {
             content = content + "\n\n规范检查未通过，已记录并放行：\n" + lintNote;
             messages.set(messages.size() - 1, Message.assistant(content, List.of(), reasoning));
             summary = content;
         }
-        if (config.completionChecks() && (!openSteps.isEmpty() || !blockedSteps.isEmpty())) {
-            String partial = content;
-            if (!content.contains("本轮为部分交付，尚未完成：")) {
-                partial += "\n\n本轮为部分交付，尚未完成：" + String.join("；", openSteps.isEmpty() ? blockedSteps : openSteps);
-                if (!blockedSteps.isEmpty() && !openSteps.isEmpty()) {
-                    partial += "\n\n已阻塞：" + String.join("；", blockedSteps);
-                }
-            }
+        if (config.completionChecks()
+            && (!planSummary.openSteps().isEmpty() || !planSummary.blockedSteps().isEmpty())) {
+            String partial = appendPartialSummary(content, planSummary.openSteps(), planSummary.blockedSteps());
             messages.set(messages.size() - 1, Message.assistant(partial, List.of(), reasoning));
             events.accept(new AssistantDelta(partial));
             events.accept(RunEnded.of(RunOutcome.PARTIAL, RunFailureCode.TASK_INCOMPLETE.name(), partial, changed,
-                checksOut, plan, List.of("查看本轮差异", "继续执行未完成步骤")));
+                checksOut, planSummary.plan(), List.of("查看本轮差异", "继续执行未完成步骤")));
             return new Result(partial, RunFailureCode.TASK_INCOMPLETE.name(), conversation(messages), changed,
-                checksOut, plan);
+                checksOut, planSummary.plan());
         }
         // 仅在剩余计划与验收检查通过后发出完成事件。
         if (!content.isBlank()) {
             events.accept(new AssistantDelta(content));
         }
-        events.accept(new RunCompleted(summary, changed, checksOut, done, plan.size(), openSteps));
-        return new Result(content, null, conversation(messages), changed, checksOut, plan);
+        events.accept(new RunCompleted(summary, changed, checksOut, planSummary.done(), planSummary.plan().size(),
+            planSummary.openSteps()));
+        return new Result(content, null, conversation(messages), changed, checksOut, planSummary.plan());
+    }
+
+    private static String appendPartialSummary(String content, List<String> openSteps, List<String> blockedSteps) {
+        if (content.contains("本轮为部分交付，尚未完成：")) {
+            return content;
+        }
+        String partial =
+            content + "\n\n本轮为部分交付，尚未完成：" + String.join("；", openSteps.isEmpty() ? blockedSteps : openSteps);
+        if (!blockedSteps.isEmpty() && !openSteps.isEmpty()) {
+            partial += "\n\n已阻塞：" + String.join("；", blockedSteps);
+        }
+        return partial;
     }
 
     private Result reverifyCandidate(ToolCall reverification, LoopContext context) {
@@ -1057,8 +1122,10 @@ public final class AgentLoop {
     }
 
     /** 非模型故障可请求一次禁用工具的收尾；端点失败或预算耗尽时直接保留本地说明。 */
-    private Result finalizeFailure(List<Message> messages, Consumer<SessionEvent> events, UsageTracker usage,
-        String code, String reason, boolean emitFailure, Set<String> changedFiles, List<String> checks) {
+    private Result finalizeFailure(LoopContext context, UsageTracker usage, String code, String reason,
+        boolean emitFailure) {
+        List<Message> messages = context.messages();
+        Consumer<SessionEvent> events = context.events();
         String fallback = "本轮未能完整结束（" + code + "）：" + Texts.oneLine(reason, 500) + (RunFailureCode.NO_PROGRESS.is(code)
             ? "\n\n已有进度已保存。可以先继续一次推进未完成步骤，或直接补充要执行的命令与资料后重新发送。" : "\n\n已有进度已保存。请根据上面的原因补充条件或选择继续执行。");
         String finalText = fallback;
@@ -1068,7 +1135,7 @@ public final class AgentLoop {
                 if (executionPolicy != null) {
                     executionPolicy.beginFinalization();
                 }
-                refreshTaskContext(messages, null);
+                refreshTaskContext(messages);
                 ArrayList<Message> request = new ArrayList<>(messages);
                 request.add(
                     Message.user("[系统收尾要求] 本轮必须现在结束，禁止调用工具，也不要假装任务已经完成。" + "请基于已有对话和证据给用户一份可直接阅读的阶段交付：先说明实际完成了什么和证据，"
@@ -1080,8 +1147,8 @@ public final class AgentLoop {
                 ModelResponse response = client.chat(List.copyOf(request), List.of());
                 usage.finish(response);
                 if (response.finishReason() == ModelResponse.FinishReason.STOP
-                    && (response.toolCalls() == null || response.toolCalls().isEmpty()) && response.content() != null
-                    && !response.content().isBlank()) {
+                    && (response.toolCalls() == null || response.toolCalls().isEmpty())
+                    && hasText(response.content())) {
                     finalText = response.content();
                 }
             } catch (RuntimeException ignored) {
@@ -1093,8 +1160,8 @@ public final class AgentLoop {
         messages.add(Message.assistant(finalText, List.of()));
         events.accept(new AssistantDelta(finalText));
         List<PlanItem> plan = planSnapshot();
-        List<String> changed = List.copyOf(changedFiles);
-        List<String> checksOut = List.copyOf(checks);
+        List<String> changed = List.copyOf(context.changedFiles());
+        List<String> checksOut = List.copyOf(context.checks());
         RunOutcome outcome = RunOutcome.fromCode(code);
         if (emitFailure) {
             if (outcome.failure()) {
@@ -1108,6 +1175,10 @@ public final class AgentLoop {
 
     private static boolean hasInput(Message input) {
         return input != null && (!input.content().isBlank() || input.hasAttachments());
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     /**
@@ -1253,8 +1324,7 @@ public final class AgentLoop {
         }
         if (!requestFits(messages, guidance) && historyCanShrink(messages)) {
             int wireLimit =
-                (int)Math.min(Integer.MAX_VALUE, RequestBudget.assessRequest(requestMessages(messages, guidance),
-                    tools.definitions(), contextLimit(), client.capacity()).inputLimit());
+                (int)Math.min(Integer.MAX_VALUE, assessBudget(requestMessages(messages, guidance)).inputLimit());
             int beforeSize = messages.size();
             budget.apply(messages, Math.max(1, wireLimit), contextLimit(), fixedOverheadTokens(messages), events,
                 observedThroughIndex);
@@ -1406,14 +1476,15 @@ public final class AgentLoop {
         if (messages.isEmpty()) {
             return false;
         }
-        return RequestBudget
-            .assessRequest(List.of(messages.get(0)), tools.definitions(), contextLimit(), client.capacity()).fits();
+        return assessBudget(List.of(messages.get(0))).fits();
     }
 
     private boolean requestFits(List<Message> messages, String guidance) {
-        return RequestBudget
-            .assessRequest(requestMessages(messages, guidance), tools.definitions(), contextLimit(), client.capacity())
-            .fits();
+        return assessBudget(requestMessages(messages, guidance)).fits();
+    }
+
+    private RequestBudget.Assessment assessBudget(List<Message> request) {
+        return RequestBudget.assessRequest(request, tools.definitions(), contextLimit(), client.capacity());
     }
 
     /** 审批通过不等于仍可执行；开始产生副作用前再消费一次控制信号。 */
@@ -1486,11 +1557,11 @@ public final class AgentLoop {
         }
     }
 
-    private void refreshTaskContext(List<Message> messages, String runtimeGuidance) {
+    private void refreshTaskContext(List<Message> messages) {
         String context = taskContext.get();
         // 系统提示词保持稳定，运行时任务状态作为追加的 user reminder 进入历史。
         // 这样每次状态变化只改尾部，不会重写 system 前缀，也不会破坏供应商的 prefix cache。
-        if (context != null && !context.isBlank()) {
+        if (hasText(context)) {
             String state = "<system-reminder>\n[Runtime task context]\n" + context + "\n</system-reminder>";
             String previous = messages.stream().filter(AgentLoop::runtimeContext).map(Message::content)
                 .reduce((a, b) -> b).orElse("");
@@ -1498,7 +1569,6 @@ public final class AgentLoop {
                 messages.add(Message.user(state));
             }
         }
-        // runtimeGuidance 只对本次请求生效，由 requestMessages 临时追加，不写回历史。
     }
 
     private static boolean runtimeContext(Message message) {
@@ -1507,7 +1577,7 @@ public final class AgentLoop {
     }
 
     private List<Message> requestMessages(List<Message> messages, String guidance) {
-        refreshTaskContext(messages, guidance);
+        refreshTaskContext(messages);
         List<String> touched;
         synchronized (touchedPaths) {
             touched = List.copyOf(touchedPaths);
@@ -1515,8 +1585,8 @@ public final class AgentLoop {
         String rules = scopedRules.apply(touched);
         PhaseHint activeHint = phaseHint;
         boolean hasHint = activeHint != null && activeHint.remaining() > 0 && !activeHint.content().isBlank();
-        boolean hasRules = rules != null && !rules.isBlank();
-        boolean hasGuidance = guidance != null && !guidance.isBlank();
+        boolean hasRules = hasText(rules);
+        boolean hasGuidance = hasText(guidance);
         if (!hasGuidance && !hasRules && !hasHint) {
             return List.copyOf(messages);
         }
@@ -1636,24 +1706,16 @@ public final class AgentLoop {
      */
     private ModelTurn callModel(List<Message> messages, Consumer<SessionEvent> events, UsageTracker usage,
         RuntimeGuidance runtimeGuidance) {
-        int attempt = 0;
-        int repeatAborts = 0;
-        int overflowRetries = 0;
-        int malformedToolRetries = 0;
-        String retainedGuidance = null;
-        AtomicBoolean reasoningPreviewVisible = new AtomicBoolean();
-        long[] clockMark = new long[] {wallClock.getAsLong(), monoClock.getAsLong()};
+        CallState state = new CallState(wallClock.getAsLong(), monoClock.getAsLong());
         while (true) {
             if (cancellation.cancelled()) {
                 return new ModelTurn(null, stopForCancellation(messages, events));
             }
-            StreamRepeatGuard repeatGuard = new StreamRepeatGuard();
-            StreamRepeatGuard reasoningRepeatGuard = new StreamRepeatGuard();
             try {
                 // 用户纠正优先于策略提示；不要提前消费一次性 guidance 后再因为 steering 丢掉。
                 if (applySteering(messages, events, pendingInput.get())) {
                     runtimeGuidance.clear();
-                    retainedGuidance = null;
+                    state.retainedGuidance = null;
                     continue;
                 }
                 String policyGuidance = null;
@@ -1664,87 +1726,12 @@ public final class AgentLoop {
                 if (cancellation.cancelled()) {
                     return new ModelTurn(null, stopForCancellation(messages, events));
                 }
-                // 本地控制提示与 policy guidance 都只属于这次采样。模型请求发生瞬时失败时
-                // retainedGuidance 会沿重试保留；真正拿到响应后才消费。
-                planGate.observeModelRequest();
-                if (!planSnapshot().isEmpty()) {
-                    planGate.markPlanned();
-                }
-                String planReminder = planGate.takeReminder();
-                if (planReminder != null) {
-                    runtimeGuidance.add(planReminder);
-                }
-                retainedGuidance = RuntimeGuidance.merge(retainedGuidance, runtimeGuidance.render(policyGuidance));
-                // 阶段性纠偏属于运行时上下文，只进入当前请求的 system 消息；下一次请求会
-                // 重新构造 system，checkpoint/conversation 也从不保存它。
-                RequestBudget.closeDanglingToolCalls(messages);
-                List<Message> request = requestMessages(messages, retainedGuidance);
-                RequestBudget.Assessment admission =
-                    RequestBudget.assessRequest(request, tools.definitions(), contextLimit(), client.capacity());
-                if (!admission.fits()) {
-                    // 本地字符预算比发送线松，长对话会在这里才发现超窗。先折掉更早的记录再发，
-                    // 不把整轮停成失败。系统提示和工具定义本身都放不下时，折叠也没有用。
-                    fitHistoryToInputBudget(messages, events, retainedGuidance);
-                    request = requestMessages(messages, retainedGuidance);
-                    admission =
-                        RequestBudget.assessRequest(request, tools.definitions(), contextLimit(), client.capacity());
-                }
-                if (!admission.fits()
-                    && (retainedGuidance != null && !retainedGuidance.isBlank() || phaseHint != null)) {
-                    // 临时纠偏与阶段提示都只是辅助上下文，差一点点时先拿掉它们再发，不要为此中断任务。
-                    retainedGuidance = null;
-                    clearPhaseHint();
-                    fitHistoryToInputBudget(messages, events, null);
-                    request = requestMessages(messages, null);
-                    admission =
-                        RequestBudget.assessRequest(request, tools.definitions(), contextLimit(), client.capacity());
-                }
-                if (!admission.fits()) {
-                    throw new ExecutionPolicy.Stop(RunFailureCode.CONTEXT_TOO_LARGE,
-                        "完整模型请求估算为 " + admission.estimatedInputTokens() + " token，安全输入预算为 " + admission.inputLimit()
-                            + "；未发送请求。请缩小输入或拆分任务后继续。");
-                }
+                List<Message> request = prepareModelRequest(messages, events, runtimeGuidance, policyGuidance, state);
                 // 每次真正发请求前都作废上一段预览：工具调用、策略催办或重试都会开启新一轮生成，
                 // 上一轮的字如果留着，会和这次从头输出的内容拼成重复段落。
-                if (liveText != null) {
-                    events.accept(AssistantPreview.discarded());
-                }
-                if (reasoningPreviewVisible.getAndSet(false)) {
-                    events.accept(AssistantReasoning.discarded());
-                }
+                discardPreviews(events, state.reasoningPreviewVisible, liveText != null);
                 usage.start(request, admissionLimit(), tools.definitions());
-                ModelResponse response = client.chat(request, tools.definitions(), delta -> {
-                    if (delta == null || delta.isEmpty()) {
-                        return;
-                    }
-                    // 同一行连续重复到阈值就止损：继续流下去只会把上下文和界面一起刷满。
-                    if (repeatGuard.accept(delta) > 0) {
-                        throw new StreamRepeatException();
-                    }
-                    if (liveText == null) {
-                        return;
-                    }
-                    try {
-                        liveText.accept(delta);
-                    } catch (RuntimeException ignored) {
-                        // 界面预览失败不影响这一次模型请求
-                    }
-                }, delta -> {
-                    if (delta == null || delta.isEmpty()) {
-                        return;
-                    }
-                    if (reasoningRepeatGuard.accept(delta) > 0) {
-                        throw new StreamRepeatException();
-                    }
-                    if (liveReasoning != null) {
-                        try {
-                            liveReasoning.accept(delta);
-                            reasoningPreviewVisible.set(true);
-                        } catch (RuntimeException ignored) {
-                            // 推理预览失败不影响这一次模型请求
-                        }
-                    }
-                });
+                ModelResponse response = streamModelResponse(request, state.reasoningPreviewVisible);
                 usage.finish(response);
                 observedThroughIndex = messages.size();
                 // 一次成功请求说明端点恢复了，下一次故障重新计算退避与预算
@@ -1753,7 +1740,7 @@ public final class AgentLoop {
                 runtimeGuidance.clear();
                 consumePhaseHintTurn();
                 // client 已拿到请求快照；立即还原基础 system，避免当前内存历史也携带一次性提示。
-                refreshTaskContext(messages, null);
+                refreshTaskContext(messages);
                 return new ModelTurn(response, null);
             } catch (ExecutionPolicy.Stop stop) {
                 usage.abort();
@@ -1763,131 +1750,228 @@ public final class AgentLoop {
                 throw stop;
             } catch (StreamRepeatException repeat) {
                 usage.abort();
-                Thread.interrupted();
-                repeatAborts++;
-                // 界面上已经出现的重复段落作废：重试会从头重新输出，不能和残留内容拼在一起。
-                events.accept(AssistantPreview.discarded());
-                if (reasoningPreviewVisible.getAndSet(false)) {
-                    events.accept(AssistantReasoning.discarded());
-                }
-                if (repeatAborts >= MAX_REPEAT_ABORTS) {
-                    throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_REPEATED,
-                        "模型连续 " + repeatAborts + " 次陷入逐行重复，已中止本轮生成；已有进度已保存。可以继续执行，或把问题拆小后重新发送。");
-                }
-                runtimeGuidance.add(REPEAT_GUIDANCE);
-                events.accept(new RunContinued(1, 1, "模型输出陷入逐行重复，已中止本次生成并重试"));
-                continue;
+                handleStreamRepeat(events, runtimeGuidance, state);
             } catch (RuntimeException e) {
                 usage.abort();
-                if (e instanceof RequestBudget.BudgetExceeded) {
-                    return new ModelTurn(null,
-                        new Result(e.getMessage(), RunFailureCode.CONTEXT_TOO_LARGE.name(), conversation(messages)));
-                }
-                // 客户端抛错时会重新设置中断位；不清掉的话，后续每次请求都会立刻失败。
-                Thread.interrupted();
-                if (cancellation.cancelled()) {
-                    return new ModelTurn(null, stopForCancellation(messages, events));
-                }
-                if (client.disableRejectedNativeTools(e)) {
-                    events.accept(new RunContinued(1, 1, "服务端拒绝原生工具，已自动恢复 Pilot 工具继续当前任务"));
-                    continue;
-                }
-                ModelFailureKind kind = ModelRetryPolicy.classify(e);
-                if (kind == ModelFailureKind.CONTEXT_OVERFLOW) {
-                    overflowRetries++;
-                    retainedGuidance = null;
-                    if (overflowRetries > 2) {
-                        return new ModelTurn(null, new Result("模型服务端连续拒绝了超长输入。已多次收缩历史，仍然放不下。请缩小输入或拆分任务后继续。",
-                            RunFailureCode.CONTEXT_TOO_LARGE.name(), conversation(messages)));
-                    }
-                    int beforeChars = ContextCompactor.totalChars(messages);
-                    fitHistoryToInputBudget(messages, events, null);
-                    boolean shrunk = ContextCompactor.totalChars(messages) < beforeChars;
-                    // 本地估算仍判定「放得下」时四层收缩全部被跳过。真实窗口更小或 tokenizer 计费更高，
-                    // 必须按服务端拒绝值强制收缩，绝不把同一份超限请求原样重发。
-                    if (!shrunk) {
-                        shrunk = forceShrinkForServerOverflow(messages, events);
-                    }
-                    if (!shrunk) {
-                        return new ModelTurn(null, new Result("模型服务端拒绝了超长输入，但历史已没有可以再收缩的记录。请缩小输入或拆分任务后继续。",
-                            RunFailureCode.CONTEXT_TOO_LARGE.name(), conversation(messages)));
-                    }
-                    events.accept(new RunContinued(overflowRetries, 2, "模型服务端提示上下文超限，已收缩历史并自动重试"));
-                    continue;
-                }
-                if (kind == ModelFailureKind.MALFORMED_TOOL_CALL) {
-                    malformedToolRetries++;
-                    events.accept(AssistantPreview.discarded());
-                    if (reasoningPreviewVisible.getAndSet(false)) {
-                        events.accept(AssistantReasoning.discarded());
-                    }
-                    if (malformedToolRetries > MAX_MALFORMED_TOOL_RETRIES) {
-                        throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_ERROR,
-                            "模型连续 " + malformedToolRetries + " 次返回非法工具调用参数 JSON，已停止重试；进度和对话已保存，可继续执行。");
-                    }
-                    runtimeGuidance.add(MALFORMED_TOOL_GUIDANCE);
-                    events.accept(
-                        new RunContinued(malformedToolRetries, MAX_MALFORMED_TOOL_RETRIES, "工具调用参数 JSON 非法，已提示模型重发"));
-                    continue;
-                }
-                if (kind == ModelFailureKind.INTERRUPTED) {
-                    // 用户取消已在上面的分支返回。能走到这里说明是外部中断：服务重启、
-                    // 容器关停、线程被别的组件打断。按瞬时故障继续重试，
-                    // 不让一次外部中断把整轮任务判死。
-                    kind = ModelFailureKind.TRANSIENT;
-                }
-                String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-                // 永久错误（鉴权、余额、模型不支持、结构非法）重试不会变好；如配了备用预设且符合故障转移条件，先切备用继续
-                if (!kind.retryable()) {
-                    if (tryFailover(e, events, reasoningPreviewVisible)) {
-                        attempt = 0;
-                        continue;
-                    }
-                    throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_ERROR, "模型调用失败：" + Texts.oneLine(reason, 300));
-                }
-                // 主模型重试一次仍失败时优先切备用预设，避免免费端点限流或本机停服让用户长时间干等
-                if (attempt >= 1 && tryFailover(e, events, reasoningPreviewVisible)) {
-                    attempt = 0;
-                    continue;
-                }
-                boolean wokeFromSleep = compensateWakeupIfDetected(clockMark, -1L, events);
-                RetryBudget.Decision decision;
-                try {
-                    decision = nextRetryDecision(e, reason, wokeFromSleep);
-                } catch (ExecutionPolicy.Stop stop) {
-                    if (tryFailover(e, events, reasoningPreviewVisible)) {
-                        attempt = 0;
-                        continue;
-                    }
-                    throw stop;
-                }
-                attempt = decision.attempt();
-                events.accept(new RunRetrying(attempt, decision.delayMs(), Texts.oneLine(reason, 300),
-                    decision.elapsedMs(), decision.remainingMs(), retryBudget.maxAttempts()));
-                // 上一次尝试可能已经推过一段预览：重试会重新输出全文，旧片段必须先作废。
-                events.accept(AssistantPreview.discarded());
-                if (reasoningPreviewVisible.getAndSet(false)) {
-                    events.accept(AssistantReasoning.discarded());
-                }
-                if (!pause(decision.delayMs(), clockMark, events)) {
-                    return new ModelTurn(null, stopForCancellation(messages, events));
+                ModelTurn stop = handleModelException(e, messages, events, runtimeGuidance, state);
+                if (stop != null) {
+                    return stop;
                 }
             }
+        }
+    }
+
+    private List<Message> prepareModelRequest(List<Message> messages, Consumer<SessionEvent> events,
+        RuntimeGuidance runtimeGuidance, String policyGuidance, CallState state) {
+        // 本地控制提示与 policy guidance 都只属于这次采样。模型请求发生瞬时失败时
+        // retainedGuidance 会沿重试保留；真正拿到响应后才消费。
+        planGate.observeModelRequest();
+        if (!planSnapshot().isEmpty()) {
+            planGate.markPlanned();
+        }
+        String planReminder = planGate.takeReminder();
+        if (planReminder != null) {
+            runtimeGuidance.add(planReminder);
+        }
+        state.retainedGuidance = RuntimeGuidance.merge(state.retainedGuidance, runtimeGuidance.render(policyGuidance));
+        // 阶段性纠偏属于运行时上下文，只进入当前请求的 system 消息；下一次请求会
+        // 重新构造 system，checkpoint/conversation 也从不保存它。
+        RequestBudget.closeDanglingToolCalls(messages);
+        List<Message> request = requestMessages(messages, state.retainedGuidance);
+        RequestBudget.Assessment admission = assessBudget(request);
+        if (!admission.fits()) {
+            // 本地字符预算比发送线松，长对话会在这里才发现超窗。先折掉更早的记录再发，
+            // 不把整轮停成失败。系统提示和工具定义本身都放不下时，折叠也没有用。
+            fitHistoryToInputBudget(messages, events, state.retainedGuidance);
+            request = requestMessages(messages, state.retainedGuidance);
+            admission = assessBudget(request);
+        }
+        if (!admission.fits() && (hasText(state.retainedGuidance) || phaseHint != null)) {
+            // 临时纠偏与阶段提示都只是辅助上下文，差一点点时先拿掉它们再发，不要为此中断任务。
+            state.retainedGuidance = null;
+            clearPhaseHint();
+            fitHistoryToInputBudget(messages, events, null);
+            request = requestMessages(messages, null);
+            admission = assessBudget(request);
+        }
+        if (!admission.fits()) {
+            throw new ExecutionPolicy.Stop(RunFailureCode.CONTEXT_TOO_LARGE,
+                "完整模型请求估算为 " + admission.estimatedInputTokens() + " token，安全输入预算为 " + admission.inputLimit()
+                    + "；未发送请求。请缩小输入或拆分任务后继续。");
+        }
+        return request;
+    }
+
+    private ModelResponse streamModelResponse(List<Message> request, AtomicBoolean reasoningPreviewVisible) {
+        StreamRepeatGuard repeatGuard = new StreamRepeatGuard();
+        StreamRepeatGuard reasoningRepeatGuard = new StreamRepeatGuard();
+        return client.chat(request, tools.definitions(), delta -> {
+            if (delta == null || delta.isEmpty()) {
+                return;
+            }
+            // 同一行连续重复到阈值就止损：继续流下去只会把上下文和界面一起刷满。
+            if (repeatGuard.accept(delta) > 0) {
+                throw new StreamRepeatException();
+            }
+            if (liveText == null) {
+                return;
+            }
+            try {
+                liveText.accept(delta);
+            } catch (RuntimeException ignored) {
+                // 界面预览失败不影响这一次模型请求
+            }
+        }, delta -> {
+            if (delta == null || delta.isEmpty()) {
+                return;
+            }
+            if (reasoningRepeatGuard.accept(delta) > 0) {
+                throw new StreamRepeatException();
+            }
+            if (liveReasoning != null) {
+                try {
+                    liveReasoning.accept(delta);
+                    reasoningPreviewVisible.set(true);
+                } catch (RuntimeException ignored) {
+                    // 推理预览失败不影响这一次模型请求
+                }
+            }
+        });
+    }
+
+    private void handleStreamRepeat(Consumer<SessionEvent> events, RuntimeGuidance runtimeGuidance, CallState state) {
+        Thread.interrupted();
+        state.repeatAborts++;
+        // 界面上已经出现的重复段落作废：重试会从头重新输出，不能和残留内容拼在一起。
+        discardPreviews(events, state.reasoningPreviewVisible, true);
+        if (state.repeatAborts >= MAX_REPEAT_ABORTS) {
+            throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_REPEATED,
+                "模型连续 " + state.repeatAborts + " 次陷入逐行重复，已中止本轮生成；已有进度已保存。可以继续执行，或把问题拆小后重新发送。");
+        }
+        runtimeGuidance.add(REPEAT_GUIDANCE);
+        events.accept(new RunContinued(1, 1, "模型输出陷入逐行重复，已中止本次生成并重试"));
+    }
+
+    private ModelTurn handleModelException(RuntimeException e, List<Message> messages, Consumer<SessionEvent> events,
+        RuntimeGuidance runtimeGuidance, CallState state) {
+        if (e instanceof RequestBudget.BudgetExceeded) {
+            return new ModelTurn(null,
+                new Result(e.getMessage(), RunFailureCode.CONTEXT_TOO_LARGE.name(), conversation(messages)));
+        }
+        // 客户端抛错时会重新设置中断位；不清掉的话，后续每次请求都会立刻失败。
+        Thread.interrupted();
+        if (cancellation.cancelled()) {
+            return new ModelTurn(null, stopForCancellation(messages, events));
+        }
+        if (client.disableRejectedNativeTools(e)) {
+            events.accept(new RunContinued(1, 1, "服务端拒绝原生工具，已自动恢复 Pilot 工具继续当前任务"));
+            return null;
+        }
+        ModelFailureKind kind = ModelRetryPolicy.classify(e);
+        if (kind == ModelFailureKind.CONTEXT_OVERFLOW) {
+            return handleContextOverflow(messages, events, state);
+        }
+        if (kind == ModelFailureKind.MALFORMED_TOOL_CALL) {
+            handleMalformedToolCall(events, runtimeGuidance, state);
+            return null;
+        }
+        if (kind == ModelFailureKind.INTERRUPTED) {
+            // 用户取消已在上面的分支返回。能走到这里说明是外部中断：服务重启、
+            // 容器关停、线程被别的组件打断。按瞬时故障继续重试，
+            // 不让一次外部中断把整轮任务判死。
+            kind = ModelFailureKind.TRANSIENT;
+        }
+        String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+        // 永久错误（鉴权、余额、模型不支持、结构非法）重试不会变好；如配了备用预设且符合故障转移条件，先切备用继续
+        if (!kind.retryable()) {
+            if (tryFailover(e, events, state.reasoningPreviewVisible)) {
+                state.attempt = 0;
+                return null;
+            }
+            throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_ERROR, "模型调用失败：" + Texts.oneLine(reason, 300));
+        }
+        // 主模型重试一次仍失败时优先切备用预设，避免免费端点限流或本机停服让用户长时间干等
+        if (state.attempt >= 1 && tryFailover(e, events, state.reasoningPreviewVisible)) {
+            state.attempt = 0;
+            return null;
+        }
+        boolean wokeFromSleep = compensateWakeupIfDetected(state.clockMark, -1L, events);
+        RetryBudget.Decision decision;
+        try {
+            decision = nextRetryDecision(e, reason, wokeFromSleep);
+        } catch (ExecutionPolicy.Stop stop) {
+            if (tryFailover(e, events, state.reasoningPreviewVisible)) {
+                state.attempt = 0;
+                return null;
+            }
+            throw stop;
+        }
+        state.attempt = decision.attempt();
+        events.accept(new RunRetrying(state.attempt, decision.delayMs(), Texts.oneLine(reason, 300),
+            decision.elapsedMs(), decision.remainingMs(), retryBudget.maxAttempts()));
+        // 上一次尝试可能已经推过一段预览：重试会重新输出全文，旧片段必须先作废。
+        discardPreviews(events, state.reasoningPreviewVisible, true);
+        if (!pause(decision.delayMs(), state.clockMark, events)) {
+            return new ModelTurn(null, stopForCancellation(messages, events));
+        }
+        return null;
+    }
+
+    private ModelTurn handleContextOverflow(List<Message> messages, Consumer<SessionEvent> events, CallState state) {
+        state.overflowRetries++;
+        state.retainedGuidance = null;
+        if (state.overflowRetries > 2) {
+            return new ModelTurn(null, new Result("模型服务端连续拒绝了超长输入。已多次收缩历史，仍然放不下。请缩小输入或拆分任务后继续。",
+                RunFailureCode.CONTEXT_TOO_LARGE.name(), conversation(messages)));
+        }
+        int beforeChars = ContextCompactor.totalChars(messages);
+        fitHistoryToInputBudget(messages, events, null);
+        boolean shrunk = ContextCompactor.totalChars(messages) < beforeChars;
+        // 本地估算仍判定「放得下」时四层收缩全部被跳过。真实窗口更小或 tokenizer 计费更高，
+        // 必须按服务端拒绝值强制收缩，绝不把同一份超限请求原样重发。
+        if (!shrunk) {
+            shrunk = forceShrinkForServerOverflow(messages, events);
+        }
+        if (!shrunk) {
+            return new ModelTurn(null, new Result("模型服务端拒绝了超长输入，但历史已没有可以再收缩的记录。请缩小输入或拆分任务后继续。",
+                RunFailureCode.CONTEXT_TOO_LARGE.name(), conversation(messages)));
+        }
+        events.accept(new RunContinued(state.overflowRetries, 2, "模型服务端提示上下文超限，已收缩历史并自动重试"));
+        return null;
+    }
+
+    private void handleMalformedToolCall(Consumer<SessionEvent> events, RuntimeGuidance runtimeGuidance,
+        CallState state) {
+        state.malformedToolRetries++;
+        discardPreviews(events, state.reasoningPreviewVisible, true);
+        if (state.malformedToolRetries > MAX_MALFORMED_TOOL_RETRIES) {
+            throw new ExecutionPolicy.Stop(RunFailureCode.MODEL_ERROR,
+                "模型连续 " + state.malformedToolRetries + " 次返回非法工具调用参数 JSON，已停止重试；进度和对话已保存，可继续执行。");
+        }
+        runtimeGuidance.add(MALFORMED_TOOL_GUIDANCE);
+        events
+            .accept(new RunContinued(state.malformedToolRetries, MAX_MALFORMED_TOOL_RETRIES, "工具调用参数 JSON 非法，已提示模型重发"));
+    }
+
+    private static void discardPreviews(Consumer<SessionEvent> events, AtomicBoolean reasoningPreviewVisible,
+        boolean discardTextPreview) {
+        if (discardTextPreview) {
+            events.accept(AssistantPreview.discarded());
+        }
+        if (reasoningPreviewVisible.getAndSet(false)) {
+            events.accept(AssistantReasoning.discarded());
         }
     }
 
     private boolean tryFailover(Throwable failure, Consumer<SessionEvent> events,
         AtomicBoolean reasoningPreviewVisible) {
         String switched = client.failover(failure);
-        if (switched == null || switched.isBlank()) {
+        if (!hasText(switched)) {
             return false;
         }
         retryBudget.reset();
         connectionFailures = 0;
-        events.accept(AssistantPreview.discarded());
-        if (reasoningPreviewVisible.getAndSet(false)) {
-            events.accept(AssistantReasoning.discarded());
-        }
+        discardPreviews(events, reasoningPreviewVisible, true);
         events.accept(new RunContinued(1, 1, "主模型不可用，已自动切换备用预设：" + switched));
         return true;
     }
@@ -2145,6 +2229,42 @@ public final class AgentLoop {
     }
 
     private record ModelTurn(ModelResponse response, Result stop) {
+    }
+
+    /** 追踪同一工具调用与结果连续不变的次数，用于无进展提醒。 */
+    private static final class RepeatState {
+        private String lastSignature;
+        private List<String> lastOutcomes = List.of();
+        private int count;
+
+        private int record(String signature, List<ToolExecutor.Outcome> outcomes) {
+            List<String> results = outcomes.stream().map(ToolExecutor.Outcome::result).toList();
+            count = signature.equals(lastSignature) && results.equals(lastOutcomes) ? count + 1 : 1;
+            lastSignature = signature;
+            lastOutcomes = results;
+            return count;
+        }
+
+        private void reset() {
+            lastSignature = null;
+            lastOutcomes = List.of();
+            count = 0;
+        }
+    }
+
+    /** 单次模型调用重试循环的局部状态。 */
+    private static final class CallState {
+        private int attempt;
+        private int repeatAborts;
+        private int overflowRetries;
+        private int malformedToolRetries;
+        private String retainedGuidance;
+        private final AtomicBoolean reasoningPreviewVisible = new AtomicBoolean();
+        private final long[] clockMark;
+
+        private CallState(long wallMs, long monoNanos) {
+            this.clockMark = new long[] {wallMs, monoNanos};
+        }
     }
 
     /** 一次 run 内累计模型用量；请求开始先推估算，响应回来后再用端点 usage 校准。 */

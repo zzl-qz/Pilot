@@ -11,6 +11,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
+import com.pilot.core.util.HostOs;
+
 /**
  * 协调范围：一个会话在跨会话协调里「看得见哪些目录」。
  *
@@ -62,7 +64,7 @@ public final class ProjectCoordinationScope {
 
     /** 当前平台是否按 Windows 语义比较路径大小写。 */
     public static boolean windowsFileSystem() {
-        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("windows");
+        return HostOs.isWindows();
     }
 
     /** 目录的比较键：真实路径、统一 {@code /}、去掉末尾分隔符，必要时折叠大小写。 */

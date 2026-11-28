@@ -6,11 +6,11 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import com.pilot.core.exec.ProcessSupport;
+import com.pilot.core.util.HostOs;
 
 /**
  * 用系统 shell 跑 lint。命令来自仓库自己的清单，工作目录锁在该仓库根。
@@ -60,8 +60,7 @@ public final class ProcessLintRunner implements LintRunner {
     }
 
     static List<String> shell(String command) {
-        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-        if (os.contains("win")) {
+        if (HostOs.isWindows()) {
             return List.of("cmd.exe", "/d", "/s", "/c", command);
         }
         return List.of("sh", "-c", command);

@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.pilot.core.workspace.AgentScope;
+
 /**
  * 全局任务 DAG，父 Agent 独占。
  *
@@ -190,8 +192,8 @@ public final class TaskGraph {
         }
         for (String first : left) {
             for (String second : right) {
-                String prefixA = literalPrefix(first);
-                String prefixB = literalPrefix(second);
+                String prefixA = AgentScope.literalPrefix(first, true);
+                String prefixB = AgentScope.literalPrefix(second, true);
                 if (!prefixA.startsWith(prefixB) && !prefixB.startsWith(prefixA)) {
                     continue;
                 }
@@ -200,24 +202,6 @@ public final class TaskGraph {
             }
         }
         return null;
-    }
-
-    /** glob 里第一个通配符之前的字面部分；空串表示匹配整个工作区。 */
-    private static String literalPrefix(String glob) {
-        String text = glob == null ? "" : glob.replace('\\', '/').strip();
-        int cut = text.length();
-        for (int i = 0; i < text.length(); i++) {
-            char current = text.charAt(i);
-            if (current == '*' || current == '?' || current == '{' || current == '[') {
-                cut = i;
-                break;
-            }
-        }
-        String prefix = text.substring(0, cut);
-        while (prefix.endsWith("/")) {
-            prefix = prefix.substring(0, prefix.length() - 1);
-        }
-        return prefix;
     }
 
     /** 某个任务的最长依赖链深度，用于并行调度时按层推进。 */

@@ -84,46 +84,159 @@ public final class ProcessSupport {
     /** 捕获合并输出的开头，超出上限的字节仍继续消费。退出与读完输出共享同一个期限。 */
     public static CapturedOutput captureUtf8(ProcessBuilder builder, Duration timeout, int maxBytes)
         throws IOException, InterruptedException, TimeoutException {
+        return captureUtf8Internal(builder, true, null, timeout, maxBytes);
+    }
+
+    /** 仅捕获 stdout（stderr 丢弃），供 ripgrep/git ls-files 等只读查询命令共享。 */
+    public static CapturedOutput captureStdoutUtf8(ProcessBuilder builder, Duration timeout, int maxBytes)
+        throws IOException, InterruptedException, TimeoutException {
+        return captureUtf8Internal(builder, false, null, timeout, maxBytes);
+    }
+
+    /** 写入 stdin 并捕获合并输出的开头，写入与读取并发执行且共享同一个期限。 */
+    public static CapturedOutput captureUtf8WithStdin(ProcessBuilder builder, byte[] stdin, Duration timeout,
+        int maxBytes) throws IOException, InterruptedException, TimeoutException {
+        return captureUtf8Internal(builder, true, stdin, timeout, maxBytes);
+    }
+
+    /** 写入 stdin 并仅捕获 stdout（stderr 丢弃），供 NUL 分隔或结构化输出命令共享。 */
+    public static CapturedOutput captureStdoutUtf8WithStdin(ProcessBuilder builder, byte[] stdin, Duration timeout,
+        int maxBytes) throws IOException, InterruptedException, TimeoutException {
+        return captureUtf8Internal(builder, false, stdin, timeout, maxBytes);
+    }
+
+    private static CapturedOutput captureUtf8Internal(ProcessBuilder builder, boolean mergeStderr, byte[] stdin,
+        Duration timeout, int maxBytes) throws IOException, InterruptedException, TimeoutException {
         if (maxBytes < 0) {
             throw new IllegalArgumentException("maxBytes must be nonnegative");
         }
         long budget = timeout.toNanos();
-        Process process = builder.redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.PIPE).start();
+        if (mergeStderr) {
+            builder.redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.PIPE);
+        } else {
+            builder.redirectErrorStream(false).redirectError(ProcessBuilder.Redirect.DISCARD)
+                .redirectOutput(ProcessBuilder.Redirect.PIPE);
+        }
+        Process process = builder.start();
         long deadline = System.nanoTime() + budget;
-        var output = new FutureTask<>(() -> capturePrefix(process.getInputStream(), maxBytes));
+        var output = new FutureTask<>(
+            () -> new String(readBoundedBytes(process.getInputStream(), maxBytes), StandardCharsets.UTF_8));
+        FutureTask<Void> writer = null;
         try {
-            process.getOutputStream().close();
             Thread.startVirtualThread(output);
+            if (stdin == null || stdin.length == 0) {
+                process.getOutputStream().close();
+            } else {
+                writer = new FutureTask<>(() -> {
+                    try (var out = process.getOutputStream()) {
+                        out.write(stdin);
+                    } catch (IOException ignored) {
+                        // 子进程提前退出或超时关闭 stdin 时停止写入
+                    }
+                    return null;
+                });
+                Thread.startVirtualThread(writer);
+            }
             if (!process.waitFor(Duration.ofNanos(deadline - System.nanoTime()))) {
                 throw new TimeoutException();
             }
-            return new CapturedOutput(process.exitValue(),
-                output.get(deadline - System.nanoTime(), TimeUnit.NANOSECONDS));
+            // 进程已退出，给读线程留出最小收尾余量以完成 EOF 读取和解码，避免临近 deadline 时误判超时
+            long readNanos = Math.max(TimeUnit.MILLISECONDS.toNanos(500), deadline - System.nanoTime());
+            return new CapturedOutput(process.exitValue(), output.get(readNanos, TimeUnit.NANOSECONDS));
         } catch (ExecutionException e) {
             throw new IOException("无法读取命令输出", e.getCause());
         } finally {
             if (process.isAlive()) {
                 terminate(process);
             }
+            try {
+                process.getOutputStream().close();
+            } catch (IOException ignored) {
+                // 忽略已关闭的 stdin
+            }
             output.cancel(true);
+            if (writer != null) {
+                writer.cancel(true);
+            }
         }
     }
 
-    private static void terminate(Process process) {
-        var descendants = process.descendants().toList();
-        process.destroyForcibly();
-        descendants.forEach(ProcessHandle::destroyForcibly);
+    /** 强制终止进程及其全部后代进程；单条后代终止失败不阻断其余清理。 */
+    public static void terminate(Process process) {
+        if (process == null) {
+            return;
+        }
+        List<ProcessHandle> descendants = List.of();
+        try {
+            descendants = process.descendants().toList();
+        } catch (RuntimeException ignored) {
+            // 受限环境或测试桩可能不支持 descendants
+        }
+        try {
+            process.toHandle().destroyForcibly();
+        } catch (RuntimeException ignored) {
+            process.destroyForcibly();
+        }
+        for (ProcessHandle handle : descendants) {
+            try {
+                handle.destroyForcibly();
+            } catch (RuntimeException ignored) {
+                // 子进程可能已退出
+            }
+        }
     }
 
-    private static String capturePrefix(InputStream input, int maxBytes) throws IOException {
+    /** 先温和请求进程树退出并等待 {@code grace}，超时或中断再强制终止。 */
+    public static void terminateGracefully(Process process, Duration grace) {
+        if (process == null) {
+            return;
+        }
+        List<ProcessHandle> descendants = List.of();
+        try {
+            descendants = process.descendants().toList();
+        } catch (RuntimeException ignored) {
+            // 受限环境或测试桩可能不支持 descendants
+        }
+        for (ProcessHandle handle : descendants) {
+            try {
+                handle.destroy();
+            } catch (RuntimeException ignored) {
+                // 子进程可能已退出
+            }
+        }
+        try {
+            process.destroy();
+        } catch (RuntimeException ignored) {
+            // 忽略已退出进程
+        }
+        if (grace != null && !grace.isNegative() && !grace.isZero()) {
+            try {
+                if (process.waitFor(grace)) {
+                    return;
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        terminate(process);
+    }
+
+    /** 保留至多 {@code maxBytes} 字节，超出上限仍继续排空流避免阻塞写端，结束时关闭流。 */
+    public static byte[] readBoundedBytes(InputStream input, int maxBytes) throws IOException {
+        if (maxBytes < 0) {
+            throw new IllegalArgumentException("maxBytes must be nonnegative");
+        }
         try (input) {
             byte[] buffer = new byte[8192];
             var output = new ByteArrayOutputStream(Math.min(maxBytes, buffer.length));
             int count;
             while ((count = input.read(buffer)) != -1) {
-                output.write(buffer, 0, Math.min(count, maxBytes - output.size()));
+                int remaining = maxBytes - output.size();
+                if (remaining > 0) {
+                    output.write(buffer, 0, Math.min(count, remaining));
+                }
             }
-            return output.toString(StandardCharsets.UTF_8);
+            return output.toByteArray();
         }
     }
 

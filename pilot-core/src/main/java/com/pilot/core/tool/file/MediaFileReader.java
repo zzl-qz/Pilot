@@ -1,28 +1,20 @@
 package com.pilot.core.tool.file;
 
-import java.awt.image.BufferedImage;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-
-import javax.imageio.ImageIO;
 
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
-import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
 
 import com.pilot.core.message.Attachment;
-import com.pilot.core.tool.ToolArtifacts;
 import com.pilot.core.tool.ToolResult;
 import com.pilot.core.tool.office.OfficeSupport;
 import com.pilot.core.util.FileNames;
-import com.pilot.core.util.Sha256;
 
 /**
  * {@code read_file} 的图片与 PDF 分支：图片原样交给模型，PDF 抽取文本，扫描件按页渲染成图片。
@@ -45,11 +37,11 @@ final class MediaFileReader {
     }
 
     static boolean isImage(Path file) {
-        return IMAGE_TYPES.containsKey(extension(file));
+        return IMAGE_TYPES.containsKey(FileNames.extension(file));
     }
 
     static boolean isPdf(Path file) {
-        return "pdf".equals(extension(file));
+        return "pdf".equals(FileNames.extension(file));
     }
 
     /** Office 四类文件在 read_file 里走纯文本抽取，用于独立读回核对，不还原排版。 */
@@ -76,7 +68,7 @@ final class MediaFileReader {
         if (size == 0) {
             return ToolResult.text("ERROR: 图片文件为空: " + display);
         }
-        String mime = IMAGE_TYPES.get(extension(file));
+        String mime = IMAGE_TYPES.get(FileNames.extension(file));
         String text = "图片 " + display + "（" + mime + "，" + Math.max(1, size / 1024) + " KB）。"
             + "图片内容附在本批工具结果之后的消息里，请直接观察，不要再用 read_file 重复读取。";
         return ToolResult.withImages(text,
@@ -131,60 +123,14 @@ final class MediaFileReader {
     }
 
     private static List<Attachment> render(PDDocument document, Path source, int[] range) throws IOException {
-        PDFRenderer renderer = new PDFRenderer(document);
-        String key = digest(source, document.getNumberOfPages());
-        Path dir = ToolArtifacts.directory("pdf/" + key);
-        List<Attachment> images = new ArrayList<>();
-        for (int page = range[0]; page <= range[1] && images.size() < MAX_RENDERED_PAGES; page++) {
-            BufferedImage image =
-                OfficeSupport.renderPdfPage(renderer, document.getPage(page - 1), page - 1, RENDER_DPI);
-            Path target = dir.resolve("page-" + page + ".png");
-            if (!ImageIO.write(image, "png", target.toFile()) || Files.size(target) > MAX_IMAGE_BYTES) {
-                Files.deleteIfExists(target);
-                continue;
-            }
-            images.add(new Attachment(source.getFileName() + " 第 " + page + " 页", "image/png", target.toString()));
-        }
-        return images;
-    }
-
-    /** 同一份文件内容得到同一个目录，重复读取不会堆积产物。 */
-    private static String digest(Path source, int pages) throws IOException {
-        var sha = Sha256.newDigest();
-        sha.update(source.toAbsolutePath().toString().getBytes(StandardCharsets.UTF_8));
-        sha.update(Long.toString(Files.size(source)).getBytes(StandardCharsets.UTF_8));
-        sha.update(Long.toString(Files.getLastModifiedTime(source).toMillis()).getBytes(StandardCharsets.UTF_8));
-        sha.update((byte)pages);
-        return Sha256.finishHex(sha).substring(0, 16);
+        return OfficeSupport
+            .renderPdfPages(document, source, range,
+                new OfficeSupport.PdfRenderOptions("pdf/", RENDER_DPI, MAX_IMAGE_BYTES, MAX_RENDERED_PAGES, true))
+            .images();
     }
 
     /** 解析 {@code "3"}、{@code "2-5"}；缺省读前 10 页，单次最多 30 页。 */
     static int[] pageRange(Object value, int total) {
-        if (value == null || value.toString().isBlank()) {
-            return new int[] {1, Math.min(total, DEFAULT_PDF_PAGES)};
-        }
-        String text = value.toString().strip();
-        int start;
-        int end;
-        try {
-            int dash = text.indexOf('-');
-            if (dash < 0) {
-                start = end = Integer.parseInt(text);
-            } else {
-                start = Integer.parseInt(text.substring(0, dash).strip());
-                end = Integer.parseInt(text.substring(dash + 1).strip());
-            }
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException("pages 必须是页码或范围，例如 \"3\" 或 \"2-5\"");
-        }
-        if (start < 1 || end < start || start > total) {
-            throw new IllegalArgumentException("pages 超出范围: " + text);
-        }
-        end = Math.min(end, Math.min(total, start + MAX_PDF_PAGES - 1));
-        return new int[] {start, end};
-    }
-
-    private static String extension(Path file) {
-        return FileNames.extension(file.getFileName().toString());
+        return OfficeSupport.parsePageRange(value, total, DEFAULT_PDF_PAGES, MAX_PDF_PAGES, true);
     }
 }

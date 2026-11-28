@@ -50,6 +50,17 @@ public record McpServerConfig(String name, String transport, String command, Lis
         return isRemote() ? !url.isBlank() : (command != null && !command.isBlank());
     }
 
+    /** 用于界面与能力清单展示的命令或远程端点摘要。 */
+    public String displayCommand() {
+        if (isRemote()) {
+            return transport.toUpperCase(Locale.ROOT) + " " + url;
+        }
+        if (command == null) {
+            return "";
+        }
+        return args.isEmpty() ? command : command + " " + String.join(" ", args);
+    }
+
     /** 校验远程 MCP URL：只允许 http/https，拒绝内嵌凭据 userinfo。 */
     public static String validateRemoteUrl(String rawUrl) {
         if (rawUrl == null || rawUrl.isBlank()) {

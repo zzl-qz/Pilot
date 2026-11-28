@@ -78,11 +78,9 @@ public final class ModelCatalog {
         Duration effectiveTimeout =
             timeout == null || timeout.isNegative() || timeout.isZero() ? REQUEST_TIMEOUT : timeout;
         URI modelsUri = resolveModelsUri(endpoint);
-        HttpRequest.Builder request =
-            HttpRequest.newBuilder(modelsUri).timeout(effectiveTimeout).header("Accept", "application/json").GET();
-        if (apiKey != null && !apiKey.isBlank()) {
-            request.header("Authorization", "Bearer " + apiKey.strip());
-        }
+        HttpRequest.Builder request = ModelHttp.withBearerAuth(
+            HttpRequest.newBuilder(modelsUri).timeout(effectiveTimeout).header("Accept", "application/json").GET(),
+            apiKey);
 
         BoundedHttp.TextResponse response;
         try {
@@ -130,24 +128,20 @@ public final class ModelCatalog {
     }
 
     static URI appendPath(URI endpoint, String suffix) {
-        String raw = endpoint.toString();
-        int queryIndex = raw.indexOf('?');
-        String base = queryIndex >= 0 ? raw.substring(0, queryIndex) : raw;
-        String query = queryIndex >= 0 ? raw.substring(queryIndex) : "";
+        String[] split = ModelHttp.splitQuery(endpoint);
+        String base = split[0];
         while (base.endsWith("/")) {
             base = base.substring(0, base.length() - 1);
         }
-        return URI.create(base + suffix + query);
+        return URI.create(base + suffix + split[1]);
     }
 
     private static URI replaceSuffix(URI endpoint, String suffix, String replacement) {
-        String raw = endpoint.toString();
-        int queryIndex = raw.indexOf('?');
-        String base = queryIndex >= 0 ? raw.substring(0, queryIndex) : raw;
-        String query = queryIndex >= 0 ? raw.substring(queryIndex) : "";
+        String[] split = ModelHttp.splitQuery(endpoint);
+        String base = split[0];
         if (!base.endsWith(suffix)) {
             return appendPath(endpoint, replacement);
         }
-        return URI.create(base.substring(0, base.length() - suffix.length()) + replacement + query);
+        return URI.create(base.substring(0, base.length() - suffix.length()) + replacement + split[1]);
     }
 }

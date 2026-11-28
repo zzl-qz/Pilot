@@ -104,4 +104,16 @@ class ReadTrackerTest {
         assertEquals(1.0, tracker.checkDelivered(b, stampB, 1, 10).overlapRatio(), 0.001);
         assertTrue(tracker.isObserved(a), "单文件清视图后仍应保留已读安全记录");
     }
+
+    @Test
+    void lineRangeHelpersMergeCoverAndComputeOverlapRatio() {
+        List<ReadGuard.LineRange> ranges = ReadGuard.LineRange.merge(List.of(), new ReadGuard.LineRange(10, 20));
+        ranges = ReadGuard.LineRange.merge(ranges, new ReadGuard.LineRange(21, 30));
+        ranges = ReadGuard.LineRange.merge(ranges, new ReadGuard.LineRange(50, 60));
+        ranges = ReadGuard.LineRange.merge(ranges, new ReadGuard.LineRange(25, 55));
+        assertEquals(List.of(new ReadGuard.LineRange(10, 60)), ranges);
+        assertEquals(11, ReadGuard.LineRange.coveredLines(ranges, 5, 20));
+        assertEquals(0.5, ReadGuard.LineRange.overlapRatio(ranges, 51, 70), 0.001);
+        assertEquals(0.0, ReadGuard.LineRange.overlapRatio(ranges, 10, 5), 0.001);
+    }
 }

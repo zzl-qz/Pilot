@@ -1,12 +1,18 @@
 package com.pilot.core.util;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.DosFileAttributeView;
 import java.util.ArrayList;
@@ -20,6 +26,56 @@ public final class FileTrees {
     }
 
     private FileTrees() {
+    }
+
+    /** 原子写文件（UTF-8）：父目录不存在时自动创建，写同目录临时文件后再尽量原子替换目标。 */
+    public static void writeAtomic(Path target, String content) throws IOException {
+        Objects.requireNonNull(content, "content");
+        writeAtomic(target, content.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** 原子写文件：父目录不存在时自动创建，移动失败时清理临时文件。 */
+    public static void writeAtomic(Path target, byte[] bytes) throws IOException {
+        writeAtomicInternal(target, bytes, false);
+    }
+
+    /** 原子写文件并在替换前 {@code fsync} 临时文件，供需要崩溃一致性的状态落盘使用。 */
+    public static void writeAtomicSync(Path target, byte[] bytes) throws IOException {
+        writeAtomicInternal(target, bytes, true);
+    }
+
+    private static void writeAtomicInternal(Path target, byte[] bytes, boolean sync) throws IOException {
+        Objects.requireNonNull(target, "target");
+        Objects.requireNonNull(bytes, "bytes");
+        Path absolute = target.toAbsolutePath();
+        Path parent = absolute.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        } else {
+            parent = Path.of(".").toAbsolutePath();
+        }
+        Path tmp = Files.createTempFile(parent, ".pilot-", ".tmp");
+        try {
+            if (sync) {
+                try (FileChannel channel =
+                    FileChannel.open(tmp, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING)) {
+                    ByteBuffer buffer = ByteBuffer.wrap(bytes);
+                    while (buffer.hasRemaining()) {
+                        channel.write(buffer);
+                    }
+                    channel.force(true);
+                }
+            } else {
+                Files.write(tmp, bytes);
+            }
+            try {
+                Files.move(tmp, absolute, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(tmp, absolute, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(tmp);
+        }
     }
 
     public static void delete(Path root) throws IOException {
