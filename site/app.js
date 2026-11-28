@@ -122,6 +122,38 @@
   /* ── 5. 复制 ───────────────────────────────────────── */
   var isEn = (document.documentElement.lang || "").toLowerCase().indexOf("en") === 0;
   var copiedSvg = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 13 4 4L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  var defaultCopyLabel = isEn ? "Copy" : "复制";
+  var copyState = new WeakMap();
+
+  function getCopyState(button) {
+    var state = copyState.get(button);
+    if (!state) {
+      state = {
+        html: button.innerHTML,
+        label: button.getAttribute("aria-label") || defaultCopyLabel,
+        title: button.getAttribute("title") || "",
+        timer: null
+      };
+      copyState.set(button, state);
+    }
+    return state;
+  }
+
+  function clearCopyTimer(state) {
+    if (state.timer !== null) {
+      clearTimeout(state.timer);
+      state.timer = null;
+    }
+  }
+
+  function restoreButton(button, state) {
+    state.timer = null;
+    button.classList.remove("done", "failed");
+    button.innerHTML = state.html;
+    button.setAttribute("aria-label", state.label);
+    if (state.title) button.title = state.title;
+    else button.removeAttribute("title");
+  }
 
   function legacyCopy(text) {
     var area = document.createElement("textarea");
@@ -138,8 +170,9 @@
   }
 
   function markDone(button, text) {
+    var state = getCopyState(button);
+    clearCopyTimer(state);
     clearFailure(button);
-    var original = button.innerHTML;
     button.classList.add("done");
     button.innerHTML = copiedSvg;
     button.setAttribute("aria-label", isEn ? "Copied" : "已复制");
@@ -149,10 +182,8 @@
       status.textContent = isEn ? "Copied to clipboard." : "已复制到剪贴板。";
       status.hidden = false;
     }
-    setTimeout(function () {
-      button.classList.remove("done");
-      button.innerHTML = original;
-      button.setAttribute("aria-label", button.dataset.label || (isEn ? "Copy" : "复制"));
+    state.timer = setTimeout(function () {
+      restoreButton(button, state);
     }, 1600);
   }
 
@@ -195,7 +226,10 @@
    * 用户用键盘（Tab 聚焦后 Ctrl/Cmd+A、Ctrl/Cmd+C）也能完成复制。
    */
   function markFailed(button, text) {
-    var original = button.innerHTML;
+    var state = getCopyState(button);
+    clearCopyTimer(state);
+    button.classList.remove("done");
+    button.innerHTML = state.html;
     button.classList.add("failed");
     button.setAttribute("aria-label", isEn ? "Copy failed; select command manually" : "复制失败，请手动选择命令复制");
     button.title = isEn ? "Copy failed: select command manually" : "复制失败：请手动选择命令后复制";
@@ -214,7 +248,7 @@
       var fallback = document.createElement("pre");
       fallback.className = "copy-fallback";
       fallback.tabIndex = 0;
-      fallback.setAttribute("aria-label", "安装命令，可手动复制");
+      fallback.setAttribute("aria-label", isEn ? "Install command, select to copy manually" : "安装命令，可手动复制");
       fallback.textContent = text;
       status ? status.insertAdjacentElement("afterend", fallback) : parent.appendChild(fallback);
       fallback.focus();
@@ -226,10 +260,8 @@
         selection.addRange(range);
       }
     }
-    setTimeout(function () {
-      button.classList.remove("failed");
-      button.innerHTML = original;
-      button.setAttribute("aria-label", button.dataset.label || "复制");
+    state.timer = setTimeout(function () {
+      restoreButton(button, state);
     }, 4000);
   }
 
@@ -246,7 +278,8 @@
   }
 
   document.querySelectorAll(".copy").forEach(function (button) {
-    button.dataset.label = button.getAttribute("aria-label") || "复制";
+    var state = getCopyState(button);
+    button.dataset.label = state.label;
     button.addEventListener("click", function () {
       var text = button.dataset.copy || "";
       if (!text) return;

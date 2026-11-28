@@ -8,11 +8,11 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
+import {resolveJava,waitFor as pollUntil} from './smoke-env.mjs';
 const root=fileURLToPath(new URL('..',import.meta.url));
 const temp=await mkdtemp(join(tmpdir(),'pilot-capability-中文 with spaces-'));
 const token=randomUUID(), key=randomUUID(), nextKey=randomUUID();
 let probes=0,child,base,logs='';
-const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const gateway=createServer(async(req,res)=>{
   const chunks=[];for await(const chunk of req)chunks.push(chunk);
   assert.ok([key,nextKey].some(value=>req.headers.authorization==='Bearer '+value),'只向已配置的中转站发送对应凭证');
@@ -32,7 +32,7 @@ const gateway=createServer(async(req,res)=>{
 try{
   await new Promise(resolve=>gateway.listen(0,'127.0.0.1',resolve));
   const endpoint=`http://127.0.0.1:${gateway.address().port}/relay/v1/chat/completions`;
-  const java=process.env.JAVA_HOME?join(process.env.JAVA_HOME,'bin',process.platform==='win32'?'java.exe':'java'):'java';
+  const java=resolveJava();
   child=spawn(java,['--enable-native-access=ALL-UNNAMED','-jar',join(root,'pilot-server/target/pilot-server-0.0.1-SNAPSHOT.jar'),
     '--spring.profiles.active=test','--server.address=127.0.0.1','--server.port=0',`--pilot.data.dir=${join(temp,'data')}`,
     `--pilot.agent.workspace=${temp}`,`--pilot.mobile.libraries=${join(temp,'missing-bridge')}`,'--pilot.mobile.provision=false',
@@ -47,7 +47,7 @@ try{
     child.once('error',error=>{clearTimeout(timer);reject(error);});
     child.once('exit',code=>{clearTimeout(timer);reject(Error('隔离后台提前退出 '+code));});
   });
-  async function waitFor(predicate){const until=Date.now()+8000;while(!await predicate()){if(Date.now()>until)throw Error('自动验证状态未收敛');await pause(30);}}
+  const waitFor=predicate=>pollUntil(predicate,{timeoutMs:8000,intervalMs:30,message:'自动验证状态未收敛'});
   async function api(path,method='GET',body){
     const response=await fetch(base+path,{method,headers:{'X-Pilot-Token':token,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
     assert.ok(response.ok,`隔离接口失败：${path} HTTP ${response.status}`);

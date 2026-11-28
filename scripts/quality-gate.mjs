@@ -9,6 +9,7 @@ import { homedir, tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checkJdkMajor, isDirectRun, resolveJava } from './smoke-env.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const JAVA_DIRS = ['pilot-core/src/main/java', 'pilot-core/src/test/java', 'pilot-server/src/main/java', 'pilot-server/src/test/java'];
@@ -238,14 +239,9 @@ function decodeXml(text) {
 
 // Checkstyle 14 需要 JDK 21+，直接拿 PATH 上的旧 JDK 会抛 LinkageError；这里先探测版本给出可执行的提示。
 function javaBinary() {
-  const candidate = process.env.JAVA_HOME
-    ? join(process.env.JAVA_HOME, 'bin', process.platform === 'win32' ? 'java.exe' : 'java') : 'java';
+  const candidate = resolveJava();
   const probe = runCapture(candidate, ['-version']);
-  const reported = /version "(\d+)/.exec(`${probe.stdout}${probe.stderr}`)?.[1];
-  if (!reported) throw new Error(`无法运行 java（${candidate}）：请把 JAVA_HOME 指向 JDK 21 或 25`);
-  if (Number(reported) < 21) {
-    throw new Error(`运行 Checkstyle 需要 JDK 21+，当前是 ${reported}：请把 JAVA_HOME 指向 JDK 21 或 25`);
-  }
+  checkJdkMajor(`${probe.stdout}${probe.stderr}`, 21, '运行 Checkstyle');
   return candidate;
 }
 
@@ -268,31 +264,34 @@ function lintJava(entries) {
   for (let offset = 0; offset < entries.length; offset += batchSize) {
     const batch = entries.slice(offset, offset + batchSize).map((entry) => entry.abs);
     const workDir = mkdtempSync(join(tmpdir(), 'pilot-checkstyle-'));
-    const seen = new Set();
-    for (const [index, configName] of configs.entries()) {
-      const output = join(workDir, `report-${index}.xml`);
-      const configPath = join(workDir, configName);
-      writeFileSync(configPath, readFileSync(join(configDir, configName), 'utf8'), 'utf8');
-      const args = ['-cp', classpath, 'com.puppycrawl.tools.checkstyle.Main', '-c', configPath,
-        '-f', 'xml', '-o', output, ...batch];
-      const result = runCapture(javaBin, args);
-      if (!existsSync(output)) {
-        throw new Error(`Checkstyle 执行失败（${configName}）：${result.stderr.trim() || `退出码 ${result.status}`}`);
+    try {
+      const seen = new Set();
+      for (const [index, configName] of configs.entries()) {
+        const output = join(workDir, `report-${index}.xml`);
+        const configPath = join(workDir, configName);
+        writeFileSync(configPath, readFileSync(join(configDir, configName), 'utf8'), 'utf8');
+        const args = ['-cp', classpath, 'com.puppycrawl.tools.checkstyle.Main', '-c', configPath,
+          '-f', 'xml', '-o', output, ...batch];
+        const result = runCapture(javaBin, args);
+        if (!existsSync(output)) {
+          throw new Error(`Checkstyle 执行失败（${configName}）：${result.stderr.trim() || `退出码 ${result.status}`}`);
+        }
+        for (const finding of parseCheckstyleReport(safeRead(output) ?? '', display, index === 0 ? seen : null)) {
+          const key = `${finding.path}:${finding.line}:${finding.rule}`;
+          if (emitted.has(key)) continue;
+          emitted.add(key);
+          findings.push(finding);
+        }
       }
-      for (const finding of parseCheckstyleReport(safeRead(output) ?? '', display, index === 0 ? seen : null)) {
-        const key = `${finding.path}:${finding.line}:${finding.rule}`;
-        if (emitted.has(key)) continue;
-        emitted.add(key);
-        findings.push(finding);
+      // 检查器没返回结果的文件等于没检查过（例如带 BOM 的 UTF-8 会被静默跳过），必须显式报出来。
+      for (const abs of batch) {
+        if (!seen.has(resolve(abs))) {
+          findings.push({ path: display.get(resolve(abs)) ?? toRepoPath(abs), line: 1, rule: 'unparsed-file', detail: HINTS['unparsed-file'] });
+        }
       }
+    } finally {
+      rmSync(workDir, { recursive: true, force: true });
     }
-    // 检查器没返回结果的文件等于没检查过（例如带 BOM 的 UTF-8 会被静默跳过），必须显式报出来。
-    for (const abs of batch) {
-      if (!seen.has(resolve(abs))) {
-        findings.push({ path: display.get(resolve(abs)) ?? toRepoPath(abs), line: 1, rule: 'unparsed-file', detail: HINTS['unparsed-file'] });
-      }
-    }
-    rmSync(workDir, { recursive: true, force: true });
   }
   return findings;
 }
@@ -414,7 +413,7 @@ function lintAll(entries, options) {
   const javaEntries = options.java ? entries.filter((entry) => JAVA_EXT.test(entry.path)) : [];
   const tsEntries = options.ts ? entries.filter((entry) => TS_EXT.test(entry.path)) : [];
   return [
-    ...lintJava(javaEntries.map((entry) => ({ abs: join(ROOT, entry.path), path: entry.path }))),
+    ...lintJava(javaEntries.map((entry) => ({ abs: entry.abs ?? join(ROOT, entry.path), path: entry.path }))),
     ...lintTs(tsEntries),
     ...layerFindings([...javaEntries, ...tsEntries]),
     ...suppressionFindings([...javaEntries, ...tsEntries]),
@@ -429,8 +428,12 @@ function render(findings, limit) {
 
 function scanAll(options) {
   const paths = [];
-  if (options.java) paths.push(...listFiles(JAVA_DIRS, JAVA_EXT));
-  if (options.ts) paths.push(...listFiles(TS_DIRS, TS_EXT));
+  if (options.files.length) {
+    paths.push(...options.files.filter((path) => (options.java && JAVA_EXT.test(path)) || (options.ts && TS_EXT.test(path))));
+  } else {
+    if (options.java) paths.push(...listFiles(JAVA_DIRS, JAVA_EXT));
+    if (options.ts) paths.push(...listFiles(TS_DIRS, TS_EXT));
+  }
   const entries = paths.map((path) => ({ path, text: safeRead(join(ROOT, path)) ?? '' })).filter((entry) => entry.text);
   return { entries, findings: lintAll(entries, options) };
 }
@@ -444,26 +447,25 @@ function scanChanged(options) {
   const entries = paths.map((path) => ({ path, text: safeRead(join(ROOT, path)) })).filter((entry) => entry.text !== null);
 
   // 基线版本的内容写到临时目录里检查，用同一套规则算出「本来就有的问题」。
-  const baseRoot = join(mkdtempSync(join(tmpdir(), 'pilot-base-')), 'tree');
-  const baseEntries = [];
-  for (const entry of entries) {
-    const stored = git(['show', `${base}:${entry.path}`]);
-    if (stored.status !== 0) continue;
-    const target = join(baseRoot, ...entry.path.split('/'));
-    mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, stored.stdout, 'utf8');
-    baseEntries.push({ path: entry.path, text: stored.stdout, abs: target });
-  }
-  const baseText = new Map(baseEntries.map((entry) => [entry.path, entry.text]));
+  const baseDir = mkdtempSync(join(tmpdir(), 'pilot-base-'));
+  const baseRoot = join(baseDir, 'tree');
   const known = new Set();
-  const baseFindings = [
-    ...lintJava(baseEntries.map((entry) => ({ abs: entry.abs, path: entry.path }))),
-    ...lintTs(baseEntries),
-    ...layerFindings(baseEntries),
-    ...suppressionFindings(baseEntries),
-    ...bomFindings(baseEntries)
-  ];
-  for (const finding of baseFindings) known.add(`${finding.path}|${keyOf(finding, baseText.get(finding.path) ?? '')}`);
+  try {
+    const baseEntries = [];
+    for (const entry of entries) {
+      const stored = git(['show', `${base}:${entry.path}`]);
+      if (stored.status !== 0) continue;
+      const target = join(baseRoot, ...entry.path.split('/'));
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, stored.stdout, 'utf8');
+      baseEntries.push({ path: entry.path, text: stored.stdout, abs: target });
+    }
+    const baseText = new Map(baseEntries.map((entry) => [entry.path, entry.text]));
+    const baseFindings = lintAll(baseEntries, options);
+    for (const finding of baseFindings) known.add(`${finding.path}|${keyOf(finding, baseText.get(finding.path) ?? '')}`);
+  } finally {
+    rmSync(baseDir, { recursive: true, force: true });
+  }
 
   const current = lintAll(entries, options);
   const currentText = new Map(entries.map((entry) => [entry.path, entry.text]));
@@ -494,9 +496,7 @@ function main() {
 }
 
 // 只有直接执行时才跑；被质量同步脚本 import 时只导出规则声明，不产生副作用。
-const invokedPath = process.argv[1] ? resolve(process.argv[1]) : '';
-const modulePath = resolve(fileURLToPath(import.meta.url));
-if (invokedPath && (process.platform === 'win32' ? invokedPath.toLowerCase() === modulePath.toLowerCase() : invokedPath === modulePath)) {
+if (isDirectRun(import.meta.url)) {
   try {
     main();
   } catch (error) {

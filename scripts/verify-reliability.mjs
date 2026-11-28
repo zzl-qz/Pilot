@@ -11,7 +11,7 @@ const windows = process.platform === 'win32';
 async function run(command, args, cwd = root) {
   console.log(`\n> ${command} ${args.join(' ')}`);
   const code = await new Promise((resolveCode, reject) => {
-    const child = spawn(command, args, { cwd, stdio: 'inherit', env: { ...process.env, CI: 'true', PILOT_SKIP_DEPS_ASK: '1' } });
+    const child = spawn(command, args, { cwd, stdio: 'inherit', env: { ...process.env, CI: 'true' } });
     child.once('error', reject); child.once('exit', (code, signal) => resolveCode(signal ? 1 : code));
   });
   if (code !== 0) throw new Error(`检查失败：${command}（${code}）`);

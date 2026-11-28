@@ -9,6 +9,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
+import { isDirectRun } from './smoke-env.mjs';
 
 export const UNOBSERVED = '未观测';
 export const EXIT_OK = 0;
@@ -664,6 +665,6 @@ function main(argv) {
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
+if (isDirectRun(import.meta.url)) {
   process.exitCode = main(process.argv.slice(2));
 }

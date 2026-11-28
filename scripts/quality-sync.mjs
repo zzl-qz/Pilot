@@ -3,8 +3,9 @@
 // 加规则、改阈值只改 rules.json，然后 `--write` 生成；CI 用默认（--check）确认生成的配置没有漂移。
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { GATE_IMPLS } from './quality-gate.mjs';
+import { isDirectRun } from './smoke-env.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const CATALOG_PATH = join(ROOT, 'config', 'quality', 'rules.json');
@@ -194,6 +195,6 @@ function main() {
 }
 
 // 只有直接执行时才跑；被测试 import 时只导出校验和生成函数，不产生副作用。
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isDirectRun(import.meta.url)) {
   main();
 }

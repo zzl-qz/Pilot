@@ -54,7 +54,7 @@ async function fixture(t) {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 10_000,
-      env: { ...process.env, CI: 'true', PILOT_SKIP_DEPS_ASK: '1', PILOT_OFFLINE: 'true', PILOT_FIXTURE_INSTALL: mode },
+      env: { ...process.env, CI: 'true', PILOT_OFFLINE: 'true', PILOT_FIXTURE_INSTALL: mode },
     });
   }
   return { frontend, capture, installed, json, run };

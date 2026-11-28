@@ -13,14 +13,15 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { checkJdkMajor, isDirectRun, resolveJava, waitFor } from './smoke-env.mjs';
 
 const execFileAsync = promisify(execFile);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const DESKTOP_RUNTIME_FILES = [
-  'package.json', 'main.mjs', 'preload.cjs', 'alert-preload.cjs', 'brand-host.mjs',
-  'desktop-shell.mjs', 'desktop-alerts.mjs', 'browser-control.mjs', 'workbench-security.mjs',
-  'protocol.mjs', 'platform-menu.mjs', 'offline-page.mjs', 'directory-picker.mjs',
-  'media-permission.mjs', 'session-export.mjs', 'mobile-bridge.mjs'
+export const DESKTOP_RUNTIME_FILES = [
+  'package.json', 'main.mjs', 'preload.cjs', 'alert-preload.cjs', 'alert-window.html',
+  'brand-host.mjs', 'desktop-shell.mjs', 'desktop-alerts.mjs', 'browser-control.mjs',
+  'workbench-security.mjs', 'protocol.mjs', 'clipboard-files.mjs', 'platform-menu.mjs',
+  'offline-page.mjs', 'directory-picker.mjs', 'media-permission.mjs', 'session-export.mjs'
 ];
 
 async function copyDesktopRuntime(target) {
@@ -31,6 +32,10 @@ async function copyDesktopRuntime(target) {
     try { await cp(path.join(desktopDir, file), path.join(destination, file)); }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
   }
+  await cp(
+    path.join(ROOT, 'pilot-core/src/main/resources/browser/browser-policy.mjs'),
+    path.join(destination, 'browser-policy.mjs')
+  );
   try { await cp(path.join(desktopDir, 'assets'), path.join(destination, 'assets'), { recursive: true }); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
   const bridge = path.join(ROOT, 'mobile-bridge/lib');
@@ -220,17 +225,14 @@ async function resolveJavaHome(configured) {
 }
 
 async function verifyJdkVersion(javaHome) {
-  const javaBin = path.join(javaHome, 'bin', executableName('java'));
+  const javaBin = resolveJava(javaHome);
   const { stdout, stderr } = await execFileAsync(javaBin, ['-version']);
-  const major = Number((stderr + stdout).match(/version\s+"(\d+)/)?.[1]);
-  if (!Number.isFinite(major) || major < 25) {
-    throw new Error(`jlink 打包需要 Java 25+，当前检测到：${(stderr + stdout).split('\n')[0] || '未知版本'}`);
-  }
+  checkJdkMajor(stderr + stdout, 25, 'jlink 打包');
   return javaBin;
 }
 
 async function verifyJdkTarget(javaHome, platform, arch) {
-  const bin = path.join(javaHome, 'bin', executableName('java'));
+  const bin = resolveJava(javaHome);
   const { stdout, stderr } = await execFileAsync(bin, ['-XshowSettings:properties', '-version']);
   const details = stdout + stderr;
   const homePlatform = process.platform;
@@ -309,22 +311,21 @@ async function verifyBundledRuntime(javaBin, jarPath) {
       });
     });
 
-    let health = null;
-    for (let attempt = 0; attempt < 20; attempt++) {
+    const health = await waitFor(async () => {
       try {
-        health = await fetch(`http://127.0.0.1:${port}/api/health`);
-        if (health.ok) break;
-      } catch { /* 等待 Servlet 就绪 */ }
-      await new Promise((r) => setTimeout(r, 250));
-    }
-    if (!health?.ok) throw new Error(`/api/health 返回 ${health?.status ?? '无响应'}（port=${port}）`);
+        const res = await fetch(`http://127.0.0.1:${port}/api/health`);
+        return res.ok ? res : null;
+      } catch {
+        return null;
+      }
+    }, { timeoutMs: 5000, intervalMs: 250, message: `/api/health 无响应或未就绪（port=${port}）` });
     const diag = await fetch(`http://127.0.0.1:${port}/api/diagnostics/export`);
     if (!diag.ok) throw new Error(`/api/diagnostics/export 返回 ${diag.status}`);
     const bundle = await diag.json();
     if (!bundle?.sanitized) throw new Error('脱敏诊断包未包含 sanitized=true');
     return { port, healthStatus: health.status, diagnosticsStatus: diag.status };
   } finally {
-    if (child && child.exitCode === null) {
+    if (child && child.exitCode === null && child.signalCode === null) {
       child.kill('SIGTERM');
       await new Promise((resolve) => {
         const force = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} resolve(); }, 5000);
@@ -437,8 +438,7 @@ export async function packageRelease(rawOptions) {
   }
 }
 
-const isDirect = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isDirect) {
+if (isDirectRun(import.meta.url)) {
   packageRelease(parseArgs(process.argv.slice(2)))
     .then(({ outDir, manifest }) => {
       const jreMb = (manifest.jreSizeBytes / (1024 * 1024)).toFixed(1);

@@ -3,8 +3,9 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveJava } from './smoke-env.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'pilot-mobile');
-const java = process.env.JAVA_HOME ? path.join(process.env.JAVA_HOME, 'bin', process.platform === 'win32' ? 'java.exe' : 'java') : 'java';
+const java = resolveJava();
 const operation = process.argv[2] || 'build';
 let args;
 if (operation === 'bridge') {

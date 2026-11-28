@@ -7,11 +7,11 @@ import {resolve,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {release} from 'node:os';
 import {prepareDesktopRuntime} from '../pilot-desktop/prepare-runtime.mjs';
+import {redactPairingCodes as redact} from './smoke-env.mjs';
 const root=fileURLToPath(new URL('..',import.meta.url));
 const output=resolve(process.env.PILOT_DESKTOP_REPORT_DIR||join(root,'pilot-desktop/out/host-report',`${process.platform}-${process.arch}`));
 await mkdir(output,{recursive:true});
 const report={platform:process.platform,arch:process.arch,osRelease:release(),environment:process.env.CI?'CI runner':'local process',startedAt:new Date().toISOString(),stages:[],success:false};
-const redact=text=>text.replace(/pilot:\/\/pair\/[A-Za-z0-9_-]+/g,'[配对码已隐藏]');
 let active;
 for(const signal of ['SIGTERM','SIGINT'])process.once(signal,()=>{active?.kill(signal);process.exitCode=1;});
 async function stage(name,action){
