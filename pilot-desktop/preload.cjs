@@ -3,23 +3,20 @@ const { contextBridge, ipcRenderer } = require('electron');
 const expectedOrigin = process.argv.find(value => value.startsWith('--pilot-workbench-origin='))?.slice('--pilot-workbench-origin='.length);
 // 默认拒绝：离线页、外部文档和子框架不获得桌面桥；主进程仍独立校验实际来源。
 if (window === window.top && ['http:', 'https:'].includes(location.protocol) && location.origin === expectedOrigin) {
+  const subscribe = (channel, callback, passPayload = true) => {
+    const listener = passPayload ? (_event, payload) => callback(payload) : () => callback();
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
+  };
+
   contextBridge.exposeInMainWorld('pilotDesktop', {
-    onBrowserOpen: callback => {
-      const listener = (_event, message) => callback(message);
-      ipcRenderer.on('pilot-browser-open', listener);
-      return () => ipcRenderer.removeListener('pilot-browser-open', listener);
-    },
-    onNavigationNotice: callback => {
-      const listener = (_event, message) => callback(message);
-      ipcRenderer.on('pilot-navigation-notice', listener);
-      return () => ipcRenderer.removeListener('pilot-navigation-notice', listener);
-    },
+    onBrowserOpen: callback => subscribe('pilot-browser-open', callback),
+    onNavigationNotice: callback => subscribe('pilot-navigation-notice', callback),
     reloadWorkbench: () => ipcRenderer.invoke('pilot-workbench-reload'),
     onWorkbenchCommand: callback => {
-      const listener = (_event, command) => callback(command);
-      ipcRenderer.on('pilot-workbench-command', listener);
+      const unsubscribe = subscribe('pilot-workbench-command', callback);
       ipcRenderer.send('pilot-workbench-ready');
-      return () => ipcRenderer.removeListener('pilot-workbench-command', listener);
+      return unsubscribe;
     },
     copyPairingCode: code => ipcRenderer.invoke('pilot-mobile-copy', code),
     readClipboardFiles: limits => ipcRenderer.invoke('pilot:read-clipboard-files', limits),
@@ -30,28 +27,12 @@ if (window === window.top && ['http:', 'https:'].includes(location.protocol) && 
     showNativeNotification: (payload) => ipcRenderer.invoke('pilot:notify-show', payload),
     setWindowAttention: (payload) => ipcRenderer.invoke('pilot:window-attention', payload),
     focusMainWindow: () => ipcRenderer.invoke('pilot:window-focus'),
-    onAlertAction: (callback) => {
-      const listener = (_event, action) => callback(action);
-      ipcRenderer.on('pilot-alert-action', listener);
-      return () => ipcRenderer.removeListener('pilot-alert-action', listener);
-    },
-    onWindowFocusChange: (callback) => {
-      const listener = (_event, payload) => callback(payload);
-      ipcRenderer.on('pilot-window-focus', listener);
-      return () => ipcRenderer.removeListener('pilot-window-focus', listener);
-    },
+    onAlertAction: (callback) => subscribe('pilot-alert-action', callback),
+    onWindowFocusChange: (callback) => subscribe('pilot-window-focus', callback),
     syncDesktopRuntime: (payload) => ipcRenderer.invoke('pilot:desktop-runtime-sync', payload),
     setGlobalShortcut: (accelerator) => ipcRenderer.invoke('pilot:desktop-shortcut-set', accelerator),
-    onDesktopPreferenceAction: (callback) => {
-      const listener = (_event, action) => callback(action);
-      ipcRenderer.on('pilot-desktop-pref-action', listener);
-      return () => ipcRenderer.removeListener('pilot-desktop-pref-action', listener);
-    },
-    onMobileConnection: callback => {
-      const listener = () => callback();
-      ipcRenderer.on('pilot-mobile-open', listener);
-      return () => ipcRenderer.removeListener('pilot-mobile-open', listener);
-    },
+    onDesktopPreferenceAction: (callback) => subscribe('pilot-desktop-pref-action', callback),
+    onMobileConnection: callback => subscribe('pilot-mobile-open', callback, false),
     openMobileConnection: () => ipcRenderer.invoke('pilot-mobile-open'),
     ensureTab: (sessionId) => ipcRenderer.invoke('pilot-browser-ensure', sessionId),
     navigate: (url) => ipcRenderer.invoke('pilot-browser-navigate', url),
@@ -67,35 +48,14 @@ if (window === window.top && ['http:', 'https:'].includes(location.protocol) && 
     logs: (network) => ipcRenderer.invoke('pilot-browser-logs', Boolean(network)),
     openMenu: () => ipcRenderer.invoke('pilot-browser-menu'),
     find: (text) => ipcRenderer.invoke('pilot-browser-find', text),
-    onLog: (callback) => {
-      const listener = (_event, entry) => callback(entry);
-      ipcRenderer.on('pilot-browser-log', listener);
-      return () => ipcRenderer.removeListener('pilot-browser-log', listener);
-    },
-    onQuote: (callback) => {
-      const listener = (_event, text) => callback(text);
-      ipcRenderer.on('pilot-browser-quote', listener);
-      return () => ipcRenderer.removeListener('pilot-browser-quote', listener);
-    },
-    onDownload: (callback) => {
-      const listener = (_event, info) => callback(info);
-      ipcRenderer.on('pilot-browser-download', listener);
-      return () => ipcRenderer.removeListener('pilot-browser-download', listener);
-    },
+    onLog: (callback) => subscribe('pilot-browser-log', callback),
+    onQuote: (callback) => subscribe('pilot-browser-quote', callback),
+    onDownload: (callback) => subscribe('pilot-browser-download', callback),
     pick: () => ipcRenderer.invoke('pilot-browser-pick'),
     resetEmulation: () => ipcRenderer.invoke('pilot-browser-reset-emulation'),
     setBounds: (bounds) => ipcRenderer.send('pilot-browser-bounds', bounds),
     setWorkspace: (workspace) => ipcRenderer.send('pilot-browser-workspace', workspace),
-    onState: (callback) => {
-      const listener = (_event, state) => callback(state);
-      ipcRenderer.on('pilot-browser-state', listener);
-      return () => ipcRenderer.removeListener('pilot-browser-state', listener);
-    },
-    focusAddress: (callback) => {
-      const listener = () => callback();
-      ipcRenderer.on('pilot-browser-focus-address', listener);
-      return () => ipcRenderer.removeListener('pilot-browser-focus-address', listener);
-    }
+    onState: (callback) => subscribe('pilot-browser-state', callback),
+    focusAddress: (callback) => subscribe('pilot-browser-focus-address', callback, false)
   });
-
 }

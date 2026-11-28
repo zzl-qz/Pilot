@@ -5,6 +5,7 @@ import {
   buildTrayMenuTemplate,
   createOfflineReconnector,
   createPowerAwakeController,
+  formatTrayStatus,
   normalizeWindowBounds,
   shouldHideOnClose
 } from '../desktop-shell.mjs';
@@ -57,6 +58,8 @@ test('buildTrayMenuTemplate reflects runtime counts, pending shortcut, and prefs
   });
   assert.match(items[0].label, /1 项待处理/);
   assert.match(items[0].label, /2 项执行中/);
+  assert.equal(formatTrayStatus({ pendingCount: 1, runningCount: 2 }, { separator: ' / ', prefix: 'Pilot · ', idle: 'Pilot 工作台' }), 'Pilot · 1 项待处理 / 2 项执行中');
+  assert.equal(formatTrayStatus({}, { separator: ' / ', prefix: 'Pilot · ', idle: 'Pilot 工作台' }), 'Pilot 工作台');
   const showItem = items.find((i) => i.label === '显示主窗口');
   assert.ok(showItem);
   const pendingItem = items.find((i) => i.label?.includes('处理待确认事项'));

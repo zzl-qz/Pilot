@@ -1,6 +1,26 @@
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
+async function loadBrowserPolicy() {
+  try {
+    return await import(new URL('./browser-policy.mjs', import.meta.url));
+  } catch (error) {
+    if (error?.code !== 'ERR_MODULE_NOT_FOUND' && error?.code !== 'ENOENT') throw error;
+    return await import(new URL('../pilot-core/src/main/resources/browser/browser-policy.mjs', import.meta.url));
+  }
+}
+
+const browserPolicy = await loadBrowserPolicy();
+
+export const {
+  DANGEROUS_DOWNLOAD_EXTENSIONS,
+  isDangerousDownloadExtension,
+  isLoopbackHost: isLoopback,
+  sanitizeDiagnosticText: scrubLogText,
+  sanitizeDiagnosticUrl,
+  sanitizeDownloadFilename
+} = browserPolicy;
+
 /** 人在地址栏输入的地址。本机没写协议时用 http，其它主机用 https。 */
 export function userPageUrl(input) {
   const text = String(input || '').trim();
@@ -13,45 +33,8 @@ export function userPageUrl(input) {
     return null;
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
-  if (!hasScheme) {
-    if (!isLoopback(url.hostname)) url.protocol = 'https:';
-  }
+  if (!hasScheme && !isLoopback(url.hostname)) url.protocol = 'https:';
   return url.href;
-}
-
-/**
- * 桌面浏览器里，人已经打开的 http(s) 页面智能体可以点、可以输入。
- * 无头浏览器没有「眼前这一页」，仍然只许本机源。
- */
-export function agentMayTouchPage(url, desktop) {
-  if (!url || String(url).includes('/marker/')) return true;
-  let parsed;
-  try {
-    parsed = new URL(String(url));
-  } catch {
-    return false;
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
-  if (desktop) return true;
-  return isLoopback(parsed.hostname);
-}
-
-/** 智能体只能操作这些源。人自己打开的页面不受这一条限制。 */
-export function agentMayOperate(url) {
-  let parsed;
-  try {
-    parsed = new URL(String(url || ''));
-  } catch {
-    return false;
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
-  return isLoopback(parsed.hostname);
-}
-
-function isLoopback(hostname) {
-  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  return host === 'localhost' || host.endsWith('.localhost') || host === '127.0.0.1'
-    || host === '::1' || /^127\.\d+\.\d+\.\d+$/.test(host);
 }
 
 /** 工作区一个持久分区，cookie 不串到另一个工作区，也不读系统浏览器。 */
@@ -72,46 +55,6 @@ export function snapBounds(bounds) {
 
 export function markerPath(tabId) {
   return `/marker/${encodeURIComponent(tabId)}`;
-}
-
-const DANGEROUS_DOWNLOAD_EXTENSIONS = new Set([
-  '.exe', '.bat', '.cmd', '.com', '.msi', '.scr', '.pif', '.vbs', '.vbe',
-  '.js', '.jse', '.wsf', '.wsh', '.ps1', '.psm1', '.sh', '.bash', '.zsh',
-  '.command', '.app', '.dmg', '.pkg', '.deb', '.rpm', '.appimage', '.run',
-  '.jar', '.lnk', '.reg', '.hta', '.cpl', '.msc', '.desktop', '.url', '.webloc'
-]);
-
-const SENSITIVE_PARAM_PATTERN = /([?&#])(token|access_token|id_token|refresh_token|auth|code|password|passwd|key|api_key|apikey|secret|sig|signature|session|sessionid|sid|jwt|credential|oauth_token)=([^&#\s]*)/gi;
-const BEARER_PATTERN = /(Bearer\s+)[A-Za-z0-9._~+/=-]{6,}/gi;
-
-export function sanitizeDownloadFilename(raw) {
-  const leaf = String(raw || '')
-    .replace(/\\/g, '/')
-    .split('/')
-    .filter(Boolean)
-    .pop() || '';
-  const cleaned = leaf
-    .replace(/[\x00-\x1f<>:"|?*]/g, '_')
-    .replace(/^\.+/, '')
-    .trim();
-  if (!cleaned || cleaned === '.' || cleaned === '..') {
-    return 'download.bin';
-  }
-  if (cleaned.length <= 120) {
-    return cleaned;
-  }
-  const dot = cleaned.lastIndexOf('.');
-  if (dot > 0 && cleaned.length - dot <= 16) {
-    const ext = cleaned.slice(dot);
-    return cleaned.slice(0, 120 - ext.length) + ext;
-  }
-  return cleaned.slice(0, 120);
-}
-
-export function isDangerousDownloadExtension(filename) {
-  const clean = String(filename || '').replace(/[\s.]+$/, '').toLowerCase();
-  const dot = clean.lastIndexOf('.');
-  return dot >= 0 && DANGEROUS_DOWNLOAD_EXTENSIONS.has(clean.slice(dot));
 }
 
 export function isWindowsUncPath(value) {
@@ -171,12 +114,6 @@ export function isRegularFileStat(info) {
   return Boolean(info?.isFile?.() && !info.isSymbolicLink?.());
 }
 
-function scrubLogText(text) {
-  return String(text || '')
-    .replace(SENSITIVE_PARAM_PATTERN, '$1$2=***')
-    .replace(BEARER_PATTERN, '$1***');
-}
-
 /** 桌面页自己的控制台 / 网络记录。空列表给一句固定说明，和旧面板同一句。 */
 export function formatPageLogs(entries, kind) {
   const list = Array.isArray(entries) ? entries : [];
@@ -184,12 +121,15 @@ export function formatPageLogs(entries, kind) {
     if (!list.length) return '没有网络记录';
     return list.map((item) => {
       const status = item.statusCode || scrubLogText(item.error || '');
-      return `${item.method || 'GET'} ${status} ${scrubLogText(item.url || '')}`.trim();
+      return `${item.method || 'GET'} ${status} ${sanitizeDiagnosticUrl(item.url || '')}`.trim();
     }).join('\n');
   }
   if (!list.length) return '没有控制台记录';
   return list.map((item) => {
-    const where = item.sourceId ? ` @ ${scrubLogText(item.sourceId)}${item.lineNumber ? ':' + item.lineNumber : ''}` : '';
+    const source = item.sourceId
+      ? (/^https?:\/\//i.test(item.sourceId) ? sanitizeDiagnosticUrl(item.sourceId) : scrubLogText(item.sourceId))
+      : '';
+    const where = source ? ` @ ${source}${item.lineNumber ? ':' + item.lineNumber : ''}` : '';
     return `[${item.level || 'info'}] ${scrubLogText(item.message || '')}${where}`;
   }).join('\n');
 }

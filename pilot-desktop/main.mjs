@@ -4,23 +4,20 @@ import { installMicrophonePermissions } from './media-permission.mjs';
 import { configuredWorkbenchUrl, workbenchOrigin, workbenchIpc, installWorkbenchNavigation } from './workbench-security.mjs';
 import { app, BrowserWindow, WebContentsView, ipcMain, session, Menu, Tray, globalShortcut, powerSaveBlocker, nativeImage, systemPreferences, dialog, clipboard, Notification, screen } from 'electron';
 import { createDesktopAlertManager } from './desktop-alerts.mjs';
-import { buildTrayMenuTemplate, createOfflineReconnector, createPowerAwakeController, normalizeWindowBounds, shouldHideOnClose } from './desktop-shell.mjs';
+import { buildTrayMenuTemplate, createOfflineReconnector, createPowerAwakeController, formatTrayStatus, normalizeWindowBounds, shouldHideOnClose } from './desktop-shell.mjs';
+import { readClipboardFiles } from './clipboard-files.mjs';
 import { startBrowserControl } from './browser-control.mjs';
 import { randomBytes, randomInt } from 'node:crypto';
 import net from 'node:net';
-import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, lstatSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hostname, homedir } from 'node:os';
 import {
   formatPageLogs,
-  isRegularFileStat,
-  isWindowsUncPath,
   isDangerousDownloadExtension,
   markerPath,
   partitionName,
-  parseClipboardFilePaths,
   sanitizeDownloadFilename,
   snapBounds,
   userPageUrl
@@ -564,6 +561,12 @@ function detachActive() {
   broadcast();
 }
 
+function resolveControlTargets(body) {
+  const selected = body.tabId ? [tabs.get(body.tabId)]
+    : body.sessionId ? [...tabs.values()].filter(tab => tab.sessionId === body.sessionId) : [activeTab()];
+  return selected.filter(Boolean);
+}
+
 let controlPort = 0;
 
 async function startControl() {
@@ -591,17 +594,13 @@ async function startControl() {
       return state();
     },
     emulate(body) {
-      const selected = body.tabId ? [tabs.get(body.tabId)]
-        : body.sessionId ? [...tabs.values()].filter(tab => tab.sessionId === body.sessionId) : [activeTab()];
-      const targets = selected.filter(Boolean);
+      const targets = resolveControlTargets(body);
       if (!targets.length) return null;
       for (const tab of targets) emulate(tab, Number(body.width) || 0, Number(body.height) || 0);
       return { ok: true, emulated: targets[0].emulated || null };
     },
     control(body) {
-      const matches = body.tabId ? [tabs.get(body.tabId)]
-        : body.sessionId ? [...tabs.values()].filter(tab => tab.sessionId === body.sessionId) : [activeTab()];
-      const targets = matches.filter(Boolean);
+      const targets = resolveControlTargets(body);
       if (!targets.length) return null;
       const active = Boolean(body.agentControlled);
       const status = active ? String(body.controlStatus || '') : '';
@@ -776,7 +775,7 @@ function installWorkbenchKeys(contents) {
 
 async function openMobileConnection() {
   if (!shell || shell.isDestroyed()) throw new Error('请先打开 Pilot 工作台');
-  shell.show(); shell.focus();
+  focusMainShell();
   if (!workbench.send('pilot-mobile-open')) throw new Error('请先连接 Pilot 工作台，再打开手机连接');
 }
 
@@ -804,114 +803,13 @@ workbench.handle('pilot-mobile-copy', async (event, code) => {
 });
 
 // workbench.handle 在打开弹框前和返回后都检查主窗口、主框架与 origin。
-
-// 系统文件管理器复制文件后，浏览器剪贴板事件通常只有路径；按用户主动 Ctrl+V 读取一次。
-const CLIPBOARD_IMAGE_MIME = new Map([
-  ['.png', 'image/png'], ['.jpg', 'image/jpeg'], ['.jpeg', 'image/jpeg'],
-  ['.webp', 'image/webp'], ['.gif', 'image/gif']
-]);
-
-function clipboardLimits(raw) {
-  const value = raw && typeof raw === 'object' ? raw : {};
-  const limit = (item, fallback, max) => {
-    const number = Number(item);
-    return Number.isSafeInteger(number) && number > 0 ? Math.min(number, max) : fallback;
-  };
-  return {
-    maxFiles: limit(value.maxFiles, 64, 64),
-    maxFileBytes: limit(value.maxFileBytes, 2 * 1024 * 1024, 64 * 1024 * 1024),
-    maxTotalBytes: limit(value.maxTotalBytes, 25 * 1024 * 1024, 128 * 1024 * 1024)
-  };
-}
-
-function clipboardPath(value) {
-  let text = String(value || '').replace(/^\uFEFF/, '').trim();
-  if (!text || text === 'copy' || text.startsWith('#')) return '';
-  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
-    text = text.slice(1, -1);
-  }
-  if (/^file:/i.test(text)) {
-    try { return fileURLToPath(new URL(text)); } catch { return ''; }
-  }
-  if (process.platform === 'win32') {
-    if (isWindowsUncPath(text)) return '';
-    return /^[A-Za-z]:[\\/]/.test(text) ? text : '';
-  }
-  return text.startsWith('/') ? text : '';
-}
-
-function clipboardFilePaths(limit) {
-  // Windows 不区分大小写：同一个文件可能以不同大小写出现两次，去重但不能改写真实大小写
-  const found = new Map();
-  const key = path => (process.platform === 'win32' ? path.toLowerCase() : path);
-  const addPaths = values => {
-    for (const line of values) {
-      if (found.size >= limit) return;
-      const path = clipboardPath(line);
-      if (path && !found.has(key(path))) found.set(key(path), path);
-    }
-  };
-  let formats = [];
-  try { formats = clipboard.availableFormats() || []; } catch { /* 无系统剪贴板 */ }
-  for (const format of formats) {
-    try {
-      const data = /FileNameW|CF_HDROP/i.test(format) ? clipboard.readBuffer(format) : clipboard.read(format);
-      addPaths(parseClipboardFilePaths(format, data, process.platform));
-    } catch { /* 该格式不可读，继续看其他格式 */ }
-  }
-  if (!found.size) {
-    try { addPaths(clipboard.readText().split(/\r?\n/)); } catch { /* 忽略 */ }
-  }
-  return [...found.values()];
-}
-
-async function readClipboardFiles(rawLimits) {
-  const limits = clipboardLimits(rawLimits);
-  const human = bytes => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`);
-  const paths = clipboardFilePaths(limits.maxFiles);
-  if (!paths.length) {
-    return { ok: false, error: '系统剪贴板中没有文件。复制文件后再按 Ctrl+V，或直接拖入文件。' };
-  }
-  if (paths.length > limits.maxFiles) {
-    return { ok: false, error: `一次最多附加 ${limits.maxFiles} 个文件。` };
-  }
-  const files = [];
-  let total = 0;
-  for (const path of paths) {
-    const name = basename(path) || '附件';
-    let info;
-    try { info = lstatSync(path); } catch { return { ok: false, error: `无法读取「${name}」，文件可能已移动或没有权限。` }; }
-    if (!isRegularFileStat(info)) {
-      return { ok: false, error: `「${name}」不是普通文件；文件夹请压缩后再拖入，或拖入其中的文件。` };
-    }
-    if (info.size <= 0) {
-      return { ok: false, error: `「${name}」是空文件，无法添加。` };
-    }
-    if (info.size > limits.maxFileBytes) {
-      return { ok: false, error: `「${name}」超过单文件上限（${human(limits.maxFileBytes)}）。` };
-    }
-    total += info.size;
-    if (total > limits.maxTotalBytes) {
-      return { ok: false, error: `附件总量超过单条消息上限（${human(limits.maxTotalBytes)}）。` };
-    }
-    let bytes;
-    try { bytes = await readFile(path); } catch { return { ok: false, error: `无法读取「${name}」的内容。` }; }
-    const mimeType = CLIPBOARD_IMAGE_MIME.get(name.slice(name.lastIndexOf('.')).toLowerCase()) || 'application/octet-stream';
-    files.push({
-      name, mimeType, size: bytes.length,
-      dataBase64: `data:${mimeType};base64,${bytes.toString('base64')}`
-    });
-  }
-  return { ok: true, files };
-}
-
 workbench.handle('pilot:save-session-markdown', (event, name, text) => saveSessionMarkdown(name, text, async options => {
   const result = await dialog.showSaveDialog(shell, options);
   if (!workbench.trusted(event)) throw new Error('工作台已关闭或切换，请重新导出。');
   return result;
 }));
 workbench.handle('pilot:select-directories', () => selectProjectDirectories({ origin, parent: shell, dialog }));
-workbench.handle('pilot:read-clipboard-files', (_event, limits) => readClipboardFiles(limits));
+workbench.handle('pilot:read-clipboard-files', (_event, limits) => readClipboardFiles(limits, { clipboard }));
 
 let alerts = null;
 let tray = null;
@@ -964,10 +862,7 @@ function focusMainShell() {
 
 function refreshTrayMenu() {
   if (!tray || tray.isDestroyed?.()) return;
-  const parts = [];
-  if (runtimeStatus.pendingCount > 0) parts.push(`${runtimeStatus.pendingCount} 项待处理`);
-  if (runtimeStatus.runningCount > 0) parts.push(`${runtimeStatus.runningCount} 项执行中`);
-  tray.setToolTip(parts.length ? `Pilot · ${parts.join(' / ')}` : 'Pilot 工作台');
+  tray.setToolTip(formatTrayStatus(runtimeStatus, { separator: ' / ', prefix: 'Pilot · ', idle: 'Pilot 工作台' }));
   const template = buildTrayMenuTemplate({
     runningCount: runtimeStatus.runningCount,
     pendingCount: runtimeStatus.pendingCount,
@@ -1004,11 +899,15 @@ function refreshTrayMenu() {
   tray.setContextMenu(Menu.buildFromTemplate(template));
 }
 
-workbench.handle('pilot:alert-show', (_event, payload) => alerts ? alerts.show(payload) : { ok: false });
-workbench.handle('pilot:alert-dismiss', (_event, id) => alerts ? alerts.dismiss(id) : { ok: false });
-workbench.handle('pilot:notify-show', (_event, payload) => alerts ? alerts.showNativeNotification(payload) : { ok: false });
-workbench.handle('pilot:window-attention', (_event, payload) => alerts ? alerts.setWindowAttention(payload) : { ok: false });
-workbench.handle('pilot:window-focus', () => alerts ? alerts.focusMainWindow() : { ok: false });
+for (const [channel, method] of [
+  ['pilot:alert-show', 'show'],
+  ['pilot:alert-dismiss', 'dismiss'],
+  ['pilot:notify-show', 'showNativeNotification'],
+  ['pilot:window-attention', 'setWindowAttention'],
+  ['pilot:window-focus', 'focusMainWindow']
+]) {
+  workbench.handle(channel, (_event, payload) => alerts ? alerts[method](payload) : { ok: false });
+}
 workbench.handle('pilot:desktop-runtime-sync', (_event, payload) => {
   if (payload && typeof payload === 'object') {
     runtimeStatus.runningCount = Math.max(0, Number(payload.runningCount) || 0);
@@ -1045,16 +944,14 @@ workbench.handle('pilot:desktop-shortcut-set', (_event, accelerator) => {
   }
 });
 
-ipcMain.on('pilot-alert-act', (event, payload) => {
-  const contents = alerts?.webContents();
-  if (!contents || event.sender !== contents) return;
-  alerts.handleAlertAct(payload);
-});
-ipcMain.on('pilot-alert-resize', (event, height) => {
-  const contents = alerts?.webContents();
-  if (!contents || event.sender !== contents) return;
-  alerts.handleAlertResize(height);
-});
+function alertOn(channel, handler) {
+  ipcMain.on(channel, (event, payload) => {
+    const contents = alerts?.webContents();
+    if (contents && event.sender === contents) handler(payload);
+  });
+}
+alertOn('pilot-alert-act', (payload) => alerts.handleAlertAct(payload));
+alertOn('pilot-alert-resize', (height) => alerts.handleAlertResize(height));
 
 function installMenu() {
   if (smoke) return;
@@ -1275,18 +1172,24 @@ app.on('activate', () => {
   focusMainShell();
 });
 
-app.on('before-quit', () => {
+let cleanedUp = false;
+function cleanupOnExit() {
+  if (cleanedUp) return;
+  cleanedUp = true;
   quitting = true;
   clearTimeout(boundsSaveTimer);
+  boundsSaveTimer = null;
   powerAwake.destroy();
   try { globalShortcut.unregisterAll(); } catch { /* 忽略 */ }
   tray?.destroy?.();
   tray = null;
   alerts?.destroy();
+  alerts = null;
   clearEndpoint();
-});
+}
+
+app.on('before-quit', cleanupOnExit);
 app.on('window-all-closed', () => {
-  alerts?.destroy();
-  clearEndpoint();
+  cleanupOnExit();
   app.quit();
 });

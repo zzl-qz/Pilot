@@ -71,6 +71,16 @@ export function normalizeWindowBounds(saved, displays, fallback = DEFAULT_WINDOW
   return { x, y, width, height, maximized };
 }
 
+export function formatTrayStatus(
+  { runningCount = 0, pendingCount = 0 } = {},
+  { separator = ' · ', prefix = '状态：', idle = '状态：空闲就绪' } = {}
+) {
+  const parts = [];
+  if (pendingCount > 0) parts.push(`${pendingCount} 项待处理`);
+  if (runningCount > 0) parts.push(`${runningCount} 项执行中`);
+  return parts.length ? `${prefix}${parts.join(separator)}` : idle;
+}
+
 export function buildTrayMenuTemplate({
   runningCount = 0,
   pendingCount = 0,
@@ -79,10 +89,7 @@ export function buildTrayMenuTemplate({
   windowVisible = true,
   handlers = {}
 } = {}) {
-  const statusParts = [];
-  if (pendingCount > 0) statusParts.push(`${pendingCount} 项待处理`);
-  if (runningCount > 0) statusParts.push(`${runningCount} 项执行中`);
-  const statusLabel = statusParts.length ? `状态：${statusParts.join(' · ')}` : '状态：空闲就绪';
+  const statusLabel = formatTrayStatus({ runningCount, pendingCount });
 
   const items = [
     { label: statusLabel, enabled: false },

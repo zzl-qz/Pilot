@@ -71,23 +71,34 @@ export async function externalRequestAllowed({ url, method, navigation, origin, 
   return true;
 }
 
-/**
- * 外部 CDP 端点只接受本机回环地址：连到网络对端等于把真实浏览器的控制权交出去。
- *
- * <p>返回规范化后的 origin，写错协议或主机一律 null。
- */
-export function cdpEndpoint(value) {
+/** 判断主机名是否为本机回环地址（localhost / *.localhost / 127.0.0.0/8 / ::1）。 */
+export function isLoopbackHost(hostname) {
+  const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  return host === 'localhost' || host.endsWith('.localhost') || host === '::1'
+    || host === '127.0.0.1' || /^127\.\d+\.\d+\.\d+$/.test(host);
+}
+
+/** 返回规范化的本机回环 origin（含端口），非回环地址返回 null。 */
+export function loopbackOrigin(value) {
   if (value == null) return null;
   const text = String(value).trim();
   if (!text) return null;
   try {
     const url = new URL(text);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
-    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
-    const loopback = host === 'localhost' || host.endsWith('.localhost') || host === '::1'
-      || host === '127.0.0.1' || /^127\.\d+\.\d+\.\d+$/.test(host);
-    return loopback ? url.origin : null;
-  } catch { return null; }
+    return isLoopbackHost(url.hostname) ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 外部 CDP 端点只接受本机回环地址：连到网络对端等于把真实浏览器的控制权交出去。
+ *
+ * <p>返回规范化后的 origin，写错协议或主机一律 null。
+ */
+export function cdpEndpoint(value) {
+  return loopbackOrigin(value);
 }
 
 /**
@@ -105,7 +116,9 @@ export function externalAgentHostAllowed(value, hosts) {
   return allow.length > 0 && hostDecision(parsed.hostname.toLowerCase(), hosts) === 'allow';
 }
 
-const SENSITIVE_QUERY_KEY = /^(?:access[_-]?token|refresh[_-]?token|id[_-]?token|token|secret|password|passwd|authorization|auth|credential|session|cookie|api[_-]?key|client[_-]?secret|code|otp|state)$/i;
+const SENSITIVE_QUERY_NAMES = 'access[_-]?token|refresh[_-]?token|id[_-]?token|oauth[_-]?token|token|secret|password|passwd|authorization|auth|credential|session|sessionid|sid|cookie|api[_-]?key|client[_-]?secret|code|otp|state|jwt|sig|signature|key';
+const SENSITIVE_QUERY_KEY = new RegExp(`^(?:${SENSITIVE_QUERY_NAMES})$`, 'i');
+const SENSITIVE_QUERY_PARAM = new RegExp(`([?&#](?:${SENSITIVE_QUERY_NAMES})=)[^&#\\s]*`, 'gi');
 
 /** Remove credential-like values before browser diagnostics are retained or returned to the model. */
 export function sanitizeDiagnosticText(value) {
@@ -114,7 +127,7 @@ export function sanitizeDiagnosticText(value) {
     .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/-]{6,}={0,2}/gi, '$1 [已遮挡]')
     .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]{8,})?/g, '[已遮挡令牌]')
     .replace(/(?<![A-Za-z0-9_-])(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{16,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|glpat-[A-Za-z0-9_-]{10,}|hf_[A-Za-z0-9]{12,})/g, '[已遮挡密钥]')
-    .replace(/([?&#](?:token|access_token|refresh_token|id_token|secret|password|passwd|authorization|auth|credential|session|cookie|api[_-]?key|client[_-]?secret|code|otp|state)=)[^&#\s]*/gi, '$1[已遮挡]')
+    .replace(SENSITIVE_QUERY_PARAM, '$1[已遮挡]')
     .replace(/((?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|passwd|authorization|secret|token)\s*[=:]\s*)(["']?)[^\s"',;&]{4,}/gi, '$1$2[已遮挡]');
 }
 
@@ -189,20 +202,6 @@ export function sensitivePageUrl(value, rules = null) {
   return classifySensitivePage(value, rules) !== null;
 }
 
-/** 返回规范化的本机回环 origin（含端口），非回环地址返回 null。 */
-export function loopbackOrigin(value) {
-  try {
-    const url = new URL(String(value));
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
-    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
-    const loopback = host === 'localhost' || host.endsWith('.localhost') || host === '::1'
-      || host === '127.0.0.1' || /^127\.\d+\.\d+\.\d+$/.test(host);
-    return loopback ? url.origin : null;
-  } catch {
-    return null;
-  }
-}
-
 export const DEFAULT_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024;
 
 export function maxDownloadBytesFromEnv(env = process.env) {
@@ -210,12 +209,54 @@ export function maxDownloadBytesFromEnv(env = process.env) {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_DOWNLOAD_BYTES;
 }
 
-const DANGEROUS_DOWNLOAD_EXTENSIONS = new Set([
-  '.app', '.appx', '.apk', '.applescript', '.bat', '.cmd', '.com', '.command', '.cpl', '.deb',
-  '.dll', '.dmg', '.exe', '.gadget', '.hta', '.img', '.iso', '.jar', '.js', '.jse', '.lnk',
-  '.msi', '.msp', '.pkg', '.ps1', '.psm1', '.reg', '.rpm', '.scf', '.scpt', '.scr', '.sh',
-  '.sys', '.vb', '.vbe', '.vbs', '.workflow', '.wsf'
+export const DANGEROUS_DOWNLOAD_EXTENSIONS = new Set([
+  '.apk', '.app', '.appimage', '.applescript', '.appx', '.bash', '.bat', '.cmd', '.com', '.command',
+  '.cpl', '.deb', '.desktop', '.dll', '.dmg', '.exe', '.gadget', '.hta', '.img', '.iso',
+  '.jar', '.js', '.jse', '.lnk', '.msc', '.msi', '.msp', '.pif', '.pkg', '.ps1',
+  '.psm1', '.reg', '.rpm', '.run', '.scf', '.scpt', '.scr', '.sh', '.sys', '.url',
+  '.vb', '.vbe', '.vbs', '.webloc', '.workflow', '.wsf', '.wsh', '.zsh'
 ]);
+
+const WINDOWS_RESERVED_NAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\s*\..*)?$/i;
+
+function truncateDownloadFilename(cleaned, maxLength, fallback) {
+  if (cleaned.length <= maxLength) return cleaned;
+  const dot = cleaned.lastIndexOf('.');
+  if (dot > 0 && cleaned.length - dot <= 16) {
+    const ext = cleaned.slice(dot);
+    const stem = cleaned.slice(0, maxLength - ext.length).replace(/[. ]+$/, '') || '_';
+    return stem + ext;
+  }
+  return cleaned.slice(0, maxLength).replace(/[. ]+$/, '') || fallback;
+}
+
+/** 清理下载文件名：剔除路径穿越、控制字符与非法符号，保护 Windows 保留设备名，截断时保留扩展名。 */
+export function sanitizeDownloadFilename(raw, fallback = 'download.bin') {
+  const leaf = String(raw || '')
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter(Boolean)
+    .pop() || '';
+  let cleaned = leaf
+    .replace(/[\x00-\x1f<>:"|?*]/g, '_')
+    .trim()
+    .replace(/^\.+/, '')
+    .replace(/[. ]+$/, '')
+    .trim();
+  if (!cleaned || cleaned === '.' || cleaned === '..') return fallback;
+  cleaned = truncateDownloadFilename(cleaned, 120, fallback);
+  if (WINDOWS_RESERVED_NAME.test(cleaned)) {
+    cleaned = truncateDownloadFilename(`_${cleaned}`, 120, fallback);
+  }
+  return cleaned;
+}
+
+/** 识别危险可执行或脚本扩展名（忽略末尾空格与点号，防止绕过）。 */
+export function isDangerousDownloadExtension(filename) {
+  const clean = String(filename || '').replace(/[\s.]+$/, '').toLowerCase();
+  const dot = clean.lastIndexOf('.');
+  return dot >= 0 && DANGEROUS_DOWNLOAD_EXTENSIONS.has(clean.slice(dot));
+}
 
 const DANGEROUS_DOWNLOAD_MIMES = new Set([
   'application/x-msdownload', 'application/x-executable', 'application/x-mach-binary',
@@ -255,7 +296,9 @@ export function inspectDownloadSafety({
   maxBytes = DEFAULT_MAX_DOWNLOAD_BYTES
 } = {}) {
   const cleanName = String(filename || 'download');
-  const extension = extname(cleanName).toLowerCase();
+  const trimmedName = cleanName.replace(/[\s.]+$/, '');
+  const dot = trimmedName.lastIndexOf('.');
+  const extension = (extname(trimmedName) || (dot >= 0 ? trimmedName.slice(dot) : '')).toLowerCase();
   const normalizedMime = String(mimeType || '').split(';')[0].trim().toLowerCase();
   const signature = detectBinarySignature(headBytes);
   const basis = `扩展名=${extension || '无'}，MIME=${normalizedMime || '未知'}，内容签名=${signature || '未命中危险魔数'}`;
@@ -270,7 +313,7 @@ export function inspectDownloadSafety({
       reason: `下载文件超过大小上限（${sizeBytes} 字节 > ${maxBytes} 字节）：${cleanName}`
     };
   }
-  if (DANGEROUS_DOWNLOAD_EXTENSIONS.has(extension)) {
+  if (isDangerousDownloadExtension(cleanName)) {
     return {
       allowed: false,
       extension,

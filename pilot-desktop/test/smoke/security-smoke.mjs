@@ -35,6 +35,7 @@ const invokeCases=[
   ['pilot-browser-find','fixture'],['pilot-browser-logs',false],['pilot-browser-devtools'],['pilot-browser-pick'],
   ['pilot-browser-reset-emulation'],['pilot-workbench-reload'],['pilot-mobile-open'],['pilot-mobile-copy','invalid'],
   ['pilot:select-directories'], ['pilot:save-session-markdown', 'pilot-test.md', 'probe'],
+  ['pilot:read-clipboard-files'],
   ['pilot:alert-show', { id: 'probe', kind: 'done', title: 'probe' }], ['pilot:alert-dismiss', 'probe'],
   ['pilot:notify-show', { title: 'probe', body: 'probe' }], ['pilot:window-attention', { urgentCount: 1 }],
   ['pilot:window-focus'],
@@ -136,7 +137,7 @@ try{
   await desktop.evaluate(async({webContents},{id,filePath,url})=>{const c=webContents.fromId(id);c.session.registerPreloadScript({type:'frame',filePath});await c.loadURL(url);},{id:contentsId,filePath:probe,url:other+'/tab'});
   const guestResults=await desktop.evaluate(async({webContents},{id,cases})=>webContents.fromId(id).executeJavaScript(`Promise.all(${JSON.stringify(cases)}.map(([name,...args])=>ipcProbe.invoke(name,...args)))`),{id:contentsId,cases:invokeCases});
   for(const value of guestResults)assert.equal(value.code,'UNTRUSTED_WORKBENCH');
-  passed.push('ordinary browser view: all 17 invoke channels denied');
+  passed.push(`ordinary browser view: all ${invokeCases.length} invoke channels denied`);
   assert.equal(await desktop.evaluate(()=>process._pilotDirectoryCalls.length),3,'不可信 IPC 不得触发目录弹框');
   const isolated=await desktop.evaluate(({webContents,session},{id,partition})=>webContents.fromId(id).session===session.fromPartition(partition),{id:contentsId,partition:partitionName('security-workspace')});
   assert.equal(isolated,true,'不可信单向消息不能更改工作区分区');

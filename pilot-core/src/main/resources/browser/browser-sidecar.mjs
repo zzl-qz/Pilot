@@ -19,9 +19,9 @@ import { createRequire } from 'node:module';
 import { publicHttps, externalRequestAllowed, externalMutations, requireExternalApproval, hostDecision,
   hostRulesFromEnv, cdpEndpoint, externalAgentHostAllowed, sanitizeDiagnosticText, sanitizeDiagnosticUrl,
   sensitivePageUrl, classifySensitivePage, sensitiveRulesFromEnv, loopbackOrigin,
-  inspectDownloadSafety, maxDownloadBytesFromEnv } from './browser-policy.mjs';
+  inspectDownloadSafety, maxDownloadBytesFromEnv, sanitizeDownloadFilename } from './browser-policy.mjs';
 import { writeFileSync, appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync } from 'node:fs';
-import { basename, dirname, extname, join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 
@@ -39,32 +39,18 @@ const NAVIGATION_TIMEOUT_MS = 30000;
 const MAX_SCREENSHOT_BYTES = 4 * 1024 * 1024;
 let downloadSequence = 0;
 const SENSITIVE_MASK_COLOR = '#171717';
+const SENSITIVE_FIELD_KEYWORDS = ['password', 'token', 'csrf', 'secret', 'otp', 'card', 'cvv', 'cvc', 'security', 'ssn'];
+const SENSITIVE_FIELD_PATTERN_SOURCE = ['one-time-code', ...SENSITIVE_FIELD_KEYWORDS].join('|');
 const SENSITIVE_FIELD_SELECTOR = [
   'input[type="password"]',
   'input[autocomplete*="password" i]',
   'input[autocomplete="one-time-code" i]',
   'input[autocomplete^="cc-" i]',
-  'input[name*="password" i]', 'input[id*="password" i]',
-  'input[name*="token" i]', 'input[id*="token" i]',
-  'input[name*="csrf" i]', 'input[id*="csrf" i]',
-  'input[name*="secret" i]', 'input[id*="secret" i]',
-  'input[name*="otp" i]', 'input[id*="otp" i]',
-  'input[name*="card" i]', 'input[id*="card" i]',
-  'input[name*="cvv" i]', 'input[id*="cvv" i]',
-  'input[name*="cvc" i]', 'input[id*="cvc" i]',
-  'input[name*="security" i]', 'input[id*="security" i]',
-  'input[name*="ssn" i]', 'input[id*="ssn" i]',
-  'textarea[name*="password" i]', 'textarea[id*="password" i]',
-  'textarea[name*="token" i]', 'textarea[id*="token" i]',
-  'textarea[name*="csrf" i]', 'textarea[id*="csrf" i]',
-  'textarea[name*="secret" i]', 'textarea[id*="secret" i]',
-  'textarea[name*="card" i]', 'textarea[id*="card" i]',
-  'textarea[name*="otp" i]', 'textarea[id*="otp" i]',
-  'textarea[name*="cvv" i]', 'textarea[id*="cvv" i]',
-  'textarea[name*="cvc" i]', 'textarea[id*="cvc" i]',
-  'textarea[name*="security" i]', 'textarea[id*="security" i]',
-  'textarea[name*="ssn" i]', 'textarea[id*="ssn" i]',
-  '[data-sensitive]',
+  ...SENSITIVE_FIELD_KEYWORDS.flatMap((kw) => [
+    `input[name*="${kw}" i]`, `input[id*="${kw}" i]`,
+    `textarea[name*="${kw}" i]`, `textarea[id*="${kw}" i]`
+  ]),
+  '[data-sensitive]'
 ].join(',');
 const AGENT_OVERLAY_STYLE = '[data-pilot-agent-overlay] { visibility: hidden !important; }';
 const DEFAULT_VIEWPORT = Object.freeze({ width: 1280, height: 800 });
@@ -78,7 +64,7 @@ const MAX_DOWNLOAD_BYTES = maxDownloadBytesFromEnv();
 const EXTERNAL_CDP = cdpEndpoint(process.env.PILOT_BROWSER_CDP);
 
 let playwright;
-let browserPromise = null;
+const managedBrowsers = { default: null, headed: null };
 let desktopPromise = null;
 let externalPromise = null;
 const sessions = new Map();
@@ -94,17 +80,30 @@ function send(message) {
   process.stdout.write(JSON.stringify(message) + '\n');
 }
 
-function loopbackUrl(value) {
-  let url;
-  try {
-    url = new URL(value);
-  } catch {
-    return false;
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-  const host = url.hostname.toLowerCase();
-  return host === 'localhost' || host.endsWith('.localhost') || host === '127.0.0.1'
-    || host === '[::1]' || host === '::1' || /^127\.\d+\.\d+\.\d+$/.test(host);
+function emitMirrorFrame(session, frame, w, h, url, ts = Date.now()) {
+  send({
+    event: 'mirror-frame',
+    session: session.id,
+    frame, w, h, width: w, height: h,
+    url: sanitizeDiagnosticUrl(url),
+    ts
+  });
+}
+
+function emitControlState(session, event = 'control-state', extra = {}) {
+  send({
+    event,
+    session: session.id,
+    agentControlled: Boolean(session.agentControlled),
+    controlStatus: String(session.controlStatus || ''),
+    ...extra,
+    ts: Date.now()
+  });
+}
+
+function sensitiveMessage(page, detail, suffix = '请由用户完成验证或确认页面状态后继续。') {
+  if (!sensitivePageUrl(page.url(), SENSITIVE_RULES)) return null;
+  return `敏感登录或支付页面${detail}（${sanitizeDiagnosticUrl(page.url())}）。${suffix}`;
 }
 
 function loadPlaywright() {
@@ -176,7 +175,6 @@ function launchArgs() {
 }
 
 let presentHeaded = false;
-let headedPromise = null;
 
 function headlessMode() {
   // 网页里点「打开内置浏览器」后，这一进程改为有头。否则只有显式 false 才开窗口。
@@ -184,19 +182,14 @@ function headlessMode() {
   return (process.env.PILOT_BROWSER_HEADLESS ?? 'true') !== 'false';
 }
 
-async function launchBrowser() {
+async function launchManagedBrowser({ headless, onDisconnect }) {
   const { chromium } = loadPlaywright();
   const executables = candidateExecutables();
   if (executables.length === 0) {
     let expected = '';
-    try {
-      expected = loadPlaywright().chromium.executablePath();
-    } catch {
-      // playwright-core 不可用时不强求给出期望路径
-    }
+    try { expected = chromium.executablePath(); } catch { /* playwright-core 不可用时不强求给出期望路径 */ }
     throw new Error(`没有找到可用的内置 Chromium${expected ? `（期望位置：${expected}）` : ''}。首次启动会自动下载完整版 Chromium（约 400MB）；也可以用 PILOT_BROWSER_PATH 指向已有的浏览器可执行文件。`);
   }
-  const headless = headlessMode();
   const failures = [];
   for (const executablePath of executables) {
     try {
@@ -204,42 +197,10 @@ async function launchBrowser() {
       browser.__executable = executablePath;
       browser.__headless = headless;
       browser.on('disconnected', () => {
-        browserPromise = null;
-        for (const session of sessions.values()) session.dead = true;
-        sessions.clear();
-        send({ event: 'browser-closed', reason: 'disconnected' });
-      });
-      return browser;
-    } catch (error) {
-      failures.push(`${executablePath}: ${String(error.message || error).split('\n')[0]}`);
-    }
-  }
-  throw new Error('浏览器启动失败：' + failures.join('；'));
-}
-
-async function launchHeadedBrowser() {
-  const { chromium } = loadPlaywright();
-  const executables = candidateExecutables();
-  if (executables.length === 0) {
-    throw new Error('没有找到可用的内置 Chromium。首次启动会自动下载完整版 Chromium（约 180MB）。');
-  }
-  const failures = [];
-  for (const executablePath of executables) {
-    try {
-      const browser = await chromium.launch({
-        executablePath,
-        headless: false,
-        args: launchArgs(),
-        timeout: 20000
-      });
-      browser.__executable = executablePath;
-      browser.__headless = false;
-      browser.on('disconnected', () => {
-        headedPromise = null;
-        presentHeaded = false;
-        for (const [id, session] of sessions) {
-          if (!session.desktop) {
-            session.dead = true;
+        onDisconnect(browser);
+        for (const [id, current] of sessions) {
+          if (!current.desktop && !current.external && current.browser === browser) {
+            current.dead = true;
             sessions.delete(id);
           }
         }
@@ -253,25 +214,25 @@ async function launchHeadedBrowser() {
   throw new Error('浏览器启动失败：' + failures.join('；'));
 }
 
-function getHeadedBrowser() {
-  if (!headedPromise) {
-    headedPromise = launchHeadedBrowser().catch((error) => {
-      headedPromise = null;
+function cachedBrowser(slot, factory) {
+  if (!managedBrowsers[slot]) {
+    managedBrowsers[slot] = factory().catch((error) => {
+      managedBrowsers[slot] = null;
       throw error;
     });
   }
-  return headedPromise;
+  return managedBrowsers[slot];
 }
 
-function getBrowser() {
-  if (!browserPromise) {
-    browserPromise = launchBrowser().catch((error) => {
-      browserPromise = null;
-      throw error;
-    });
-  }
-  return browserPromise;
-}
+const getBrowser = () => cachedBrowser('default', () => launchManagedBrowser({
+  headless: headlessMode(),
+  onDisconnect: () => { managedBrowsers.default = null; }
+}));
+
+const getHeadedBrowser = () => cachedBrowser('headed', () => launchManagedBrowser({
+  headless: false,
+  onDisconnect: () => { managedBrowsers.headed = null; presentHeaded = false; }
+}));
 
 function pushLimited(list, entry) {
   list.push(entry);
@@ -629,28 +590,62 @@ async function waitForDesktopPage(browser, tabId, targetId) {
   throw new Error('桌面浏览器里没有出现这个标签。先打开 Pilot 桌面壳。');
 }
 
-async function createDesktopSession(id, desktop) {
-  const response = await fetch(`http://127.0.0.1:${desktop.controlPort}/tabs`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-pilot-token': desktop.token },
-    body: JSON.stringify({ sessionId: id })
-  });
-  if (!response.ok) throw new Error(`桌面浏览器没有接上这个会话（HTTP ${response.status}）`);
-  const created = await response.json();
-  const browser = await connectDesktop(desktop);
-  const page = await waitForDesktopPage(browser, created.tabId, created.targetId);
-  const session = {
-    id, context: page.context(), page, console: [], network: [], dead: false, desktop: true, desktopTabId: created.tabId,
+function createSessionState(id, context, page, overrides = {}) {
+  context.setDefaultTimeout(ACTION_TIMEOUT_MS);
+  context.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
+  return {
+    id, context, page, browser: null, console: [], network: [], dead: false,
+    desktop: false, external: false, desktopTabId: null,
     tabs: new Map(), pageToTabId: new WeakMap(), activeTabId: null, tabSeq: 0,
     allowedLoopbackOrigins: new Set(), currentLoopbackOrigin: null, blockedOrigins: [], downloadResponses: new Map(),
-    mirror: false, capture: false, embed: true, frameOptions: '',
-    mirrorWidth: DEFAULT_MIRROR_WIDTH, mirrorQuality: DEFAULT_MIRROR_QUALITY,
+    mirror: false, capture: false,
+    embed: true, frameOptions: '', mirrorWidth: DEFAULT_MIRROR_WIDTH, mirrorQuality: DEFAULT_MIRROR_QUALITY,
     cdp: null, cdpPage: null, lastFrameAt: 0, historyCdp: null, historyCdpPage: null,
     refFrames: {}, nextDialog: null, dialogs: [], recording: null,
-    agentControlled: false, controlStatus: '', controlToken: randomUUID(), controlAborted: false, stopBindingInstalled: new WeakSet()
+    agentControlled: false, controlStatus: '', controlToken: randomUUID(), controlAborted: false,
+    stopBindingInstalled: new WeakSet(),
+    ...overrides
   };
-  page.context().setDefaultTimeout(ACTION_TIMEOUT_MS);
-  page.context().setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
+}
+
+async function desktopRequest(desktop, path, { method = 'GET', body, errorPrefix = '桌面浏览器请求失败' } = {}) {
+  const headers = { 'x-pilot-token': desktop.token };
+  const init = { method, headers };
+  if (body !== undefined) {
+    headers['content-type'] = 'application/json';
+    init.body = JSON.stringify(body);
+  }
+  const response = await fetch(`http://127.0.0.1:${desktop.controlPort}${path}`, init);
+  if (!response.ok) throw new Error(`${errorPrefix}（HTTP ${response.status}）`);
+  return response.json().catch(() => ({}));
+}
+
+async function desktopTabsForSession(desktop, sessionId) {
+  const body = await desktopRequest(desktop, '/tabs', { errorPrefix: '读取桌面标签失败' });
+  return {
+    activeId: body.activeId,
+    tabs: (body.tabs || []).filter((tab) => tab.sessionId === sessionId)
+  };
+}
+
+async function openDesktopTab(desktop, body, errorPrefix = '新建桌面标签失败') {
+  const created = await desktopRequest(desktop, '/tabs', { method: 'POST', body, errorPrefix });
+  const browser = await connectDesktop(desktop);
+  const page = await waitForDesktopPage(browser, created.tabId, created.targetId);
+  return { created, page };
+}
+
+async function openAndAttachDesktopTab(desktop, current, body, { viewport = DEFAULT_VIEWPORT, errorPrefix = '新建桌面标签失败' } = {}) {
+  const { created, page } = await openDesktopTab(desktop, body, errorPrefix);
+  current.desktopTabId = created.tabId;
+  attachPage(current, page);
+  await handlers.resize(viewport, current);
+  return { created, page };
+}
+
+async function createDesktopSession(id, desktop) {
+  const { created, page } = await openDesktopTab(desktop, { sessionId: id }, '桌面浏览器没有接上这个会话');
+  const session = createSessionState(id, page.context(), page, { desktop: true, desktopTabId: created.tabId });
   attachPage(session, page);
   sessions.set(id, session);
   // Agent 的验证视口独立于右侧预览面板，隐藏标签也必须能截图。
@@ -672,18 +667,7 @@ async function createExternalSession(id) {
   }
   const context = browser.contexts()[0] || await browser.newContext();
   const page = await context.newPage();
-  const session = {
-    id, context, page, console: [], network: [], dead: false, external: true, desktop: false,
-    tabs: new Map(), pageToTabId: new WeakMap(), activeTabId: null, tabSeq: 0,
-    allowedLoopbackOrigins: new Set(), currentLoopbackOrigin: null, blockedOrigins: [], downloadResponses: new Map(),
-    mirror: false, capture: false, embed: true, frameOptions: '',
-    mirrorWidth: DEFAULT_MIRROR_WIDTH, mirrorQuality: DEFAULT_MIRROR_QUALITY,
-    cdp: null, cdpPage: null, lastFrameAt: 0, historyCdp: null, historyCdpPage: null,
-    refFrames: {}, nextDialog: null, dialogs: [], recording: null,
-    agentControlled: false, controlStatus: '', controlToken: randomUUID(), controlAborted: false, stopBindingInstalled: new WeakSet()
-  };
-  context.setDefaultTimeout(ACTION_TIMEOUT_MS);
-  context.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
+  const session = createSessionState(id, context, page, { external: true });
   attachPage(session, page);
   sessions.set(id, session);
   return session;
@@ -717,7 +701,7 @@ function agentMayTouchPage(url, current) {
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
   if (external) return externalAgentHostAllowed(url, HOST_RULES);
-  return Boolean(current && current.desktop) || loopbackUrl(url);
+  return Boolean(current && current.desktop) || Boolean(loopbackOrigin(url));
 }
 
 function refuseOffAllowlist(current) {
@@ -736,14 +720,13 @@ async function notifyDesktopControl(session) {
   if (!session || !session.desktop) return;
   const desktop = readDesktop();
   if (!desktop) return;
-  await fetch(`http://127.0.0.1:${desktop.controlPort}/control`, {
+  await desktopRequest(desktop, '/control', {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-pilot-token': desktop.token },
-    body: JSON.stringify({
+    body: {
       sessionId: session.id,
       agentControlled: Boolean(session.agentControlled),
       controlStatus: String(session.controlStatus || '')
-    })
+    }
   }).catch(() => {});
 }
 
@@ -761,14 +744,7 @@ async function triggerControlStop(session, source = 'page') {
   session.controlStatus = '';
   await removeControlOverlay(session.page);
   await notifyDesktopControl(session);
-  send({
-    event: 'control-stopped',
-    session: session.id,
-    source,
-    agentControlled: false,
-    controlStatus: '',
-    ts: Date.now()
-  });
+  emitControlState(session, 'control-stopped', { source });
 }
 
 async function ensureStopBinding(session, page) {
@@ -927,6 +903,170 @@ async function syncControlOverlay(session, page, cursorInfo = null) {
   }, { status, token: session.controlToken, cursor: cursorInfo }).catch(() => {});
 }
 
+const WITH_HIDDEN_OVERLAY_SOURCE = `const withHiddenOverlay = (fn) => {
+  const overlay = document.querySelector('[data-pilot-agent-overlay]');
+  const prevVis = overlay ? overlay.style.visibility : '';
+  const prevPtr = overlay ? overlay.style.pointerEvents : '';
+  if (overlay) {
+    overlay.style.visibility = 'hidden';
+    overlay.style.pointerEvents = 'none';
+  }
+  try {
+    return fn();
+  } finally {
+    if (overlay) {
+      overlay.style.visibility = prevVis;
+      overlay.style.pointerEvents = prevPtr;
+    }
+  }
+};`;
+
+const DEEP_ELEMENT_FROM_POINT_SOURCE = `const deepElementFromPoint = (startRoot, px, py, pierceIframes = false) => {
+  let root = startRoot;
+  let gx = px;
+  let gy = py;
+  let hit = null;
+  for (let guard = 0; guard < 12; guard += 1) {
+    const next = typeof root?.elementFromPoint === 'function' ? root.elementFromPoint(gx, gy) : null;
+    if (!next || next === hit) break;
+    hit = next;
+    if (next.shadowRoot) {
+      root = next.shadowRoot;
+      continue;
+    }
+    if (pierceIframes && String(next.tagName).toUpperCase() === 'IFRAME') {
+      try {
+        const childDoc = next.contentDocument;
+        if (childDoc) {
+          const r = next.getBoundingClientRect();
+          gx -= r.left;
+          gy -= r.top;
+          root = childDoc;
+          continue;
+        }
+      } catch { /* 跨域 iframe */ }
+    }
+    break;
+  }
+  return hit;
+};`;
+
+const ELEMENT_LABEL_SOURCE = `const accessibleLabel = (el, max = 48, fallbackSelector = 'button,a,[role="button"],summary') => (
+  el.getAttribute?.('aria-label')
+  || (el.labels && el.labels[0] && (el.labels[0].innerText || el.labels[0].textContent))
+  || el.getAttribute?.('placeholder')
+  || (fallbackSelector && el.matches?.(fallbackSelector) ? el.innerText : '')
+  || ''
+).replace(/\\s+/g, ' ').trim().slice(0, max);`;
+
+const DESCRIBE_HIT_SOURCE = `const describeHit = (node, includeRole = false) => {
+  if (!node) return '';
+  const tag = String(node.tagName || '').toLowerCase();
+  const id = node.id ? '#' + node.id : '';
+  const role = includeRole && node.getAttribute?.('role') ? '[role="' + node.getAttribute('role') + '"]' : '';
+  const txt = String(node.innerText || node.getAttribute?.('aria-label') || '').replace(/\\s+/g, ' ').trim().slice(0, 32);
+  return tag + id + role + (txt ? ' "' + txt + '"' : '');
+};`;
+
+const CLEAR_REFS_SOURCE = `const clearRefsInTree = (node) => {
+  if (!node) return;
+  if (typeof node.removeAttribute === 'function') {
+    node.removeAttribute('data-pilot-ref');
+    node.removeAttribute('data-pilot-frame');
+  }
+  if (node.tagName && String(node.tagName).toUpperCase() === 'IFRAME') {
+    try {
+      const childDoc = node.contentDocument;
+      if (childDoc && childDoc.body) clearRefsInTree(childDoc.body);
+    } catch { /* 跨域 iframe 跳过 */ }
+  }
+  if (node.shadowRoot && node.shadowRoot.children) {
+    for (const child of node.shadowRoot.children) clearRefsInTree(child);
+  }
+  if (node.children) {
+    for (const child of node.children) clearRefsInTree(child);
+  }
+};
+document.querySelectorAll('[data-pilot-ref]').forEach((node) => node.removeAttribute('data-pilot-ref'));
+if (document.body) clearRefsInTree(document.body);`;
+
+const ACTION_LABEL_FN = new Function('el', `${ELEMENT_LABEL_SOURCE}\nreturn accessibleLabel(el, 48, 'button,a,[role="button"]');`);
+const PAGE_TEXT_FN = new Function(`${WITH_HIDDEN_OVERLAY_SOURCE}\nreturn withHiddenOverlay(() => (document.body && document.body.innerText) || '');`);
+const INVALIDATE_REFS_FN = new Function(CLEAR_REFS_SOURCE);
+const COORDINATE_HIT_FN = new Function('arg', `
+  const { px, py } = arg;
+  ${WITH_HIDDEN_OVERLAY_SOURCE}
+  ${DEEP_ELEMENT_FROM_POINT_SOURCE}
+  ${DESCRIBE_HIT_SOURCE}
+  return withHiddenOverlay(() => describeHit(deepElementFromPoint(document, px, py, true)));
+`);
+const TOP_OCCLUSION_FN = new Function('arg', `
+  const { px, py, topFrameId } = arg;
+  ${WITH_HIDDEN_OVERLAY_SOURCE}
+  ${DESCRIBE_HIT_SOURCE}
+  return withHiddenOverlay(() => {
+    const hit = document.elementFromPoint(px, py);
+    if (!hit) return null;
+    if (hit.getAttribute && hit.getAttribute('data-pilot-frame') === topFrameId) return null;
+    if (hit.closest && hit.closest('iframe[data-pilot-frame="' + topFrameId + '"]')) return null;
+    return describeHit(hit);
+  });
+`);
+const TARGET_PROBE_FN = new Function('el', `
+  const doc = el.ownerDocument || document;
+  const win = doc.defaultView || window;
+  ${WITH_HIDDEN_OVERLAY_SOURCE}
+  ${DEEP_ELEMENT_FROM_POINT_SOURCE}
+  ${ELEMENT_LABEL_SOURCE}
+  ${DESCRIBE_HIT_SOURCE}
+  return withHiddenOverlay(() => {
+    const rect = el.getBoundingClientRect();
+    const label = accessibleLabel(el, 48, 'button,a,[role="button"],summary');
+    const visLeft = Math.max(0, rect.left);
+    const visTop = Math.max(0, rect.top);
+    const visRight = Math.min(win.innerWidth, rect.right);
+    const visBottom = Math.min(win.innerHeight, rect.bottom);
+    const visWidth = visRight - visLeft;
+    const visHeight = visBottom - visTop;
+    if (visWidth <= 0 || visHeight <= 0) {
+      return { offscreen: true, label, rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height } };
+    }
+    const containsDeep = (container, node) => {
+      let cur = node;
+      while (cur) {
+        if (cur === container) return true;
+        cur = cur.parentNode || cur.host || null;
+      }
+      return false;
+    };
+    const hitBelongs = (hit) => Boolean(hit) && (
+      containsDeep(el, hit) || Boolean(el.labels && Array.from(el.labels).some((lbl) => containsDeep(lbl, hit)))
+    );
+    const insetX = Math.min(4, Math.max(1, visWidth * 0.15));
+    const insetY = Math.min(4, Math.max(1, visHeight * 0.15));
+    const cx = visLeft + visWidth / 2;
+    const cy = visTop + visHeight / 2;
+    const candidates = [
+      [cx, cy], [visLeft + insetX, cy], [visRight - insetX, cy],
+      [cx, visTop + insetY], [cx, visBottom - insetY],
+      [visLeft + insetX, visTop + insetY], [visRight - insetX, visBottom - insetY]
+    ];
+    let firstBlocker = null;
+    for (const [px, py] of candidates) {
+      const hit = deepElementFromPoint(doc, px, py, false);
+      if (hitBelongs(hit)) {
+        return {
+          ok: true, label, hitX: px, hitY: py,
+          relX: Math.max(1, Math.min(Math.max(1, rect.width - 1), px - rect.left)),
+          relY: Math.max(1, Math.min(Math.max(1, rect.height - 1), py - rect.top))
+        };
+      }
+      if (!firstBlocker && hit) firstBlocker = describeHit(hit, true) || '未知元素';
+    }
+    return { ok: false, occludedBy: firstBlocker || '未知遮罩层', label, cx, cy };
+  });
+`);
+
 async function showAgentAction(session, page, locator, kind, precomputed = null) {
   const box = precomputed?.box || await locator.boundingBox().catch(() => null);
   if (!box) return null;
@@ -937,22 +1077,22 @@ async function showAgentAction(session, page, locator, kind, precomputed = null)
     select: '选择', check: '勾选', uncheck: '取消勾选', scroll: '滚动',
     upload: '选择文件', download: '下载'
   };
-  const target = precomputed?.label ?? await locator.evaluate((el) => el.getAttribute('aria-label')
-    || (el.labels && el.labels[0] && el.labels[0].innerText)
-    || el.getAttribute('placeholder')
-    || (el.matches('button,a,[role="button"]') ? el.innerText : '')
-    || '').catch(() => '');
+  const target = precomputed?.label ?? await locator.evaluate(ACTION_LABEL_FN).catch(() => '');
   const status = `${verbs[kind] || '操作'}${target ? `：${String(target).replace(/\s+/g, ' ').trim().slice(0, 48)}` : ''}`;
   await syncControlOverlay(session, page, { x, y, box, status });
   return { status, box, x, y };
 }
 
+function sessionLogPath(session) {
+  const name = String(session.id || 'session').replace(/[^a-zA-Z0-9_-]/g, '_');
+  return join(process.cwd(), 'browser-logs', `${name}.log`);
+}
+
 function appendLog(session, line) {
   try {
-    const dir = join(process.cwd(), 'browser-logs');
-    mkdirSync(dir, { recursive: true });
-    const name = String(session.id || 'session').replace(/[^a-zA-Z0-9_-]/g, '_');
-    appendFileSync(join(dir, `${name}.log`), sanitizeDiagnosticText(line) + '\n');
+    const file = sessionLogPath(session);
+    mkdirSync(dirname(file), { recursive: true });
+    appendFileSync(file, sanitizeDiagnosticText(line) + '\n');
   } catch {
     // 日志写失败不影响页面操作
   }
@@ -978,16 +1118,11 @@ async function createLocalSession(id, browser) {
     acceptDownloads: true,
     serviceWorkers: 'block'
   });
-  context.setDefaultTimeout(ACTION_TIMEOUT_MS);
-  context.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
-  const session = { id, context, page: null, console: [], network: [], dead: false,
-    tabs: new Map(), pageToTabId: new WeakMap(), activeTabId: null, tabSeq: 0,
-    allowedLoopbackOrigins: new Set(), currentLoopbackOrigin: null, blockedOrigins: [], downloadResponses: new Map(),
-    mirror: mirrorRequested.has(id), capture: mirrorCapture.get(id) !== false,
-    embed: true, frameOptions: '', mirrorWidth: DEFAULT_MIRROR_WIDTH, mirrorQuality: DEFAULT_MIRROR_QUALITY,
-    cdp: null, cdpPage: null, lastFrameAt: 0, historyCdp: null, historyCdpPage: null,
-    refFrames: {}, nextDialog: null, dialogs: [], recording: null,
-    agentControlled: false, controlStatus: '', controlToken: randomUUID(), controlAborted: false, stopBindingInstalled: new WeakSet() };
+  const session = createSessionState(id, context, null, {
+    browser,
+    mirror: mirrorRequested.has(id),
+    capture: mirrorCapture.get(id) !== false
+  });
   // 主框架导航只允许当前已授权的本机源或外网 origin，跨端口/跨源重定向一律拦截并记录。
   await context.route('**/*', async (route) => {
     const request = route.request();
@@ -1007,12 +1142,12 @@ async function createLocalSession(id, browser) {
     }
     if (request.isNavigationRequest() && request.frame() === session.page?.mainFrame()) {
       if (reqUrl === 'about:blank') return route.continue();
-      if (!loopbackUrl(reqUrl)) {
+      const targetOrigin = loopbackOrigin(reqUrl);
+      if (!targetOrigin) {
         recordBlockedOrigin(session, session.page?.url(), reqUrl, 'non_loopback');
         pushLimited(session.console, { type: 'blocked', text: sanitizeDiagnosticText(`已拦截对非本机地址的导航：${reqUrl}`), at: '' });
         return route.abort('blockedbyclient');
       }
-      const targetOrigin = loopbackOrigin(reqUrl);
       if (session.historyNavigating) {
         if (session.allowedLoopbackOrigins.size > 0 && !session.allowedLoopbackOrigins.has(targetOrigin)) {
           recordBlockedOrigin(session, session.page?.url(), reqUrl, 'cross_port_redirect');
@@ -1082,17 +1217,7 @@ async function startScreencast(session) {
       const h = vp.height || (frame.metadata && frame.metadata.deviceHeight) || null;
       const pageUrl = page.url();
       appendRecordingFrameData(session, frame.data, w, h, pageUrl);
-      send({
-        event: 'mirror-frame',
-        session: session.id,
-        frame: frame.data,
-        w,
-        h,
-        width: w,
-        height: h,
-        url: sanitizeDiagnosticUrl(pageUrl),
-        ts: now
-      });
+      emitMirrorFrame(session, frame.data, w, h, pageUrl, now);
     });
     const viewport = page.viewportSize() || { width: session.mirrorWidth, height: DEFAULT_VIEWPORT.height };
     await cdp.send('Page.startScreencast', {
@@ -1124,17 +1249,7 @@ async function publishSnapshot(session) {
     const shot = await page.screenshot({ type: 'jpeg', quality: session.mirrorQuality });
     if (!session.mirror || session.capture === false || session.dead || session.page !== page) return;
     session.lastFrameAt = Date.now();
-    send({
-      event: 'mirror-frame',
-      session: session.id,
-      frame: shot.toString('base64'),
-      w: viewport.width,
-      h: viewport.height,
-      width: viewport.width,
-      height: viewport.height,
-      url: sanitizeDiagnosticUrl(page.url()),
-      ts: Date.now()
-    });
+    emitMirrorFrame(session, shot.toString('base64'), viewport.width, viewport.height, page.url());
   } catch {
     // 下一帧 screencast 会补上
   }
@@ -1158,6 +1273,21 @@ async function closeScreencast(session) {
   }
 }
 
+async function emitActionEvent(session, page, { kind, status, x, y, box, ref, viewport }) {
+  const vp = viewport || page?.viewportSize() || DEFAULT_VIEWPORT;
+  recordActionMarker(session, { kind, status, url: page?.url() || '', ref, x, y, box });
+  if (session.recording && !session.cdp) await captureRecordingFrame(session, kind);
+  send({
+    event: 'agent-action',
+    session: session.id,
+    kind, status, x, y, box,
+    viewportWidth: vp.width,
+    viewportHeight: vp.height,
+    ref,
+    ts: Date.now()
+  });
+}
+
 // 智能体动作坐标供镜像事件使用；状态事件不依赖是否已开视频流。
 async function reportAction(session, kind, args, precomputed = null) {
   try {
@@ -1166,7 +1296,6 @@ async function reportAction(session, kind, args, precomputed = null) {
     const box = precomputed?.box || await locator.boundingBox();
     if (box) {
       const shown = await showAgentAction(session, page, locator, kind, precomputed);
-      const viewport = page?.viewportSize() || DEFAULT_VIEWPORT;
       const cx = shown?.x ?? Math.round(box.x + box.width / 2);
       const cy = shown?.y ?? Math.round(box.y + box.height / 2);
       const actionBox = {
@@ -1175,24 +1304,13 @@ async function reportAction(session, kind, args, precomputed = null) {
         width: Math.round(box.width),
         height: Math.round(box.height)
       };
-      const status = (shown && shown.status) || kind;
-      const ref = String(args.ref || args.selector || '');
-      recordActionMarker(session, { kind, status, url: page?.url() || '', ref, x: cx, y: cy, box: actionBox });
-      if (session.recording && !session.cdp) {
-        await captureRecordingFrame(session, kind);
-      }
-      send({
-        event: 'agent-action',
-        session: session.id,
+      await emitActionEvent(session, page, {
         kind,
-        status,
+        status: (shown && shown.status) || kind,
         x: cx,
         y: cy,
         box: actionBox,
-        viewportWidth: viewport.width,
-        viewportHeight: viewport.height,
-        ref,
-        ts: Date.now()
+        ref: String(args.ref || args.selector || '')
       });
     } else if (session.agentControlled && page && !page.isClosed()) {
       await syncControlOverlay(session, page);
@@ -1206,59 +1324,9 @@ async function reportAction(session, kind, args, precomputed = null) {
 async function prepareCoordinates(current, xRaw, yRaw, kind, labelText = '') {
   const page = pageOf(current);
   const vp = page.viewportSize() || DEFAULT_VIEWPORT;
-  const maxX = Math.max(0, vp.width - 1);
-  const maxY = Math.max(0, vp.height - 1);
-  const x = Math.min(maxX, Math.max(0, Math.round(Number(xRaw))));
-  const y = Math.min(maxY, Math.max(0, Math.round(Number(yRaw))));
-  const hitSummary = await page.evaluate(({ px, py }) => {
-    const overlay = document.querySelector('[data-pilot-agent-overlay]');
-    const prevVis = overlay ? overlay.style.visibility : '';
-    const prevPtr = overlay ? overlay.style.pointerEvents : '';
-    if (overlay) {
-      overlay.style.visibility = 'hidden';
-      overlay.style.pointerEvents = 'none';
-    }
-    try {
-      let doc = document;
-      let gx = px;
-      let gy = py;
-      let hit = null;
-      for (let guard = 0; guard < 12; guard += 1) {
-        const next = typeof doc.elementFromPoint === 'function' ? doc.elementFromPoint(gx, gy) : null;
-        if (!next || next === hit) break;
-        hit = next;
-        if (next.shadowRoot) {
-          doc = next.shadowRoot;
-          continue;
-        }
-        if (String(next.tagName).toUpperCase() === 'IFRAME') {
-          try {
-            const childDoc = next.contentDocument;
-            if (childDoc) {
-              const r = next.getBoundingClientRect();
-              gx -= r.left;
-              gy -= r.top;
-              doc = childDoc;
-              continue;
-            }
-          } catch {
-            // 跨域 iframe
-          }
-        }
-        break;
-      }
-      if (!hit) return '';
-      const tag = String(hit.tagName || '').toLowerCase();
-      const id = hit.id ? `#${hit.id}` : '';
-      const label = (hit.getAttribute?.('aria-label') || hit.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 32);
-      return `${tag}${id}${label ? ` "${label}"` : ''}`;
-    } finally {
-      if (overlay) {
-        overlay.style.visibility = prevVis;
-        overlay.style.pointerEvents = prevPtr;
-      }
-    }
-  }, { px: x, py: y }).catch(() => '');
+  const x = Math.min(Math.max(0, vp.width - 1), Math.max(0, Math.round(Number(xRaw))));
+  const y = Math.min(Math.max(0, vp.height - 1), Math.max(0, Math.round(Number(yRaw))));
+  const hitSummary = await page.evaluate(COORDINATE_HIT_FN, { px: x, py: y }).catch(() => '');
 
   const box = {
     x: Math.max(0, x - 14),
@@ -1268,26 +1336,8 @@ async function prepareCoordinates(current, xRaw, yRaw, kind, labelText = '') {
   };
   const verbs = { click: '坐标点击', dblclick: '坐标双击', right_click: '坐标右键', hover: '坐标悬停', drag: '拖拽', scroll: '坐标滚动' };
   const status = `${verbs[kind] || kind} (${x}, ${y})${labelText ? ` · ${labelText}` : hitSummary ? ` · ${hitSummary}` : ''}`;
-  if (current.agentControlled) {
-    await syncControlOverlay(current, page, { x, y, box, status });
-  }
-  recordActionMarker(current, { kind, status, url: page.url(), ref: `(${x},${y})`, x, y, box });
-  if (current.recording && !current.cdp) {
-    await captureRecordingFrame(current, kind);
-  }
-  send({
-    event: 'agent-action',
-    session: current.id,
-    kind,
-    status,
-    x,
-    y,
-    box,
-    viewportWidth: vp.width,
-    viewportHeight: vp.height,
-    ref: `(${x},${y})`,
-    ts: Date.now()
-  });
+  if (current.agentControlled) await syncControlOverlay(current, page, { x, y, box, status });
+  await emitActionEvent(current, page, { kind, status, x, y, box, ref: `(${x},${y})`, viewport: vp });
   return { page, x, y, box, hitSummary, status };
 }
 
@@ -1295,26 +1345,22 @@ async function prepareCoordinates(current, xRaw, yRaw, kind, labelText = '') {
 async function prepareTarget(current, args, kind, options = {}) {
   const page = pageOf(current);
   const chain = frameChainFor(current, args);
-  let frameScope = page;
-  for (const fid of chain) {
-    if (!/^f\d+$/.test(fid)) throw new Error(`frame 格式不对：${fid}（应形如 f1 或 f1>f2）`);
-    await frameScope.locator(`iframe[data-pilot-frame="${fid}"]`).first().evaluate((el) => {
-      if (typeof el.scrollIntoView === 'function') {
-        el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
-      }
-    }).catch(() => {});
-    frameScope = frameScope.frameLocator(`iframe[data-pilot-frame="${fid}"]`).first();
-  }
-  const locator = locatorFor(current, args);
-  const count = await locator.count();
-  if (count === 0) {
-    throw new Error(`找不到目标元素（${args.ref || args.selector}）：页面上已不存在，请重新 snapshot。`);
-  }
-  await locator.evaluate((el) => {
+  const scrollIntoCenter = (el) => {
     if (typeof el.scrollIntoView === 'function') {
       el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
     }
-  }).catch(() => {});
+  };
+  let frameScope = page;
+  for (const fid of chain) {
+    if (!/^f\d+$/.test(fid)) throw new Error(`frame 格式不对：${fid}（应形如 f1 或 f1>f2）`);
+    await frameScope.locator(`iframe[data-pilot-frame="${fid}"]`).first().evaluate(scrollIntoCenter).catch(() => {});
+    frameScope = frameScope.frameLocator(`iframe[data-pilot-frame="${fid}"]`).first();
+  }
+  const locator = locatorFor(current, args);
+  if (await locator.count() === 0) {
+    throw new Error(`找不到目标元素（${args.ref || args.selector}）：页面上已不存在，请重新 snapshot。`);
+  }
+  await locator.evaluate(scrollIntoCenter).catch(() => {});
   await page.evaluate(() => new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(resolve));
   })).catch(() => {});
@@ -1327,107 +1373,7 @@ async function prepareTarget(current, args, kind, options = {}) {
     throw new Error(`目标元素当前不可见或尺寸为 0（${args.ref || args.selector}），请检查是否折叠或先滚动/展开。`);
   }
 
-  const probe = await locator.evaluate((el) => {
-    const doc = el.ownerDocument || document;
-    const win = doc.defaultView || window;
-    const overlay = document.querySelector('[data-pilot-agent-overlay]');
-    const prevVis = overlay ? overlay.style.visibility : '';
-    const prevPtr = overlay ? overlay.style.pointerEvents : '';
-    if (overlay) {
-      overlay.style.visibility = 'hidden';
-      overlay.style.pointerEvents = 'none';
-    }
-    try {
-      const rect = el.getBoundingClientRect();
-      const label = (el.getAttribute('aria-label')
-        || (el.labels && el.labels[0] && el.labels[0].innerText)
-        || el.getAttribute('placeholder')
-        || (el.matches('button,a,[role="button"],summary') ? el.innerText : '')
-        || '').replace(/\s+/g, ' ').trim().slice(0, 48);
-
-      const visLeft = Math.max(0, rect.left);
-      const visTop = Math.max(0, rect.top);
-      const visRight = Math.min(win.innerWidth, rect.right);
-      const visBottom = Math.min(win.innerHeight, rect.bottom);
-      const visWidth = visRight - visLeft;
-      const visHeight = visBottom - visTop;
-      if (visWidth <= 0 || visHeight <= 0) {
-        return { offscreen: true, label, rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height } };
-      }
-
-      const deepHit = (px, py) => {
-        let root = doc;
-        let hit = null;
-        for (let guard = 0; guard < 12; guard += 1) {
-          const next = typeof root.elementFromPoint === 'function' ? root.elementFromPoint(px, py) : null;
-          if (!next || next === hit) break;
-          hit = next;
-          if (next.shadowRoot) root = next.shadowRoot;
-          else break;
-        }
-        return hit;
-      };
-      const containsDeep = (container, node) => {
-        let cur = node;
-        while (cur) {
-          if (cur === container) return true;
-          if (cur.parentNode) cur = cur.parentNode;
-          else if (cur.host) cur = cur.host;
-          else break;
-        }
-        return false;
-      };
-      const hitBelongs = (hit) => {
-        if (!hit) return false;
-        if (containsDeep(el, hit)) return true;
-        if (el.labels && Array.from(el.labels).some((lbl) => containsDeep(lbl, hit))) return true;
-        return false;
-      };
-      const describeEl = (node) => {
-        if (!node) return '未知元素';
-        const tag = (node.tagName || '').toLowerCase();
-        const id = node.id ? `#${node.id}` : '';
-        const role = node.getAttribute?.('role') ? `[role="${node.getAttribute('role')}"]` : '';
-        const txt = String(node.innerText || node.getAttribute?.('aria-label') || '').replace(/\s+/g, ' ').trim().slice(0, 32);
-        return `${tag}${id}${role}${txt ? ` "${txt}"` : ''}`;
-      };
-
-      const insetX = Math.min(4, Math.max(1, visWidth * 0.15));
-      const insetY = Math.min(4, Math.max(1, visHeight * 0.15));
-      const cx = visLeft + visWidth / 2;
-      const cy = visTop + visHeight / 2;
-      const candidates = [
-        [cx, cy],
-        [visLeft + insetX, cy],
-        [visRight - insetX, cy],
-        [cx, visTop + insetY],
-        [cx, visBottom - insetY],
-        [visLeft + insetX, visTop + insetY],
-        [visRight - insetX, visBottom - insetY]
-      ];
-      let firstBlocker = null;
-      for (const [px, py] of candidates) {
-        const hit = deepHit(px, py);
-        if (hitBelongs(hit)) {
-          return {
-            ok: true,
-            label,
-            hitX: px,
-            hitY: py,
-            relX: Math.max(1, Math.min(Math.max(1, rect.width - 1), px - rect.left)),
-            relY: Math.max(1, Math.min(Math.max(1, rect.height - 1), py - rect.top))
-          };
-        }
-        if (!firstBlocker && hit) firstBlocker = describeEl(hit);
-      }
-      return { ok: false, occludedBy: firstBlocker || '未知遮罩层', label, cx, cy };
-    } finally {
-      if (overlay) {
-        overlay.style.visibility = prevVis;
-        overlay.style.pointerEvents = prevPtr;
-      }
-    }
-  }).catch(() => null);
+  const probe = await locator.evaluate(TARGET_PROBE_FN).catch(() => null);
 
   if (options.requireHitTest && probe) {
     if (probe.offscreen) {
@@ -1441,43 +1387,17 @@ async function prepareTarget(current, args, kind, options = {}) {
   const targetX = probe?.ok ? Math.round(box.x + probe.relX) : Math.round(box.x + box.width / 2);
   const targetY = probe?.ok ? Math.round(box.y + probe.relY) : Math.round(box.y + box.height / 2);
   if (chain.length > 0 && options.requireHitTest) {
-    const topOccluded = await page.evaluate(({ px, py, topFrameId }) => {
-      const overlay = document.querySelector('[data-pilot-agent-overlay]');
-      const prevVis = overlay ? overlay.style.visibility : '';
-      const prevPtr = overlay ? overlay.style.pointerEvents : '';
-      if (overlay) {
-        overlay.style.visibility = 'hidden';
-        overlay.style.pointerEvents = 'none';
-      }
-      try {
-        const hit = document.elementFromPoint(px, py);
-        if (!hit) return null;
-        if (hit.getAttribute && hit.getAttribute('data-pilot-frame') === topFrameId) return null;
-        if (hit.closest && hit.closest(`iframe[data-pilot-frame="${topFrameId}"]`)) return null;
-        const tag = (hit.tagName || '').toLowerCase();
-        const id = hit.id ? `#${hit.id}` : '';
-        const txt = String(hit.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 32);
-        return `${tag}${id}${txt ? ` "${txt}"` : ''}`;
-      } finally {
-        if (overlay) {
-          overlay.style.visibility = prevVis;
-          overlay.style.pointerEvents = prevPtr;
-        }
-      }
-    }, { px: targetX, py: targetY, topFrameId: chain[0] }).catch(() => null);
+    const topOccluded = await page.evaluate(TOP_OCCLUSION_FN, { px: targetX, py: targetY, topFrameId: chain[0] }).catch(() => null);
     if (topOccluded) {
       throw new Error(`iframe 目标元素（${args.ref || args.selector}）当前被主页面元素遮挡（遮挡层：${topOccluded}），请先关闭弹窗/遮罩后再试。`);
     }
   }
 
-  const hitPosition = probe?.ok ? { x: probe.relX, y: probe.relY } : null;
   const precomputed = {
-    locator,
-    page,
-    box,
+    locator, page, box,
     x: targetX,
     y: targetY,
-    hitPosition,
+    hitPosition: probe?.ok ? { x: probe.relX, y: probe.relY } : null,
     label: probe?.label || ''
   };
   await reportAction(current, kind, args, precomputed);
@@ -1504,29 +1424,8 @@ const SNAPSHOT_SCRIPT = `(limits) => {
   const INTERACTIVE_ROLES = new Set(['button', 'link', 'checkbox', 'radio', 'tab', 'menuitem', 'switch',
     'textbox', 'combobox', 'option', 'slider', 'searchbox', 'menuitemcheckbox', 'menuitemradio', 'treeitem']);
   const SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'META', 'LINK', 'HEAD', 'SVG', 'PATH']);
-  document.querySelectorAll('[data-pilot-ref]').forEach((node) => node.removeAttribute('data-pilot-ref'));
-  const clearRefsInTree = (node) => {
-    if (!node) return;
-    if (typeof node.removeAttribute === 'function') {
-      node.removeAttribute('data-pilot-ref');
-      node.removeAttribute('data-pilot-frame');
-    }
-    if (node.tagName && String(node.tagName).toUpperCase() === 'IFRAME') {
-      try {
-        const childDoc = node.contentDocument;
-        if (childDoc && childDoc.body) clearRefsInTree(childDoc.body);
-      } catch {
-        // 跨域 iframe 跳过
-      }
-    }
-    if (node.shadowRoot && node.shadowRoot.children) {
-      for (const child of node.shadowRoot.children) clearRefsInTree(child);
-    }
-    if (node.children) {
-      for (const child of node.children) clearRefsInTree(child);
-    }
-  };
-  if (document.body) clearRefsInTree(document.body);
+  const SENSITIVE_FIELD_RE = new RegExp(${JSON.stringify(SENSITIVE_FIELD_PATTERN_SOURCE)}, 'i');
+  ${CLEAR_REFS_SOURCE}
   let counter = 0;
   let frameCounter = 0;
   const refFrames = {};
@@ -1573,8 +1472,7 @@ const SNAPSHOT_SCRIPT = `(limits) => {
     || el.hasAttribute('onclick') || (el.isContentEditable && el.getAttribute('contenteditable') !== 'inherit')
     || (el.tabIndex >= 0 && !['BODY', 'HTML', 'IFRAME'].includes(el.tagName));
   const sensitiveField = (el) => el.hasAttribute('data-sensitive') || el.type === 'hidden'
-    || /password|one-time-code|token|csrf|secret|credit.?card|card|otp|cvv|cvc|security.?code|ssn/i
-      .test([el.type, el.autocomplete, el.name, el.id].join(' '));
+    || SENSITIVE_FIELD_RE.test([el.type, el.autocomplete, el.name, el.id].join(' '));
   const attrs = (el) => {
     const out = [];
     const tag = el.tagName.toLowerCase();
@@ -1732,7 +1630,8 @@ const SNAPSHOT_SCRIPT = `(limits) => {
 
 // ---- 元素拾取 ------------------------------------------------------------------------------
 // 面板里点「选择元素」后，下一次点击不再转发给页面，而是把点到的东西描述成可粘贴的引用。
-const PICK_SCRIPT = `(x, y) => {
+const PICK_FN = new Function('arg', `
+  const { x, y } = arg;
   const INTERACTIVE = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'SUMMARY', 'LABEL', 'OPTION']);
   const ROLES = new Set(['button', 'link', 'checkbox', 'radio', 'tab', 'menuitem', 'switch',
     'textbox', 'combobox', 'option', 'slider', 'searchbox']);
@@ -1762,29 +1661,9 @@ const PICK_SCRIPT = `(x, y) => {
     }
     return parts.join(' > ');
   };
-  const overlay = document.querySelector('[data-pilot-agent-overlay]');
-  const prevVis = overlay ? overlay.style.visibility : '';
-  const prevPtr = overlay ? overlay.style.pointerEvents : '';
-  if (overlay) {
-    overlay.style.visibility = 'hidden';
-    overlay.style.pointerEvents = 'none';
-  }
-  let hit = null;
-  try {
-    let root = document;
-    for (let guard = 0; guard < 12; guard += 1) {
-      const next = typeof root.elementFromPoint === 'function' ? root.elementFromPoint(x, y) : null;
-      if (!next || next === hit) break;
-      hit = next;
-      if (next.shadowRoot) root = next.shadowRoot;
-      else break;
-    }
-  } finally {
-    if (overlay) {
-      overlay.style.visibility = prevVis;
-      overlay.style.pointerEvents = prevPtr;
-    }
-  }
+  ${WITH_HIDDEN_OVERLAY_SOURCE}
+  ${DEEP_ELEMENT_FROM_POINT_SOURCE}
+  const hit = withHiddenOverlay(() => deepElementFromPoint(document, x, y, false));
   if (!hit) return null;
   let target = hit;
   // 点到的是按钮里的文字/图标：往上找一个真正可交互、或者有意义的容器
@@ -1807,7 +1686,7 @@ const PICK_SCRIPT = `(x, y) => {
     rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
     attrs
   };
-}`;
+`);
 
 async function snapshot(current) {
   const page = pageOf(current);
@@ -2007,6 +1886,34 @@ async function setCheckedState(current, args, desired) {
   return { text: `${desired ? '已勾选' : '已取消勾选'} ${args.ref || args.selector}（checked=${actual}）\n${await describePage(current)}` };
 }
 
+async function finishNavigate(current, page, response) {
+  const status = response ? response.status() : 0;
+  const gate = await detectHumanGate(page);
+  const diag = sessionDiagnostics(current);
+  if (current.agentControlled) await syncControlOverlay(current, page);
+  return {
+    text: `已打开，HTTP ${status || '未知'}\n${await describePage(current)}${gate ? `\n提示：${gate.reason}` : ''}`,
+    url: page.url(),
+    title: await pageTitle(page),
+    gate,
+    ...diag
+  };
+}
+
+async function navigateHistory(current, method, movedText, emptyText) {
+  const page = pageOf(current);
+  current.historyNavigating = true;
+  let response;
+  try {
+    response = await page[method]({ waitUntil: 'load', timeout: NAVIGATION_TIMEOUT_MS });
+    const origin = loopbackOrigin(page.url());
+    if (origin && !current.externalOrigin) current.currentLoopbackOrigin = origin;
+  } finally {
+    current.historyNavigating = false;
+  }
+  return { text: `${response ? movedText : emptyText}\n${await describePage(current)}`, url: page.url(), title: await pageTitle(page), ...sessionDiagnostics(current) };
+}
+
 // ---- 操作 -------------------------------------------------------------------------------
 const handlers = {
   async open_window() {
@@ -2063,7 +1970,7 @@ const handlers = {
     const headless = browser.__headless;
     // 探测只验证能启动，随后关掉，不占用常驻内存。（有头模式下这会闪一下窗口，属可接受代价。）
     await browser.close();
-    browserPromise = null;
+    managedBrowsers.default = null;
     return { text: `浏览器可用：${executable}（Chromium ${version}${headless ? '' : '，有头'}）`,
              executable, version, headless, capabilities: ['mirror'] };
   },
@@ -2079,48 +1986,24 @@ const handlers = {
       } catch (error) {
         throw new Error(`外部浏览器打开 ${args.url} 失败：${String(error.message || error).split('\n')[0]}`);
       }
-      const externalStatus = externalResponse ? externalResponse.status() : 0;
-      const gate = await detectHumanGate(current.page);
-      const diag = sessionDiagnostics(current);
-      if (current.agentControlled) await syncControlOverlay(current, current.page);
-      return {
-        text: `已打开，HTTP ${externalStatus || '未知'}\n${await describePage(current)}${gate ? `\n提示：${gate.reason}` : ''}`,
-        url: current.page.url(),
-        title: await pageTitle(current.page),
-        gate,
-        ...diag
-      };
+      return finishNavigate(current, current.page, externalResponse);
     }
     if (args.approvedExternal) {
       if (!await publicHttps(args.url, undefined, HOST_RULES)) throw new Error(externalBlockedReason(args.url));
       current.externalOrigin = new URL(args.url).origin;
-    } else if (!args.url || !loopbackUrl(args.url) || current.externalOrigin) {
-      throw new Error(`只允许打开本机地址（http(s)://localhost、127.0.0.1、[::1]）：${args.url}`);
     } else {
-      const origin = loopbackOrigin(args.url);
-      if (origin) {
-        current.allowedLoopbackOrigins.add(origin);
-        current.currentLoopbackOrigin = origin;
+      const origin = args.url ? loopbackOrigin(args.url) : null;
+      if (!origin || current.externalOrigin) {
+        throw new Error(`只允许打开本机地址（http(s)://localhost、127.0.0.1、[::1]）：${args.url}`);
       }
+      current.allowedLoopbackOrigins.add(origin);
+      current.currentLoopbackOrigin = origin;
     }
     let page = current.page;
     if (current.desktop && (!page || page.isClosed())) {
       const desktop = readDesktop();
       if (desktop) {
-        const opened = await fetch(`http://127.0.0.1:${desktop.controlPort}/tabs`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', 'x-pilot-token': desktop.token },
-          body: JSON.stringify({ sessionId: current.id, fresh: true })
-        });
-        if (opened.ok) {
-          const created = await opened.json();
-          const browser = await connectDesktop(desktop);
-          const viewport = DEFAULT_VIEWPORT;
-          page = await waitForDesktopPage(browser, created.tabId, created.targetId);
-          current.desktopTabId = created.tabId;
-          attachPage(current, page);
-          await handlers.resize(viewport, current);
-        }
+        await openAndAttachDesktopTab(desktop, current, { sessionId: current.id, fresh: true });
       }
     }
     page = pageOf(current);
@@ -2161,17 +2044,7 @@ const handlers = {
         throw new Error(`已拦截跨端口重定向：当前仅允许 ${current.currentLoopbackOrigin}，跳转目标 ${sanitizeDiagnosticUrl(landedUrl)}。`);
       }
     }
-    const status = response ? response.status() : 0;
-    const gate = await detectHumanGate(page);
-    const diag = sessionDiagnostics(current);
-    if (current.agentControlled) await syncControlOverlay(current, page);
-    return {
-      text: `已打开，HTTP ${status || '未知'}\n${await describePage(current)}${gate ? `\n提示：${gate.reason}` : ''}`,
-      url: page.url(),
-      title: await pageTitle(page),
-      gate,
-      ...diag
-    };
+    return finishNavigate(current, page, response);
   },
 
   async reload(args, current) {
@@ -2181,33 +2054,9 @@ const handlers = {
     return { text: `已刷新\n${await describePage(current)}`, url: page.url(), title: await pageTitle(page), gate, ...sessionDiagnostics(current) };
   },
 
-  async back(args, current) {
-    const page = pageOf(current);
-    current.historyNavigating = true;
-    let response;
-    try {
-      response = await page.goBack({ waitUntil: 'load', timeout: NAVIGATION_TIMEOUT_MS });
-      const backOrigin = loopbackOrigin(page.url());
-      if (backOrigin && !current.externalOrigin) current.currentLoopbackOrigin = backOrigin;
-    } finally {
-      current.historyNavigating = false;
-    }
-    return { text: (response ? '已后退' : '没有可后退的历史') + `\n${await describePage(current)}`, url: page.url(), title: await pageTitle(page), ...sessionDiagnostics(current) };
-  },
+  back: (_args, current) => navigateHistory(current, 'goBack', '已后退', '没有可后退的历史'),
 
-  async forward(args, current) {
-    const page = pageOf(current);
-    current.historyNavigating = true;
-    let response;
-    try {
-      response = await page.goForward({ waitUntil: 'load', timeout: NAVIGATION_TIMEOUT_MS });
-      const forwardOrigin = loopbackOrigin(page.url());
-      if (forwardOrigin && !current.externalOrigin) current.currentLoopbackOrigin = forwardOrigin;
-    } finally {
-      current.historyNavigating = false;
-    }
-    return { text: (response ? '已前进' : '没有可前进的历史') + `\n${await describePage(current)}`, url: page.url(), title: await pageTitle(page), ...sessionDiagnostics(current) };
-  },
+  forward: (_args, current) => navigateHistory(current, 'goForward', '已前进', '没有可前进的历史'),
 
   /*
    * 用户在面板里直接操作页面（内置浏览器）：坐标是页面坐标系（与镜像帧同尺度）。
@@ -2234,10 +2083,9 @@ const handlers = {
   /** 面板里的「选择元素」：返回点击位置元素的描述，用户可以把这段当引用发给模型。 */
   async pick(args, current) {
     const page = pageOf(current);
-    if (sensitivePageUrl(page.url(), SENSITIVE_RULES)) {
-      throw new Error(`敏感登录或支付页面已隐藏元素详情（${sanitizeDiagnosticUrl(page.url())}）。`);
-    }
-    const info = await page.evaluate(`(${PICK_SCRIPT})(${Math.round(Number(args.x) || 0)}, ${Math.round(Number(args.y) || 0)})`);
+    const blocked = sensitiveMessage(page, '已隐藏元素详情', '');
+    if (blocked) throw new Error(blocked);
+    const info = await page.evaluate(PICK_FN, { x: Math.round(Number(args.x) || 0), y: Math.round(Number(args.y) || 0) });
     if (!info) throw new Error('这个位置没有取到元素');
     const attrs = Object.entries(info.attrs || {}).map(([name, value]) => `${name}=${JSON.stringify(value)}`).join(' ');
     const lines = [
@@ -2269,12 +2117,11 @@ const handlers = {
     if (current.desktop) {
       const desktop = readDesktop();
       if (desktop) {
-        const response = await fetch(`http://127.0.0.1:${desktop.controlPort}/emulate`, {
+        await desktopRequest(desktop, '/emulate', {
           method: 'POST',
-          headers: { 'content-type': 'application/json', 'x-pilot-token': desktop.token },
-          body: JSON.stringify({ tabId: current.desktopTabId, width, height })
+          body: { tabId: current.desktopTabId, width, height },
+          errorPrefix: '桌面视口调整失败'
         });
-        if (!response.ok) throw new Error(`桌面视口调整失败（HTTP ${response.status}）`);
       }
     }
     // 视口变化会让原来的 screencast 停在旧画面上：重开一次，并立刻补一帧
@@ -2316,19 +2163,10 @@ const handlers = {
 
   async snapshot(args, current) {
     const page = pageOf(current);
-    if (sensitivePageUrl(page.url(), SENSITIVE_RULES)) {
-      const gate = await detectHumanGate(page);
-      return {
-        text: `敏感登录或支付页面已隐藏页面内容（${sanitizeDiagnosticUrl(page.url())}）。请由用户完成验证或确认页面状态后继续。`,
-        url: page.url(),
-        title: await pageTitle(page),
-        gate,
-        ...sessionDiagnostics(current)
-      };
-    }
+    const blocked = sensitiveMessage(page, '已隐藏页面内容');
     const gate = await detectHumanGate(page);
     return {
-      text: sanitizeDiagnosticText(await snapshot(current)),
+      text: blocked || sanitizeDiagnosticText(await snapshot(current)),
       url: page.url(),
       title: await pageTitle(page),
       gate,
@@ -2339,7 +2177,8 @@ const handlers = {
   // 固定的只读诊断，无任意表达式、事件触发、DOM 写入或网络请求。
   async inspect(args, current) {
     const page = pageOf(current);
-    if (sensitivePageUrl(page.url(), SENSITIVE_RULES)) return { text: `敏感登录或支付页面已隐藏布局和元素信息（${sanitizeDiagnosticUrl(page.url())}）。请由用户完成验证或确认页面状态后继续。`, url: page.url() };
+    const blocked = sensitiveMessage(page, '已隐藏布局和元素信息');
+    if (blocked) return { text: blocked, url: page.url() };
     const overview = await page.evaluate(() => {
       const candidates = [...document.querySelectorAll('main,aside,header,footer,nav,[role="main"],[data-pilot-ref],button,input,textarea,select')]
         .filter((el) => !el.closest('[data-pilot-agent-overlay]'));
@@ -2432,22 +2271,17 @@ const handlers = {
 
   async text(args, current) {
     const page = pageOf(current);
-    if (sensitivePageUrl(page.url(), SENSITIVE_RULES)) return { text: `敏感登录或支付页面已隐藏页面文本（${sanitizeDiagnosticUrl(page.url())}）。请由用户完成验证或确认页面状态后继续。`, url: sanitizeDiagnosticUrl(page.url()) };
-    const text = await page.evaluate(() => {
-      const overlay = document.querySelector('[data-pilot-agent-overlay]');
-      const previous = overlay?.style.visibility;
-      if (overlay) overlay.style.visibility = 'hidden';
-      const value = document.body.innerText || '';
-      if (overlay) overlay.style.visibility = previous;
-      return value;
-    }).catch(() => '');
+    const blocked = sensitiveMessage(page, '已隐藏页面文本');
+    if (blocked) return { text: blocked, url: sanitizeDiagnosticUrl(page.url()) };
+    const text = await page.evaluate(PAGE_TEXT_FN).catch(() => '');
     const clipped = text.length > 8000 ? text.slice(0, 8000) + '\n…（已截断）' : text;
     return { text: sanitizeDiagnosticText(clipped || '页面没有可读文本'), url: sanitizeDiagnosticUrl(page.url()), title: await pageTitle(page) };
   },
 
   async links(args, current) {
     const page = pageOf(current);
-    if (sensitivePageUrl(page.url(), SENSITIVE_RULES)) return { text: `敏感登录或支付页面已隐藏链接（${sanitizeDiagnosticUrl(page.url())}）。请由用户完成验证或确认页面状态后继续。`, url: sanitizeDiagnosticUrl(page.url()) };
+    const blocked = sensitiveMessage(page, '已隐藏链接');
+    if (blocked) return { text: blocked, url: sanitizeDiagnosticUrl(page.url()) };
     const links = await page.evaluate(() => Array.from(document.querySelectorAll('a[href]')).slice(0, 80).map((node) => ({
       text: (node.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 80),
       href: node.href
@@ -2460,25 +2294,14 @@ const handlers = {
     if (current.desktop) {
       const desktop = readDesktop();
       if (!desktop) throw new Error('桌面浏览器未连接。');
-      const opened = await fetch(`http://127.0.0.1:${desktop.controlPort}/tabs`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-pilot-token': desktop.token },
-        body: JSON.stringify({
-          sessionId: current.id,
-          fresh: true,
-          background: args.background !== false,
-          agentId: args.agentId || null,
-          label: args.label || null
-        })
-      });
-      if (!opened.ok) throw new Error(`新建桌面标签失败（HTTP ${opened.status}）`);
-      const created = await opened.json();
-      const browser = await connectDesktop(desktop);
       const viewport = current.page?.viewportSize() || DEFAULT_VIEWPORT;
-      const page = await waitForDesktopPage(browser, created.tabId, created.targetId);
-      current.desktopTabId = created.tabId;
-      attachPage(current, page);
-      await handlers.resize(viewport, current);
+      const { created, page } = await openAndAttachDesktopTab(desktop, current, {
+        sessionId: current.id,
+        fresh: true,
+        background: args.background !== false,
+        agentId: args.agentId || null,
+        label: args.label || null
+      }, { viewport });
       if (args.url) {
         const nav = await handlers.navigate({ ...args, url: args.url }, current);
         return { ...nav, tabId: created.tabId, text: `已新建标签 ${created.tabId} 并打开\n${await describePage(current)}` };
@@ -2499,13 +2322,9 @@ const handlers = {
     if (current.desktop) {
       const desktop = readDesktop();
       if (!desktop) return { text: '桌面浏览器未连接。' };
-      const response = await fetch(`http://127.0.0.1:${desktop.controlPort}/tabs`, {
-        headers: { 'x-pilot-token': desktop.token }
-      });
-      const body = await response.json();
-      const mine = (body.tabs || []).filter((tab) => tab.sessionId === current.id);
+      const { activeId, tabs: mine } = await desktopTabsForSession(desktop, current.id);
       if (!mine.length) return { text: '还没有标签。' };
-      return { text: mine.map((tab) => `${tab.id}${tab.id === body.activeId ? '  当前' : ''}  ${sanitizeDiagnosticText(tab.title)}  ${sanitizeDiagnosticUrl(tab.url)}`).join('\n') };
+      return { text: mine.map((tab) => `${tab.id}${tab.id === activeId ? '  当前' : ''}  ${sanitizeDiagnosticText(tab.title)}  ${sanitizeDiagnosticUrl(tab.url)}`).join('\n') };
     }
     const entries = [...(current.tabs || new Map()).entries()].filter(([, page]) => page && !page.isClosed());
     if (!entries.length) return { text: '还没有标签。' };
@@ -2524,12 +2343,9 @@ const handlers = {
     if (current.desktop) {
       const desktop = readDesktop();
       if (!desktop) throw new Error('桌面浏览器未连接。');
-      const response = await fetch(`http://127.0.0.1:${desktop.controlPort}/tabs`, {
-        headers: { 'x-pilot-token': desktop.token }
-      });
-      const body = await response.json();
-      const tab = (body.tabs || []).find((item) => item.id === tabId);
-      if (!tab || tab.sessionId !== current.id) throw new Error('标签不属于当前会话。');
+      const { tabs: mine } = await desktopTabsForSession(desktop, current.id);
+      const tab = mine.find((item) => item.id === tabId);
+      if (!tab) throw new Error('标签不属于当前会话。');
       const browser = await connectDesktop(desktop);
       const page = await waitForDesktopPage(browser, tab.id, tab.targetId);
       current.desktopTabId = tab.id;
@@ -2551,17 +2367,12 @@ const handlers = {
     if (current.desktop) {
       const desktop = readDesktop();
       if (!desktop) throw new Error('桌面浏览器未连接。');
-      const response = await fetch(`http://127.0.0.1:${desktop.controlPort}/tabs`, {
-        headers: { 'x-pilot-token': desktop.token }
-      });
-      const body = await response.json();
-      if (!(body.tabs || []).some(tab => tab.id === tabId && tab.sessionId === current.id)) {
-        throw new Error('标签不属于当前会话。');
-      }
-      await fetch(`http://127.0.0.1:${desktop.controlPort}/tabs/close`, {
+      const { tabs: mine } = await desktopTabsForSession(desktop, current.id);
+      if (!mine.some((tab) => tab.id === tabId)) throw new Error('标签不属于当前会话。');
+      await desktopRequest(desktop, '/tabs/close', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-pilot-token': desktop.token },
-        body: JSON.stringify({ tabId })
+        body: { tabId },
+        errorPrefix: '关闭桌面标签失败'
       });
       return { text: `已关闭标签 ${tabId}` };
     }
@@ -2587,9 +2398,8 @@ const handlers = {
     refuseOffAllowlist(current);
     if (!args.path) throw new Error('download 需要 path。');
     const page = pageOf(current);
-    if (sensitivePageUrl(page.url(), SENSITIVE_RULES)) {
-      throw new Error(`敏感登录或支付页面已限制自动下载（${sanitizeDiagnosticUrl(page.url())}）。请由用户接管后自行检查下载。`);
-    }
+    const blocked = sensitiveMessage(page, '已限制自动下载', '请由用户接管后自行检查下载。');
+    if (blocked) throw new Error(blocked);
     const { locator, hitPosition } = await prepareTarget(current, args, 'download', { requireHitTest: true });
     const clickOpts = { timeout: ACTION_TIMEOUT_MS };
     if (hitPosition) clickOpts.position = hitPosition;
@@ -2597,10 +2407,7 @@ const handlers = {
       page.waitForEvent('download', { timeout: ACTION_TIMEOUT_MS }),
       stopIfPageGone(page, () => locator.click(clickOpts), current)
     ]);
-    let suggested = basename(String(download.suggestedFilename() || 'download')
-      .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')).replace(/^\.+/, '').replace(/[. ]+$/, '').slice(0, 120);
-    if (/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(suggested)) suggested = `_${suggested}`;
-    if (!suggested) suggested = 'download';
+    const suggested = sanitizeDownloadFilename(download.suggestedFilename(), 'download');
 
     const downloadUrl = download.url();
     const responseMeta = current.downloadResponses?.get(downloadUrl);
@@ -2683,37 +2490,30 @@ const handlers = {
     refuseOffAllowlist(current);
     if (typeof args.text !== 'string') throw new Error('fill 需要 text。');
     const { locator, page, hitPosition } = await prepareTarget(current, args, 'fill');
-    const meta = await locator.evaluate((el) => {
+    const meta = await locator.evaluate((el, patternSource) => {
       const sensitive = el.hasAttribute('data-sensitive') || el.type === 'hidden'
-        || /password|one-time-code|token|csrf|secret|credit.?card|card|otp|cvv|cvc|security.?code|ssn/i
-          .test([el.type, el.autocomplete, el.name, el.id].join(' '));
+        || new RegExp(patternSource, 'i').test([el.type, el.autocomplete, el.name, el.id].join(' '));
       return {
         isNative: el.tagName === 'INPUT' || el.tagName === 'TEXTAREA',
         inputType: String(el.type || '').toLowerCase(),
         sensitive
       };
-    }).catch(() => ({ isNative: true, inputType: 'text', sensitive: false }));
+    }, SENSITIVE_FIELD_PATTERN_SOURCE).catch(() => ({ isNative: true, inputType: 'text', sensitive: false }));
+    const replaceViaKeyboard = () => stopIfPageGone(page, async () => {
+      await locator.click(hitPosition ? { position: hitPosition, timeout: ACTION_TIMEOUT_MS } : { timeout: ACTION_TIMEOUT_MS });
+      await page.keyboard.press('ControlOrMeta+A');
+      await page.keyboard.press('Backspace');
+      if (args.text) await page.keyboard.insertText(args.text);
+    }, current);
     try {
       if (meta.isNative) {
         await stopIfPageGone(page, () => locator.fill(args.text, { timeout: ACTION_TIMEOUT_MS }), current);
         if (!meta.sensitive && !['number', 'date', 'datetime-local', 'time', 'month', 'week', 'range', 'color'].includes(meta.inputType)) {
           const readback = await locator.inputValue().catch(() => null);
-          if (readback !== null && readback !== args.text) {
-            await stopIfPageGone(page, async () => {
-              await locator.click(hitPosition ? { position: hitPosition, timeout: ACTION_TIMEOUT_MS } : { timeout: ACTION_TIMEOUT_MS });
-              await page.keyboard.press('ControlOrMeta+A');
-              await page.keyboard.press('Backspace');
-              if (args.text) await page.keyboard.insertText(args.text);
-            }, current);
-          }
+          if (readback !== null && readback !== args.text) await replaceViaKeyboard();
         }
       } else {
-        await stopIfPageGone(page, async () => {
-          await locator.click(hitPosition ? { position: hitPosition, timeout: ACTION_TIMEOUT_MS } : { timeout: ACTION_TIMEOUT_MS });
-          await page.keyboard.press('ControlOrMeta+A');
-          await page.keyboard.press('Backspace');
-          if (args.text) await page.keyboard.insertText(args.text);
-        }, current);
+        await replaceViaKeyboard();
       }
       if (args.submit) await stopIfPageGone(page, () => page.keyboard.press('Enter'), current);
     } catch (error) {
@@ -2968,22 +2768,17 @@ const handlers = {
       : await screenshotMasks(page);
     const options = { path, type: 'png', fullPage: Boolean(args.fullPage), mask: masks,
       maskColor: SENSITIVE_MASK_COLOR, style: AGENT_OVERLAY_STYLE };
-    if (args.ref || args.selector) {
-      const elementOptions = { ...options };
-      delete elementOptions.fullPage;
-      await locatorFor(current, args).screenshot(elementOptions);
-    } else {
-      await page.screenshot(options);
-    }
+    const capture = (opts) => {
+      if (args.ref || args.selector) {
+        const { fullPage: _ignored, ...elementOpts } = opts;
+        return locatorFor(current, args).screenshot(elementOpts);
+      }
+      return page.screenshot(opts);
+    };
+    await capture(options);
     if (statSync(path).size > MAX_SCREENSHOT_BYTES) {
       path = path.replace(/\.png$/i, '') + '.jpg';
-      if (args.ref || args.selector) {
-        const elementOptions = { ...options, path, type: 'jpeg', quality: 70 };
-        delete elementOptions.fullPage;
-        await locatorFor(current, args).screenshot(elementOptions);
-      } else {
-        await page.screenshot({ ...options, path, type: 'jpeg', quality: 70 });
-      }
+      await capture({ ...options, path, type: 'jpeg', quality: 70 });
     }
     return {
       text: `已截图${sensitive ? '（敏感登录/支付页已整页遮挡）' : ''}\n${await describePage(current)}`,
@@ -2999,7 +2794,7 @@ const handlers = {
     const entries = current.console.slice();
     if (args.clear) current.console.length = 0;
     const filtered = args.level ? entries.filter((entry) => entry.type === args.level) : entries;
-    const file = join(process.cwd(), 'browser-logs', `${String(current.id).replace(/[^a-zA-Z0-9_-]/g, '_')}.log`);
+    const file = sessionLogPath(current);
     const diag = sessionDiagnostics(current);
     if (filtered.length === 0) return { text: `控制台没有记录。\n完整日志: ${file}`, ...diag };
     const shown = filtered.slice(-100);
@@ -3018,7 +2813,7 @@ const handlers = {
       entries = entries.filter((entry) => entry.url.toLowerCase().includes(needle));
     }
     if (args.clear) current.network.length = 0;
-    const file = join(process.cwd(), 'browser-logs', `${String(current.id).replace(/[^a-zA-Z0-9_-]/g, '_')}.log`);
+    const file = sessionLogPath(current);
     const diag = sessionDiagnostics(current);
     if (entries.length === 0) return { text: `没有匹配的网络请求。\n完整日志: ${file}`, ...diag };
     const shown = entries.slice(-100);
@@ -3080,7 +2875,7 @@ const handlers = {
       'select', 'check', 'uncheck', 'scroll', 'drag', 'wait', 'dialog']);
     const stopOnError = args.stopOnError !== false;
     const delayMs = Math.min(1000, Math.max(0, Math.round(Number(args.delayMs) || 0)));
-    const page = pageOf(current);
+    pageOf(current);
     const summary = [];
 
     for (let i = 0; i < steps.length; i += 1) {
@@ -3103,7 +2898,7 @@ const handlers = {
       }
       if (current.agentControlled) {
         current.controlStatus = `批量 ${i + 1}/${steps.length}：${controlStatusLabel(op, stepArgs)}`;
-        await syncControlOverlay(current, page);
+        await syncControlOverlay(current, pageOf(current));
       }
       try {
         const res = await handlers[op](stepArgs, current);
@@ -3123,7 +2918,8 @@ const handlers = {
         if (current.controlAborted) {
           throw new Error(`用户已停止自动控制，批量操作在 ${i + 1}/${steps.length} 步后中止。`);
         }
-        await stopIfPageGone(page, () => page.waitForTimeout(delayMs), current, { allowNavigate: true });
+        const activePage = pageOf(current);
+        await stopIfPageGone(activePage, () => activePage.waitForTimeout(delayMs), current, { allowNavigate: true });
       }
     }
     const header = `已完成批量操作 ${steps.length} 步\n${await describePage(current)}`;
@@ -3211,9 +3007,8 @@ const handlers = {
     refuseOffAllowlist(current);
     if (!args.expression) throw new Error('evaluate 需要 expression。');
     const page = pageOf(current);
-    if (sensitivePageUrl(page.url(), SENSITIVE_RULES)) {
-      throw new Error(`敏感登录或支付页面已禁止执行页面脚本（${sanitizeDiagnosticUrl(page.url())}）。请由用户接管完成操作后继续。`);
-    }
+    const blocked = sensitiveMessage(page, '已禁止执行页面脚本', '请由用户接管完成操作后继续。');
+    if (blocked) throw new Error(blocked);
     const value = await page.evaluate(String(args.expression));
     let text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
     if (text === undefined) text = 'undefined';
@@ -3238,13 +3033,7 @@ const handlers = {
     current.controlStatus = '';
     await removeControlOverlay(current.page);
     await notifyDesktopControl(current);
-    send({
-      event: 'control-state',
-      session: current.id,
-      agentControlled: false,
-      controlStatus: '',
-      ts: Date.now()
-    });
+    emitControlState(current);
     return { text: '已清理控制指示覆盖层' };
   },
 
@@ -3259,13 +3048,7 @@ const handlers = {
       await syncControlOverlay(current, current.page);
     }
     await notifyDesktopControl(current);
-    send({
-      event: 'control-state',
-      session: current.id,
-      agentControlled: current.agentControlled,
-      controlStatus: current.controlStatus,
-      ts: Date.now()
-    });
+    emitControlState(current);
     return { text: current.agentControlled ? `已开启控制锁定：${current.controlStatus}` : '已释放控制锁定' };
   },
 
@@ -3278,31 +3061,7 @@ const handlers = {
     current.refFrames = {};
     const page = current.page;
     if (page && !page.isClosed()) {
-      await page.evaluate(() => {
-        const clearTree = (node) => {
-          if (!node) return;
-          if (typeof node.removeAttribute === 'function') {
-            node.removeAttribute('data-pilot-ref');
-            node.removeAttribute('data-pilot-frame');
-          }
-          if (node.tagName && String(node.tagName).toUpperCase() === 'IFRAME') {
-            try {
-              const childDoc = node.contentDocument;
-              if (childDoc && childDoc.body) clearTree(childDoc.body);
-            } catch {
-              // 跨域 iframe 跳过
-            }
-          }
-          if (node.shadowRoot && node.shadowRoot.children) {
-            for (const child of node.shadowRoot.children) clearTree(child);
-          }
-          if (node.children) {
-            for (const child of node.children) clearTree(child);
-          }
-        };
-        document.querySelectorAll('[data-pilot-ref]').forEach((node) => node.removeAttribute('data-pilot-ref'));
-        if (document.body) clearTree(document.body);
-      }).catch(() => {});
+      await page.evaluate(INVALIDATE_REFS_FN).catch(() => {});
     }
     return { text: '已失效旧元素引用' };
   },
@@ -3419,7 +3178,7 @@ async function dispatch(request) {
   }
   const handler = handlers[op];
   if (!handler) throw new Error(`未知操作：${op}`);
-  if (request.userInitiated && op === 'navigate' && !loopbackUrl(request.url)) {
+  if (request.userInitiated && op === 'navigate' && !loopbackOrigin(request.url)) {
     request.approvedExternal = true;
   }
   let current;
@@ -3441,13 +3200,7 @@ async function dispatch(request) {
     current.agentControlled = true;
     current.controlStatus = status;
     if (newlyActivated) {
-      send({
-        event: 'control-state',
-        session: current.id,
-        agentControlled: true,
-        controlStatus: status,
-        ts: Date.now()
-      });
+      emitControlState(current);
       await notifyDesktopControl(current);
       if (current.page && !current.page.isClosed()) {
         await syncControlOverlay(current, current.page);
@@ -3520,10 +3273,10 @@ lines.on('line', (line) => {
 });
 lines.on('close', async () => {
   try {
-    const browser = browserPromise ? await browserPromise : null;
-    if (browser) await browser.close();
-    const headed = headedPromise ? await headedPromise : null;
-    if (headed) await headed.close();
+    for (const slot of ['default', 'headed']) {
+      const browser = managedBrowsers[slot] ? await managedBrowsers[slot] : null;
+      if (browser) await browser.close();
+    }
   } catch {
     // 退出时忽略
   }

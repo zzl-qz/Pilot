@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { cdpEndpoint, classifySensitivePage, externalAgentHostAllowed, hostDecision, hostRulesFromEnv,
   inspectDownloadSafety, loopbackOrigin, parseHosts, publicHttps, sanitizeDiagnosticText, sanitizeDiagnosticUrl,
-  sensitivePageUrl, sensitiveRulesFromEnv } from '../../main/resources/browser/browser-policy.mjs';
+  sanitizeDownloadFilename, sensitivePageUrl, sensitiveRulesFromEnv } from '../../main/resources/browser/browser-policy.mjs';
 
 test('parseHosts 接受逗号与空白两种分隔，并统一小写去空白', () => {
   assert.deepEqual(parseHosts('a.com, b.com  c.com'), ['a.com', 'b.com', 'c.com']);
@@ -139,4 +139,14 @@ test('inspectDownloadSafety 校验扩展名、危险 MIME、魔数签名与大�
   assert.equal(inspectDownloadSafety({ filename: 'run.txt', headBytes: Buffer.from('#!/bin/sh\nrm -rf /') }).allowed, false);
   // 超出大小上限
   assert.equal(inspectDownloadSafety({ filename: 'big.zip', sizeBytes: 200, maxBytes: 100 }).allowed, false);
+});
+
+test('sanitizeDownloadFilename 防护截断后与点前空格导致的 Windows 保留设备名绕过', () => {
+  assert.equal(sanitizeDownloadFilename('CON' + ' '.repeat(120) + 'x'), '_CON');
+  assert.equal(sanitizeDownloadFilename('con' + ' '.repeat(118) + '.txt'), '_con.txt');
+  assert.equal(sanitizeDownloadFilename('CON .txt'), '_CON .txt');
+  const longReserved = sanitizeDownloadFilename('con.' + 'a'.repeat(112) + '.txt');
+  assert.ok(longReserved.startsWith('_'), longReserved);
+  assert.ok(longReserved.endsWith('.txt'), longReserved);
+  assert.ok(longReserved.length <= 120, String(longReserved.length));
 });

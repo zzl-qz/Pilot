@@ -1,17 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { startBrowserControl } from '../browser-control.mjs';
+import { readClipboardFiles } from '../clipboard-files.mjs';
 import {
-  agentMayOperate,
-  agentMayTouchPage,
+  DANGEROUS_DOWNLOAD_EXTENSIONS,
   formatPageLogs,
+  isDangerousDownloadExtension,
+  isLoopback,
   isRegularFileStat,
   isWindowsUncPath,
-  isDangerousDownloadExtension,
   markerPath,
-  partitionName,
   parseClipboardFilePaths,
+  partitionName,
   sanitizeDownloadFilename,
+  scrubLogText,
   snapBounds,
   userPageUrl
 } from '../protocol.mjs';
@@ -24,19 +26,15 @@ test('人的地址栏：本机补 http，外网补 https，拒绝别的协议', 
   assert.equal(userPageUrl(''), null);
 });
 
-test('桌面里眼前的外网站可以操作，无头浏览器仍然不行', () => {
-  assert.equal(agentMayTouchPage('https://example.com/app', true), true);
-  assert.equal(agentMayTouchPage('https://example.com/app', false), false);
-  assert.equal(agentMayTouchPage('http://127.0.0.1:9999/', false), true);
-  assert.equal(agentMayTouchPage('javascript:alert(1)', true), false);
-});
-
-test('智能体只允许本机源，人打开的外网页面不算', () => {
-  assert.equal(agentMayOperate('http://localhost:5173/app'), true);
-  assert.equal(agentMayOperate('http://127.0.0.1:8080/'), true);
-  assert.equal(agentMayOperate('http://[::1]:9999/'), true);
-  assert.equal(agentMayOperate('https://example.com/'), false);
-  assert.equal(agentMayOperate('about:blank'), false);
+test('isLoopback 统一识别本机回环主机名并拒绝外网主机', () => {
+  assert.equal(isLoopback('localhost'), true);
+  assert.equal(isLoopback('app.localhost'), true);
+  assert.equal(isLoopback('127.0.0.1'), true);
+  assert.equal(isLoopback('127.0.1.9'), true);
+  assert.equal(isLoopback('[::1]'), true);
+  assert.equal(isLoopback('::1'), true);
+  assert.equal(isLoopback('example.com'), false);
+  assert.equal(isLoopback('10.0.0.1'), false);
 });
 
 test('工作区分区稳定且彼此不同', () => {
@@ -65,14 +63,28 @@ test('标签标记路径只含这个标签的 id', () => {
   assert.equal(markerPath('a/b'), '/marker/a%2Fb');
 });
 
-test('下载文件名清理路径穿越并识别危险扩展名', () => {
+test('下载文件名清理路径穿越、Windows 保留名、截断保扩展名，并合并识别全量危险扩展名', () => {
   assert.equal(sanitizeDownloadFilename('../../evil/setup.exe'), 'setup.exe');
   assert.equal(sanitizeDownloadFilename('..'), 'download.bin');
-  assert.equal(isDangerousDownloadExtension('setup.EXE'), true);
-  assert.equal(isDangerousDownloadExtension('payload.exe.'), true);
-  assert.equal(isDangerousDownloadExtension('payload.exe.  '), true);
-  assert.equal(isDangerousDownloadExtension('app.desktop'), true);
-  assert.equal(isDangerousDownloadExtension('script.ps1'), true);
+  assert.equal(sanitizeDownloadFilename('CON'), '_CON');
+  assert.equal(sanitizeDownloadFilename('nul.txt'), '_nul.txt');
+  assert.equal(sanitizeDownloadFilename('COM1.log'), '_COM1.log');
+  assert.equal(sanitizeDownloadFilename('LPT9'), '_LPT9');
+  assert.equal(sanitizeDownloadFilename('report.pdf.  '), 'report.pdf');
+  const longName = sanitizeDownloadFilename('a'.repeat(140) + '.tar.gz');
+  assert.equal(longName.length, 120);
+  assert.ok(longName.endsWith('.gz'));
+  const longDanger = sanitizeDownloadFilename('x'.repeat(140) + '.exe');
+  assert.ok(longDanger.endsWith('.exe'));
+  assert.equal(isDangerousDownloadExtension(longDanger), true);
+  assert.ok(DANGEROUS_DOWNLOAD_EXTENSIONS.size >= 48);
+  for (const name of [
+    'setup.EXE', 'payload.exe.', 'payload.exe.  ', 'app.desktop', 'script.ps1',
+    'lib.dll', 'mobile.apk', 'installer.appimage', 'launch.webloc', 'automator.workflow',
+    'shell.bash', 'shell.zsh', 'shortcut.pif', 'script.wsh', 'snap.msc', 'disk.iso'
+  ]) {
+    assert.equal(isDangerousDownloadExtension(name), true, name);
+  }
   assert.equal(isDangerousDownloadExtension('report.pdf'), false);
 });
 
@@ -97,11 +109,52 @@ test('剪贴板文件格式跨平台解析多路径并拒绝 UNC 与非普通文
   assert.equal(isRegularFileStat({ isFile: () => true, isSymbolicLink: () => true }), false);
 });
 
-test('桌面日志自动脱敏认证令牌和敏感查询参数', () => {
-  const net = formatPageLogs([{ method: 'GET', statusCode: 200, url: 'https://a.test/cb?access_token=topsecret#code=123456' }], 'network');
-  assert.doesNotMatch(net, /topsecret|123456/);
-  const con = formatPageLogs([{ level: 'warn', message: 'Authorization: Bearer my-jwt-secret-token' }], 'console');
-  assert.doesNotMatch(con, /my-jwt-secret-token/);
+test('readClipboardFiles 读取剪贴板普通文件并拦截空剪贴板与非普通文件', async () => {
+  const empty = await readClipboardFiles({}, {
+    clipboard: { availableFormats: () => [], readText: () => '' },
+    platform: 'linux'
+  });
+  assert.equal(empty.ok, false);
+  const ok = await readClipboardFiles({}, {
+    clipboard: {
+      availableFormats: () => ['text/uri-list'],
+      read: () => 'file:///tmp/demo.png',
+      readText: () => ''
+    },
+    platform: 'linux',
+    statFn: () => ({ isFile: () => true, isSymbolicLink: () => false, size: 4 }),
+    readFileFn: async () => Buffer.from([1, 2, 3, 4])
+  });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.files.length, 1);
+  assert.equal(ok.files[0].name, 'demo.png');
+  assert.equal(ok.files[0].mimeType, 'image/png');
+  const symlink = await readClipboardFiles({}, {
+    clipboard: {
+      availableFormats: () => ['text/uri-list'],
+      read: () => 'file:///tmp/link.txt',
+      readText: () => ''
+    },
+    platform: 'linux',
+    statFn: () => ({ isFile: () => true, isSymbolicLink: () => true, size: 4 })
+  });
+  assert.equal(symlink.ok, false);
+});
+
+test('桌面日志自动脱敏认证令牌、JWT、API 密钥、URL 凭证和敏感查询参数', () => {
+  const net = formatPageLogs([{
+    method: 'GET',
+    statusCode: 200,
+    url: 'https://alice:hunter2@a.test/cb?access_token=topsecret&sig=hmac123#code=123456'
+  }], 'network');
+  assert.doesNotMatch(net, /alice|hunter2|topsecret|hmac123|123456/);
+  const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3OCJ9.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c';
+  const con = formatPageLogs([{
+    level: 'warn',
+    message: `Authorization: Bearer my-jwt-secret-token jwt=${jwt} sk-proj123456789 ghp_abcdefghij1234 AKIAIOSFODNN7EXAMPLE`
+  }], 'console');
+  assert.doesNotMatch(con, /my-jwt-secret-token|eyJhbGciOiJIUzI1NiJ9|sk-proj123456789|ghp_abcdefghij1234|AKIAIOSFODNN7EXAMPLE/);
+  assert.doesNotMatch(scrubLogText('Basic dXNlcjpwYXNz'), /dXNlcjpwYXNz/);
 });
 
 test('桌面控制端口支持 POST /control 令牌校验与控制态更新', async () => {

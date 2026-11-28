@@ -84,6 +84,7 @@ test('payload normalization & action validation sanitize inputs', () => {
   const html = alertWindowHtml();
   assert.ok(html.includes('Content-Security-Policy'));
   assert.ok(!html.includes('innerHTML'));
+  assert.ok(alertWindowHtml('light').includes('data-theme="light"'));
 });
 
 test('alert manager prioritizes urgent items, respects focus, and drives macOS dock and Win/Linux flashFrame', async () => {
@@ -180,6 +181,9 @@ test('alert manager prioritizes urgent items, respects focus, and drives macOS d
 
   manager.setWindowAttention({ urgentCount: 2, kind: 'attention', bounce: true });
   assert.deepEqual(dockCalls, [['badge', '2'], ['bounce', 'critical']]);
+  dockCalls.length = 0;
+  manager.setWindowAttention({ urgentCount: 0, kind: 'idle', bounce: true });
+  assert.deepEqual(dockCalls, [['badge', '']]);
 
   manager.showNativeNotification({ title: 'Pilot', body: '需要批准', sessionId: 's2', id: 'approval:c1' });
   assert.equal(fakeNotifications.length, 1);
